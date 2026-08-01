@@ -20,13 +20,20 @@
 relkit --version
 ```
 
-装成命令的形式可能还没做好；从源码目录跑等价于：
+正式工具是 Go 单二进制（[github.com/shichao402/relkit](https://github.com/shichao402/relkit)）。安装任选其一：
+
+```bash
+go install github.com/shichao402/relkit/cmd/relkit@latest
+# 或从 GitHub Releases 下载对应平台二进制并放进 PATH
+```
+
+历史 Python 参考实现（仅对照，新接入不要用）：
 
 ```bash
 python -m relkit --version        # 需要 update-spec/ 在 PYTHONPATH 上
 ```
 
-两种都失败就说明工具在当前环境不可用。此时：
+`relkit --version` 失败就说明工具在当前环境不可用。此时：
 
 - **禁止**声称执行了任何 `relkit` 命令，**禁止**编造命令输出。
 - 直接告知用户工具不可用，并询问是要先安装还是先实现它。
@@ -35,7 +42,8 @@ python -m relkit --version        # 需要 update-spec/ 在 PYTHONPATH 上
 
 | 能力 | 状态 |
 |---|---|
-| `init` `keygen` `stage` `inspect` `simulate` `publish` `verify` `conformance` `agent-guide` `backends` | 可用 |
+| `init` `keygen` `stage` `inspect` `simulate` `publish` `verify` `agent-guide` `backends` | 可用（Go） |
+| `conformance` 子命令 | Go 以 `go test` + 夹具覆盖；Python 参考仍有 `relkit conformance` |
 | `local` 后端（输出完整 key 目录树，可离线跑通全流程） | 可用 |
 | `static-http` 后端（任何按路径提供 HTTP 下载的托管，校验走真实 HTTP） | 可用 |
 | `http-put` 后端（带鉴权 PUT 上传，配 relkit-serve 或任何 PUT / WebDAV 端点） | 可用 |
