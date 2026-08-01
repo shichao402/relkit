@@ -1,26 +1,37 @@
 # relkit
 
-`relkit` 是 RUP（Release & Update Protocol）的 Go 发布端实现：给业务团队一个可直接分发的单二进制工具，完成 stage / 签名 / 上传 / 提交，无需自写发布脚本。
+RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管分发服务，同一模块、两套单二进制。
+
+| 二进制 | 路径 | 作用 |
+|---|---|---|
+| `relkit` | `cmd/relkit` | stage / 签名 / 上传 / 提交 |
+| `relkit-serve` | `cmd/relkit-serve` | Range 下载 + 鉴权 PUT + 孤儿 GC |
 
 当前版本：`0.1.0`
 
-曾用过其它语言做过原型；正式实现就是本仓库。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。
+曾用过其它语言做过原型；发布工具正式实现就是本仓库的 Go CLI。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。  
+CLI 与 serve 合并决策见 [`docs/adr/0002-one-repo-cli-and-serve.md`](docs/adr/0002-one-repo-cli-and-serve.md)。
 
 ## 安装
 
-直接下载 [Releases](https://github.com/shichao402/relkit/releases) 里对应平台二进制，或：
+从 [Releases](https://github.com/shichao402/relkit/releases) 下载对应平台二进制，或：
 
 ```bash
 go install github.com/shichao402/relkit/cmd/relkit@latest
+go install github.com/shichao402/relkit/cmd/relkit-serve@latest
 ```
 
-本地开发构建：
+本地构建：
 
 ```bash
 go build -o relkit ./cmd/relkit
+go build -o relkit-serve ./cmd/relkit-serve
+# 或交叉编译 serve：
+./deploy/build-serve.sh        # Unix
+./deploy/build-serve.ps1       # Windows
 ```
 
-## 已实现命令
+## relkit（发布 CLI）
 
 ```text
 relkit init
@@ -34,68 +45,43 @@ relkit agent-guide
 relkit backends
 ```
 
-已实现后端：
+已实现后端：`local` · `static-http` · `http-put`
 
-- `local`
-- `static-http`
-- `http-put`
-
-## 快速开始
-
-1. 初始化项目配置：
+### 快速开始
 
 ```bash
 relkit init --product demoapp
-```
-
-2. 生成签名密钥，并把公钥写入 `relkit.json`：
-
-```bash
 relkit keygen --key-id k1 --out keys --update-config
-```
-
-3. 在 `relkit.json` 里给当前机器补上私钥路径，或改为使用环境变量：
-
-```json
-{
-  "signing": {
-    "keyId": "k1",
-    "privateKeyEnv": "RELKIT_PRIVATE_KEY",
-    "privateKeyPath": "keys/k1.private.json"
-  }
-}
-```
-
-4. 固化待发布产物：
-
-```bash
 relkit stage 1.0.0 --code 100 \
-  --add dist/demoapp-win-x64.zip os=windows,arch=x64 \
-  --add dist/demoapp-mac-arm64.zip os=macos,arch=arm64
-```
-
-5. 发布前先看升级路径并做 dry-run：
-
-```bash
+  --add dist/demoapp-win-x64.zip os=windows,arch=x64
 relkit simulate --with-staged 1.0.0 --from all
 relkit publish 1.0.0 --dry-run
-```
-
-6. 正式发布并校验：
-
-```bash
 relkit publish 1.0.0
-relkit verify
 relkit verify --deep
 ```
 
-`local` 后端会把完整的发布树写到 `dist/publish/`；如果你已经有静态托管或仓库 CI，可以切到 `static-http`；如果你用 `relkit-serve` 或任意 PUT / WebDAV 端点，可改用 `http-put`。
+`local` 写到 `dist/publish/`；已有静态托管用 `static-http`；对接本仓库的 `relkit-serve`（或任意 PUT / WebDAV）用 `http-put`。
+
+## relkit-serve（分发服务）
+
+```bash
+relkit-serve init -dir /srv/releases -out /etc/relkit-serve
+relkit-serve -config /etc/relkit-serve/relkit-serve.json
+```
+
+Linux + systemd：
+
+```bash
+sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
+```
+
+运维手册：`relkit-serve agent-guide`（二进制内嵌），源文件在 [`cmd/relkit-serve/AGENT-GUIDE.md`](cmd/relkit-serve/AGENT-GUIDE.md)。设计说明见 [`cmd/relkit-serve/README.md`](cmd/relkit-serve/README.md)。
 
 ## 设计与规范来源
 
 - 协议规范与夹具：[`AgentsHelpMe/update-spec`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec)
-- 操作手册：`relkit agent-guide`（二进制内嵌）
-- 配套分发服务：[relkit-serve](https://github.com/shichao402/relkit-serve)
+- 发布侧手册：`relkit agent-guide`
+- 服务侧手册：`relkit-serve agent-guide`
 
 ## 开发与测试
 
@@ -107,3 +93,4 @@ go test ./...
 
 - `chain` / `selectors` / `envelope` 的 conformance 夹具回归
 - `local` / `static-http` / `http-put` 端到端发布与校验
+- `relkit-serve` 的 Range / PUT / GC / 配置加载

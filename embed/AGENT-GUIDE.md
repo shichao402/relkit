@@ -47,7 +47,7 @@ go install github.com/shichao402/relkit/cmd/relkit@latest
 关于后端怎么选，看两件事：**产物由谁送上去**、**URL 是否可预测**。
 
 - 托管方按可预测路径提供 HTTP 下载，且产物已有别的机制送达（仓库 CI、rsync、独立上传步骤）→ 用 `static-http`，配 `stageDir` 指向那个机制会取用的目录。CNB 仓库直链属于这一类。
-- 自己掌管一台服务器 → 部署 relkit-serve（独立仓库，Go 单文件服务：Range 并发下载、RUP 缓存语义、带鉴权上传端点；部署照它自带的 `AGENT-GUIDE.md`，或在装好后跑 `relkit-serve agent-guide`），用 `http-put` 后端，发布与分发一步完成。token 只从环境变量读。
+- 自己掌管一台服务器 → 部署同仓的 `relkit-serve`（Go 单文件：Range 并发下载、RUP 缓存语义、带鉴权上传；部署照 `relkit` 仓库 `cmd/relkit-serve/AGENT-GUIDE.md`，或装好后跑 `relkit-serve agent-guide`），用 `http-put` 后端，发布与分发一步完成。token 只从环境变量读。
 - 需要工具自己带凭据上传到对象存储（COS / S3）→ 还没有，得先实现 `s3-compatible`。
 - 只想审计别人发布的站点 → `static-http` 不配 `stageDir`，得到一个只读后端，`verify` 可用而 `publish` 会直接拒绝。
 

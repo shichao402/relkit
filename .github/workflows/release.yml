@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
-      - name: Build binaries
+      - name: Build publisher binaries
         run: |
           mkdir -p dist
           version="${GITHUB_REF_NAME#v}"
@@ -29,9 +29,33 @@ jobs:
               go build -trimpath -ldflags "-s -w -X main.version=${version}" \
               -o "$out" ./cmd/relkit
           done
-          cd dist && sha256sum * > SHA256SUMS
+      - name: Build serve binaries
+        run: ./deploy/build-serve.sh "${GITHUB_REF_NAME#v}" dist
+      - name: Verify linux serve binaries are static
+        run: |
+          for f in dist/relkit-serve-linux-*; do
+            if file "$f" | grep -q "dynamically linked"; then
+              echo "$f is dynamically linked"; exit 1
+            fi
+            echo "$f: static"
+          done
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          body: |
+            ## Binaries
+
+            - `relkit-*` — publisher CLI (`stage` / `publish` / …)
+            - `relkit-serve-*` — self-hosted RUP download + authenticated PUT
+
+            Install the server on Linux with systemd:
+
+            ```
+            sudo ./deploy/install.sh --binary ./relkit-serve-linux-amd64
+            ```
+
+            Guides: `relkit agent-guide` · `relkit-serve agent-guide`

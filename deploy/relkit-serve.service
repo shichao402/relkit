@@ -1,0 +1,47 @@
+[Unit]
+Description=relkit-serve (RUP release file server)
+Documentation=https://github.com/shichao402/relkit-serve
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/relkit-serve -config /etc/relkit-serve/relkit-serve.json
+Restart=always
+RestartSec=2
+
+User=relkit
+Group=relkit
+
+# Give the service time to finish in-flight downloads. Must exceed the
+# shutdownTimeout in the config, or systemd kills the process while
+# relkit-serve is still politely waiting for downloads to drain.
+TimeoutStopSec=45
+
+# The release directory is the only thing this service may write. Anything
+# that can write there can replace binaries that clients will download and
+# execute, so the blast radius of a compromise is bounded here and nowhere
+# else.
+ProtectSystem=strict
+ReadWritePaths=/srv/releases
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Concurrent downloads mean concurrent sockets, and each socket is a file
+# descriptor. The default 1024 is reached at a few hundred clients, and the
+# failure looks like random connection resets rather than a clear limit.
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
