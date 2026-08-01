@@ -3,7 +3,10 @@ package publish
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -276,6 +279,7 @@ func checkClientsCanVerify(cfg *config.Config, env *model.Envelope, channel stri
 
 func readExistingIndexes(openedBackends []backends.Backend, cfg *config.Config, channel string, trusted map[string]ed25519.PublicKey, printer Printer) (*model.IndexDocument, int, map[string][]byte, error) {
 	key := model.IndexKey(cfg.Product, channel)
+	legacyKey := path.Join("index", cfg.Product, channel+".json")
 	rawByBackend := map[string][]byte{}
 	parsed := map[string]*model.IndexDocument{}
 
@@ -286,7 +290,7 @@ func readExistingIndexes(openedBackends []backends.Backend, cfg *config.Config, 
 		}
 		rawByBackend[backend.Name()] = raw
 		if raw == nil {
-			printer(fmt.Sprintf("  %-12s no existing index (first release on this channel)", backend.Name()))
+			printer(fmt.Sprintf("  %-12s no existing protobuf index", backend.Name()))
 			continue
 		}
 
@@ -305,7 +309,32 @@ func readExistingIndexes(openedBackends []backends.Backend, cfg *config.Config, 
 		printer(fmt.Sprintf("  %-12s sequence %d, %d version(s)", backend.Name(), index.Sequence, len(index.Versions)))
 	}
 
+	legacyFloor := 0
+	for _, backend := range openedBackends {
+		legacyRaw, err := backend.Get(legacyKey)
+		if err != nil {
+			return nil, 0, nil, Error{Message: fmt.Sprintf("could not read legacy index from backend %q: %v", backend.Name(), err)}
+		}
+		if legacyRaw == nil {
+			continue
+		}
+		seq, err := legacyV1Sequence(legacyRaw, trusted, cfg.Product, channel)
+		if err != nil {
+			printer(fmt.Sprintf("  %-12s ignoring legacy %s: %v", backend.Name(), legacyKey, err))
+			continue
+		}
+		if seq > legacyFloor {
+			legacyFloor = seq
+		}
+		printer(fmt.Sprintf("  %-12s legacy v1 sequence floor %d (%s)", backend.Name(), seq, legacyKey))
+	}
+
 	if len(parsed) == 0 {
+		if legacyFloor > 0 {
+			printer(fmt.Sprintf("  using legacy v1 sequence floor %d (no protobuf index yet)", legacyFloor))
+			return model.EmptyIndex(cfg.Product, channel), legacyFloor, rawByBackend, nil
+		}
+		printer("  first release on this channel")
 		return model.EmptyIndex(cfg.Product, channel), 0, rawByBackend, nil
 	}
 
@@ -332,7 +361,75 @@ func readExistingIndexes(openedBackends []backends.Backend, cfg *config.Config, 
 			newest = index
 		}
 	}
-	return newest, int(newest.Sequence), rawByBackend, nil
+	baseSequence := int(newest.Sequence)
+	if legacyFloor > baseSequence {
+		printer(fmt.Sprintf("  elevating sequence floor from legacy v1: %d -> %d", baseSequence, legacyFloor))
+		baseSequence = legacyFloor
+	}
+	return newest, baseSequence, rawByBackend, nil
+}
+
+// legacyV1Sequence reads a discarded rup.envelope/1 JSON document solely to keep
+// the sequence watermark monotonic across the v1→v2 cutover. Versions are not
+// imported (their manifests remain JSON and are not usable by v2 clients).
+func legacyV1Sequence(raw []byte, trusted map[string]ed25519.PublicKey, expectProduct, expectChannel string) (int, error) {
+	var env struct {
+		Schema     string `json:"schema"`
+		Payload    string `json:"payload"`
+		Signatures []struct {
+			KeyID string `json:"keyId"`
+			Alg   string `json:"alg"`
+			Sig   string `json:"sig"`
+		} `json:"signatures"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return 0, fmt.Errorf("not JSON: %w", err)
+	}
+	if env.Schema != "rup.envelope/1" {
+		return 0, fmt.Errorf("unexpected schema %q", env.Schema)
+	}
+	payload, err := base64.StdEncoding.DecodeString(env.Payload)
+	if err != nil {
+		return 0, fmt.Errorf("payload is not base64: %w", err)
+	}
+
+	verified := false
+	for _, entry := range env.Signatures {
+		if entry.Alg != "ed25519" {
+			continue
+		}
+		publicKey, ok := trusted[entry.KeyID]
+		if !ok {
+			continue
+		}
+		sig, err := base64.StdEncoding.DecodeString(entry.Sig)
+		if err != nil {
+			continue
+		}
+		if ed25519.Verify(publicKey, payload, sig) {
+			verified = true
+			break
+		}
+	}
+	if !verified {
+		return 0, fmt.Errorf("no trusted key verified the legacy envelope")
+	}
+
+	var index struct {
+		Product  string `json:"product"`
+		Channel  string `json:"channel"`
+		Sequence int64  `json:"sequence"`
+	}
+	if err := json.Unmarshal(payload, &index); err != nil {
+		return 0, fmt.Errorf("payload is not a JSON index: %w", err)
+	}
+	if index.Product != expectProduct || index.Channel != expectChannel {
+		return 0, fmt.Errorf("legacy index is for %s/%s", index.Product, index.Channel)
+	}
+	if index.Sequence < 1 {
+		return 0, fmt.Errorf("legacy sequence %d is invalid", index.Sequence)
+	}
+	return int(index.Sequence), nil
 }
 
 func checkCodeMonotonic(existing *model.IndexDocument, staged *model.StagedDocument, allowBackfill bool) error {
