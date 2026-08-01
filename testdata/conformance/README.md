@@ -1,6 +1,6 @@
 # RUP 一致性用例（Conformance Fixtures）v1
 
-本目录是语言无关的测试数据。任何 RUP 客户端实现（Go / Dart / Node / C# / Python…）都**必须**跑通全部用例，任何发布侧实现都**必须**跑通 `reachability/`。
+本目录是语言无关的测试数据。任何 RUP 客户端实现（Go / Dart / Node / C#…）都**必须**跑通全部用例，任何发布侧实现都**必须**跑通 `reachability/`。
 
 ## 为什么需要它
 
@@ -17,20 +17,18 @@
 | `selector/` | artifact 匹配与多匹配仲裁 | SPEC.md §11 |
 | `signature/` | 信封验签、密钥轮换、防降级 | SPEC.md §4.1、§12.1、§12.4 |
 
-## 附带的工具
+## 怎么跑
 
-| 文件 | 作用 |
+本目录只有 JSON 夹具，不含执行器。
+
+| 实现 | 如何跑 |
 |---|---|
-| `run.py` | 用例执行器。纯标准库，`python run.py` 即可运行，退出码非 0 表示有用例失败 |
-| `generate_signature_fixtures.py` | 重新生成 `signature/` 下的用例。种子硬编码且 Ed25519 签名是确定性的，因此重复运行产出字节相同的文件 |
+| 发布工具 [relkit](https://github.com/shichao402/relkit) | `go test ./internal/chain ./internal/selectors ./internal/envelope`（权威行为在这些包里） |
+| Dart 客户端 `clients/dart/` | `dart test test/conformance_test.dart` |
 
-**规范性行为的实现不在本目录，而在 `../relkit/`。** 执行器 import `relkit.chain`、`relkit.selectors`、`relkit.envelope`（签名部分是 `relkit._ed25519`，纯 Python 的 RFC 8032 实现，已与 Node 原生 `crypto.sign('ed25519')` 交叉验证：公钥相同、签名字节完全一致）。
+排查「某个升级路径为什么是这个结果」时，直接读 relkit 仓库的 `internal/chain`，比读散文快。
 
-这样安排是有意的：这些用例校验的必须是**真正会发布出去的那份代码**。如果本目录另留一份参考实现，两份逻辑迟早各自漂移，而用例全绿会掩盖发布工具与客户端已经不一致的事实。`python run.py` 仍然零配置可跑 —— 执行器自己把上一级目录加入 `sys.path`。
-
-排查「某个升级路径为什么是这个结果」时，直接读 `../relkit/chain.py`，比读散文快。
-
-**客户端实现无需移植 `_ed25519.py`。** 各目标运行时都自带 Ed25519：Node 的 `crypto.verify('ed25519', …)`、Go 的 `crypto/ed25519`、.NET 的 NSec 或 BouncyCastle、Dart 的 `cryptography` 包。难写的部分只在发布侧需要一次。
+客户端用各运行时自带的 Ed25519（Go `crypto/ed25519`、Dart `cryptography`、Node `crypto.verify` 等）。签名夹具里的密钥是测试专用平凡种子，禁止用于真实发布。
 
 ## 通用规则
 
@@ -109,9 +107,9 @@
 
 ## `signature/` 用例格式
 
-该目录的数据由 `generate_signature_fixtures.py` 生成，**禁止**手工编辑 —— 手改会使签名与 payload 失配，让本应通过的用例变成失败。
+该目录下的签名用例由确定性 Ed25519 生成并检入仓库，**禁止**手工改 envelope 字节 —— 手改会使签名与 payload 失配。若需扩展，用相同平凡种子在实现侧重新生成并整文件替换。
 
-`keys.json` 不是用例，而是供 runner 使用的密钥表。它同时包含公钥与私钥种子：**这些是测试专用的平凡密钥（种子为重复的 `0x01`、`0x02` 等），禁止用于任何真实发布。** 包含私钥种子是为了让其他语言的实现者能自行重新生成或扩展用例。可信 keyId 为 `k1` 与 `k2`，`kx` 与 `ky` 代表客户端不认识的签名者。
+`keys.json` 不是用例，而是供 runner 使用的密钥表。它同时包含公钥与私钥种子：**这些是测试专用的平凡密钥（种子为重复的 `0x01`、`0x02` 等），禁止用于任何真实发布。** 可信 keyId 为 `k1` 与 `k2`，`kx` 与 `ky` 代表客户端不认识的签名者。
 
 `envelope.json` 覆盖 SPEC.md §4.1 的验签流程，以及 §12.1 步骤 1–3 的 `product` / `channel` 守卫：
 
@@ -127,9 +125,9 @@
 }
 ```
 
-`expectAccepted` 表示客户端是否可以把该信封当作可信 index 使用。为 `false` 的用例中有几个特别值得注意，它们捕捉的是真实实现里出现过的错误类型：
+`expectAccepted` 表示客户端是否可以把该信封当作可信 index 使用。为 `false` 的用例中有几个特别值得注意：
 
-- `unknown-key`：签名在密码学上完全有效，但签名者的 `keyId` 不在信任列表里。**必须**拒绝 —— 否则内嵌公钥就失去了意义。
+- `unknown-key`：签名在密码学上完全有效，但签名者的 `keyId` 不在信任列表里。**必须**拒绝。
 - `cross-payload-replay`：一份由 `k1` 对**另一个** index 产生的真实签名，被贴到当前 payload 上。这能抓出「对重新序列化后的对象验签」而非「对 payload 原始字节验签」的实现。
 - `unsupported-alg`：`alg` 为未知算法时**禁止**跳过验签。
 - `no-signatures`：空签名数组**禁止**被理解为「没什么要检查的，因此通过」。

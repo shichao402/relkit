@@ -1,12 +1,14 @@
 # relkit
 
-`relkit` 是 RUP（Release & Update Protocol）的 Go 发布端实现，目标是替代 `AgentsHelpMe/update-spec/relkit/` 里的 Python CLI，给业务团队提供一个可直接分发的单二进制工具。
+`relkit` 是 RUP（Release & Update Protocol）的 Go 发布端实现：给业务团队一个可直接分发的单二进制工具，完成 stage / 签名 / 上传 / 提交，无需自写发布脚本。
 
 当前版本：`0.1.0`
 
+曾用过其它语言做过原型；正式实现就是本仓库。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。
+
 ## 安装
 
-直接下载发布页里的对应平台二进制，或自行安装：
+直接下载 [Releases](https://github.com/shichao402/relkit/releases) 里对应平台二进制，或：
 
 ```bash
 go install github.com/shichao402/relkit/cmd/relkit@latest
@@ -91,29 +93,17 @@ relkit verify --deep
 
 ## 设计与规范来源
 
-本仓库实现遵循以下 SSOT（目前仍在 AgentsHelpMe 工作区里评审）：
-
-- 协议规范：[`AgentsHelpMe/update-spec/SPEC.md`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec/SPEC.md)
-- CLI 设计：[`CLI.md`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec/CLI.md)
-- 一致性夹具：[`conformance/`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec/conformance)
+- 协议规范与夹具：[`AgentsHelpMe/update-spec`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec)
 - 操作手册：`relkit agent-guide`（二进制内嵌）
 - 配套分发服务：[relkit-serve](https://github.com/shichao402/relkit-serve)
 
 ## 开发与测试
 
-运行全部测试：
-
 ```bash
 go test ./...
 ```
 
-当前测试覆盖：
+覆盖：
 
 - `chain` / `selectors` / `envelope` 的 conformance 夹具回归
-- 本地 `local` 后端完整发布流
-- `static-http` 的真实 HTTP 校验
-- `http-put` 的带鉴权上传与读回校验
-
-## 与 Python 版的关系
-
-Python 版 `update-spec/relkit/` 仍然保留为设计与行为参考；Go 版 `relkit` 才是面向生产分发的单二进制 CLI。
+- `local` / `static-http` / `http-put` 端到端发布与校验
