@@ -1,0 +1,45 @@
+{
+  "name": "min-supported",
+  "description": "验证 minSupported 与 minFrom 的正交性：前者回答『当前版本还能不能继续用』，后者回答『下一跳去哪』。客户端可能同时处于『必须更新』且『只能先升到中间版本』的状态。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 20,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "minSupported": 120,
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.2.0", "code": 120, "minFrom": 100, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.2.0.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 120, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 100,
+      "expectTarget": "1.2.0",
+      "expectPath": ["1.2.0", "1.5.0"],
+      "expectMandatory": true,
+      "why": "低于 minSupported 故为强制更新，同时受 minFrom 约束只能先到 1.2.0。两个机制同时生效"
+    },
+    {
+      "currentCode": 119,
+      "expectTarget": "1.2.0",
+      "expectPath": ["1.2.0", "1.5.0"],
+      "expectMandatory": true
+    },
+    {
+      "currentCode": 120,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0"],
+      "expectMandatory": false,
+      "why": "恰好等于 minSupported，不构成强制更新（比较是严格小于）"
+    },
+    {
+      "currentCode": 150,
+      "expectTarget": null,
+      "expectPath": [],
+      "expectMandatory": false
+    }
+  ]
+}

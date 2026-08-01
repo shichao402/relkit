@@ -1,0 +1,19 @@
+{
+  "name": "valid",
+  "description": "合法的链条：每个已发布版本都能最终到达 head，从 code=0 出发也能起步。这是发布工具应当放行的形态。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 7,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.2.0", "code": 120, "minFrom": 100, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.2.0.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 120, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "expectValid": true,
+  "expectErrors": [],
+  "expectWarnings": []
+}

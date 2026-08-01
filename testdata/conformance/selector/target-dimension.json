@@ -1,0 +1,30 @@
+{
+  "name": "target-dimension",
+  "description": "一个版本同时包含多个可独立分发的子目标，取自 HelloKnightRemoteCam 的真实形态（桌面 client 与 Android server 共用一个版本号）。这里用 target 维度表达，替代该项目目前的 client.platforms.macos 固定嵌套结构——新增一个 Linux client 只是多一个数组元素，无需改动 Schema、生成脚本参数与客户端解析代码。同时演示 meta 作为宿主专属逃生舱的用法。",
+  "manifest": {
+    "schema": "rup.manifest/1",
+    "product": "conformance",
+    "version": "1.5.0",
+    "code": 150,
+    "artifacts": [
+      { "id": "client-macos", "filename": "RCC_macos_1.5.0.zip", "size": 1024, "sha256": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a", "kind": "archive", "selectors": { "target": "client", "os": "macos" }, "urls": ["https://x.invalid/client-macos.zip"], "meta": { "installerEntry": "RCC_macos.dmg" } },
+      { "id": "client-windows", "filename": "RCC_windows_1.5.0.zip", "size": 1024, "sha256": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b", "kind": "archive", "selectors": { "target": "client", "os": "windows" }, "urls": ["https://x.invalid/client-windows.zip"], "meta": { "installerEntry": "RCC_windows_setup.exe" } },
+      { "id": "server-android", "filename": "rcc_server_android_1.5.0.zip", "size": 1024, "sha256": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "kind": "archive", "selectors": { "target": "server", "os": "android" }, "urls": ["https://x.invalid/server-android.zip"], "meta": { "installerEntry": "app-release.apk" } }
+    ]
+  },
+  "cases": [
+    { "clientSelectors": { "target": "client", "os": "macos" }, "expectArtifactId": "client-macos" },
+    { "clientSelectors": { "target": "client", "os": "windows" }, "expectArtifactId": "client-windows" },
+    { "clientSelectors": { "target": "server", "os": "android" }, "expectArtifactId": "server-android" },
+    {
+      "clientSelectors": { "target": "client", "os": "android" },
+      "expectArtifactId": null,
+      "why": "不存在 Android 版 client。两个维度必须同时匹配，禁止只满足其中一个就取件"
+    },
+    {
+      "clientSelectors": { "os": "macos" },
+      "expectArtifactId": null,
+      "why": "客户端未声明 target，无法确定它要的是 client 还是 server"
+    }
+  ]
+}

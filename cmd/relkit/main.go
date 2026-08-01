@@ -23,7 +23,8 @@ import (
 	"github.com/shichao402/relkit/internal/verify"
 )
 
-const version = "0.1.0"
+// Overridden at release build time via -ldflags "-X main.version=...".
+var version = "0.1.0"
 
 func main() {
 	os.Exit(run(os.Args[1:]))

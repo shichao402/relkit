@@ -1,0 +1,34 @@
+{
+  "name": "anti-rollback",
+  "description": "Sequence monotonicity per SPEC.md 12.4. A valid signature only proves the publisher issued this index at some point, not that it is the newest one; without this check an attacker can replay an older correctly-signed index to steer clients onto a version with known vulnerabilities.",
+  "cases": [
+    {
+      "lastSeenSequence": null,
+      "indexSequence": 1,
+      "expectAccepted": true,
+      "why": "First run, nothing recorded yet."
+    },
+    {
+      "lastSeenSequence": 42,
+      "indexSequence": 43,
+      "expectAccepted": true
+    },
+    {
+      "lastSeenSequence": 42,
+      "indexSequence": 42,
+      "expectAccepted": true,
+      "why": "Equal is fine: this is the normal case of fetching the same index again."
+    },
+    {
+      "lastSeenSequence": 42,
+      "indexSequence": 41,
+      "expectAccepted": false,
+      "why": "Replay of an older index. Must be rejected, and must NOT be surfaced as an error: mirrors legitimately lag behind each other, so the client tries the next source and otherwise reports 'no update'."
+    },
+    {
+      "lastSeenSequence": 42,
+      "indexSequence": 1,
+      "expectAccepted": false
+    }
+  ]
+}

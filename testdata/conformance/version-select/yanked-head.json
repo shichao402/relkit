@@ -1,0 +1,36 @@
+{
+  "name": "yanked-head",
+  "description": "最新版本被撤回，可达的最新退回到上一个版本。第三个用例是危险场景：客户端已经装上了被撤回的版本，而没有更新的版本可以救它——此时选路正确地返回 null，宿主应当提示用户当前版本已被撤回，发布方应尽快发布新版本。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 16,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.2.0", "code": 120, "minFrom": 0, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.2.0.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 0, "yanked": true, "notes": "已撤回：启动崩溃", "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 100,
+      "expectTarget": "1.2.0",
+      "expectPath": ["1.2.0"],
+      "why": "1.5.0 已撤回，可达的最新是 1.2.0"
+    },
+    {
+      "currentCode": 120,
+      "expectTarget": null,
+      "expectPath": [],
+      "why": "已经处于可达的最新版本"
+    },
+    {
+      "currentCode": 150,
+      "expectTarget": null,
+      "expectPath": [],
+      "why": "客户端已装上被撤回的版本且无更新可用。禁止把它降级回 1.2.0——降级不在本协议范围内，必须靠发布新版本修复"
+    }
+  ]
+}

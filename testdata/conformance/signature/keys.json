@@ -1,0 +1,38 @@
+{
+  "warning": "TEST KEYS ONLY. Trivial hard-coded seeds. Never use for a real release.",
+  "trustedKeys": [
+    "k1",
+    "k2"
+  ],
+  "note": "A conforming client embeds only the public keys. privateSeedBase64 is included so implementers can regenerate or extend these fixtures.",
+  "keys": [
+    {
+      "keyId": "k1",
+      "alg": "ed25519",
+      "publicKeyBase64": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+      "privateSeedBase64": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+      "trusted": true
+    },
+    {
+      "keyId": "k2",
+      "alg": "ed25519",
+      "publicKeyBase64": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+      "privateSeedBase64": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+      "trusted": true
+    },
+    {
+      "keyId": "kx",
+      "alg": "ed25519",
+      "publicKeyBase64": "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "privateSeedBase64": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+      "trusted": false
+    },
+    {
+      "keyId": "ky",
+      "alg": "ed25519",
+      "publicKeyBase64": "E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o=",
+      "privateSeedBase64": "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=",
+      "trusted": false
+    }
+  ]
+}

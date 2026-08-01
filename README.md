@@ -91,13 +91,13 @@ relkit verify --deep
 
 ## 设计与规范来源
 
-本仓库实现遵循以下 SSOT：
+本仓库实现遵循以下 SSOT（目前仍在 AgentsHelpMe 工作区里评审）：
 
-- 协议规范：`../AgentsHelpMe/update-spec/SPEC.md`
-- CLI 设计：`../AgentsHelpMe/update-spec/CLI.md`
-- Python 参考实现：`../AgentsHelpMe/update-spec/relkit/`
-- 一致性夹具：`../AgentsHelpMe/update-spec/conformance/`
-- 操作手册：`relkit agent-guide`
+- 协议规范：[`AgentsHelpMe/update-spec/SPEC.md`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec/SPEC.md)
+- CLI 设计：[`CLI.md`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec/CLI.md)
+- 一致性夹具：[`conformance/`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec/conformance)
+- 操作手册：`relkit agent-guide`（二进制内嵌）
+- 配套分发服务：[relkit-serve](https://github.com/shichao402/relkit-serve)
 
 ## 开发与测试
 

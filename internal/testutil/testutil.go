@@ -18,11 +18,17 @@ func RepoRoot(t *testing.T) string {
 
 func UpdateSpecRoot(t *testing.T) string {
 	t.Helper()
-	root := filepath.Clean(filepath.Join(RepoRoot(t), "..", "AgentsHelpMe", "update-spec"))
-	if _, err := os.Stat(root); err != nil {
-		t.Fatalf("update-spec root not found: %s", root)
+	candidates := []string{
+		filepath.Clean(filepath.Join(RepoRoot(t), "..", "AgentsHelpMe", "update-spec")),
+		filepath.Clean(filepath.Join(RepoRoot(t), "testdata")),
 	}
-	return root
+	for _, root := range candidates {
+		if _, err := os.Stat(filepath.Join(root, "conformance")); err == nil {
+			return root
+		}
+	}
+	t.Fatalf("update-spec/conformance not found; tried: %v", candidates)
+	return ""
 }
 
 func ConformanceRoot(t *testing.T) string {

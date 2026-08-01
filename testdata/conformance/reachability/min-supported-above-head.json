@@ -1,0 +1,19 @@
+{
+  "name": "min-supported-above-head",
+  "description": "minSupported 高于最新可用版本的 code。后果是全体客户端（包括刚装上最新版的）都被判定为『必须强制更新』，却没有任何可升级的目标——一个所有人都无法脱离的死锁。通常是手误把 minSupported 写成了下一个待发布版本的 code。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 6,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "minSupported": 200,
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 0, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "expectValid": false,
+  "expectErrors": ["min-supported-above-head"],
+  "expectWarnings": []
+}

@@ -1,0 +1,46 @@
+{
+  "name": "three-hops",
+  "description": "最严格的链条：每一级都要求紧邻的前一级，任何客户端都必须逐级升级，不允许跳版本。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 12,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "2.0.0", "code": 200, "minFrom": 100, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/2.0.0.json"] } },
+      { "version": "3.0.0", "code": 300, "minFrom": 200, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/3.0.0.json"] } },
+      { "version": "4.0.0", "code": 400, "minFrom": 300, "manifest": { "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size": 1024, "urls": ["https://x.invalid/4.0.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 100,
+      "expectTarget": "2.0.0",
+      "expectPath": ["2.0.0", "3.0.0", "4.0.0"],
+      "why": "逐级升级，共三跳。resolveUpgradePath 必须能一次算出整条路线用于向用户展示"
+    },
+    {
+      "currentCode": 150,
+      "expectTarget": "2.0.0",
+      "expectPath": ["2.0.0", "3.0.0", "4.0.0"],
+      "why": "3.0.0 要求 minFrom=200，150 不满足"
+    },
+    {
+      "currentCode": 200,
+      "expectTarget": "3.0.0",
+      "expectPath": ["3.0.0", "4.0.0"]
+    },
+    {
+      "currentCode": 300,
+      "expectTarget": "4.0.0",
+      "expectPath": ["4.0.0"]
+    },
+    {
+      "currentCode": 400,
+      "expectTarget": null,
+      "expectPath": []
+    }
+  ]
+}
