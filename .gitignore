@@ -1,0 +1,5 @@
+.relkit/
+dist/
+*.exe
+*.private.json
+coverage.out

@@ -1,0 +1,487 @@
+package config
+
+import (
+	"crypto/ed25519"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/shichao402/relkit/internal/envelope"
+	"github.com/shichao402/relkit/internal/jsonio"
+	"github.com/shichao402/relkit/internal/keys"
+	"github.com/shichao402/relkit/internal/model"
+)
+
+const ConfigName = "relkit.json"
+
+var envStrategyPattern = regexp.MustCompile(`^env:([A-Za-z_][A-Za-z0-9_]*)(?:\+(\d+))?$`)
+
+type Error struct {
+	Message string
+}
+
+func (e Error) Error() string {
+	return e.Message
+}
+
+type Config struct {
+	Path           string
+	Root           string
+	Raw            map[string]any
+	Product        string
+	DefaultChannel string
+	Channels       []string
+	CodeStrategy   string
+	Signing        map[string]any
+	Backends       map[string]map[string]any
+	PublishTo      []string
+}
+
+func FindConfig(start string) (string, error) {
+	current := start
+	if current == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		current = cwd
+	}
+	resolved, err := filepath.Abs(current)
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		candidate := filepath.Join(resolved, ConfigName)
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+		parent := filepath.Dir(resolved)
+		if parent == resolved {
+			return "", nil
+		}
+		resolved = parent
+	}
+}
+
+func Load(path string) (*Config, error) {
+	resolved := path
+	var err error
+	if resolved == "" {
+		resolved, err = FindConfig("")
+		if err != nil {
+			return nil, err
+		}
+		if resolved == "" {
+			return nil, Error{Message: fmt.Sprintf("no %s found in the current directory or any parent; run 'relkit init' to create one", ConfigName)}
+		}
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(resolved)
+	if err != nil || info.IsDir() {
+		return nil, Error{Message: fmt.Sprintf("config not found: %s", resolved)}
+	}
+
+	var raw map[string]any
+	if err := jsonio.LoadPathLenient(resolved, &raw); err != nil {
+		return nil, Error{Message: fmt.Sprintf("%s is not valid JSON: %v", resolved, err)}
+	}
+
+	cfg := &Config{
+		Path: resolved,
+		Root: filepath.Dir(resolved),
+		Raw:  raw,
+	}
+
+	product, ok := raw["product"].(string)
+	if !ok {
+		return nil, Error{Message: fmt.Sprintf("%s is missing required field %q", resolved, "product")}
+	}
+	if err := model.CheckIdentifier(product, "product"); err != nil {
+		return nil, err
+	}
+	cfg.Product = product
+
+	cfg.DefaultChannel = "stable"
+	if value, ok := raw["defaultChannel"]; ok {
+		asString, ok := value.(string)
+		if !ok {
+			return nil, Error{Message: "defaultChannel must be a string"}
+		}
+		if err := model.CheckIdentifier(asString, "defaultChannel"); err != nil {
+			return nil, err
+		}
+		cfg.DefaultChannel = asString
+	}
+
+	cfg.Channels = []string{cfg.DefaultChannel}
+	if value, ok := raw["channels"]; ok {
+		list, err := stringList(value)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Channels = list
+	}
+	if !contains(cfg.Channels, cfg.DefaultChannel) {
+		return nil, Error{Message: fmt.Sprintf("defaultChannel %q is not listed in channels %q", cfg.DefaultChannel, cfg.Channels)}
+	}
+	for _, channel := range cfg.Channels {
+		if err := model.CheckIdentifier(channel, "channel"); err != nil {
+			return nil, err
+		}
+	}
+
+	cfg.CodeStrategy = "explicit"
+	if value, ok := raw["codeStrategy"]; ok {
+		asString, ok := value.(string)
+		if !ok {
+			return nil, Error{Message: "codeStrategy must be a string"}
+		}
+		cfg.CodeStrategy = asString
+	}
+	if err := checkCodeStrategy(cfg.CodeStrategy); err != nil {
+		return nil, err
+	}
+
+	cfg.Signing = map[string]any{}
+	if value, ok := raw["signing"]; ok {
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil, Error{Message: "signing must be an object"}
+		}
+		cfg.Signing = obj
+	}
+
+	backendsValue, ok := raw["backends"]
+	if !ok {
+		return nil, Error{Message: "at least one backend must be configured"}
+	}
+	backendObjects, ok := backendsValue.(map[string]any)
+	if !ok || len(backendObjects) == 0 {
+		return nil, Error{Message: "at least one backend must be configured"}
+	}
+	cfg.Backends = make(map[string]map[string]any, len(backendObjects))
+	for name, entry := range backendObjects {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			return nil, Error{Message: fmt.Sprintf("backend %q must be an object", name)}
+		}
+		cfg.Backends[name] = obj
+	}
+
+	if value, ok := raw["publishTo"]; ok {
+		list, err := stringList(value)
+		if err != nil {
+			return nil, err
+		}
+		cfg.PublishTo = list
+	} else {
+		for name := range cfg.Backends {
+			cfg.PublishTo = append(cfg.PublishTo, name)
+		}
+	}
+	for _, name := range cfg.PublishTo {
+		if _, ok := cfg.Backends[name]; !ok {
+			return nil, Error{Message: fmt.Sprintf("publishTo names unknown backend %q (configured: %s)", name, strings.Join(sortedKeys(cfg.Backends), ", "))}
+		}
+	}
+
+	return cfg, nil
+}
+
+func (c *Config) ResolveCode(version string, explicit *int) (int, error) {
+	if c.CodeStrategy == "explicit" {
+		if explicit == nil {
+			return 0, Error{Message: "codeStrategy is 'explicit', so --code is required"}
+		}
+		return *explicit, nil
+	}
+
+	derived, err := c.deriveCode(version, c.CodeStrategy)
+	if err != nil {
+		return 0, err
+	}
+	if explicit != nil && *explicit != derived {
+		return 0, Error{Message: fmt.Sprintf("--code %d conflicts with codeStrategy %q which yields %d for version %q; change the version, the strategy, or drop --code", *explicit, c.CodeStrategy, derived, version)}
+	}
+	return derived, nil
+}
+
+func (c *Config) BackendConfig(name string) (map[string]any, error) {
+	entry, ok := c.Backends[name]
+	if !ok {
+		return nil, Error{Message: fmt.Sprintf("unknown backend %q (configured: %s)", name, strings.Join(sortedKeys(c.Backends), ", "))}
+	}
+	if _, ok := entry["type"]; !ok {
+		return nil, Error{Message: fmt.Sprintf("backend %q has no 'type'", name)}
+	}
+	cloned := make(map[string]any, len(entry))
+	for key, value := range entry {
+		cloned[key] = value
+	}
+	return cloned, nil
+}
+
+func (c *Config) LoadSigners() ([]envelope.Signer, error) {
+	keyID, _ := c.Signing["keyId"].(string)
+	if keyID == "" {
+		return nil, Error{Message: "signing.keyId is required in order to publish"}
+	}
+
+	if envName, _ := c.Signing["privateKeyEnv"].(string); envName != "" {
+		if raw := os.Getenv(envName); raw != "" {
+			seed, err := keys.DecodeSeed(raw, "environment variable "+envName)
+			if err != nil {
+				return nil, err
+			}
+			return []envelope.Signer{{KeyID: keyID, Seed: seed}}, nil
+		}
+	}
+
+	if rawPath, ok := c.Signing["privateKeyPath"]; ok && rawPath != nil {
+		keyPath, ok := rawPath.(string)
+		if !ok {
+			return nil, Error{Message: "signing.privateKeyPath must be a string or null"}
+		}
+		resolved := keyPath
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(c.Root, keyPath)
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || info.IsDir() {
+			return nil, Error{Message: fmt.Sprintf("signing.privateKeyPath not found: %s", resolved)}
+		}
+		var document model.PrivateKeyDocument
+		if err := jsonio.LoadPathLenient(resolved, &document); err != nil {
+			return nil, err
+		}
+		seed, err := keys.LoadPrivateSeed(document, resolved)
+		if err != nil {
+			return nil, err
+		}
+		return []envelope.Signer{{KeyID: keyID, Seed: seed}}, nil
+	}
+
+	envName, _ := c.Signing["privateKeyEnv"].(string)
+	if envName == "" {
+		envName = "signing.privateKeyEnv"
+	}
+	return nil, Error{Message: fmt.Sprintf("no private key available: set %s, or point signing.privateKeyPath at a key file", envName)}
+}
+
+func (c *Config) TrustedPublicKeys() (map[string]ed25519.PublicKey, error) {
+	value, ok := c.Signing["publicKeys"]
+	if !ok {
+		return nil, Error{Message: "signing.publicKeys is empty; add the public key(s) clients embed so that verification is possible without the private key"}
+	}
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return nil, Error{Message: "signing.publicKeys is empty; add the public key(s) clients embed so that verification is possible without the private key"}
+	}
+
+	trusted := make(map[string]ed25519.PublicKey, len(list))
+	for _, entry := range list {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			return nil, Error{Message: "every signing.publicKeys entry must be an object"}
+		}
+		keyID, _ := obj["keyId"].(string)
+		if keyID == "" {
+			return nil, Error{Message: "every signing.publicKeys entry needs a keyId"}
+		}
+		publicKeyBase64, _ := obj["publicKeyBase64"].(string)
+		publicKey, err := keys.DecodePublicKey(publicKeyBase64, fmt.Sprintf("signing.publicKeys[%s]", keyID))
+		if err != nil {
+			return nil, err
+		}
+		trusted[keyID] = publicKey
+	}
+	return trusted, nil
+}
+
+func (c *Config) ChannelOrDefault(channel string) (string, error) {
+	if channel == "" {
+		return c.DefaultChannel, nil
+	}
+	if !contains(c.Channels, channel) {
+		return "", Error{Message: fmt.Sprintf("channel %q is not listed in channels %q", channel, c.Channels)}
+	}
+	return channel, nil
+}
+
+func Skeleton(product string) map[string]any {
+	return map[string]any{
+		"product":        product,
+		"defaultChannel": "stable",
+		"channels":       []string{"stable", "beta"},
+		"codeStrategy":   "explicit",
+		"signing": map[string]any{
+			"keyId":          "k1",
+			"privateKeyEnv":  "RELKIT_PRIVATE_KEY",
+			"privateKeyPath": nil,
+			"publicKeys":     []any{},
+		},
+		"backends": map[string]any{
+			"local": map[string]any{
+				"type":      "local",
+				"outputDir": "dist/publish",
+				"baseUrl":   "https://example.invalid/rup/",
+			},
+		},
+		"publishTo": []string{"local"},
+	}
+}
+
+func ParseJSONDocument(path string) (map[string]any, error) {
+	var raw map[string]any
+	if err := jsonio.LoadPathLenient(path, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func PrettyDocument(doc map[string]any) ([]byte, error) {
+	return jsonio.MarshalPretty(doc)
+}
+
+func checkCodeStrategy(strategy string) error {
+	switch strategy {
+	case "explicit", "semver", "version-build":
+		return nil
+	}
+	if envStrategyPattern.MatchString(strategy) {
+		return nil
+	}
+	return Error{Message: fmt.Sprintf("unknown codeStrategy %q; expected one of explicit, semver, version-build, or env:VAR, or env:VAR+N", strategy)}
+}
+
+func (c *Config) deriveCode(version, strategy string) (int, error) {
+	switch strategy {
+	case "semver":
+		return semverCode(version)
+	case "version-build":
+		return versionBuildCode(version)
+	}
+
+	matched := envStrategyPattern.FindStringSubmatch(strategy)
+	name := matched[1]
+	offset := 0
+	if matched[2] != "" {
+		parsed, err := strconv.Atoi(matched[2])
+		if err != nil {
+			return 0, err
+		}
+		offset = parsed
+	}
+	raw := os.Getenv(name)
+	if raw == "" {
+		return 0, Error{Message: fmt.Sprintf("codeStrategy %q requires environment variable %s to be set", strategy, name)}
+	}
+	if !digitsOnly(strings.TrimSpace(raw)) {
+		return 0, Error{Message: fmt.Sprintf("environment variable %s must hold a non-negative integer, got %q", name, raw)}
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, err
+	}
+	return value + offset, nil
+}
+
+func semverCode(version string) (int, error) {
+	core := strings.Split(strings.Split(version, "+")[0], "-")[0]
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return 0, Error{Message: fmt.Sprintf("codeStrategy 'semver' needs a major.minor.patch version, got %q", version)}
+	}
+	values := make([]int, 3)
+	for i, part := range parts {
+		value, err := strconv.Atoi(part)
+		if err != nil {
+			return 0, Error{Message: fmt.Sprintf("version %q has non-numeric components", version)}
+		}
+		values[i] = value
+	}
+	if values[1] > 999 || values[2] > 999 {
+		return 0, Error{Message: fmt.Sprintf("version %q would overflow the semver code encoding (minor and patch must each stay under 1000); use an explicit code instead", version)}
+	}
+	return values[0]*1_000_000 + values[1]*1_000 + values[2], nil
+}
+
+func versionBuildCode(version string) (int, error) {
+	if !strings.Contains(version, "+") {
+		return 0, Error{Message: fmt.Sprintf("codeStrategy 'version-build' needs a '+build' segment, got %q", version)}
+	}
+	build := version[strings.LastIndex(version, "+")+1:]
+	if !digitsOnly(build) {
+		return 0, Error{Message: fmt.Sprintf("build segment of %q is not a non-negative integer", version)}
+	}
+	value, err := strconv.Atoi(build)
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
+func stringList(value any) ([]string, error) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, Error{Message: "expected an array of strings"}
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		asString, ok := item.(string)
+		if !ok {
+			return nil, Error{Message: "expected an array of strings"}
+		}
+		result = append(result, asString)
+	}
+	return result, nil
+}
+
+func sortedKeys[V any](input map[string]V) []string {
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func contains(list []string, item string) bool {
+	for _, candidate := range list {
+		if candidate == item {
+			return true
+		}
+	}
+	return false
+}
+
+func digitsOnly(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func ParseRawJSON(data []byte) (map[string]any, error) {
+	var value map[string]any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return nil, err
+	}
+	return value, nil
+}

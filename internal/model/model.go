@@ -1,0 +1,521 @@
+package model
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+)
+
+const (
+	SchemaStaged   = "rup.staged/1"
+	SchemaManifest = "rup.manifest/1"
+	SchemaIndex    = "rup.index/1"
+	SchemaEnvelope = "rup.envelope/1"
+)
+
+var Kinds = []string{"archive", "installer", "binary", "blob"}
+
+var (
+	identifierPattern  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+	selectorKeyPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
+	windowsReserved    = map[string]struct{}{
+		"CON": {}, "PRN": {}, "AUX": {}, "NUL": {},
+		"COM1": {}, "COM2": {}, "COM3": {}, "COM4": {}, "COM5": {},
+		"COM6": {}, "COM7": {}, "COM8": {}, "COM9": {},
+		"LPT1": {}, "LPT2": {}, "LPT3": {}, "LPT4": {}, "LPT5": {},
+		"LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
+	}
+	kindBySuffix = []struct {
+		Suffix string
+		Kind   string
+	}{
+		{".tar.gz", "archive"},
+		{".tgz", "archive"},
+		{".zip", "archive"},
+		{".exe", "installer"},
+		{".msi", "installer"},
+		{".dmg", "installer"},
+		{".pkg", "installer"},
+		{".apk", "installer"},
+		{".deb", "installer"},
+		{".rpm", "installer"},
+	}
+	standardSelectorOrder = []string{"os", "arch", "target", "abi", "variant"}
+)
+
+type ValidationError struct {
+	Message string
+}
+
+func (e ValidationError) Error() string {
+	return e.Message
+}
+
+type Envelope struct {
+	Schema     string      `json:"schema"`
+	Payload    string      `json:"payload"`
+	Signatures []Signature `json:"signatures"`
+}
+
+type Signature struct {
+	KeyID string `json:"keyId"`
+	Alg   string `json:"alg"`
+	Sig   string `json:"sig"`
+}
+
+type PublicKeyDocument struct {
+	Schema          string `json:"schema"`
+	KeyID           string `json:"keyId"`
+	Alg             string `json:"alg"`
+	PublicKeyBase64 string `json:"publicKeyBase64"`
+}
+
+type PrivateKeyDocument struct {
+	Schema     string `json:"schema"`
+	KeyID      string `json:"keyId"`
+	Alg        string `json:"alg"`
+	SeedBase64 string `json:"seedBase64"`
+}
+
+type StagedDocument struct {
+	Schema    string           `json:"schema"`
+	Product   string           `json:"product"`
+	Version   string           `json:"version"`
+	Code      int              `json:"code"`
+	MinFrom   int              `json:"minFrom"`
+	Channel   string           `json:"channel"`
+	CreatedAt string           `json:"createdAt"`
+	Notes     string           `json:"notes,omitempty"`
+	Artifacts []StagedArtifact `json:"artifacts"`
+}
+
+type StagedArtifact struct {
+	ID         string            `json:"id"`
+	Filename   string            `json:"filename"`
+	Size       int64             `json:"size"`
+	SHA256     string            `json:"sha256"`
+	Kind       string            `json:"kind"`
+	Selectors  map[string]string `json:"selectors"`
+	Meta       map[string]any    `json:"meta,omitempty"`
+	SourcePath string            `json:"sourcePath,omitempty"`
+}
+
+type ManifestDocument struct {
+	Schema     string             `json:"schema"`
+	Product    string             `json:"product"`
+	Version    string             `json:"version"`
+	Code       int                `json:"code"`
+	ReleasedAt string             `json:"releasedAt"`
+	Notes      string             `json:"notes,omitempty"`
+	Artifacts  []ManifestArtifact `json:"artifacts"`
+}
+
+type ManifestArtifact struct {
+	ID        string            `json:"id"`
+	Filename  string            `json:"filename"`
+	Size      int64             `json:"size"`
+	SHA256    string            `json:"sha256"`
+	Kind      string            `json:"kind"`
+	Selectors map[string]string `json:"selectors"`
+	URLs      []string          `json:"urls"`
+	Meta      map[string]any    `json:"meta,omitempty"`
+}
+
+type IndexDocument struct {
+	Schema       string        `json:"schema"`
+	Product      string        `json:"product"`
+	Channel      string        `json:"channel"`
+	Sequence     int           `json:"sequence"`
+	GeneratedAt  string        `json:"generatedAt"`
+	MinSupported *int          `json:"minSupported,omitempty"`
+	ExpiresAt    string        `json:"expiresAt,omitempty"`
+	Versions     []VersionNode `json:"versions"`
+}
+
+type VersionNode struct {
+	Version    string      `json:"version"`
+	Code       int         `json:"code"`
+	MinFrom    int         `json:"minFrom"`
+	ReleasedAt string      `json:"releasedAt,omitempty"`
+	Yanked     bool        `json:"yanked,omitempty"`
+	Notes      string      `json:"notes,omitempty"`
+	NotesURL   string      `json:"notesUrl,omitempty"`
+	Manifest   ManifestRef `json:"manifest"`
+	Rollout    any         `json:"rollout,omitempty"`
+}
+
+type ManifestRef struct {
+	SHA256 string   `json:"sha256"`
+	Size   int64    `json:"size"`
+	URLs   []string `json:"urls"`
+}
+
+func UTCNow() string {
+	return time.Now().UTC().Truncate(time.Second).Format(time.RFC3339)
+}
+
+func CheckIdentifier(value, what string) error {
+	if value == "" {
+		return ValidationError{Message: fmt.Sprintf("%s must be a non-empty string", what)}
+	}
+	if len(value) > 64 {
+		return ValidationError{Message: fmt.Sprintf("%s exceeds 64 characters: %q", what, value)}
+	}
+	if !identifierPattern.MatchString(value) {
+		return ValidationError{Message: fmt.Sprintf("%s must match [a-zA-Z0-9][a-zA-Z0-9._-]*, got %q", what, value)}
+	}
+	return nil
+}
+
+func CheckFilename(name string) error {
+	if name == "" {
+		return ValidationError{Message: "filename must be a non-empty string"}
+	}
+	if len(name) > 255 {
+		return ValidationError{Message: fmt.Sprintf("filename exceeds 255 characters: %q", name)}
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return ValidationError{Message: fmt.Sprintf("filename must not contain a path separator: %q", name)}
+	}
+	if name == "." || name == ".." {
+		return ValidationError{Message: fmt.Sprintf("filename must not be %q", name)}
+	}
+	if strings.Contains(name, "..") {
+		return ValidationError{Message: fmt.Sprintf("filename must not contain '..': %q", name)}
+	}
+	for _, ch := range name {
+		if ch < 0x20 || ch == 0x7F {
+			return ValidationError{Message: fmt.Sprintf("filename must not contain control characters: %q", name)}
+		}
+	}
+	stem := strings.ToUpper(strings.SplitN(name, ".", 2)[0])
+	if _, ok := windowsReserved[stem]; ok {
+		return ValidationError{Message: fmt.Sprintf("filename is a reserved device name on Windows: %q", name)}
+	}
+	return nil
+}
+
+func CheckSelectors(selectors map[string]string, what string) error {
+	if selectors == nil {
+		return ValidationError{Message: fmt.Sprintf("%s must be an object", what)}
+	}
+	for key, value := range selectors {
+		if !selectorKeyPattern.MatchString(key) {
+			return ValidationError{Message: fmt.Sprintf("%s key must match [a-zA-Z][a-zA-Z0-9_-]*, got %q", what, key)}
+		}
+		if value == "" {
+			return ValidationError{Message: fmt.Sprintf("%s[%q] must be a non-empty string", what, key)}
+		}
+	}
+	return nil
+}
+
+func CheckVersion(version string) error {
+	if version == "" {
+		return ValidationError{Message: "version must be a non-empty string"}
+	}
+	if len(version) > 64 {
+		return ValidationError{Message: fmt.Sprintf("version exceeds 64 characters: %q", version)}
+	}
+	if strings.ContainsAny(version, `/\`) {
+		return ValidationError{Message: fmt.Sprintf("version must not contain a path separator: %q", version)}
+	}
+	if version == "." || version == ".." || strings.Contains(version, "..") {
+		return ValidationError{Message: fmt.Sprintf("version must not contain '..': %q", version)}
+	}
+	for _, ch := range version {
+		if ch < 0x20 || ch == 0x7F {
+			return ValidationError{Message: "version must not contain control characters"}
+		}
+	}
+	return nil
+}
+
+func IndexKey(product, channel string) string {
+	return path.Join("index", product, channel+".json")
+}
+
+func ManifestKey(product, version string) string {
+	return path.Join("manifest", product, version+".json")
+}
+
+func ArtifactKey(product, version, filename string) string {
+	return path.Join("artifact", product, version, filename)
+}
+
+func InferKind(filename string) string {
+	lowered := strings.ToLower(filename)
+	for _, entry := range kindBySuffix {
+		if strings.HasSuffix(lowered, entry.Suffix) {
+			return entry.Kind
+		}
+	}
+	if !strings.Contains(filename, ".") {
+		return "binary"
+	}
+	return "blob"
+}
+
+func DefaultArtifactID(selectors map[string]string) (string, error) {
+	if len(selectors) == 0 {
+		return "default", nil
+	}
+
+	keys := make([]string, 0, len(selectors))
+	for key := range selectors {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		ri := selectorRank(keys[i])
+		rj := selectorRank(keys[j])
+		if ri[0] != rj[0] {
+			return ri[0] < rj[0]
+		}
+		if ri[1] != rj[1] {
+			return ri[1] < rj[1]
+		}
+		return ri[2] < rj[2]
+	})
+
+	values := make([]string, 0, len(keys))
+	for _, key := range keys {
+		values = append(values, selectors[key])
+	}
+	joined := strings.Join(values, "-")
+	if err := CheckIdentifier(joined, "derived artifact id"); err != nil {
+		return "", err
+	}
+	return joined, nil
+}
+
+func selectorRank(key string) [3]string {
+	for idx, candidate := range standardSelectorOrder {
+		if key == candidate {
+			return [3]string{"0", fmt.Sprintf("%03d", idx), key}
+		}
+	}
+	return [3]string{"1", "000", key}
+}
+
+func Sha256File(path string) (string, int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer file.Close()
+
+	digest := sha256.New()
+	size, err := io.Copy(digest, file)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(digest.Sum(nil)), size, nil
+}
+
+func Sha256Bytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func NewStagedDocument(product, version string, code, minFrom int, channel string, artifacts []StagedArtifact, notes string, createdAt string) (*StagedDocument, error) {
+	if err := CheckIdentifier(product, "product"); err != nil {
+		return nil, err
+	}
+	if err := CheckIdentifier(channel, "channel"); err != nil {
+		return nil, err
+	}
+	if err := CheckVersion(version); err != nil {
+		return nil, err
+	}
+	if code < 0 {
+		return nil, ValidationError{Message: "code must be a non-negative integer"}
+	}
+	if minFrom < 0 {
+		return nil, ValidationError{Message: "minFrom must be a non-negative integer"}
+	}
+	if len(artifacts) == 0 {
+		return nil, ValidationError{Message: "a release needs at least one artifact"}
+	}
+
+	doc := &StagedDocument{
+		Schema:    SchemaStaged,
+		Product:   product,
+		Version:   version,
+		Code:      code,
+		MinFrom:   minFrom,
+		Channel:   channel,
+		CreatedAt: nonEmptyOr(createdAt, UTCNow()),
+		Artifacts: artifacts,
+	}
+	if notes != "" {
+		doc.Notes = notes
+	}
+	return doc, nil
+}
+
+func NewStagedArtifact(artifactID, filename string, size int64, digest, kind string, selectors map[string]string, meta map[string]any, sourcePath string) (*StagedArtifact, error) {
+	if err := CheckIdentifier(artifactID, "artifact id"); err != nil {
+		return nil, err
+	}
+	if err := CheckFilename(filename); err != nil {
+		return nil, err
+	}
+	if err := CheckSelectors(selectors, "selectors"); err != nil {
+		return nil, err
+	}
+	if !slices.Contains(Kinds, kind) {
+		return nil, ValidationError{Message: fmt.Sprintf("kind must be one of %v, got %q", Kinds, kind)}
+	}
+
+	artifact := &StagedArtifact{
+		ID:        artifactID,
+		Filename:  filename,
+		Size:      size,
+		SHA256:    digest,
+		Kind:      kind,
+		Selectors: selectors,
+	}
+	if len(meta) > 0 {
+		artifact.Meta = meta
+	}
+	if sourcePath != "" {
+		artifact.SourcePath = sourcePath
+	}
+	return artifact, nil
+}
+
+func NewManifestFromStaged(staged *StagedDocument, urlsByArtifactID map[string][]string, releasedAt string) (*ManifestDocument, error) {
+	artifacts := make([]ManifestArtifact, 0, len(staged.Artifacts))
+	for _, item := range staged.Artifacts {
+		urls := append([]string(nil), urlsByArtifactID[item.ID]...)
+		if len(urls) == 0 {
+			return nil, ValidationError{Message: fmt.Sprintf("no URLs resolved for artifact %q", item.ID)}
+		}
+		artifact := ManifestArtifact{
+			ID:        item.ID,
+			Filename:  item.Filename,
+			Size:      item.Size,
+			SHA256:    item.SHA256,
+			Kind:      item.Kind,
+			Selectors: copyStringMap(item.Selectors),
+			URLs:      urls,
+		}
+		if len(item.Meta) > 0 {
+			artifact.Meta = copyAnyMap(item.Meta)
+		}
+		artifacts = append(artifacts, artifact)
+	}
+
+	manifest := &ManifestDocument{
+		Schema:     SchemaManifest,
+		Product:    staged.Product,
+		Version:    staged.Version,
+		Code:       staged.Code,
+		ReleasedAt: nonEmptyOr(releasedAt, UTCNow()),
+		Artifacts:  artifacts,
+	}
+	if staged.Notes != "" {
+		manifest.Notes = staged.Notes
+	}
+	return manifest, nil
+}
+
+func NewIndexNode(staged *StagedDocument, manifestDigest string, manifestSize int64, manifestURLs []string, releasedAt string) VersionNode {
+	node := VersionNode{
+		Version:    staged.Version,
+		Code:       staged.Code,
+		MinFrom:    staged.MinFrom,
+		ReleasedAt: nonEmptyOr(releasedAt, UTCNow()),
+		Manifest: ManifestRef{
+			SHA256: manifestDigest,
+			Size:   manifestSize,
+			URLs:   append([]string(nil), manifestURLs...),
+		},
+	}
+	if staged.Notes != "" {
+		node.Notes = staged.Notes
+	}
+	return node
+}
+
+func NewIndex(product, channel string, sequence int, versions []VersionNode, minSupported *int, generatedAt string) (*IndexDocument, error) {
+	if err := CheckIdentifier(product, "product"); err != nil {
+		return nil, err
+	}
+	if err := CheckIdentifier(channel, "channel"); err != nil {
+		return nil, err
+	}
+	if sequence < 1 {
+		return nil, ValidationError{Message: "sequence must be an integer >= 1"}
+	}
+	if len(versions) == 0 {
+		return nil, ValidationError{Message: "index must contain at least one version"}
+	}
+
+	cloned := append([]VersionNode(nil), versions...)
+	sort.Slice(cloned, func(i, j int) bool {
+		return cloned[i].Code < cloned[j].Code
+	})
+
+	doc := &IndexDocument{
+		Schema:      SchemaIndex,
+		Product:     product,
+		Channel:     channel,
+		Sequence:    sequence,
+		GeneratedAt: nonEmptyOr(generatedAt, UTCNow()),
+		Versions:    cloned,
+	}
+	if minSupported != nil {
+		value := *minSupported
+		doc.MinSupported = &value
+	}
+	return doc, nil
+}
+
+func EmptyIndex(product, channel string) *IndexDocument {
+	return &IndexDocument{
+		Schema:      SchemaIndex,
+		Product:     product,
+		Channel:     channel,
+		Sequence:    0,
+		GeneratedAt: UTCNow(),
+		Versions:    []VersionNode{},
+	}
+}
+
+func copyStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return map[string]string{}
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func copyAnyMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func nonEmptyOr(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}

@@ -1,0 +1,723 @@
+package main
+
+import (
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+
+	relkitembed "github.com/shichao402/relkit/embed"
+	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/envelope"
+	"github.com/shichao402/relkit/internal/jsonio"
+	"github.com/shichao402/relkit/internal/keys"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/publish"
+	"github.com/shichao402/relkit/internal/simulate"
+	"github.com/shichao402/relkit/internal/stage"
+	"github.com/shichao402/relkit/internal/verify"
+)
+
+const version = "0.1.0"
+
+func main() {
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(argv []string) (code int) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			return
+		}
+		switch value := recovered.(type) {
+		case error:
+			code = fail(value)
+		case string:
+			code = fail(fmt.Errorf("%s", value))
+		default:
+			panic(recovered)
+		}
+	}()
+
+	configPath, showVersion, args, err := stripGlobalFlags(argv)
+	if err != nil {
+		return fail(err)
+	}
+	if showVersion {
+		fmt.Println("relkit " + version)
+		return 0
+	}
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, usage())
+		return 2
+	}
+
+	command := args[0]
+	rest := args[1:]
+	switch command {
+	case "init":
+		err = cmdInit(rest)
+	case "keygen":
+		err = cmdKeygen(rest, configPath)
+	case "stage":
+		err = cmdStage(rest, configPath)
+	case "inspect":
+		err = cmdInspect(rest, configPath)
+	case "simulate":
+		err = cmdSimulate(rest, configPath)
+	case "verify":
+		err = cmdVerify(rest, configPath)
+	case "publish":
+		err = cmdPublish(rest, configPath)
+	case "agent-guide":
+		err = cmdAgentGuide(rest)
+	case "backends":
+		err = cmdBackends(rest)
+	default:
+		err = fmt.Errorf("unknown command %q", command)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	return 0
+}
+
+func cmdInit(args []string) error {
+	var directory string
+	product := ""
+	force := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--product":
+			i++
+			product = mustValue(args, i, "--product")
+		case arg == "--force":
+			force = true
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown flag %q", arg)
+		case directory == "":
+			directory = arg
+		default:
+			return fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+
+	if directory == "" {
+		directory = "."
+	}
+	target, err := filepath.Abs(filepath.Join(directory, config.ConfigName))
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(target); err == nil && !force {
+		return fmt.Errorf("%s already exists; pass --force to overwrite", target)
+	}
+	if product == "" {
+		product = filepath.Base(filepath.Dir(target))
+	}
+	if err := model.CheckIdentifier(product, "product"); err != nil {
+		return err
+	}
+	data, err := jsonio.MarshalPretty(config.Skeleton(product))
+	if err != nil {
+		return err
+	}
+	if err := jsonio.WritePath(target, data); err != nil {
+		return err
+	}
+	fmt.Println("wrote " + target)
+	fmt.Println("next: 'relkit keygen --key-id k1 --out keys/', then paste the public key into signing.publicKeys")
+	return nil
+}
+
+func cmdKeygen(args []string, configPath string) error {
+	keyID := ""
+	outDir := "keys"
+	force := false
+	updateConfig := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--key-id":
+			i++
+			keyID = mustValue(args, i, "--key-id")
+		case arg == "--out":
+			i++
+			outDir = mustValue(args, i, "--out")
+		case arg == "--force":
+			force = true
+		case arg == "--update-config":
+			updateConfig = true
+		default:
+			return fmt.Errorf("unknown flag %q", arg)
+		}
+	}
+	if keyID == "" {
+		return fmt.Errorf("--key-id is required")
+	}
+	if err := model.CheckIdentifier(keyID, "keyId"); err != nil {
+		return err
+	}
+
+	resolvedOut, err := filepath.Abs(outDir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(resolvedOut, 0o755); err != nil {
+		return err
+	}
+
+	publicPath := filepath.Join(resolvedOut, keyID+".public.json")
+	privatePath := filepath.Join(resolvedOut, keyID+".private.json")
+	for _, path := range []string{publicPath, privatePath} {
+		if _, err := os.Stat(path); err == nil && !force {
+			return fmt.Errorf("%s already exists; pass --force to overwrite (this invalidates every client that embedded the old key)", path)
+		}
+	}
+
+	seed, err := keys.GenerateSeed()
+	if err != nil {
+		return err
+	}
+	publicDoc := keys.PublicKeyDocument(keyID, seed)
+	privateDoc := keys.PrivateKeyDocument(keyID, seed)
+
+	publicBytes, err := jsonio.MarshalPretty(publicDoc)
+	if err != nil {
+		return err
+	}
+	privateBytes, err := jsonio.MarshalPretty(privateDoc)
+	if err != nil {
+		return err
+	}
+	if err := jsonio.WritePath(publicPath, publicBytes); err != nil {
+		return err
+	}
+	if err := jsonio.WritePath(privatePath, privateBytes); err != nil {
+		return err
+	}
+	keys.RestrictPermissions(privatePath)
+
+	fmt.Println("public  " + publicPath)
+	fmt.Println("private " + privatePath)
+	fmt.Println()
+	fmt.Println("publicKeyBase64: " + publicDoc.PublicKeyBase64)
+
+	if updateConfig {
+		target, adopted, err := recordPublicKey(configPath, keyID, publicDoc)
+		if err != nil {
+			return err
+		}
+		fmt.Println("recorded in " + target + " under signing.publicKeys")
+		if adopted {
+			fmt.Printf("signing.keyId set to %q (it named no configured key)\n", keyID)
+		}
+		fmt.Printf("To publish from this machine, either export the private seed as the variable named by signing.privateKeyEnv, or set signing.privateKeyPath to %s.\n", filepath.Base(privatePath))
+	} else {
+		fmt.Printf("Add that to signing.publicKeys in %s (or re-run with --update-config), and embed it in the client.\n", config.ConfigName)
+	}
+	fmt.Println()
+
+	ignored, _ := keys.IsGitIgnored(privatePath, resolvedOut)
+	if ignored == nil {
+		fmt.Println("NOTE: could not determine whether the private key is git-ignored.")
+	} else if !*ignored {
+		fmt.Printf("WARNING: %s is NOT git-ignored.\n", filepath.Base(privatePath))
+		fmt.Println("         Add '*.private.json' to .gitignore before committing anything. A leaked signing key means anyone can forge updates for every client that trusts it.")
+	}
+	return nil
+}
+
+func cmdStage(args []string, configPath string) error {
+	opts, err := parseStageArgs(args)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	code, err := cfg.ResolveCode(opts.version, opts.code)
+	if err != nil {
+		return err
+	}
+	_, err = stage.Run(cfg, opts.version, code, opts.minFrom, opts.adds, opts.channel, opts.notes, opts.notesFile, opts.link, func(line string) {
+		fmt.Println(line)
+	})
+	return err
+}
+
+func cmdInspect(args []string, configPath string) error {
+	versionArg := ""
+	fileArg := ""
+	raw := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--file":
+			i++
+			fileArg = mustValue(args, i, "--file")
+		case arg == "--raw":
+			raw = true
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown flag %q", arg)
+		case versionArg == "":
+			versionArg = arg
+		default:
+			return fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+
+	var document map[string]any
+	if versionArg != "" {
+		staged, err := stage.LoadStaged(cfg.Root, versionArg)
+		if err != nil {
+			return err
+		}
+		document, err = asMap(staged)
+		if err != nil {
+			return err
+		}
+	} else if fileArg != "" {
+		if err := jsonio.LoadPathLenient(fileArg, &document); err != nil {
+			return err
+		}
+	} else {
+		return fmt.Errorf("pass either a version or --file")
+	}
+
+	if !raw {
+		if schema, _ := document["schema"].(string); schema == envelope.EnvelopeSchema {
+			unsealed, err := unsealForInspection(document, cfg)
+			if err != nil {
+				return err
+			}
+			document = unsealed
+		}
+	}
+
+	data, err := jsonio.MarshalPretty(document)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(data)
+	return err
+}
+
+func cmdSimulate(args []string, configPath string) error {
+	fromSpec := "all"
+	indexPath := ""
+	withStaged := ""
+	channel := ""
+	backendName := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--from":
+			i++
+			fromSpec = mustValue(args, i, "--from")
+		case arg == "--index":
+			i++
+			indexPath = mustValue(args, i, "--index")
+		case arg == "--with-staged":
+			i++
+			withStaged = mustValue(args, i, "--with-staged")
+		case arg == "--channel":
+			i++
+			channel = mustValue(args, i, "--channel")
+		case arg == "--backend":
+			i++
+			backendName = mustValue(args, i, "--backend")
+		default:
+			return fmt.Errorf("unknown flag %q", arg)
+		}
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	_, err = simulate.Run(cfg, fromSpec, indexPath, channel, withStaged, backendName, func(line string) {
+		fmt.Println(line)
+	})
+	return err
+}
+
+func cmdVerify(args []string, configPath string) error {
+	channel := ""
+	deep := false
+	var to []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--channel":
+			i++
+			channel = mustValue(args, i, "--channel")
+		case arg == "--to":
+			i++
+			to = append(to, mustValue(args, i, "--to"))
+		case arg == "--deep":
+			deep = true
+		default:
+			return fmt.Errorf("unknown flag %q", arg)
+		}
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	findings, err := verify.Run(cfg, channel, to, deep, func(line string) {
+		fmt.Println(line)
+	})
+	if err != nil {
+		return err
+	}
+	if !findings.OK() {
+		return exitCodeError{code: 1}
+	}
+	return nil
+}
+
+func cmdPublish(args []string, configPath string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("publish requires a version")
+	}
+	versionArg := ""
+	var to []string
+	dryRun := false
+	allowBackfill := false
+	allowPartial := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--to":
+			i++
+			to = append(to, mustValue(args, i, "--to"))
+		case arg == "--dry-run":
+			dryRun = true
+		case arg == "--allow-backfill":
+			allowBackfill = true
+		case arg == "--allow-partial":
+			allowPartial = true
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown flag %q", arg)
+		case versionArg == "":
+			versionArg = arg
+		default:
+			return fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+	if versionArg == "" {
+		return fmt.Errorf("publish requires a version")
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	_, err = publish.Run(cfg, versionArg, to, dryRun, allowBackfill, allowPartial, func(line string) {
+		fmt.Println(line)
+	})
+	return err
+}
+
+func cmdAgentGuide(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("agent-guide takes no arguments")
+	}
+	_, err := os.Stdout.WriteString(relkitembed.AgentGuide)
+	return err
+}
+
+func cmdBackends(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("backends takes no arguments")
+	}
+	fmt.Println("backend types implemented in this build:")
+	fmt.Println()
+	types := backends.AvailableTypes()
+	slices.Sort(types)
+	for _, backendType := range types {
+		summary, required, optional := backends.SummaryFor(backendType)
+		fmt.Println("  " + backendType)
+		fmt.Println("    " + summary)
+		if len(required) == 0 {
+			fmt.Println("    required: -")
+		} else {
+			fmt.Println("    required: " + strings.Join(required, ", "))
+		}
+		if len(optional) > 0 {
+			fmt.Println("    optional: " + strings.Join(optional, ", "))
+		}
+		fmt.Println()
+	}
+	fmt.Println("Anything not listed here is unimplemented. See CLI.md section 6 for the full set")
+	fmt.Println("and which of them still need to be built.")
+	return nil
+}
+
+type stageArgs struct {
+	version   string
+	code      *int
+	minFrom   int
+	channel   string
+	notes     string
+	notesFile string
+	link      bool
+	adds      []stage.AddSpec
+}
+
+func parseStageArgs(args []string) (*stageArgs, error) {
+	opts := &stageArgs{minFrom: 0}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--code":
+			i++
+			value, err := strconv.Atoi(mustValue(args, i, "--code"))
+			if err != nil {
+				return nil, err
+			}
+			opts.code = &value
+		case arg == "--min-from":
+			i++
+			value, err := strconv.Atoi(mustValue(args, i, "--min-from"))
+			if err != nil {
+				return nil, err
+			}
+			opts.minFrom = value
+		case arg == "--channel":
+			i++
+			opts.channel = mustValue(args, i, "--channel")
+		case arg == "--notes":
+			i++
+			opts.notes = mustValue(args, i, "--notes")
+		case arg == "--notes-file":
+			i++
+			opts.notesFile = mustValue(args, i, "--notes-file")
+		case arg == "--link":
+			opts.link = true
+		case arg == "--add":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--add requires a path")
+			}
+			pathValue := args[i+1]
+			i++
+			pairs := ""
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				pairs = args[i+1]
+				i++
+			}
+			opts.adds = append(opts.adds, stage.AddSpec{Path: pathValue, PairsText: pairs})
+		case strings.HasPrefix(arg, "-"):
+			return nil, fmt.Errorf("unknown flag %q", arg)
+		case opts.version == "":
+			opts.version = arg
+		default:
+			return nil, fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+	if opts.version == "" {
+		return nil, fmt.Errorf("stage requires a version")
+	}
+	return opts, nil
+}
+
+func recordPublicKey(configPath string, keyID string, publicDoc model.PublicKeyDocument) (string, bool, error) {
+	target := configPath
+	var err error
+	if target == "" {
+		target, err = config.FindConfig("")
+		if err != nil {
+			return "", false, err
+		}
+		if target == "" {
+			return "", false, fmt.Errorf("--update-config needs a %s; run 'relkit init' first", config.ConfigName)
+		}
+	}
+
+	var data map[string]any
+	if err := jsonio.LoadPathLenient(target, &data); err != nil {
+		return "", false, err
+	}
+
+	signing, _ := data["signing"].(map[string]any)
+	if signing == nil {
+		signing = map[string]any{}
+		data["signing"] = signing
+	}
+
+	var entries []any
+	if existing, ok := signing["publicKeys"].([]any); ok {
+		for _, entry := range existing {
+			obj, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			if obj["keyId"] == keyID {
+				continue
+			}
+			entries = append(entries, obj)
+		}
+	}
+	entries = append(entries, map[string]any{
+		"keyId":           keyID,
+		"publicKeyBase64": publicDoc.PublicKeyBase64,
+	})
+	signing["publicKeys"] = entries
+
+	known := map[string]struct{}{keyID: {}}
+	for _, entry := range entries {
+		if obj, ok := entry.(map[string]any); ok {
+			if key, _ := obj["keyId"].(string); key != "" {
+				known[key] = struct{}{}
+			}
+		}
+	}
+	currentKeyID, _ := signing["keyId"].(string)
+	adopted := false
+	if _, ok := known[currentKeyID]; !ok {
+		signing["keyId"] = keyID
+		adopted = true
+	}
+
+	pretty, err := jsonio.MarshalPretty(data)
+	if err != nil {
+		return "", false, err
+	}
+	if err := jsonio.WritePath(target, pretty); err != nil {
+		return "", false, err
+	}
+	return target, adopted, nil
+}
+
+func unsealForInspection(document map[string]any, cfg *config.Config) (map[string]any, error) {
+	payload, _ := document["payload"].(string)
+	signedBy := []string{}
+	if signatures, ok := document["signatures"].([]any); ok {
+		for _, entry := range signatures {
+			if obj, ok := entry.(map[string]any); ok {
+				if keyID, _ := obj["keyId"].(string); keyID != "" {
+					signedBy = append(signedBy, keyID)
+				}
+			}
+		}
+	}
+	slices.Sort(signedBy)
+
+	trusted, err := cfg.TrustedPublicKeys()
+	if err == nil && len(trusted) > 0 {
+		var env model.Envelope
+		raw, err := jsonio.MarshalCompact(document)
+		if err == nil && jsonio.LoadBytes(raw, &env) == nil {
+			index, openErr := envelope.OpenEnvelope(&env, trusted)
+			if openErr == nil {
+				fmt.Fprintln(os.Stderr, "# signature ok, signed by "+strings.Join(signedBy, ", "))
+				return asMap(index)
+			}
+			fmt.Fprintln(os.Stderr, "# WARNING: signature NOT verified: "+openErr.Error())
+			fmt.Fprintln(os.Stderr, "# showing the payload anyway, unverified")
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "# signature not checked: no signing.publicKeys configured")
+	}
+
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, err
+	}
+	var unverified map[string]any
+	if err := jsonio.LoadBytes(data, &unverified); err != nil {
+		return nil, err
+	}
+	return unverified, nil
+}
+
+func asMap(value any) (map[string]any, error) {
+	data, err := jsonio.MarshalCompact(value)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := jsonio.LoadBytes(data, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func stripGlobalFlags(args []string) (string, bool, []string, error) {
+	configPath := ""
+	showVersion := false
+	var remaining []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--version":
+			showVersion = true
+		case arg == "--config":
+			i++
+			if i >= len(args) {
+				return "", false, nil, fmt.Errorf("--config requires a value")
+			}
+			configPath = args[i]
+		case strings.HasPrefix(arg, "--config="):
+			configPath = strings.TrimPrefix(arg, "--config=")
+		default:
+			remaining = append(remaining, arg)
+		}
+	}
+	return configPath, showVersion, remaining, nil
+}
+
+func mustValue(args []string, index int, flagName string) string {
+	if index >= len(args) {
+		panic(fmt.Errorf("%s requires a value", flagName))
+	}
+	return args[index]
+}
+
+type exitCodeError struct {
+	code int
+}
+
+func (e exitCodeError) Error() string {
+	return ""
+}
+
+func fail(err error) int {
+	var exitErr exitCodeError
+	if errors.As(err, &exitErr) {
+		return exitErr.code
+	}
+	fmt.Fprintln(os.Stderr, "error:", err)
+	return 2
+}
+
+func usage() string {
+	return strings.TrimSpace(`
+relkit ` + version + `
+
+Commands:
+  init
+  keygen
+  stage
+  inspect
+  simulate
+  verify
+  publish
+  agent-guide
+  backends
+`)
+}
