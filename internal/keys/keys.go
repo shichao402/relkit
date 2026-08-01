@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	SchemaPublicKey  = "rup.publickey/1"
-	SchemaPrivateKey = "rup.privatekey/1"
+	SchemaPublicKey  = model.SchemaPublicKey
+	SchemaPrivateKey = model.SchemaPrivateKey
 	SeedBytes        = ed25519.SeedSize
 )
 
@@ -36,19 +36,19 @@ func GenerateSeed() ([]byte, error) {
 
 func PublicKeyDocument(keyID string, seed []byte) model.PublicKeyDocument {
 	return model.PublicKeyDocument{
-		Schema:          SchemaPublicKey,
-		KeyID:           keyID,
-		Alg:             "ed25519",
-		PublicKeyBase64: base64.StdEncoding.EncodeToString(PublicKey(seed)),
+		Schema:    SchemaPublicKey,
+		KeyId:     keyID,
+		Alg:       "ed25519",
+		PublicKey: append([]byte(nil), PublicKey(seed)...),
 	}
 }
 
 func PrivateKeyDocument(keyID string, seed []byte) model.PrivateKeyDocument {
 	return model.PrivateKeyDocument{
-		Schema:     SchemaPrivateKey,
-		KeyID:      keyID,
-		Alg:        "ed25519",
-		SeedBase64: base64.StdEncoding.EncodeToString(seed),
+		Schema: SchemaPrivateKey,
+		KeyId:  keyID,
+		Alg:    "ed25519",
+		Seed:   append([]byte(nil), seed...),
 	}
 }
 
@@ -78,14 +78,22 @@ func LoadPrivateSeed(document model.PrivateKeyDocument, source string) ([]byte, 
 	if document.Schema != SchemaPrivateKey {
 		return nil, Error{Message: fmt.Sprintf("%s has schema %q, expected %q", source, document.Schema, SchemaPrivateKey)}
 	}
-	return DecodeSeed(document.SeedBase64, source)
+	if len(document.Seed) != SeedBytes {
+		return nil, Error{Message: fmt.Sprintf("%s decodes to %d bytes, expected %d", source, len(document.Seed), SeedBytes)}
+	}
+	return append([]byte(nil), document.Seed...), nil
 }
 
 func LoadPublicKey(document model.PublicKeyDocument, source string) (ed25519.PublicKey, error) {
 	if document.Schema != SchemaPublicKey {
 		return nil, Error{Message: fmt.Sprintf("%s has schema %q, expected %q", source, document.Schema, SchemaPublicKey)}
 	}
-	return DecodePublicKey(document.PublicKeyBase64, source)
+	if len(document.PublicKey) != ed25519.PublicKeySize {
+		return nil, Error{Message: fmt.Sprintf("%s decodes to %d bytes, expected %d", source, len(document.PublicKey), ed25519.PublicKeySize)}
+	}
+	cloned := make(ed25519.PublicKey, len(document.PublicKey))
+	copy(cloned, document.PublicKey)
+	return cloned, nil
 }
 
 func RestrictPermissions(path string) {

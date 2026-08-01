@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/chain"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/httpx"
-	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/stage"
 )
@@ -85,9 +85,9 @@ func LoadIndex(cfg *config.Config, indexPath string, channel string, withStaged 
 		index, err = model.NewIndex(
 			chooseNonEmpty(index.Product, cfg.Product),
 			chooseNonEmpty(index.Channel, resolvedChannel),
-			max(index.Sequence, 1),
+			max(int(index.Sequence), 1),
 			versions,
-			index.MinSupported,
+			model.MinSupportedPtr(index),
 			"",
 		)
 		if err != nil {
@@ -102,10 +102,13 @@ func StartCodes(index *model.IndexDocument, spec string) ([]int, error) {
 	if spec == "" || spec == "all" {
 		codes := map[int]struct{}{0: {}}
 		for _, node := range index.Versions {
-			codes[node.Code] = struct{}{}
+			if node == nil {
+				continue
+			}
+			codes[int(node.Code)] = struct{}{}
 		}
-		if index.MinSupported != nil {
-			codes[*index.MinSupported] = struct{}{}
+		if model.HasMinSupported(index) {
+			codes[int(index.MinSupported)] = struct{}{}
 		}
 		values := make([]int, 0, len(codes))
 		for code := range codes {
@@ -142,8 +145,8 @@ func Run(cfg *config.Config, fromSpec string, indexPath string, channel string, 
 	} else {
 		printer(fmt.Sprintf("newest reachable version: %s (code %d)", head.Version, head.Code))
 	}
-	if index.MinSupported != nil {
-		printer(fmt.Sprintf("minSupported: %d", *index.MinSupported))
+	if model.HasMinSupported(index) {
+		printer(fmt.Sprintf("minSupported: %d", index.MinSupported))
 	}
 	printer("")
 
@@ -163,7 +166,7 @@ func Run(cfg *config.Config, fromSpec string, indexPath string, channel string, 
 		printer(header)
 
 		if len(path) == 0 {
-			if head != nil && code < head.Code {
+			if head != nil && int64(code) < head.Code {
 				printer("    no upgrade available -- STRANDED")
 				stranded = append(stranded, code)
 			} else {
@@ -197,32 +200,23 @@ func Run(cfg *config.Config, fromSpec string, indexPath string, channel string, 
 }
 
 func loadDocument(raw []byte, cfg *config.Config) (*model.IndexDocument, error) {
-	var generic map[string]any
-	if err := jsonio.LoadBytes(raw, &generic); err != nil {
-		return nil, err
-	}
-	schema, _ := generic["schema"].(string)
-	if schema == envelope.EnvelopeSchema {
-		var env model.Envelope
-		if err := jsonio.LoadBytes(raw, &env); err != nil {
-			return nil, err
-		}
+	if env, err := rupv2.UnmarshalEnvelope(raw); err == nil && env.Schema == envelope.EnvelopeSchema {
 		trusted, err := cfg.TrustedPublicKeys()
 		if err != nil {
 			return nil, err
 		}
-		return envelope.OpenEnvelope(&env, trusted)
+		return envelope.OpenEnvelope(env, trusted)
 	}
 
-	var index model.IndexDocument
-	if err := jsonio.LoadBytes(raw, &index); err != nil {
-		return nil, err
+	if index, err := rupv2.UnmarshalIndex(raw); err == nil && index.Schema == model.SchemaIndex {
+		return index, nil
 	}
-	return &index, nil
+
+	return nil, Error{Message: "input is neither a rup.envelope/2 nor rup.index/2 protobuf document"}
 }
 
-func mergeNode(versions []model.VersionNode, node model.VersionNode) []model.VersionNode {
-	merged := make([]model.VersionNode, 0, len(versions)+1)
+func mergeNode(versions []*model.VersionNode, node *model.VersionNode) []*model.VersionNode {
+	merged := make([]*model.VersionNode, 0, len(versions)+1)
 	for _, version := range versions {
 		if version.Code != node.Code {
 			merged = append(merged, version)

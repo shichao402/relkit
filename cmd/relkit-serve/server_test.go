@@ -11,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"google.golang.org/protobuf/proto"
 )
 
 const testToken = "s3cr3t-token"
@@ -180,16 +183,16 @@ func TestHeadReportsSizeWithoutBody(t *testing.T) {
 
 func TestCacheHeadersDistinguishMutableFromImmutable(t *testing.T) {
 	srv, dir := newTestServer(t, false)
-	writeFile(t, dir, "index/app/stable.json", []byte(`{"schema":"x"}`))
-	writeFile(t, dir, "manifest/app/1.0.0.json", []byte(`{"schema":"y"}`))
+	writeFile(t, dir, "index/app/stable.pb", []byte("x"))
+	writeFile(t, dir, "manifest/app/1.0.0.pb", []byte("y"))
 	writeFile(t, dir, "other/notes.txt", []byte("hello"))
 
 	cases := []struct {
 		path string
 		want string
 	}{
-		{"/index/app/stable.json", "no-cache, must-revalidate"},
-		{"/manifest/app/1.0.0.json", "public, max-age=31536000, immutable"},
+		{"/index/app/stable.pb", "no-cache, must-revalidate"},
+		{"/manifest/app/1.0.0.pb", "public, max-age=31536000, immutable"},
 		{"/other/notes.txt", "public, max-age=60"},
 	}
 	for _, tc := range cases {
@@ -237,7 +240,7 @@ func TestRejectsTraversal(t *testing.T) {
 func TestDirectoryListing(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeFile(t, dir, "artifact/app/1.0.0/app.zip", []byte("inside"))
-	writeFile(t, dir, "index/app/stable.json", []byte(`{}`))
+	writeFile(t, dir, "index/app/stable.pb", []byte("x"))
 
 	resp, err := http.Get(srv.URL + "/")
 	if err != nil {
@@ -387,8 +390,8 @@ func TestUploadWritesAndServesBack(t *testing.T) {
 func TestUploadOverwritesPointer(t *testing.T) {
 	srv, dir := newTestServer(t, true)
 
-	for _, content := range []string{`{"sequence":1}`, `{"sequence":2}`} {
-		req, _ := http.NewRequest("PUT", srv.URL+"/index/app/stable.json",
+	for _, content := range []string{"first", "second"} {
+		req, _ := http.NewRequest("PUT", srv.URL+"/index/app/stable.pb",
 			strings.NewReader(content))
 		req.Header.Set("Authorization", "Bearer "+testToken)
 		resp, err := http.DefaultClient.Do(req)
@@ -401,11 +404,11 @@ func TestUploadOverwritesPointer(t *testing.T) {
 		}
 	}
 
-	stored, err := os.ReadFile(filepath.Join(dir, "index", "app", "stable.json"))
+	stored, err := os.ReadFile(filepath.Join(dir, "index", "app", "stable.pb"))
 	if err != nil {
 		t.Fatalf("stored file: %v", err)
 	}
-	if string(stored) != `{"sequence":2}` {
+	if string(stored) != "second" {
 		t.Errorf("pointer = %s, want the second write", stored)
 	}
 }
@@ -468,12 +471,12 @@ func TestCleanKeyRejectsEscapes(t *testing.T) {
 		}
 	}
 	accepted := map[string]string{
-		"/":                      ".",
-		"":                       ".",
-		"/index/app/stable.json": "index/app/stable.json",
-		"/a/./b":                 "a/b",
-		"/a/b/../c":              "a/c",
-		"/artifact/":             "artifact",
+		"/":                    ".",
+		"":                     ".",
+		"/index/app/stable.pb": "index/app/stable.pb",
+		"/a/./b":               "a/b",
+		"/a/b/../c":            "a/c",
+		"/artifact/":           "artifact",
 	}
 	for in, want := range accepted {
 		key, ok := cleanKey(in)
@@ -495,7 +498,14 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("status = %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if strings.TrimSpace(string(body)) != "ok" {
-		t.Errorf("body = %q", body)
+	if got := resp.Header.Get("Content-Type"); got != "application/protobuf" {
+		t.Errorf("Content-Type = %q", got)
+	}
+	var health rupv2.Health
+	if err := proto.Unmarshal(body, &health); err != nil {
+		t.Fatalf("health proto: %v", err)
+	}
+	if health.Status != "ok" {
+		t.Errorf("health status = %q", health.Status)
 	}
 }

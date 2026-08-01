@@ -8,18 +8,35 @@ import (
 	"os"
 	"path"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 )
 
 const (
-	SchemaStaged   = "rup.staged/1"
-	SchemaManifest = "rup.manifest/1"
-	SchemaIndex    = "rup.index/1"
-	SchemaEnvelope = "rup.envelope/1"
+	SchemaStaged     = rupv2.SchemaStaged
+	SchemaManifest   = rupv2.SchemaManifest
+	SchemaIndex      = rupv2.SchemaIndex
+	SchemaEnvelope   = rupv2.SchemaEnvelope
+	SchemaPublicKey  = rupv2.SchemaPublicKey
+	SchemaPrivateKey = rupv2.SchemaPrivateKey
 )
+
+type Envelope = rupv2.Envelope
+type Signature = rupv2.Signature
+type PublicKeyDocument = rupv2.PublicKeyDocument
+type PrivateKeyDocument = rupv2.PrivateKeyDocument
+type StagedDocument = rupv2.Staged
+type StagedArtifact = rupv2.StagedArtifact
+type ManifestDocument = rupv2.Manifest
+type ManifestArtifact = rupv2.Artifact
+type IndexDocument = rupv2.Index
+type VersionNode = rupv2.VersionNode
+type ManifestRef = rupv2.DigestRef
+type Selector = rupv2.Selector
+type MetaEntry = rupv2.MetaEntry
 
 var Kinds = []string{"archive", "installer", "binary", "blob"}
 
@@ -57,105 +74,6 @@ type ValidationError struct {
 
 func (e ValidationError) Error() string {
 	return e.Message
-}
-
-type Envelope struct {
-	Schema     string      `json:"schema"`
-	Payload    string      `json:"payload"`
-	Signatures []Signature `json:"signatures"`
-}
-
-type Signature struct {
-	KeyID string `json:"keyId"`
-	Alg   string `json:"alg"`
-	Sig   string `json:"sig"`
-}
-
-type PublicKeyDocument struct {
-	Schema          string `json:"schema"`
-	KeyID           string `json:"keyId"`
-	Alg             string `json:"alg"`
-	PublicKeyBase64 string `json:"publicKeyBase64"`
-}
-
-type PrivateKeyDocument struct {
-	Schema     string `json:"schema"`
-	KeyID      string `json:"keyId"`
-	Alg        string `json:"alg"`
-	SeedBase64 string `json:"seedBase64"`
-}
-
-type StagedDocument struct {
-	Schema    string           `json:"schema"`
-	Product   string           `json:"product"`
-	Version   string           `json:"version"`
-	Code      int              `json:"code"`
-	MinFrom   int              `json:"minFrom"`
-	Channel   string           `json:"channel"`
-	CreatedAt string           `json:"createdAt"`
-	Notes     string           `json:"notes,omitempty"`
-	Artifacts []StagedArtifact `json:"artifacts"`
-}
-
-type StagedArtifact struct {
-	ID         string            `json:"id"`
-	Filename   string            `json:"filename"`
-	Size       int64             `json:"size"`
-	SHA256     string            `json:"sha256"`
-	Kind       string            `json:"kind"`
-	Selectors  map[string]string `json:"selectors"`
-	Meta       map[string]any    `json:"meta,omitempty"`
-	SourcePath string            `json:"sourcePath,omitempty"`
-}
-
-type ManifestDocument struct {
-	Schema     string             `json:"schema"`
-	Product    string             `json:"product"`
-	Version    string             `json:"version"`
-	Code       int                `json:"code"`
-	ReleasedAt string             `json:"releasedAt"`
-	Notes      string             `json:"notes,omitempty"`
-	Artifacts  []ManifestArtifact `json:"artifacts"`
-}
-
-type ManifestArtifact struct {
-	ID        string            `json:"id"`
-	Filename  string            `json:"filename"`
-	Size      int64             `json:"size"`
-	SHA256    string            `json:"sha256"`
-	Kind      string            `json:"kind"`
-	Selectors map[string]string `json:"selectors"`
-	URLs      []string          `json:"urls"`
-	Meta      map[string]any    `json:"meta,omitempty"`
-}
-
-type IndexDocument struct {
-	Schema       string        `json:"schema"`
-	Product      string        `json:"product"`
-	Channel      string        `json:"channel"`
-	Sequence     int           `json:"sequence"`
-	GeneratedAt  string        `json:"generatedAt"`
-	MinSupported *int          `json:"minSupported,omitempty"`
-	ExpiresAt    string        `json:"expiresAt,omitempty"`
-	Versions     []VersionNode `json:"versions"`
-}
-
-type VersionNode struct {
-	Version    string      `json:"version"`
-	Code       int         `json:"code"`
-	MinFrom    int         `json:"minFrom"`
-	ReleasedAt string      `json:"releasedAt,omitempty"`
-	Yanked     bool        `json:"yanked,omitempty"`
-	Notes      string      `json:"notes,omitempty"`
-	NotesURL   string      `json:"notesUrl,omitempty"`
-	Manifest   ManifestRef `json:"manifest"`
-	Rollout    any         `json:"rollout,omitempty"`
-}
-
-type ManifestRef struct {
-	SHA256 string   `json:"sha256"`
-	Size   int64    `json:"size"`
-	URLs   []string `json:"urls"`
 }
 
 func UTCNow() string {
@@ -240,11 +158,11 @@ func CheckVersion(version string) error {
 }
 
 func IndexKey(product, channel string) string {
-	return path.Join("index", product, channel+".json")
+	return rupv2.IndexKey(product, channel)
 }
 
 func ManifestKey(product, version string) string {
-	return path.Join("manifest", product, version+".json")
+	return rupv2.ManifestKey(product, version)
 }
 
 func ArtifactKey(product, version, filename string) string {
@@ -296,13 +214,70 @@ func DefaultArtifactID(selectors map[string]string) (string, error) {
 	return joined, nil
 }
 
-func selectorRank(key string) [3]string {
-	for idx, candidate := range standardSelectorOrder {
-		if key == candidate {
-			return [3]string{"0", fmt.Sprintf("%03d", idx), key}
-		}
+func SelectorsFromMap(selectors map[string]string) []*Selector {
+	if len(selectors) == 0 {
+		return nil
 	}
-	return [3]string{"1", "000", key}
+	out := make([]*Selector, 0, len(selectors))
+	for key, value := range selectors {
+		out = append(out, &Selector{Key: key, Value: value})
+	}
+	return rupv2.SortSelectors(out)
+}
+
+func SelectorsToMap(selectors []*Selector) map[string]string {
+	if len(selectors) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(selectors))
+	for _, selector := range selectors {
+		if selector == nil || selector.Key == "" {
+			continue
+		}
+		out[selector.Key] = selector.Value
+	}
+	return out
+}
+
+func MetaEntriesFromAnyMap(meta map[string]any) ([]*MetaEntry, error) {
+	if len(meta) == 0 {
+		return nil, nil
+	}
+	out := make([]*MetaEntry, 0, len(meta))
+	for key, raw := range meta {
+		value, ok := raw.(string)
+		if !ok {
+			return nil, ValidationError{Message: fmt.Sprintf("meta[%q] must be a string, got %T", key, raw)}
+		}
+		out = append(out, &MetaEntry{Key: key, Value: value})
+	}
+	return rupv2.SortMetaEntry(out), nil
+}
+
+func MetaToMap(entries []*MetaEntry) map[string]string {
+	if len(entries) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if entry == nil || entry.Key == "" {
+			continue
+		}
+		out[entry.Key] = entry.Value
+	}
+	return out
+}
+
+func HasMinSupported(index *IndexDocument) bool {
+	return index != nil && index.HasMinSupported
+}
+
+func MinSupportedPtr(index *IndexDocument) *int {
+	if !HasMinSupported(index) {
+		return nil
+	}
+	value := int(index.MinSupported)
+	return &value
 }
 
 func Sha256File(path string) (string, int64, error) {
@@ -325,7 +300,7 @@ func Sha256Bytes(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func NewStagedDocument(product, version string, code, minFrom int, channel string, artifacts []StagedArtifact, notes string, createdAt string) (*StagedDocument, error) {
+func NewStagedDocument(product, version string, code, minFrom int, channel string, artifacts []*StagedArtifact, notes string, createdAt string) (*StagedDocument, error) {
 	if err := CheckIdentifier(product, "product"); err != nil {
 		return nil, err
 	}
@@ -349,11 +324,11 @@ func NewStagedDocument(product, version string, code, minFrom int, channel strin
 		Schema:    SchemaStaged,
 		Product:   product,
 		Version:   version,
-		Code:      code,
-		MinFrom:   minFrom,
+		Code:      int64(code),
+		MinFrom:   int64(minFrom),
 		Channel:   channel,
 		CreatedAt: nonEmptyOr(createdAt, UTCNow()),
-		Artifacts: artifacts,
+		Artifacts: cloneStagedArtifacts(artifacts),
 	}
 	if notes != "" {
 		doc.Notes = notes
@@ -371,20 +346,25 @@ func NewStagedArtifact(artifactID, filename string, size int64, digest, kind str
 	if err := CheckSelectors(selectors, "selectors"); err != nil {
 		return nil, err
 	}
-	if !slices.Contains(Kinds, kind) {
+	if !containsKind(kind) {
 		return nil, ValidationError{Message: fmt.Sprintf("kind must be one of %v, got %q", Kinds, kind)}
 	}
 
+	metaEntries, err := MetaEntriesFromAnyMap(meta)
+	if err != nil {
+		return nil, err
+	}
+
 	artifact := &StagedArtifact{
-		ID:        artifactID,
+		Id:        artifactID,
 		Filename:  filename,
 		Size:      size,
-		SHA256:    digest,
+		Sha256:    digest,
 		Kind:      kind,
-		Selectors: selectors,
+		Selectors: SelectorsFromMap(selectors),
 	}
-	if len(meta) > 0 {
-		artifact.Meta = meta
+	if len(metaEntries) > 0 {
+		artifact.Meta = metaEntries
 	}
 	if sourcePath != "" {
 		artifact.SourcePath = sourcePath
@@ -393,23 +373,26 @@ func NewStagedArtifact(artifactID, filename string, size int64, digest, kind str
 }
 
 func NewManifestFromStaged(staged *StagedDocument, urlsByArtifactID map[string][]string, releasedAt string) (*ManifestDocument, error) {
-	artifacts := make([]ManifestArtifact, 0, len(staged.Artifacts))
+	artifacts := make([]*ManifestArtifact, 0, len(staged.Artifacts))
 	for _, item := range staged.Artifacts {
-		urls := append([]string(nil), urlsByArtifactID[item.ID]...)
-		if len(urls) == 0 {
-			return nil, ValidationError{Message: fmt.Sprintf("no URLs resolved for artifact %q", item.ID)}
+		if item == nil {
+			continue
 		}
-		artifact := ManifestArtifact{
-			ID:        item.ID,
+		urls := append([]string(nil), urlsByArtifactID[item.Id]...)
+		if len(urls) == 0 {
+			return nil, ValidationError{Message: fmt.Sprintf("no URLs resolved for artifact %q", item.Id)}
+		}
+		artifact := &ManifestArtifact{
+			Id:        item.Id,
 			Filename:  item.Filename,
 			Size:      item.Size,
-			SHA256:    item.SHA256,
+			Sha256:    item.Sha256,
 			Kind:      item.Kind,
-			Selectors: copyStringMap(item.Selectors),
-			URLs:      urls,
+			Selectors: cloneSelectors(item.Selectors),
+			Urls:      urls,
 		}
 		if len(item.Meta) > 0 {
-			artifact.Meta = copyAnyMap(item.Meta)
+			artifact.Meta = cloneMetaEntries(item.Meta)
 		}
 		artifacts = append(artifacts, artifact)
 	}
@@ -428,16 +411,16 @@ func NewManifestFromStaged(staged *StagedDocument, urlsByArtifactID map[string][
 	return manifest, nil
 }
 
-func NewIndexNode(staged *StagedDocument, manifestDigest string, manifestSize int64, manifestURLs []string, releasedAt string) VersionNode {
-	node := VersionNode{
+func NewIndexNode(staged *StagedDocument, manifestDigest string, manifestSize int64, manifestURLs []string, releasedAt string) *VersionNode {
+	node := &VersionNode{
 		Version:    staged.Version,
 		Code:       staged.Code,
 		MinFrom:    staged.MinFrom,
 		ReleasedAt: nonEmptyOr(releasedAt, UTCNow()),
-		Manifest: ManifestRef{
-			SHA256: manifestDigest,
+		Manifest: &ManifestRef{
+			Sha256: manifestDigest,
 			Size:   manifestSize,
-			URLs:   append([]string(nil), manifestURLs...),
+			Urls:   append([]string(nil), manifestURLs...),
 		},
 	}
 	if staged.Notes != "" {
@@ -446,7 +429,7 @@ func NewIndexNode(staged *StagedDocument, manifestDigest string, manifestSize in
 	return node
 }
 
-func NewIndex(product, channel string, sequence int, versions []VersionNode, minSupported *int, generatedAt string) (*IndexDocument, error) {
+func NewIndex(product, channel string, sequence int, versions []*VersionNode, minSupported *int, generatedAt string) (*IndexDocument, error) {
 	if err := CheckIdentifier(product, "product"); err != nil {
 		return nil, err
 	}
@@ -460,7 +443,7 @@ func NewIndex(product, channel string, sequence int, versions []VersionNode, min
 		return nil, ValidationError{Message: "index must contain at least one version"}
 	}
 
-	cloned := append([]VersionNode(nil), versions...)
+	cloned := cloneVersionNodes(versions)
 	sort.Slice(cloned, func(i, j int) bool {
 		return cloned[i].Code < cloned[j].Code
 	})
@@ -469,13 +452,13 @@ func NewIndex(product, channel string, sequence int, versions []VersionNode, min
 		Schema:      SchemaIndex,
 		Product:     product,
 		Channel:     channel,
-		Sequence:    sequence,
+		Sequence:    int64(sequence),
 		GeneratedAt: nonEmptyOr(generatedAt, UTCNow()),
 		Versions:    cloned,
 	}
 	if minSupported != nil {
-		value := *minSupported
-		doc.MinSupported = &value
+		doc.MinSupported = int64(*minSupported)
+		doc.HasMinSupported = true
 	}
 	return doc, nil
 }
@@ -487,30 +470,93 @@ func EmptyIndex(product, channel string) *IndexDocument {
 		Channel:     channel,
 		Sequence:    0,
 		GeneratedAt: UTCNow(),
-		Versions:    []VersionNode{},
+		Versions:    []*VersionNode{},
 	}
 }
 
-func copyStringMap(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return map[string]string{}
+func selectorRank(key string) [3]string {
+	for idx, candidate := range standardSelectorOrder {
+		if key == candidate {
+			return [3]string{"0", fmt.Sprintf("%03d", idx), key}
+		}
 	}
-	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-	return dst
+	return [3]string{"1", "000", key}
 }
 
-func copyAnyMap(src map[string]any) map[string]any {
-	if len(src) == 0 {
+func cloneVersionNodes(values []*VersionNode) []*VersionNode {
+	if len(values) == 0 {
 		return nil
 	}
-	dst := make(map[string]any, len(src))
-	for key, value := range src {
-		dst[key] = value
+	out := make([]*VersionNode, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		cloned := *value
+		if value.Manifest != nil {
+			manifest := *value.Manifest
+			manifest.Urls = append([]string(nil), value.Manifest.Urls...)
+			cloned.Manifest = &manifest
+		}
+		out = append(out, &cloned)
 	}
-	return dst
+	return out
+}
+
+func cloneStagedArtifacts(values []*StagedArtifact) []*StagedArtifact {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]*StagedArtifact, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		cloned := *value
+		cloned.Selectors = cloneSelectors(value.Selectors)
+		cloned.Meta = cloneMetaEntries(value.Meta)
+		out = append(out, &cloned)
+	}
+	return out
+}
+
+func cloneSelectors(values []*Selector) []*Selector {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]*Selector, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		cloned := *value
+		out = append(out, &cloned)
+	}
+	return out
+}
+
+func cloneMetaEntries(values []*MetaEntry) []*MetaEntry {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]*MetaEntry, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		cloned := *value
+		out = append(out, &cloned)
+	}
+	return out
+}
+
+func containsKind(kind string) bool {
+	for _, candidate := range Kinds {
+		if candidate == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func nonEmptyOr(value, fallback string) string {

@@ -11,6 +11,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"google.golang.org/protobuf/proto"
 )
 
 const healthPath = "/-/health"
@@ -23,7 +26,16 @@ func (c *config) handler() http.Handler {
 	// identifier, so the namespace is free.
 	mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		w.Write([]byte("ok\n"))
+		w.Header().Set("Content-Type", "application/protobuf")
+		body, err := proto.Marshal(&rupv2.Health{
+			Status:  "ok",
+			Version: version,
+		})
+		if err != nil {
+			http.Error(w, "health marshal failed", http.StatusInternalServerError)
+			return
+		}
+		w.Write(body)
 	})
 
 	mux.HandleFunc("/", c.serve)
@@ -204,6 +216,8 @@ func (c *config) cacheControl(name string) string {
 
 func contentType(name string) string {
 	switch path.Ext(name) {
+	case ".pb":
+		return "application/protobuf"
 	case ".json":
 		return "application/json"
 	case ".zip":

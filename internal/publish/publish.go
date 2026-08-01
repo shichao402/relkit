@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/chain"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
-	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/stage"
 )
@@ -40,7 +40,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	channel := staged.Channel
 	mismatches := stage.VerifyStagedHashes(cfg, staged)
 	if len(mismatches) > 0 {
-		return nil, Error{Message: "staging tree no longer matches staged.json:\n  " + strings.Join(mismatches, "\n  ") + "\nre-run 'relkit stage'"}
+		return nil, Error{Message: "staging tree no longer matches staged.pb:\n  " + strings.Join(mismatches, "\n  ") + "\nre-run 'relkit stage'"}
 	}
 
 	targetNames := append([]string(nil), to...)
@@ -100,7 +100,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 
 	provisionalNode := model.NewIndexNode(staged, strings.Repeat("0", 64), 0, []string{"https://placeholder.invalid/"}, "")
-	provisional, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergeNode(existing.Versions, provisionalNode), existing.MinSupported, "")
+	provisional, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergeNode(existing.Versions, provisionalNode), model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	directory := stage.ArtifactsDir(cfg.Root, version)
 	urlsByArtifact := make(map[string][]string, len(staged.Artifacts))
 	for _, artifact := range staged.Artifacts {
-		urlsByArtifact[artifact.ID] = []string{}
+		urlsByArtifact[artifact.Id] = []string{}
 	}
 	for _, backend := range openedBackends {
 		for _, artifact := range staged.Artifacts {
@@ -144,7 +144,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 			if err != nil {
 				return nil, err
 			}
-			urlsByArtifact[artifact.ID] = append(urlsByArtifact[artifact.ID], urls...)
+			urlsByArtifact[artifact.Id] = append(urlsByArtifact[artifact.Id], urls...)
 			printer(fmt.Sprintf("  %-12s %s", backend.Name(), key))
 		}
 	}
@@ -153,7 +153,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if err != nil {
 		return nil, err
 	}
-	manifestBytes, err := jsonio.MarshalPretty(manifest)
+	manifestBytes, err := rupv2.MarshalManifest(manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 
 	node := model.NewIndexNode(staged, manifestDigest, manifestSize, manifestURLs, "")
-	index, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergeNode(existing.Versions, node), existing.MinSupported, "")
+	index, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergeNode(existing.Versions, node), model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if err != nil {
 		return nil, err
 	}
-	envelopeBytes, err := jsonio.MarshalPretty(env)
+	envelopeBytes, err := rupv2.MarshalEnvelope(env)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +259,10 @@ func checkClientsCanVerify(cfg *config.Config, env *model.Envelope, channel stri
 
 	signedBy := make([]string, 0, len(env.Signatures))
 	for _, signature := range env.Signatures {
-		signedBy = append(signedBy, signature.KeyID)
+		if signature == nil {
+			continue
+		}
+		signedBy = append(signedBy, signature.KeyId)
 	}
 	slices.Sort(signedBy)
 	trustedIDs := make([]string, 0, len(trusted))
@@ -287,11 +290,11 @@ func readExistingIndexes(openedBackends []backends.Backend, cfg *config.Config, 
 			continue
 		}
 
-		var env model.Envelope
-		if err := jsonio.LoadBytes(raw, &env); err != nil {
-			return nil, 0, nil, Error{Message: fmt.Sprintf("index on backend %q is not valid JSON: %v", backend.Name(), err)}
+		env, err := rupv2.UnmarshalEnvelope(raw)
+		if err != nil {
+			return nil, 0, nil, Error{Message: fmt.Sprintf("index on backend %q is not valid protobuf: %v", backend.Name(), err)}
 		}
-		index, err := envelope.OpenEnvelope(&env, trusted)
+		index, err := envelope.OpenEnvelope(env, trusted)
 		if err != nil {
 			return nil, 0, nil, Error{Message: fmt.Sprintf("index on backend %q failed verification: %v", backend.Name(), err)}
 		}
@@ -329,7 +332,7 @@ func readExistingIndexes(openedBackends []backends.Backend, cfg *config.Config, 
 			newest = index
 		}
 	}
-	return newest, newest.Sequence, rawByBackend, nil
+	return newest, int(newest.Sequence), rawByBackend, nil
 }
 
 func checkCodeMonotonic(existing *model.IndexDocument, staged *model.StagedDocument, allowBackfill bool) error {
@@ -353,8 +356,8 @@ func checkCodeMonotonic(existing *model.IndexDocument, staged *model.StagedDocum
 	return nil
 }
 
-func mergeNode(existing []model.VersionNode, node model.VersionNode) []model.VersionNode {
-	versions := make([]model.VersionNode, 0, len(existing)+1)
+func mergeNode(existing []*model.VersionNode, node *model.VersionNode) []*model.VersionNode {
+	versions := make([]*model.VersionNode, 0, len(existing)+1)
 	for _, version := range existing {
 		if version.Code != node.Code {
 			versions = append(versions, version)

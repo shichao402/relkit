@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/chain"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
@@ -36,7 +37,7 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 
 	runRelkit(t, exe, project, nil, 0, "init", "--product", "demoapp")
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
-	setPrivateKeyPath(t, project, "keys/k1.private.json")
+	setPrivateKeyPath(t, project, "keys/k1.private.pb")
 
 	writeArtifact(t, dist, "demoapp-1.0.0-win-x64.zip", "win 1.0.0 ", 64)
 	writeArtifact(t, dist, "demoapp-1.0.0-mac-arm64.zip", "mac 1.0.0 ", 64)
@@ -64,7 +65,7 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 		t.Fatalf("versions mismatch: got %d want 1", len(index.Versions))
 	}
 
-	inspectOut := runRelkit(t, exe, project, nil, 0, "inspect", "--file", filepath.Join(project, "dist", "publish", "index", "demoapp", "stable.json"))
+	inspectOut := runRelkit(t, exe, project, nil, 0, "inspect", "--file", filepath.Join(project, "dist", "publish", "index", "demoapp", "stable.pb"))
 	assertContains(t, inspectOut, "\"versions\"")
 
 	writeArtifact(t, dist, "demoapp-1.1.0-win-x64.zip", "win 1.1.0 ", 64)
@@ -139,7 +140,7 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	file.Close()
 
 	tampered := runRelkit(t, exe, project, nil, 2, "publish", "1.5.0", "--dry-run")
-	assertContains(t, tampered, "staging tree no longer matches staged.json")
+	assertContains(t, tampered, "staging tree no longer matches staged.pb")
 	verifyAfterTamper := runRelkit(t, exe, project, nil, 0, "verify")
 	assertContains(t, verifyAfterTamper, "verify passed")
 }
@@ -163,7 +164,7 @@ func TestStaticHTTPBackend(t *testing.T) {
 
 	runRelkit(t, exe, project, nil, 0, "init", "--product", "siteapp")
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
-	setPrivateKeyPath(t, project, "keys/k1.private.json")
+	setPrivateKeyPath(t, project, "keys/k1.private.pb")
 	addBackend(t, project, "site", map[string]any{
 		"type":     "static-http",
 		"baseUrl":  server.URL + "/r/",
@@ -202,7 +203,7 @@ func TestHTTPPutBackend(t *testing.T) {
 
 	runRelkit(t, exe, project, nil, 0, "init", "--product", "servedapp")
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "srv", "--out", "keys", "--update-config")
-	setPrivateKeyPath(t, project, "keys/srv.private.json")
+	setPrivateKeyPath(t, project, "keys/srv.private.pb")
 	addBackend(t, project, "dl", map[string]any{
 		"type":     "http-put",
 		"baseUrl":  server.URL + "/",
@@ -334,16 +335,20 @@ func loadPublishedIndex(t *testing.T, project string, product string, channel st
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(project, "dist", "publish", "index", product, channel+".json")
-	var env model.Envelope
-	if err := jsonio.LoadPath(path, &env); err != nil {
+	path := filepath.Join(project, "dist", "publish", "index", product, channel+".pb")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := rupv2.UnmarshalEnvelope(data)
+	if err != nil {
 		t.Fatal(err)
 	}
 	trusted, err := cfg.TrustedPublicKeys()
 	if err != nil {
 		t.Fatal(err)
 	}
-	index, err := envelope.OpenEnvelope(&env, trusted)
+	index, err := envelope.OpenEnvelope(env, trusted)
 	if err != nil {
 		t.Fatal(err)
 	}

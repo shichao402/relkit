@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/chain"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/httpx"
-	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/model"
 )
 
@@ -89,13 +89,13 @@ func Run(cfg *config.Config, channel string, to []string, deep bool, printer Pri
 			continue
 		}
 
-		var env model.Envelope
-		if err := jsonio.LoadBytes(raw, &env); err != nil {
-			findings.Error(fmt.Sprintf("index on %s is not valid JSON: %v", name, err))
+		env, err := rupv2.UnmarshalEnvelope(raw)
+		if err != nil {
+			findings.Error(fmt.Sprintf("index on %s is not valid protobuf: %v", name, err))
 			continue
 		}
 
-		index, err := envelope.OpenEnvelope(&env, trusted)
+		index, err := envelope.OpenEnvelope(env, trusted)
 		if err != nil {
 			findings.Error(fmt.Sprintf("signature check failed on %s: %v", name, err))
 			continue
@@ -155,7 +155,7 @@ func Run(cfg *config.Config, channel string, to []string, deep bool, printer Pri
 				sequences = append(sequences, fmt.Sprintf("%s=%d", name, index.Sequence))
 			}
 			slices.Sort(sequences)
-			newest := 0
+			var newest int64
 			for _, index := range parsedByBackend {
 				if index.Sequence > newest {
 					newest = index.Sequence
@@ -216,10 +216,18 @@ func checkShape(index *model.IndexDocument, findings *Findings) {
 	}
 
 	for _, node := range index.Versions {
+		if node == nil {
+			findings.Error("index contains an empty version node")
+			continue
+		}
 		if node.Version == "" {
 			findings.Error("version node is missing \"version\"")
 		}
-		if node.Manifest.SHA256 != "" && (len(node.Manifest.SHA256) != 64 || node.Manifest.SHA256 != strings.ToLower(node.Manifest.SHA256)) {
+		if node.Manifest == nil {
+			findings.Error(fmt.Sprintf("version %q is missing manifest", node.Version))
+			continue
+		}
+		if node.Manifest.Sha256 != "" && (len(node.Manifest.Sha256) != 64 || node.Manifest.Sha256 != strings.ToLower(node.Manifest.Sha256)) {
 			findings.Error(fmt.Sprintf("version %q has a malformed manifest sha256", node.Version))
 		}
 	}
@@ -237,11 +245,14 @@ func checkDeclaredURL(backend backends.Backend, key string, declaredURLs []strin
 }
 
 func checkManifests(backend backends.Backend, index *model.IndexDocument, product string, findings *Findings, printer Printer) {
-	nodes := append([]model.VersionNode(nil), index.Versions...)
-	slices.SortFunc(nodes, func(a, b model.VersionNode) int { return a.Code - b.Code })
+	nodes := append([]*model.VersionNode(nil), index.Versions...)
+	slices.SortFunc(nodes, compareVersionNodes)
 	for _, node := range nodes {
+		if node == nil || node.Manifest == nil {
+			continue
+		}
 		key := model.ManifestKey(product, node.Version)
-		checkDeclaredURL(backend, key, node.Manifest.URLs, "index entry for "+node.Version, findings)
+		checkDeclaredURL(backend, key, node.Manifest.Urls, "index entry for "+node.Version, findings)
 
 		raw, err := backend.Get(key)
 		if err != nil {
@@ -254,14 +265,14 @@ func checkManifests(backend backends.Backend, index *model.IndexDocument, produc
 		}
 
 		actualDigest := model.Sha256Bytes(raw)
-		if actualDigest != node.Manifest.SHA256 || int64(len(raw)) != node.Manifest.Size {
-			findings.Error(fmt.Sprintf("manifest-digest-mismatch for %s on %s: index records %s (%d bytes), stored manifest is %s (%d bytes)", node.Version, backend.Name(), prefix(node.Manifest.SHA256), node.Manifest.Size, prefix(actualDigest), len(raw)))
+		if actualDigest != node.Manifest.Sha256 || int64(len(raw)) != node.Manifest.Size {
+			findings.Error(fmt.Sprintf("manifest-digest-mismatch for %s on %s: index records %s (%d bytes), stored manifest is %s (%d bytes)", node.Version, backend.Name(), prefix(node.Manifest.Sha256), node.Manifest.Size, prefix(actualDigest), len(raw)))
 			continue
 		}
 
-		var manifest model.ManifestDocument
-		if err := jsonio.LoadBytes(raw, &manifest); err != nil {
-			findings.Error(fmt.Sprintf("manifest %s is not valid JSON: %v", node.Version, err))
+		manifest, err := rupv2.UnmarshalManifest(raw)
+		if err != nil {
+			findings.Error(fmt.Sprintf("manifest %s is not valid protobuf: %v", node.Version, err))
 			continue
 		}
 		if manifest.Product != product {
@@ -278,21 +289,27 @@ func checkManifests(backend backends.Backend, index *model.IndexDocument, produc
 }
 
 func checkArtifactsReachable(backend backends.Backend, index *model.IndexDocument, product string, findings *Findings, printer Printer) {
-	nodes := append([]model.VersionNode(nil), index.Versions...)
-	slices.SortFunc(nodes, func(a, b model.VersionNode) int { return a.Code - b.Code })
+	nodes := append([]*model.VersionNode(nil), index.Versions...)
+	slices.SortFunc(nodes, compareVersionNodes)
 	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
 		raw, err := backend.Get(model.ManifestKey(product, node.Version))
 		if err != nil || raw == nil {
 			continue
 		}
 
-		var manifest model.ManifestDocument
-		if err := jsonio.LoadBytes(raw, &manifest); err != nil {
+		manifest, err := rupv2.UnmarshalManifest(raw)
+		if err != nil {
 			continue
 		}
 		for _, artifact := range manifest.Artifacts {
+			if artifact == nil {
+				continue
+			}
 			key := model.ArtifactKey(product, node.Version, artifact.Filename)
-			url := checkDeclaredURL(backend, key, artifact.URLs, fmt.Sprintf("manifest %s, artifact %s", node.Version, artifact.ID), findings)
+			url := checkDeclaredURL(backend, key, artifact.Urls, fmt.Sprintf("manifest %s, artifact %s", node.Version, artifact.Id), findings)
 			if !backend.URLsAreLive() {
 				stored, err := backend.Get(key)
 				if err != nil || stored == nil {
@@ -300,7 +317,7 @@ func checkArtifactsReachable(backend backends.Backend, index *model.IndexDocumen
 				} else if int64(len(stored)) != artifact.Size {
 					findings.Error(fmt.Sprintf("artifact %s on %s is %d bytes, manifest says %d", key, backend.Name(), len(stored), artifact.Size))
 				} else {
-					printer(fmt.Sprintf("    %-12s %s ok (stored bytes)", node.Version, artifact.ID))
+					printer(fmt.Sprintf("    %-12s %s ok (stored bytes)", node.Version, artifact.Id))
 				}
 				continue
 			}
@@ -311,15 +328,32 @@ func checkArtifactsReachable(backend backends.Backend, index *model.IndexDocumen
 			if !ok {
 				findings.Error(fmt.Sprintf("artifact not downloadable: %s\n           %s", *url, note))
 			} else if !httpx.SizeMatches(artifact.Size, size) {
-				findings.Error(fmt.Sprintf("artifact %s is %d bytes at the URL, manifest says %d\n           %s", artifact.ID, valueOrZero(size), artifact.Size, *url))
+				findings.Error(fmt.Sprintf("artifact %s is %d bytes at the URL, manifest says %d\n           %s", artifact.Id, valueOrZero(size), artifact.Size, *url))
 			} else {
 				sizeText := ""
 				if size != nil {
 					sizeText = fmt.Sprintf(", %d bytes", *size)
 				}
-				printer(fmt.Sprintf("    %-12s %s ok (%s%s)", node.Version, artifact.ID, note, sizeText))
+				printer(fmt.Sprintf("    %-12s %s ok (%s%s)", node.Version, artifact.Id, note, sizeText))
 			}
 		}
+	}
+}
+
+func compareVersionNodes(a, b *model.VersionNode) int {
+	switch {
+	case a == nil && b == nil:
+		return 0
+	case a == nil:
+		return 1
+	case b == nil:
+		return -1
+	case a.Code < b.Code:
+		return -1
+	case a.Code > b.Code:
+		return 1
+	default:
+		return 0
 	}
 }
 

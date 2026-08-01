@@ -8,15 +8,15 @@ import (
 
 func SelectNextTarget(index *model.IndexDocument, currentCode int) *model.VersionNode {
 	var best *model.VersionNode
-	for i := range index.Versions {
-		node := &index.Versions[i]
-		if node.Yanked {
+	current := int64(currentCode)
+	for _, node := range index.Versions {
+		if node == nil || node.Yanked {
 			continue
 		}
-		if node.Code <= currentCode {
+		if node.Code <= current {
 			continue
 		}
-		if node.MinFrom > currentCode {
+		if node.MinFrom > current {
 			continue
 		}
 		if best == nil || node.Code > best.Code {
@@ -35,19 +35,18 @@ func ResolveUpgradePath(index *model.IndexDocument, currentCode int) []model.Ver
 			return path
 		}
 		path = append(path, *target)
-		code = target.Code
+		code = int(target.Code)
 	}
 }
 
 func IsMandatory(index *model.IndexDocument, currentCode int) bool {
-	return index.MinSupported != nil && currentCode < *index.MinSupported
+	return model.HasMinSupported(index) && int64(currentCode) < index.MinSupported
 }
 
 func FindHead(index *model.IndexDocument) *model.VersionNode {
 	var head *model.VersionNode
-	for i := range index.Versions {
-		node := &index.Versions[i]
-		if node.Yanked {
+	for _, node := range index.Versions {
+		if node == nil || node.Yanked {
 			continue
 		}
 		if head == nil || node.Code > head.Code {
@@ -63,7 +62,10 @@ func ValidateReachability(index *model.IndexDocument) ([]string, []string) {
 
 	codeCounts := make(map[int]int, len(index.Versions))
 	for _, node := range index.Versions {
-		codeCounts[node.Code]++
+		if node == nil {
+			continue
+		}
+		codeCounts[int(node.Code)]++
 	}
 	for _, count := range codeCounts {
 		if count > 1 {
@@ -89,7 +91,7 @@ func ValidateReachability(index *model.IndexDocument) ([]string, []string) {
 	}
 	sort.Ints(uniqueCodes)
 	for _, code := range uniqueCodes {
-		if code >= head.Code {
+		if code >= int(head.Code) {
 			continue
 		}
 		if !reachesHead(code) {
@@ -97,10 +99,11 @@ func ValidateReachability(index *model.IndexDocument) ([]string, []string) {
 		}
 	}
 
-	if index.MinSupported != nil {
-		if *index.MinSupported > head.Code {
+	if model.HasMinSupported(index) {
+		minSupported := int(index.MinSupported)
+		if minSupported > int(head.Code) {
 			errors["min-supported-above-head"] = struct{}{}
-		} else if *index.MinSupported < head.Code && !reachesHead(*index.MinSupported) {
+		} else if minSupported < int(head.Code) && !reachesHead(minSupported) {
 			errors["min-supported-unreachable"] = struct{}{}
 		}
 	}
@@ -120,10 +123,13 @@ func UnreachableStartCodes(index *model.IndexDocument) []int {
 
 	starts := map[int]struct{}{0: {}}
 	for _, node := range index.Versions {
-		starts[node.Code] = struct{}{}
+		if node == nil {
+			continue
+		}
+		starts[int(node.Code)] = struct{}{}
 	}
-	if index.MinSupported != nil {
-		starts[*index.MinSupported] = struct{}{}
+	if model.HasMinSupported(index) {
+		starts[int(index.MinSupported)] = struct{}{}
 	}
 
 	codes := make([]int, 0, len(starts))
@@ -134,7 +140,7 @@ func UnreachableStartCodes(index *model.IndexDocument) []int {
 
 	var stranded []int
 	for _, code := range codes {
-		if code >= head.Code {
+		if code >= int(head.Code) {
 			continue
 		}
 		path := ResolveUpgradePath(index, code)

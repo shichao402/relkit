@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/model"
@@ -41,8 +42,8 @@ func StagingDir(root, version string) string {
 	return filepath.Join(root, stagingRoot, version)
 }
 
-func StagedJSONPath(root, version string) string {
-	return filepath.Join(StagingDir(root, version), "staged.json")
+func StagedPath(root, version string) string {
+	return filepath.Join(StagingDir(root, version), "staged.pb")
 }
 
 func ArtifactsDir(root, version string) string {
@@ -50,16 +51,20 @@ func ArtifactsDir(root, version string) string {
 }
 
 func LoadStaged(root, version string) (*model.StagedDocument, error) {
-	path := StagedJSONPath(root, version)
+	path := StagedPath(root, version)
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
 		return nil, Error{Message: fmt.Sprintf("no staged release for version %q (expected %s); run 'relkit stage' first", version, path)}
 	}
-	var staged model.StagedDocument
-	if err := jsonio.LoadPath(path, &staged); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil, err
 	}
-	return &staged, nil
+	staged, err := rupv2.UnmarshalStaged(data)
+	if err != nil {
+		return nil, err
+	}
+	return staged, nil
 }
 
 func ParseKeyValues(text string) (map[string]string, error) {
@@ -186,7 +191,7 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 	}
 
 	var report []string
-	artifacts := make([]model.StagedArtifact, 0, len(adds))
+	artifacts := make([]*model.StagedArtifact, 0, len(adds))
 	for _, add := range adds {
 		pairs := map[string]string{}
 		if add.PairsText != "" {
@@ -199,7 +204,7 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 		if err != nil {
 			return nil, err
 		}
-		artifacts = append(artifacts, *artifact)
+		artifacts = append(artifacts, artifact)
 	}
 
 	if duplicateIDs := findDuplicateIDs(artifacts); len(duplicateIDs) > 0 {
@@ -227,11 +232,11 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 		}
 	}
 
-	data, err := jsonio.MarshalPretty(staged)
+	data, err := rupv2.MarshalStaged(staged)
 	if err != nil {
 		return nil, err
 	}
-	if err := jsonio.WritePath(StagedJSONPath(cfg.Root, version), data); err != nil {
+	if err := jsonio.WritePath(StagedPath(cfg.Root, version), data); err != nil {
 		return nil, err
 	}
 
@@ -240,11 +245,11 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 	}
 	printer(fmt.Sprintf("staged %s (code %d, channel %s, minFrom %d)", version, code, resolvedChannel, minFrom))
 	for _, artifact := range staged.Artifacts {
-		hashPrefix := artifact.SHA256
+		hashPrefix := artifact.Sha256
 		if len(hashPrefix) > 12 {
 			hashPrefix = hashPrefix[:12]
 		}
-		printer(fmt.Sprintf("  %-12s %-40s %12d bytes  %s", artifact.ID, artifact.Filename, artifact.Size, hashPrefix))
+		printer(fmt.Sprintf("  %-12s %-40s %12d bytes  %s", artifact.Id, artifact.Filename, artifact.Size, hashPrefix))
 	}
 	printer("staging tree: " + StagingDir(cfg.Root, version))
 	return staged, nil
@@ -265,16 +270,16 @@ func VerifyStagedHashes(cfg *config.Config, staged *model.StagedDocument) []stri
 			mismatches = append(mismatches, fmt.Sprintf("%s: %v", artifact.Filename, err))
 			continue
 		}
-		if digest != artifact.SHA256 || size != artifact.Size {
+		if digest != artifact.Sha256 || size != artifact.Size {
 			actualPrefix := digest
 			if len(actualPrefix) > 12 {
 				actualPrefix = actualPrefix[:12]
 			}
-			expectedPrefix := artifact.SHA256
+			expectedPrefix := artifact.Sha256
 			if len(expectedPrefix) > 12 {
 				expectedPrefix = expectedPrefix[:12]
 			}
-			mismatches = append(mismatches, fmt.Sprintf("%s: staged tree has %s (%d bytes), staged.json records %s (%d bytes)", artifact.Filename, actualPrefix, size, expectedPrefix, artifact.Size))
+			mismatches = append(mismatches, fmt.Sprintf("%s: staged tree has %s (%d bytes), staged.pb records %s (%d bytes)", artifact.Filename, actualPrefix, size, expectedPrefix, artifact.Size))
 		}
 	}
 	return mismatches
@@ -311,10 +316,13 @@ func nilIfEmpty(meta map[string]any) map[string]any {
 	return meta
 }
 
-func findDuplicateIDs(artifacts []model.StagedArtifact) []string {
+func findDuplicateIDs(artifacts []*model.StagedArtifact) []string {
 	counts := make(map[string]int, len(artifacts))
 	for _, artifact := range artifacts {
-		counts[artifact.ID]++
+		if artifact == nil {
+			continue
+		}
+		counts[artifact.Id]++
 	}
 	var duplicates []string
 	for id, count := range counts {

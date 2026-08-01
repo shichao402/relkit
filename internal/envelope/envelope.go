@@ -2,12 +2,11 @@ package envelope
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/shichao402/relkit/internal/jsonio"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/model"
 )
 
@@ -42,25 +41,25 @@ func Seal(index *model.IndexDocument, signers []Signer) (*model.Envelope, error)
 		return nil, Error{Message: "at least one signer is required"}
 	}
 
-	payload, err := jsonio.MarshalCompact(index)
+	payload, err := rupv2.MarshalIndex(index)
 	if err != nil {
 		return nil, err
 	}
 
-	signatures := make([]model.Signature, 0, len(signers))
+	signatures := make([]*model.Signature, 0, len(signers))
 	for _, signer := range signers {
 		privateKey := ed25519.NewKeyFromSeed(signer.Seed)
 		signature := ed25519.Sign(privateKey, payload)
-		signatures = append(signatures, model.Signature{
-			KeyID: signer.KeyID,
+		signatures = append(signatures, &model.Signature{
+			KeyId: signer.KeyID,
 			Alg:   "ed25519",
-			Sig:   base64.StdEncoding.EncodeToString(signature),
+			Sig:   signature,
 		})
 	}
 
 	return &model.Envelope{
 		Schema:     EnvelopeSchema,
-		Payload:    base64.StdEncoding.EncodeToString(payload),
+		Payload:    payload,
 		Signatures: signatures,
 	}, nil
 }
@@ -70,25 +69,21 @@ func VerifiedPayload(env *model.Envelope, trustedKeys map[string]ed25519.PublicK
 		return nil
 	}
 
-	payload, err := base64.StdEncoding.DecodeString(env.Payload)
-	if err != nil {
-		return nil
-	}
+	payload := env.Payload
 
 	for _, entry := range env.Signatures {
+		if entry == nil {
+			continue
+		}
 		if entry.Alg != "ed25519" {
 			continue
 		}
-		publicKey, ok := trustedKeys[entry.KeyID]
+		publicKey, ok := trustedKeys[entry.KeyId]
 		if !ok {
 			continue
 		}
-		signature, err := base64.StdEncoding.DecodeString(entry.Sig)
-		if err != nil {
-			continue
-		}
-		if ed25519.Verify(publicKey, payload, signature) {
-			return payload
+		if ed25519.Verify(publicKey, payload, entry.Sig) {
+			return append([]byte(nil), payload...)
 		}
 	}
 	return nil
@@ -100,8 +95,8 @@ func AcceptEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.PublicKe
 		return false
 	}
 
-	var index model.IndexDocument
-	if err := jsonio.LoadBytes(payload, &index); err != nil {
+	index, err := rupv2.UnmarshalIndex(payload)
+	if err != nil {
 		return false
 	}
 	if index.Schema != IndexSchema {
@@ -122,7 +117,7 @@ func AcceptSequence(lastSeenSequence *int, indexSequence int) bool {
 
 func OpenEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.PublicKey) (*model.IndexDocument, error) {
 	if env == nil {
-		return nil, Error{Message: "envelope is not a JSON object"}
+		return nil, Error{Message: "envelope is not a protobuf message"}
 	}
 	if env.Schema != EnvelopeSchema {
 		return nil, Error{Message: fmt.Sprintf("unexpected envelope schema: %q", env.Schema)}
@@ -135,19 +130,22 @@ func OpenEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.PublicKey)
 	if payload == nil {
 		keyIDs := make([]string, 0, len(env.Signatures))
 		for _, entry := range env.Signatures {
-			keyIDs = append(keyIDs, entry.KeyID)
+			if entry == nil {
+				continue
+			}
+			keyIDs = append(keyIDs, entry.KeyId)
 		}
 		return nil, Error{Message: fmt.Sprintf("no trusted key verified this envelope (signed by: %s; trusted: %s)", joinOrNone(keyIDs), joinSortedOrNone(trustedKeys))}
 	}
 
-	var index model.IndexDocument
-	if err := jsonio.LoadBytes(payload, &index); err != nil {
+	index, err := rupv2.UnmarshalIndex(payload)
+	if err != nil {
 		return nil, err
 	}
 	if index.Schema != IndexSchema {
 		return nil, Error{Message: fmt.Sprintf("unexpected index schema: %q", index.Schema)}
 	}
-	return &index, nil
+	return index, nil
 }
 
 func joinOrNone(values []string) string {

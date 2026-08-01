@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	relkitembed "github.com/shichao402/relkit/embed"
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/config"
@@ -21,6 +22,8 @@ import (
 	"github.com/shichao402/relkit/internal/simulate"
 	"github.com/shichao402/relkit/internal/stage"
 	"github.com/shichao402/relkit/internal/verify"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // Overridden at release build time via -ldflags "-X main.version=...".
@@ -177,8 +180,8 @@ func cmdKeygen(args []string, configPath string) error {
 		return err
 	}
 
-	publicPath := filepath.Join(resolvedOut, keyID+".public.json")
-	privatePath := filepath.Join(resolvedOut, keyID+".private.json")
+	publicPath := filepath.Join(resolvedOut, keyID+".public.pb")
+	privatePath := filepath.Join(resolvedOut, keyID+".private.pb")
 	for _, path := range []string{publicPath, privatePath} {
 		if _, err := os.Stat(path); err == nil && !force {
 			return fmt.Errorf("%s already exists; pass --force to overwrite (this invalidates every client that embedded the old key)", path)
@@ -192,11 +195,11 @@ func cmdKeygen(args []string, configPath string) error {
 	publicDoc := keys.PublicKeyDocument(keyID, seed)
 	privateDoc := keys.PrivateKeyDocument(keyID, seed)
 
-	publicBytes, err := jsonio.MarshalPretty(publicDoc)
+	publicBytes, err := rupv2.MarshalPublicKey(&publicDoc)
 	if err != nil {
 		return err
 	}
-	privateBytes, err := jsonio.MarshalPretty(privateDoc)
+	privateBytes, err := rupv2.MarshalPrivateKey(&privateDoc)
 	if err != nil {
 		return err
 	}
@@ -211,7 +214,7 @@ func cmdKeygen(args []string, configPath string) error {
 	fmt.Println("public  " + publicPath)
 	fmt.Println("private " + privatePath)
 	fmt.Println()
-	fmt.Println("publicKeyBase64: " + publicDoc.PublicKeyBase64)
+	fmt.Println("publicKeyBase64: " + base64.StdEncoding.EncodeToString(publicDoc.PublicKey))
 
 	if updateConfig {
 		target, adopted, err := recordPublicKey(configPath, keyID, publicDoc)
@@ -233,7 +236,7 @@ func cmdKeygen(args []string, configPath string) error {
 		fmt.Println("NOTE: could not determine whether the private key is git-ignored.")
 	} else if !*ignored {
 		fmt.Printf("WARNING: %s is NOT git-ignored.\n", filepath.Base(privatePath))
-		fmt.Println("         Add '*.private.json' to .gitignore before committing anything. A leaked signing key means anyone can forge updates for every client that trusts it.")
+		fmt.Println("         Add '*.private.pb' to .gitignore before committing anything. A leaked signing key means anyone can forge updates for every client that trusts it.")
 	}
 	return nil
 }
@@ -283,35 +286,51 @@ func cmdInspect(args []string, configPath string) error {
 		return err
 	}
 
-	var document map[string]any
+	var (
+		document map[string]any
+		message  proto.Message
+	)
 	if versionArg != "" {
 		staged, err := stage.LoadStaged(cfg.Root, versionArg)
 		if err != nil {
 			return err
 		}
-		document, err = asMap(staged)
-		if err != nil {
-			return err
-		}
+		message = staged
 	} else if fileArg != "" {
-		if err := jsonio.LoadPathLenient(fileArg, &document); err != nil {
-			return err
+		if strings.EqualFold(filepath.Ext(fileArg), ".json") {
+			if err := jsonio.LoadPathLenient(fileArg, &document); err != nil {
+				return err
+			}
+		} else {
+			message, err = loadProtoDocument(fileArg)
+			if err != nil {
+				return err
+			}
 		}
 	} else {
 		return fmt.Errorf("pass either a version or --file")
 	}
 
+	if document != nil {
+		data, err := jsonio.MarshalPretty(document)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(data)
+		return err
+	}
+
 	if !raw {
-		if schema, _ := document["schema"].(string); schema == envelope.EnvelopeSchema {
-			unsealed, err := unsealForInspection(document, cfg)
+		if env, ok := message.(*model.Envelope); ok {
+			unsealed, err := unsealForInspection(env, cfg)
 			if err != nil {
 				return err
 			}
-			document = unsealed
+			message = unsealed
 		}
 	}
 
-	data, err := jsonio.MarshalPretty(document)
+	data, err := marshalProtoJSON(message)
 	if err != nil {
 		return err
 	}
@@ -575,7 +594,7 @@ func recordPublicKey(configPath string, keyID string, publicDoc model.PublicKeyD
 	}
 	entries = append(entries, map[string]any{
 		"keyId":           keyID,
-		"publicKeyBase64": publicDoc.PublicKeyBase64,
+		"publicKeyBase64": base64.StdEncoding.EncodeToString(publicDoc.PublicKey),
 	})
 	signing["publicKeys"] = entries
 
@@ -604,58 +623,73 @@ func recordPublicKey(configPath string, keyID string, publicDoc model.PublicKeyD
 	return target, adopted, nil
 }
 
-func unsealForInspection(document map[string]any, cfg *config.Config) (map[string]any, error) {
-	payload, _ := document["payload"].(string)
+func unsealForInspection(env *model.Envelope, cfg *config.Config) (proto.Message, error) {
 	signedBy := []string{}
-	if signatures, ok := document["signatures"].([]any); ok {
-		for _, entry := range signatures {
-			if obj, ok := entry.(map[string]any); ok {
-				if keyID, _ := obj["keyId"].(string); keyID != "" {
-					signedBy = append(signedBy, keyID)
-				}
-			}
+	for _, entry := range env.Signatures {
+		if entry != nil && entry.KeyId != "" {
+			signedBy = append(signedBy, entry.KeyId)
 		}
 	}
 	slices.Sort(signedBy)
 
 	trusted, err := cfg.TrustedPublicKeys()
 	if err == nil && len(trusted) > 0 {
-		var env model.Envelope
-		raw, err := jsonio.MarshalCompact(document)
-		if err == nil && jsonio.LoadBytes(raw, &env) == nil {
-			index, openErr := envelope.OpenEnvelope(&env, trusted)
-			if openErr == nil {
-				fmt.Fprintln(os.Stderr, "# signature ok, signed by "+strings.Join(signedBy, ", "))
-				return asMap(index)
-			}
-			fmt.Fprintln(os.Stderr, "# WARNING: signature NOT verified: "+openErr.Error())
-			fmt.Fprintln(os.Stderr, "# showing the payload anyway, unverified")
+		index, openErr := envelope.OpenEnvelope(env, trusted)
+		if openErr == nil {
+			fmt.Fprintln(os.Stderr, "# signature ok, signed by "+strings.Join(signedBy, ", "))
+			return index, nil
 		}
+		fmt.Fprintln(os.Stderr, "# WARNING: signature NOT verified: "+openErr.Error())
+		fmt.Fprintln(os.Stderr, "# showing the payload anyway, unverified")
 	} else {
 		fmt.Fprintln(os.Stderr, "# signature not checked: no signing.publicKeys configured")
 	}
 
-	data, err := base64.StdEncoding.DecodeString(payload)
+	index, err := rupv2.UnmarshalIndex(env.Payload)
 	if err != nil {
 		return nil, err
 	}
-	var unverified map[string]any
-	if err := jsonio.LoadBytes(data, &unverified); err != nil {
-		return nil, err
-	}
-	return unverified, nil
+	return index, nil
 }
 
-func asMap(value any) (map[string]any, error) {
-	data, err := jsonio.MarshalCompact(value)
+func loadProtoDocument(path string) (proto.Message, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var out map[string]any
-	if err := jsonio.LoadBytes(data, &out); err != nil {
+	if env, err := rupv2.UnmarshalEnvelope(data); err == nil && env.Schema == model.SchemaEnvelope {
+		return env, nil
+	}
+	if index, err := rupv2.UnmarshalIndex(data); err == nil && index.Schema == model.SchemaIndex {
+		return index, nil
+	}
+	if manifest, err := rupv2.UnmarshalManifest(data); err == nil && manifest.Schema == model.SchemaManifest {
+		return manifest, nil
+	}
+	if staged, err := rupv2.UnmarshalStaged(data); err == nil && staged.Schema == model.SchemaStaged {
+		return staged, nil
+	}
+	if publicKey, err := rupv2.UnmarshalPublicKey(data); err == nil && publicKey.Schema == model.SchemaPublicKey {
+		return publicKey, nil
+	}
+	if privateKey, err := rupv2.UnmarshalPrivateKey(data); err == nil && privateKey.Schema == model.SchemaPrivateKey {
+		return privateKey, nil
+	}
+	return nil, fmt.Errorf("could not recognize protobuf document: %s", path)
+}
+
+func marshalProtoJSON(message proto.Message) ([]byte, error) {
+	if message == nil {
+		return nil, fmt.Errorf("no protobuf message to print")
+	}
+	data, err := protojson.MarshalOptions{
+		Multiline: true,
+		Indent:    "  ",
+	}.Marshal(message)
+	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	return append(data, '\n'), nil
 }
 
 func stripGlobalFlags(args []string) (string, bool, []string, error) {

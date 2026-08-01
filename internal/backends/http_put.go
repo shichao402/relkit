@@ -11,6 +11,7 @@ import (
 )
 
 var contentTypes = map[string]string{
+	".pb":   "application/protobuf",
 	".json": "application/json",
 	".zip":  "application/zip",
 	".gz":   "application/gzip",

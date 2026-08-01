@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/keys"
@@ -261,11 +262,15 @@ func (c *Config) LoadSigners() ([]envelope.Signer, error) {
 		if err != nil || info.IsDir() {
 			return nil, Error{Message: fmt.Sprintf("signing.privateKeyPath not found: %s", resolved)}
 		}
-		var document model.PrivateKeyDocument
-		if err := jsonio.LoadPathLenient(resolved, &document); err != nil {
+		data, err := os.ReadFile(resolved)
+		if err != nil {
 			return nil, err
 		}
-		seed, err := keys.LoadPrivateSeed(document, resolved)
+		document, err := rupv2.UnmarshalPrivateKey(data)
+		if err != nil {
+			return nil, err
+		}
+		seed, err := keys.LoadPrivateSeed(*document, resolved)
 		if err != nil {
 			return nil, err
 		}

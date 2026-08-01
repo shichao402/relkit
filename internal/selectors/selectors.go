@@ -13,9 +13,9 @@ type DuplicateSelectors struct {
 }
 
 func SelectArtifact(manifest *model.ManifestDocument, clientSelectors map[string]string) *model.ManifestArtifact {
-	var matches []model.ManifestArtifact
+	var matches []*model.ManifestArtifact
 	for _, artifact := range manifest.Artifacts {
-		if matchesClient(artifact.Selectors, clientSelectors) {
+		if artifact != nil && matchesClient(model.SelectorsToMap(artifact.Selectors), clientSelectors) {
 			matches = append(matches, artifact)
 		}
 	}
@@ -23,26 +23,29 @@ func SelectArtifact(manifest *model.ManifestDocument, clientSelectors map[string
 		return nil
 	}
 	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].ID < matches[j].ID
+		return matches[i].Id < matches[j].Id
 	})
-	chosen := matches[0]
-	return &chosen
+	return matches[0]
 }
 
-func FindDuplicateSelectors(artifacts []model.StagedArtifact) []DuplicateSelectors {
+func FindDuplicateSelectors(artifacts []*model.StagedArtifact) []DuplicateSelectors {
 	seen := make(map[string]string, len(artifacts))
 	var duplicates []DuplicateSelectors
 	for _, artifact := range artifacts {
-		key := selectorKey(artifact.Selectors)
+		if artifact == nil {
+			continue
+		}
+		selectors := model.SelectorsToMap(artifact.Selectors)
+		key := selectorKey(selectors)
 		if firstID, ok := seen[key]; ok {
 			duplicates = append(duplicates, DuplicateSelectors{
 				FirstID:   firstID,
-				SecondID:  artifact.ID,
-				Selectors: cloneSelectors(artifact.Selectors),
+				SecondID:  artifact.Id,
+				Selectors: cloneSelectors(selectors),
 			})
 			continue
 		}
-		seen[key] = artifact.ID
+		seen[key] = artifact.Id
 	}
 	return duplicates
 }

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -12,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 )
 
 const (
@@ -274,28 +274,15 @@ func readIndexManifestURLs(root *os.Root, name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var env struct {
-		Schema  string `json:"schema"`
-		Payload string `json:"payload"`
+	env, err := rupv2.UnmarshalEnvelope(raw)
+	if err != nil {
+		return nil, fmt.Errorf("envelope protobuf: %w", err)
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("envelope json: %w", err)
-	}
-	if env.Schema != "rup.envelope/1" {
+	if env.Schema != rupv2.SchemaEnvelope {
 		return nil, fmt.Errorf("unexpected envelope schema %q", env.Schema)
 	}
-	payload, err := base64.StdEncoding.DecodeString(env.Payload)
+	index, err := rupv2.UnmarshalIndex(env.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("payload base64: %w", err)
-	}
-	var index struct {
-		Versions []struct {
-			Manifest struct {
-				URLs []string `json:"urls"`
-			} `json:"manifest"`
-		} `json:"versions"`
-	}
-	if err := json.Unmarshal(payload, &index); err != nil {
 		return nil, fmt.Errorf("index payload: %w", err)
 	}
 	if len(index.Versions) == 0 {
@@ -303,7 +290,10 @@ func readIndexManifestURLs(root *os.Root, name string) ([]string, error) {
 	}
 	var urls []string
 	for _, v := range index.Versions {
-		urls = append(urls, v.Manifest.URLs...)
+		if v == nil || v.Manifest == nil {
+			continue
+		}
+		urls = append(urls, v.Manifest.Urls...)
 	}
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("index versions have no manifest urls")
@@ -316,20 +306,19 @@ func readManifestArtifactURLs(root *os.Root, name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var doc struct {
-		Artifacts []struct {
-			URLs []string `json:"urls"`
-		} `json:"artifacts"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("manifest json: %w", err)
+	doc, err := rupv2.UnmarshalManifest(raw)
+	if err != nil {
+		return nil, fmt.Errorf("manifest protobuf: %w", err)
 	}
 	if len(doc.Artifacts) == 0 {
 		return nil, fmt.Errorf("manifest has no artifacts")
 	}
 	var urls []string
 	for _, a := range doc.Artifacts {
-		urls = append(urls, a.URLs...)
+		if a == nil {
+			continue
+		}
+		urls = append(urls, a.Urls...)
 	}
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("manifest artifacts have no urls")
