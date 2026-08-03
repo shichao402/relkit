@@ -14,6 +14,17 @@ CLI 与 serve 合并决策见 [`docs/adr/0002-one-repo-cli-and-serve.md`](docs/a
 Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003-protobuf-v2-wire-format.md)（权威副本在 AgentsHelpMe/update-spec）。  
 项目版本 SSOT 见 [`docs/adr/0004-project-version-ssot.md`](docs/adr/0004-project-version-ssot.md)：`VERSION.json` + `relkit version …`。
 
+## Agent 开箱（接入项目时先读）
+
+要从零给**另一个产品仓**接入发布工具 + 客户端 SDK，不要从 ADR 或运维手册开始，先读：
+
+**[`docs/agent/README.md`](docs/agent/README.md)**
+
+内含工具链清单、SDK 级联索引，以及只读探测脚本 `docs/agent/bootstrap.ps1` / `bootstrap.sh`。  
+各语言 SDK 自己的开箱文在包内：`sdk/AGENT-QUICKSTART.md`（Go）、宿主观 `rup_client/AGENT-QUICKSTART.md`（Dart）。
+
+日常**已接入后的发版**仍用：`relkit agent-guide` / `relkit-serve agent-guide`。
+
 ## 安装
 
 从 [Releases](https://github.com/shichao402/relkit/releases) 下载对应平台二进制，或：
@@ -102,7 +113,7 @@ u := &sdk.Updater{
 result := u.Check(ctx)
 ```
 
-Dart SDK：`rup_client`（见 AgentsHelpMe `update-spec/clients/dart`，pub.dev / git 依赖）。
+Dart SDK：`rup_client`（各宿主仓的 `AGENT-QUICKSTART.md`；级联见 [`docs/agent/sdk-cascade.md`](docs/agent/sdk-cascade.md)）。
 
 ## 开发与测试
 

@@ -1,6 +1,13 @@
 # RUP 发布操作手册（面向 Agent）
 
-本文是**操作性知识的唯一来源（SSOT）**。`skills/rup-release/SKILL.md` 只做能力声明并指回本文，不复制内容 —— 任何操作细节的修改都只改这里。
+本文是**已接入 relkit 之后**发版、红线与排障的操作性 SSOT。  
+若项目**还没开箱**（没有 `relkit.json` / 客户端未接 SDK），先读仓库内：
+
+**[`docs/agent/README.md`](../docs/agent/README.md)**
+
+不要从本文第 3 节直接开干。
+
+`skills/rup-release/SKILL.md` 只做能力声明并指回本文，不复制内容 —— 任何操作细节的修改都只改这里。
 
 三份文档的分工：
 
