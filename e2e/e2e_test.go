@@ -42,21 +42,21 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	writeArtifact(t, dist, "demoapp-1.0.0-win-x64.zip", "win 1.0.0 ", 64)
 	writeArtifact(t, dist, "demoapp-1.0.0-mac-arm64.zip", "mac 1.0.0 ", 64)
 	stageOut := runRelkit(t, exe, project, nil, 0,
-		"stage", "1.0.0", "--code", "100",
+		"stage", "1.0.0+100",
 		"--add", filepath.Join(dist, "demoapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
 		"--add", filepath.Join(dist, "demoapp-1.0.0-mac-arm64.zip"), "os=macos,arch=arm64",
 	)
 	assertContains(t, stageOut, "windows-x64")
 	assertContains(t, stageOut, "kind inferred as archive")
 
-	dryRun := runRelkit(t, exe, project, nil, 0, "publish", "1.0.0", "--dry-run")
+	dryRun := runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100", "--dry-run")
 	assertContains(t, dryRun, "nothing uploaded")
 	assertContains(t, dryRun, "pointer, written last")
 	if _, err := os.Stat(filepath.Join(project, "dist", "publish")); !os.IsNotExist(err) {
 		t.Fatalf("dry run unexpectedly created dist/publish")
 	}
 
-	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0")
+	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100")
 	index := loadPublishedIndex(t, project, "demoapp", "stable")
 	if index.Sequence != 1 {
 		t.Fatalf("sequence mismatch: got %d want 1", index.Sequence)
@@ -70,33 +70,33 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 
 	writeArtifact(t, dist, "demoapp-1.1.0-win-x64.zip", "win 1.1.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "1.1.0", "--code", "110",
+		"stage", "1.1.0+110",
 		"--add", filepath.Join(dist, "demoapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	runRelkit(t, exe, project, nil, 0, "publish", "1.1.0")
+	runRelkit(t, exe, project, nil, 0, "publish", "1.1.0+110")
 
 	writeArtifact(t, dist, "demoapp-1.5.0-win-x64.zip", "win 1.5.0 ", 64)
 	writeArtifact(t, dist, "demoapp-1.5.0-mac-arm64.zip", "mac 1.5.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "1.5.0", "--code", "150", "--min-from", "110", "--notes", "config format changed",
+		"stage", "1.5.0+150", "--min-from", "110", "--notes", "config format changed",
 		"--add", filepath.Join(dist, "demoapp-1.5.0-win-x64.zip"), "os=windows,arch=x64",
 		"--add", filepath.Join(dist, "demoapp-1.5.0-mac-arm64.zip"), "os=macos,arch=arm64",
 	)
-	simulated := runRelkit(t, exe, project, nil, 0, "simulate", "--with-staged", "1.5.0", "--from", "all")
+	simulated := runRelkit(t, exe, project, nil, 0, "simulate", "--with-staged", "1.5.0+150", "--from", "all")
 	assertContains(t, simulated, "1.5.0")
 	if strings.Contains(simulated, "STRANDED") {
 		t.Fatalf("simulate unexpectedly reported stranded codes:\n%s", simulated)
 	}
-	runRelkit(t, exe, project, nil, 0, "publish", "1.5.0")
+	runRelkit(t, exe, project, nil, 0, "publish", "1.5.0+150")
 
 	index = loadPublishedIndex(t, project, "demoapp", "stable")
 	if index.Sequence != 3 {
 		t.Fatalf("sequence mismatch: got %d want 3", index.Sequence)
 	}
 	pathFromZero := versionsOf(chain.ResolveUpgradePath(index, 0))
-	assertStringSlices(t, pathFromZero, []string{"1.1.0", "1.5.0"})
+	assertStringSlices(t, pathFromZero, []string{"1.1.0+110", "1.5.0+150"})
 	pathFrom110 := versionsOf(chain.ResolveUpgradePath(index, 110))
-	assertStringSlices(t, pathFrom110, []string{"1.5.0"})
+	assertStringSlices(t, pathFrom110, []string{"1.5.0+150"})
 	if unreachable := chain.UnreachableStartCodes(index); len(unreachable) != 0 {
 		t.Fatalf("unexpected unreachable codes: %v", unreachable)
 	}
@@ -106,30 +106,30 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 
 	writeArtifact(t, dist, "demoapp-2.0.0-win-x64.zip", "win 2.0.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "2.0.0", "--code", "200", "--min-from", "190",
+		"stage", "2.0.0+200", "--min-from", "190",
 		"--add", filepath.Join(dist, "demoapp-2.0.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	stranding := runRelkit(t, exe, project, nil, 2, "publish", "2.0.0", "--dry-run")
+	stranding := runRelkit(t, exe, project, nil, 2, "publish", "2.0.0+200", "--dry-run")
 	assertContains(t, stranding, "unreachable")
 	assertContains(t, stranding, "0, 100, 110, 150")
 	index = loadPublishedIndex(t, project, "demoapp", "stable")
 	if index.Sequence != 3 {
 		t.Fatalf("pointer changed after rejected publish: sequence=%d", index.Sequence)
 	}
-	if _, err := os.Stat(filepath.Join(project, "dist", "publish", "artifact", "demoapp", "2.0.0")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(project, "dist", "publish", "artifact", "demoapp", "2.0.0+200")); !os.IsNotExist(err) {
 		t.Fatalf("rejected publish unexpectedly uploaded artifact")
 	}
 
 	writeArtifact(t, dist, "demoapp-0.9.0-win-x64.zip", "win 0.9.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "0.9.0", "--code", "90",
+		"stage", "0.9.0+90",
 		"--add", filepath.Join(dist, "demoapp-0.9.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	rollback := runRelkit(t, exe, project, nil, 2, "publish", "0.9.0", "--dry-run")
+	rollback := runRelkit(t, exe, project, nil, 2, "publish", "0.9.0+90", "--dry-run")
 	assertContains(t, rollback, "not greater than the highest existing code")
 	assertContains(t, rollback, "--allow-backfill")
 
-	stagedArtifact := filepath.Join(project, ".relkit", "staged", "1.5.0", "artifacts", "demoapp-1.5.0-win-x64.zip")
+	stagedArtifact := filepath.Join(project, ".relkit", "staged", "1.5.0+150", "artifacts", "demoapp-1.5.0-win-x64.zip")
 	file, err := os.OpenFile(stagedArtifact, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	}
 	file.Close()
 
-	tampered := runRelkit(t, exe, project, nil, 2, "publish", "1.5.0", "--dry-run")
+	tampered := runRelkit(t, exe, project, nil, 2, "publish", "1.5.0+150", "--dry-run")
 	assertContains(t, tampered, "staging tree no longer matches staged.pb")
 	verifyAfterTamper := runRelkit(t, exe, project, nil, 0, "verify")
 	assertContains(t, verifyAfterTamper, "verify passed")
@@ -173,10 +173,10 @@ func TestStaticHTTPBackend(t *testing.T) {
 
 	writeArtifact(t, dist, "siteapp-1.0.0-win-x64.zip", "site 1.0.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "1.0.0", "--code", "100",
+		"stage", "1.0.0+100",
 		"--add", filepath.Join(dist, "siteapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0", "--to", "site")
+	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100", "--to", "site")
 	out := runRelkit(t, exe, project, nil, 0, "verify", "--to", "site", "--deep")
 	assertContains(t, out, "verify passed")
 	assertContains(t, out, "HEAD")
@@ -214,28 +214,28 @@ func TestHTTPPutBackend(t *testing.T) {
 	env := map[string]string{"RELKIT_UPLOAD_TOKEN": token}
 	writeArtifact(t, dist, "servedapp-1.0.0-win-x64.zip", "served 1.0.0 ", 30000)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "1.0.0", "--code", "100",
+		"stage", "1.0.0+100",
 		"--add", filepath.Join(dist, "servedapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	runRelkit(t, exe, project, env, 0, "publish", "1.0.0")
+	runRelkit(t, exe, project, env, 0, "publish", "1.0.0+100")
 	out := runRelkit(t, exe, project, env, 0, "verify", "--deep")
 	assertContains(t, out, "verify passed")
 
 	writeArtifact(t, dist, "servedapp-1.1.0-win-x64.zip", "served 1.1.0 ", 30000)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "1.1.0", "--code", "110",
+		"stage", "1.1.0+110",
 		"--add", filepath.Join(dist, "servedapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	runRelkit(t, exe, project, env, 0, "publish", "1.1.0")
+	runRelkit(t, exe, project, env, 0, "publish", "1.1.0+110")
 	out = runRelkit(t, exe, project, env, 0, "verify", "--deep")
 	assertContains(t, out, "verify passed")
 
 	writeArtifact(t, dist, "servedapp-1.2.0-win-x64.zip", "served 1.2.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
-		"stage", "1.2.0", "--code", "120",
+		"stage", "1.2.0+120",
 		"--add", filepath.Join(dist, "servedapp-1.2.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	missingToken := runRelkit(t, exe, project, nil, 2, "publish", "1.2.0")
+	missingToken := runRelkit(t, exe, project, nil, 2, "publish", "1.2.0+120")
 	assertContains(t, missingToken, "RELKIT_UPLOAD_TOKEN")
 }
 

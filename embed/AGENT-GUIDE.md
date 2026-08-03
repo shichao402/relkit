@@ -36,7 +36,7 @@ go install github.com/shichao402/relkit/cmd/relkit@latest
 
 | 能力 | 状态 |
 |---|---|
-| `init` `keygen` `stage` `inspect` `simulate` `publish` `verify` `agent-guide` `backends` | 可用 |
+| `init` `keygen` `version` `stage` `inspect` `simulate` `publish` `verify` `agent-guide` `backends` | 可用 |
 | `local` 后端（输出完整 key 目录树，可离线跑通全流程） | 可用 |
 | `static-http` 后端（任何按路径提供 HTTP 下载的托管，校验走真实 HTTP） | 可用 |
 | `http-put` 后端（带鉴权 PUT 上传，配 relkit-serve 或任何 PUT / WebDAV 端点） | 可用 |
@@ -65,9 +65,9 @@ go test ./internal/chain ./internal/selectors ./internal/envelope
 
 ## 1. 适用判定
 
-**适用：** 项目根目录存在 `relkit.json`，或用户明确要求用 RUP / relkit 发布、撤回版本、设置强制更新下限、排查客户端收不到更新、为项目接入自动更新。
+**适用：** 项目根目录存在 `relkit.json`（以及配套的 `VERSION.json`），或用户明确要求用 RUP / relkit 发布、撤回版本、设置强制更新下限、排查客户端收不到更新、为项目接入自动更新。
 
-**不适用：** 项目用的是别的发布机制（例如仅靠 `version.json` 变更触发 CI 打 tag）。此时改用该项目自己的发布流程，**禁止**把 RUP 的概念硬套上去。判断方法：看有没有 `relkit.json`，没有就问，不要猜。
+**不适用：** 项目用的是别的发布机制，且**没有** `relkit.json`。判断方法：看有没有 `relkit.json`，没有就问，不要猜。一旦采用 relkit，版本号必须以 `VERSION.json`（`rup.version/1`）为 SSOT，用 `relkit version …` 读写，禁止再维护第二套版本解析器。
 
 ---
 
@@ -119,7 +119,17 @@ CI 构建号（`GITHUB_RUN_NUMBER` 等）在更换 CI 平台、重建仓库、�
 - [ ] 7. verify
 ```
 
-**1. 确认版本号、code、通道。** `code` 按 `relkit.json` 的 `codeStrategy` 取值：`explicit`（缺省）必须显式传 `--code`；`semver` 与 `env:*` 由工具自行取值，此时**不要**再传 `--code`。通道缺省用 `defaultChannel`，用户说"发预览版 / beta"时才切到 `beta`。
+**1. 确认版本号、code、通道。** 版本字符串的权威来源是根目录 `VERSION.json`（`relkit version get`）。`code` 按 `relkit.json` 的 `codeStrategy` 取值：新项目默认 `version-build`（code = `+build` 段）；`explicit` 必须显式传 `--code`；`semver` 与 `env:*` 由工具自行取值，此时**不要**再传 `--code`。通道缺省用 `defaultChannel`，用户说"发预览版 / beta"时才切到 `beta`。
+
+改号只用官方入口：
+
+```bash
+relkit version set 1.5.0+120
+relkit version bump build
+relkit version code          # 打印将用于发布的 code
+```
+
+`relkit stage` / `publish` 可省略版本参数，此时直接读 `VERSION.json`。
 
 **2. 确认 `minFrom`。** 见 §6.2 决策表。**默认填 0**，只有在存在不可跳过的迁移时才抬高。不确定时问用户，不要自己假设。
 
@@ -204,8 +214,9 @@ relkit yank 1.5.0 --reason "启动崩溃"
 
 | `codeStrategy` | 取值 | 注意 |
 |---|---|---|
-| `explicit` | 必须显式传 `--code` | 缺省策略 |
-| `semver` | 由版本号推导 | 与版本号一一对应，好对账 |
+| `version-build` | `x.y.z+build` 的 build 段 | **新项目缺省**；与 `VERSION.json` 对齐 |
+| `explicit` | 必须显式传 `--code` | 遗留；能迁就迁 |
+| `semver` | 由 major/minor/patch 编码 | 与版本号一一对应，好对账 |
 | `env:VAR` / `env:VAR+N` | CI 构建号 | 天然单调，但有重置风险，见 §2.2 |
 
 ### 6.2 `minFrom` 填什么

@@ -22,6 +22,7 @@ import (
 	"github.com/shichao402/relkit/internal/simulate"
 	"github.com/shichao402/relkit/internal/stage"
 	"github.com/shichao402/relkit/internal/verify"
+	projver "github.com/shichao402/relkit/version"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -69,6 +70,8 @@ func run(argv []string) (code int) {
 		err = cmdInit(rest)
 	case "keygen":
 		err = cmdKeygen(rest, configPath)
+	case "version":
+		err = cmdVersion(rest, configPath)
 	case "stage":
 		err = cmdStage(rest, configPath)
 	case "inspect":
@@ -138,7 +141,24 @@ func cmdInit(args []string) error {
 		return err
 	}
 	fmt.Println("wrote " + target)
+
+	versionPath := filepath.Join(filepath.Dir(target), projver.FileName)
+	if _, err := os.Stat(versionPath); err == nil && !force {
+		fmt.Println("kept existing " + versionPath)
+	} else {
+		doc, err := projver.Skeleton("0.1.0+1")
+		if err != nil {
+			return err
+		}
+		doc.Path = versionPath
+		if err := doc.Write(); err != nil {
+			return err
+		}
+		fmt.Println("wrote " + versionPath)
+	}
+
 	fmt.Println("next: 'relkit keygen --key-id k1 --out keys/', then paste the public key into signing.publicKeys")
+	fmt.Println("version SSOT: edit with 'relkit version set|bump'; stage/publish read it when version args are omitted")
 	return nil
 }
 
@@ -244,6 +264,9 @@ func cmdKeygen(args []string, configPath string) error {
 func cmdStage(args []string, configPath string) error {
 	opts, err := parseStageArgs(args)
 	if err != nil {
+		return err
+	}
+	if err := resolveStageVersion(opts, configPath); err != nil {
 		return err
 	}
 	cfg, err := config.Load(configPath)
@@ -412,9 +435,6 @@ func cmdVerify(args []string, configPath string) error {
 }
 
 func cmdPublish(args []string, configPath string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("publish requires a version")
-	}
 	versionArg := ""
 	var to []string
 	dryRun := false
@@ -440,14 +460,15 @@ func cmdPublish(args []string, configPath string) error {
 			return fmt.Errorf("unexpected argument %q", arg)
 		}
 	}
-	if versionArg == "" {
-		return fmt.Errorf("publish requires a version")
+	resolvedVersion, err := resolvePublishVersion(versionArg, configPath)
+	if err != nil {
+		return err
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
 	}
-	_, err = publish.Run(cfg, versionArg, to, dryRun, allowBackfill, allowPartial, func(line string) {
+	_, err = publish.Run(cfg, resolvedVersion, to, dryRun, allowBackfill, allowPartial, func(line string) {
 		fmt.Println(line)
 	})
 	return err
@@ -549,9 +570,7 @@ func parseStageArgs(args []string) (*stageArgs, error) {
 			return nil, fmt.Errorf("unexpected argument %q", arg)
 		}
 	}
-	if opts.version == "" {
-		return nil, fmt.Errorf("stage requires a version")
-	}
+	// Version may be omitted: cmdStage fills it from VERSION.json.
 	return opts, nil
 }
 
@@ -747,6 +766,7 @@ relkit ` + version + `
 Commands:
   init
   keygen
+  version
   stage
   inspect
   simulate

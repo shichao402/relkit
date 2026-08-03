@@ -329,7 +329,7 @@ func Skeleton(product string) map[string]any {
 		"product":        product,
 		"defaultChannel": "stable",
 		"channels":       []string{"stable", "beta"},
-		"codeStrategy":   "explicit",
+		"codeStrategy":   "version-build",
 		"signing": map[string]any{
 			"keyId":          "k1",
 			"privateKeyEnv":  "RELKIT_PRIVATE_KEY",
