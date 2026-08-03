@@ -65,7 +65,7 @@
 | 之后日常 | `relkit agent-guide` | 发版 / simulate / 红线 |
 
 Go SDK 开箱：[`../../sdk/AGENT-QUICKSTART.md`](../../sdk/AGENT-QUICKSTART.md)  
-Dart SDK 开箱：宿主 vendored 或依赖树中的 `rup_client/AGENT-QUICKSTART.md`（权威清单见 cascade）
+Dart SDK 开箱：[`../../sdk/dart/AGENT-QUICKSTART.md`](../../sdk/dart/AGENT-QUICKSTART.md)
 
 ## 3. 开箱完成标准（全部勾上才算 Done）
 

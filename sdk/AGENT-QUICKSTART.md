@@ -3,7 +3,8 @@
 面向要在 **Go 进程**里接入 RUP 检查/下载的 Agent。  
 协议细节见上游 SPEC；发版见 `relkit agent-guide`。本文只保证「依赖装上 → check/download 跑通」。
 
-上级入口：[`../docs/agent/README.md`](../docs/agent/README.md) · 级联表：[`../docs/agent/sdk-cascade.md`](../docs/agent/sdk-cascade.md)
+上级入口：[`../docs/agent/README.md`](../docs/agent/README.md) · 级联表：[`../docs/agent/sdk-cascade.md`](../docs/agent/sdk-cascade.md)  
+Dart 同级 SDK：[`dart/AGENT-QUICKSTART.md`](dart/AGENT-QUICKSTART.md)
 
 ## G0. 何时用这份文档
 

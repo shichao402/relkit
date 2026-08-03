@@ -1,0 +1,32 @@
+{
+  "name": "single-version",
+  "description": "边界情况：index 中只有一个版本节点。首次发布时必然出现，实现不得在此崩溃或返回自身。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 1,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 0,
+      "expectTarget": "1.0.0",
+      "expectPath": ["1.0.0"]
+    },
+    {
+      "currentCode": 100,
+      "expectTarget": null,
+      "expectPath": [],
+      "why": "code 相等不构成更新，比较是严格大于"
+    },
+    {
+      "currentCode": 101,
+      "expectTarget": null,
+      "expectPath": []
+    }
+  ]
+}

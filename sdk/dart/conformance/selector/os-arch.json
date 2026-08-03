@@ -1,0 +1,35 @@
+{
+  "name": "os-arch",
+  "description": "最常见的两维选择：os + arch。同时验证客户端多余的选择器键必须被忽略，以及客户端缺少 artifact 所要求的键时必须不匹配。",
+  "manifest": {
+    "schema": "rup.manifest/1",
+    "product": "conformance",
+    "version": "1.5.0",
+    "code": 150,
+    "artifacts": [
+      { "id": "app-windows-x64", "filename": "app-1.5.0-win-x64.zip", "size": 1024, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "kind": "archive", "selectors": { "os": "windows", "arch": "x64" }, "urls": ["https://x.invalid/win-x64.zip"] },
+      { "id": "app-macos-arm64", "filename": "app-1.5.0-mac-arm64.zip", "size": 1024, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "kind": "archive", "selectors": { "os": "macos", "arch": "arm64" }, "urls": ["https://x.invalid/mac-arm64.zip"] },
+      { "id": "app-macos-x64", "filename": "app-1.5.0-mac-x64.zip", "size": 1024, "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "kind": "archive", "selectors": { "os": "macos", "arch": "x64" }, "urls": ["https://x.invalid/mac-x64.zip"] }
+    ]
+  },
+  "cases": [
+    { "clientSelectors": { "os": "windows", "arch": "x64" }, "expectArtifactId": "app-windows-x64" },
+    { "clientSelectors": { "os": "macos", "arch": "arm64" }, "expectArtifactId": "app-macos-arm64" },
+    { "clientSelectors": { "os": "macos", "arch": "x64" }, "expectArtifactId": "app-macos-x64" },
+    {
+      "clientSelectors": { "os": "windows", "arch": "x64", "abi": "msvc", "hostname": "whatever" },
+      "expectArtifactId": "app-windows-x64",
+      "why": "客户端多出的键一律忽略。这保证发布方将来新增选择器维度时旧客户端不会突然匹配不到产物"
+    },
+    {
+      "clientSelectors": { "os": "windows" },
+      "expectArtifactId": null,
+      "why": "artifact 要求 arch=x64，而客户端未提供 arch 键，视为不相等"
+    },
+    {
+      "clientSelectors": { "os": "linux", "arch": "x64" },
+      "expectArtifactId": null,
+      "why": "该平台没有发布产物。客户端必须当作『无可用更新』处理，禁止退而下载其他平台的产物"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "required-intermediate",
+  "description": "核心场景：1.2.0 引入了不可跳过的变更（例如配置格式迁移），因此 1.5.0 声明 minFrom=120，强制更旧的客户端先升到 1.2.0。发布方只需填一个整数，多跳升级由客户端算法自动完成。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 7,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.2.0", "code": 120, "minFrom": 100, "notes": "配置文件格式变更，更早的版本必须经由本版本升级", "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.2.0.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 120, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 100,
+      "expectTarget": "1.2.0",
+      "expectPath": ["1.2.0", "1.5.0"],
+      "why": "1.5.0 要求 minFrom=120 而当前是 100，不满足；退而选中 1.2.0。装完 1.2.0 后再次检查即可到 1.5.0，因此完整路径是两跳"
+    },
+    {
+      "currentCode": 110,
+      "expectTarget": "1.2.0",
+      "expectPath": ["1.2.0", "1.5.0"],
+      "why": "minFrom 比较的是 code 而非节点是否恰好存在，110 这种介于两个已发布版本之间的 code 同样适用"
+    },
+    {
+      "currentCode": 120,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0"],
+      "why": "已满足 minFrom=120，一跳直达"
+    },
+    {
+      "currentCode": 0,
+      "expectTarget": "1.0.0",
+      "expectPath": ["1.0.0", "1.2.0", "1.5.0"],
+      "why": "极旧客户端需要走完整条链，三跳。这正是链条相对 latest 单点的价值"
+    },
+    {
+      "currentCode": 150,
+      "expectTarget": null,
+      "expectPath": []
+    }
+  ]
+}

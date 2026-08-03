@@ -1,0 +1,19 @@
+{
+  "name": "duplicate-code",
+  "description": "两个节点使用了相同的 code。由于 code 是唯一合法的比较依据，重复会让选路结果依赖数组顺序，必须拒绝。常见诱因是手工编辑 index 或 CI 重跑同一个构建号。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 5,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.0.1", "code": 100, "minFrom": 0, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.0.1.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 0, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "expectValid": false,
+  "expectErrors": ["duplicate-code"],
+  "expectWarnings": []
+}

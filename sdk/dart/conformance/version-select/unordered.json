@@ -1,0 +1,42 @@
+{
+  "name": "unordered",
+  "description": "versions 数组故意按 code 降序排列。此用例专门捕捉『取候选集中最后一个元素』这一类实现错误——规范要求按 code 取最大值（SPEC.md §9.2 第 3 步）。规范虽建议发布方按升序输出，但客户端禁止依赖数组顺序。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 9,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "2.0.0", "code": 200, "minFrom": 150, "manifest": { "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size": 1024, "urls": ["https://x.invalid/2.0.0.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 0, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } },
+      { "version": "1.2.0", "code": 120, "minFrom": 0, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.2.0.json"] } },
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 100,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0", "2.0.0"],
+      "why": "候选集按数组顺序是 [1.5.0, 1.2.0]。取最后一个会错误地得到 1.2.0；按 code 取最大才得到 1.5.0"
+    },
+    {
+      "currentCode": 0,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0", "2.0.0"],
+      "why": "候选集按数组顺序是 [1.5.0, 1.2.0, 1.0.0]，取最后一个会得到 1.0.0"
+    },
+    {
+      "currentCode": 150,
+      "expectTarget": "2.0.0",
+      "expectPath": ["2.0.0"],
+      "why": "唯一候选 2.0.0 恰好是数组第一个元素，能捕捉『只看数组尾部』的实现"
+    },
+    {
+      "currentCode": 200,
+      "expectTarget": null,
+      "expectPath": []
+    }
+  ]
+}

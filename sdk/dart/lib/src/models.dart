@@ -1,0 +1,176 @@
+/// Object model for the protobuf RUP documents a client reads (SPEC.md sections
+/// 4-6).
+library;
+
+import 'dart:typed_data';
+
+import 'gen/rup/v2/objects.pb.dart';
+
+export 'gen/rup/v2/envelope.pb.dart' show Envelope, Signature;
+export 'gen/rup/v2/keys.pb.dart' show PrivateKeyDocument, PublicKeyDocument;
+export 'gen/rup/v2/objects.pb.dart'
+    show
+        Artifact,
+        DigestRef,
+        Index,
+        Manifest,
+        MetaEntry,
+        Selector,
+        Staged,
+        StagedArtifact,
+        VersionNode;
+
+/// A document that does not conform to the protocol.
+///
+/// Distinct from a network failure: this one will not be fixed by retrying, and
+/// on a different mirror it will most likely reproduce, because mirrors carry
+/// byte-identical documents (SPEC.md section 5.3).
+class RupFormatException implements Exception {
+  RupFormatException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'RupFormatException: $message';
+}
+
+const envelopeSchemaId = 'rup.envelope/2';
+const indexSchemaId = 'rup.index/2';
+const manifestSchemaId = 'rup.manifest/2';
+const publicKeySchemaId = 'rup.publickey/2';
+const privateKeySchemaId = 'rup.privatekey/2';
+const stagedSchemaId = 'rup.staged/2';
+
+final _hex64 = RegExp(r'^[0-9a-f]{64}$');
+
+Never _bad(String message) => throw RupFormatException(message);
+
+Index parseIndex(Uint8List bytes) {
+  final Index index;
+  try {
+    index = Index.fromBuffer(bytes);
+  } catch (error) {
+    throw RupFormatException('index is not valid protobuf: $error');
+  }
+  _validateIndex(index);
+  return index;
+}
+
+Manifest parseManifest(Uint8List bytes) {
+  final Manifest manifest;
+  try {
+    manifest = Manifest.fromBuffer(bytes);
+  } catch (error) {
+    throw RupFormatException('manifest is not valid protobuf: $error');
+  }
+  _validateManifest(manifest);
+  return manifest;
+}
+
+Map<String, String> selectorsToMap(List<Selector> selectors) =>
+    Map.unmodifiable({
+      for (final selector in selectors) selector.key: selector.value,
+    });
+
+void _validateIndex(Index index) {
+  const where = 'index';
+
+  _requireSchema(index.schema, indexSchemaId, where);
+  _requireNonEmptyString(index.product, '$where.product');
+  _requireNonEmptyString(index.channel, '$where.channel');
+  _requireNonEmptyString(index.generatedAt, '$where.generatedAt');
+  _requireAtLeast(index.sequence.toInt(), 1, '$where.sequence');
+
+  if (!index.hasMinSupported_7 && index.minSupported.toInt() != 0) {
+    _bad('$where.minSupported is set but $where.hasMinSupported is false');
+  }
+  if (index.hasMinSupported_7) {
+    _requireAtLeast(index.minSupported.toInt(), 0, '$where.minSupported');
+  }
+
+  if (index.versions.isEmpty) {
+    _bad('$where.versions must be a non-empty array');
+  }
+  for (var i = 0; i < index.versions.length; i++) {
+    _validateVersionNode(index.versions[i], '$where.versions[$i]');
+  }
+}
+
+void _validateVersionNode(VersionNode node, String where) {
+  _requireNonEmptyString(node.version, '$where.version');
+  _requireAtLeast(node.code.toInt(), 0, '$where.code');
+  _requireAtLeast(node.minFrom.toInt(), 0, '$where.minFrom');
+
+  if (!node.hasManifest()) {
+    _bad('$where.manifest must be present');
+  }
+  _validateDigestRef(node.manifest, '$where.manifest');
+}
+
+void _validateDigestRef(DigestRef digest, String where) {
+  _requireSha256(digest.sha256, '$where.sha256');
+  _requireAtLeast(digest.size.toInt(), 0, '$where.size');
+  _requireUrls(digest.urls, '$where.urls');
+}
+
+void _validateManifest(Manifest manifest) {
+  const where = 'manifest';
+
+  _requireSchema(manifest.schema, manifestSchemaId, where);
+  _requireNonEmptyString(manifest.product, '$where.product');
+  _requireNonEmptyString(manifest.version, '$where.version');
+  _requireAtLeast(manifest.code.toInt(), 0, '$where.code');
+
+  if (manifest.artifacts.isEmpty) {
+    _bad('$where.artifacts must be a non-empty array');
+  }
+  for (var i = 0; i < manifest.artifacts.length; i++) {
+    _validateArtifact(manifest.artifacts[i], '$where.artifacts[$i]');
+  }
+}
+
+void _validateArtifact(Artifact artifact, String where) {
+  _requireNonEmptyString(artifact.id, '$where.id');
+  _requireNonEmptyString(artifact.filename, '$where.filename');
+  _requireAtLeast(artifact.size.toInt(), 0, '$where.size');
+  _requireSha256(artifact.sha256, '$where.sha256');
+  _requireUrls(artifact.urls, '$where.urls');
+
+  for (var i = 0; i < artifact.selectors.length; i++) {
+    final selector = artifact.selectors[i];
+    _requireNonEmptyString(selector.key, '$where.selectors[$i].key');
+  }
+  for (var i = 0; i < artifact.meta.length; i++) {
+    final entry = artifact.meta[i];
+    _requireNonEmptyString(entry.key, '$where.meta[$i].key');
+  }
+}
+
+void _requireSchema(String actual, String expected, String where) {
+  _requireNonEmptyString(actual, '$where.schema');
+  if (actual != expected) {
+    _bad('$where.schema is "$actual", expected "$expected"');
+  }
+}
+
+void _requireNonEmptyString(String value, String where) {
+  if (value.isEmpty) _bad('$where must be a non-empty string');
+}
+
+void _requireAtLeast(int value, int min, String where) {
+  if (value < min) _bad('$where must be at least $min');
+}
+
+void _requireSha256(String value, String where) {
+  _requireNonEmptyString(value, where);
+  if (!_hex64.hasMatch(value)) {
+    _bad('$where must be 64 lowercase hex characters');
+  }
+}
+
+void _requireUrls(List<String> urls, String where) {
+  if (urls.isEmpty) _bad('$where must be a non-empty array');
+  for (final url in urls) {
+    _requireNonEmptyString(url, where);
+  }
+}

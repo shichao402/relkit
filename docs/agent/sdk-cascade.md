@@ -18,9 +18,9 @@
 | 语言 | 包 / 模块 | 开箱文档 | 依赖安装 |
 |------|-----------|----------|----------|
 | Go | `github.com/shichao402/relkit/sdk` | [`../../sdk/AGENT-QUICKSTART.md`](../../sdk/AGENT-QUICKSTART.md) | `go get github.com/shichao402/relkit/sdk@latest` |
-| Dart | `rup_client` | 宿主内 `packages/rup_client/AGENT-QUICKSTART.md`，或你所依赖的那份副本 | path / git / pub（以宿主为准） |
+| Dart | `rup_client`（**SSOT：`sdk/dart/`**） | [`../../sdk/dart/AGENT-QUICKSTART.md`](../../sdk/dart/AGENT-QUICKSTART.md) | git `path: sdk/dart`；内网宿主可镜像，见该产品 `VENDORED.md` |
 
-> Dart 包历史上在 AgentsHelpMe `update-spec/clients/dart`；元仓库收束后，以各产品仓 vendored 副本或将来独立仓为准。开箱时以**你正在改的那份** `AGENT-QUICKSTART.md` 为 SSOT。
+目录说明见 [`../../sdk/README.md`](../../sdk/README.md)。
 
 ## 所有 SDK 共用的接入契约
 

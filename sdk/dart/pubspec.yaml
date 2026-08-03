@@ -1,0 +1,32 @@
+name: rup_client
+description: >-
+  A RUP (Release & Update Protocol) client: fetches a signed index, verifies it,
+  picks the next version along the upgrade chain, and downloads a hash-verified
+  artifact. Applying the update is left to the host.
+version: 0.3.1
+repository: https://github.com/shichao402/relkit/tree/main/sdk/dart
+homepage: https://github.com/shichao402/relkit/tree/main/sdk/dart
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  # sha256 for artifact and manifest integrity.
+  crypto: ^3.0.3
+
+  # AccumulatorSink, for hashing a large file without reading it into memory.
+  convert: ^3.1.1
+
+  # Ed25519 for index signatures. The signature is the only thing standing
+  # between a network attacker and code that clients will execute, so this is
+  # not a place to hand-roll: RFC 8032 has several implementation traps
+  # (small-order points, non-canonical encodings) that are invisible in tests
+  # built from valid signatures.
+  cryptography: ^2.7.0
+  archive: ^4.0.9
+  protobuf: ^6.0.0
+  fixnum: ^1.1.1
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

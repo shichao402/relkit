@@ -1,0 +1,42 @@
+{
+  "name": "yanked",
+  "description": "1.3.0 发布后发现严重缺陷被撤回，但节点必须保留在数组中（1.5.0 的 minFrom 语义与客户端可能正运行在该版本上都依赖它的存在）。被撤回的节点禁止作为升级目标。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 15,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "minFrom": 0, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.2.0", "code": 120, "minFrom": 100, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.2.0.json"] } },
+      { "version": "1.3.0", "code": 130, "minFrom": 100, "yanked": true, "notes": "已撤回：存在数据丢失缺陷", "manifest": { "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "size": 1024, "urls": ["https://x.invalid/1.3.0.json"] } },
+      { "version": "1.5.0", "code": 150, "minFrom": 120, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 100,
+      "expectTarget": "1.2.0",
+      "expectPath": ["1.2.0", "1.5.0"],
+      "why": "1.3.0 虽然 minFrom=100 满足条件，但已撤回，必须排除；1.5.0 的 minFrom=120 不满足，故选 1.2.0"
+    },
+    {
+      "currentCode": 120,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0"],
+      "why": "跳过被撤回的 1.3.0 直达 1.5.0"
+    },
+    {
+      "currentCode": 130,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0"],
+      "why": "客户端正运行在被撤回的 1.3.0 上。选路照常执行，得到可用的升级目标（SPEC.md §9.4）"
+    },
+    {
+      "currentCode": 150,
+      "expectTarget": null,
+      "expectPath": []
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "ambiguous",
+  "description": "同时验证空 selectors（匹配一切）与多匹配仲裁规则。Windows 客户端会同时匹配到通用产物和 Windows 专用产物，此时必须取 id 字典序最小的那个。仲裁规则被定死而不是『取数组第一个』，是为了让不同语言实现在异常输入下也给出一致结果——注意本用例中数组第一个恰好是错误答案。",
+  "manifest": {
+    "schema": "rup.manifest/1",
+    "product": "conformance",
+    "version": "1.5.0",
+    "code": 150,
+    "artifacts": [
+      { "id": "z-generic", "filename": "app-1.5.0-any.zip", "size": 1024, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "kind": "archive", "selectors": {}, "urls": ["https://x.invalid/any.zip"] },
+      { "id": "a-windows", "filename": "app-1.5.0-win.zip", "size": 1024, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "kind": "archive", "selectors": { "os": "windows" }, "urls": ["https://x.invalid/win.zip"] }
+    ]
+  },
+  "cases": [
+    {
+      "clientSelectors": { "os": "windows", "arch": "x64" },
+      "expectArtifactId": "a-windows",
+      "why": "两个 artifact 都匹配，按 id 字典序取最小得 a-windows。取数组第一个会得到 z-generic"
+    },
+    {
+      "clientSelectors": { "os": "linux", "arch": "x64" },
+      "expectArtifactId": "z-generic",
+      "why": "空 selectors 匹配任何客户端，因此非 Windows 平台仍能取到通用产物"
+    },
+    {
+      "clientSelectors": {},
+      "expectArtifactId": "z-generic",
+      "why": "客户端未提供任何选择器时，只有空 selectors 的 artifact 能匹配"
+    }
+  ]
+}

@@ -99,7 +99,14 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 - 发布侧手册：`relkit agent-guide`
 - 服务侧手册：`relkit-serve agent-guide`
 
-## Go 客户端 SDK
+## Go / Dart 客户端 SDK
+
+目录约定见 [`sdk/README.md`](sdk/README.md)：
+
+| | |
+|--|--|
+| Go | `sdk/*.go` → `go get github.com/shichao402/relkit/sdk@latest` · [`sdk/AGENT-QUICKSTART.md`](sdk/AGENT-QUICKSTART.md) |
+| Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/AGENT-QUICKSTART.md`](sdk/dart/AGENT-QUICKSTART.md) |
 
 ```go
 import "github.com/shichao402/relkit/sdk"
@@ -113,7 +120,7 @@ u := &sdk.Updater{
 result := u.Check(ctx)
 ```
 
-Dart SDK：`rup_client`（各宿主仓的 `AGENT-QUICKSTART.md`；级联见 [`docs/agent/sdk-cascade.md`](docs/agent/sdk-cascade.md)）。
+Dart：`rup_client`（git `path: sdk/dart`；级联见 [`docs/agent/sdk-cascade.md`](docs/agent/sdk-cascade.md)）。
 
 ## 开发与测试
 

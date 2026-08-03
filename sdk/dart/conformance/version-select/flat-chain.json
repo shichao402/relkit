@@ -1,0 +1,47 @@
+{
+  "name": "flat-chain",
+  "description": "最简单的情况：所有节点 minFrom 缺省（等价于 0），任何版本都能一跳直达最新。这是 Dec 与 RemoteCam 目前唯一支持的形态。",
+  "index": {
+    "schema": "rup.index/1",
+    "product": "conformance",
+    "channel": "stable",
+    "sequence": 3,
+    "generatedAt": "2026-07-30T00:00:00Z",
+    "versions": [
+      { "version": "1.0.0", "code": 100, "manifest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1024, "urls": ["https://x.invalid/1.0.0.json"] } },
+      { "version": "1.2.0", "code": 120, "manifest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024, "urls": ["https://x.invalid/1.2.0.json"] } },
+      { "version": "1.5.0", "code": 150, "manifest": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1024, "urls": ["https://x.invalid/1.5.0.json"] } }
+    ]
+  },
+  "cases": [
+    {
+      "currentCode": 0,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0"],
+      "why": "minFrom 全为 0，即使从最低的 code 出发也能直达最新"
+    },
+    {
+      "currentCode": 100,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0"],
+      "why": "候选是 1.2.0 与 1.5.0，按 code 取最大得 1.5.0；跳过中间版本是允许的"
+    },
+    {
+      "currentCode": 120,
+      "expectTarget": "1.5.0",
+      "expectPath": ["1.5.0"]
+    },
+    {
+      "currentCode": 150,
+      "expectTarget": null,
+      "expectPath": [],
+      "why": "已是最新，候选集为空"
+    },
+    {
+      "currentCode": 200,
+      "expectTarget": null,
+      "expectPath": [],
+      "why": "客户端比 index 中所有节点都新（开发版或本地构建）。禁止因此触发降级"
+    }
+  ]
+}
