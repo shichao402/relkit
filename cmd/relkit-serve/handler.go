@@ -108,8 +108,9 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 
 // listDir renders a plain HTML index of one directory.
 //
-// Kept deliberately dull: no JS, no icons, just names and sizes. The audience
-// is an operator pasting a URL into a browser to see what has been published.
+// Kept deliberately dull: no JS, no icons, just name, size, and mtime. The
+// audience is an operator pasting a URL into a browser to see what has been
+// published.
 func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, name string) {
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
@@ -150,16 +151,16 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 	b.WriteString("table{border-collapse:collapse;width:100%;max-width:56rem}")
 	b.WriteString("th,td{text-align:left;padding:.25rem .75rem .25rem 0;border-bottom:1px solid #eee}")
 	b.WriteString("th{color:#666;font-weight:500}")
-	b.WriteString("td.size{text-align:right;color:#666;white-space:nowrap}")
+	b.WriteString("td.size,td.mtime{text-align:right;color:#666;white-space:nowrap}")
 	b.WriteString("a{color:#06c;text-decoration:none}a:hover{text-decoration:underline}")
 	b.WriteString(".meta{color:#888;margin-top:1.5rem}")
 	b.WriteString("</style></head><body>")
 	b.WriteString("<h1>Index of ")
 	b.WriteString(html.EscapeString(display))
-	b.WriteString("</h1>\n<table><thead><tr><th>Name</th><th>Size</th></tr></thead><tbody>\n")
+	b.WriteString("</h1>\n<table><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>\n")
 
 	if name != "." {
-		b.WriteString("<tr><td><a href=\"../\">../</a></td><td class=\"size\">-</td></tr>\n")
+		b.WriteString("<tr><td><a href=\"../\">../</a></td><td class=\"size\">-</td><td class=\"mtime\">-</td></tr>\n")
 	}
 
 	for _, entry := range entries {
@@ -167,11 +168,16 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 		href := entryName
 		label := entryName
 		size := "-"
+		mtime := "-"
 		if entry.IsDir() {
 			href += "/"
 			label += "/"
-		} else if info, err := entry.Info(); err == nil {
-			size = humanBytes(info.Size())
+		}
+		if info, err := entry.Info(); err == nil {
+			if !entry.IsDir() {
+				size = humanBytes(info.Size())
+			}
+			mtime = info.ModTime().Format("2006-01-02 15:04")
 		}
 		b.WriteString("<tr><td><a href=\"")
 		b.WriteString(html.EscapeString(href))
@@ -179,6 +185,8 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 		b.WriteString(html.EscapeString(label))
 		b.WriteString("</a></td><td class=\"size\">")
 		b.WriteString(html.EscapeString(size))
+		b.WriteString("</td><td class=\"mtime\">")
+		b.WriteString(html.EscapeString(mtime))
 		b.WriteString("</td></tr>\n")
 	}
 

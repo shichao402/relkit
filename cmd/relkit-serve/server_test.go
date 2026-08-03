@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -254,6 +255,7 @@ func TestDirectoryListing(t *testing.T) {
 	html := string(body)
 	for _, want := range []string{
 		"Index of /",
+		"<th>Name</th><th>Size</th><th>Modified</th>",
 		`href="artifact/"`,
 		`href="index/"`,
 		"artifact/",
@@ -262,6 +264,10 @@ func TestDirectoryListing(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("GET / body missing %q\n%s", want, html)
 		}
+	}
+	// mtime column should show a formatted timestamp for each entry.
+	if !regexp.MustCompile(`class="mtime">\d{4}-\d{2}-\d{2} \d{2}:\d{2}<`).MatchString(html) {
+		t.Errorf("GET / body missing formatted mtime\n%s", html)
 	}
 
 	resp2, err := http.Get(srv.URL + "/artifact/")
