@@ -7,3 +7,7 @@ coverage.out
 __pycache__/
 *.pyc
 
+# one-shot / debug scripts
+scripts/temp/*
+!scripts/temp/.gitkeep
+
