@@ -3,11 +3,14 @@
 /// The outer transport is always a zip today:
 /// - Windows: zip holds the portable tree directly (extract-and-overwrite).
 /// - macOS: zip holds a single `.dmg`; after unzip we mount it and copy the
-///   portable tree out so the rest of apply sees the same layout as Windows.
+///   install root out. Manual-install DMGs often also contain an `Applications`
+///   symlink and Gatekeeper helper shortcuts — those must not be staged for
+///   auto-update. When [executableName] is provided, only the directory that
+///   contains that relative path is kept (preferring a `*.app` bundle).
 ///
 /// A future Windows `.exe` installer would plug in here; do not treat every
-/// `.exe` inside a zip as an installer (the portable payload itself contains
-/// `SvnAutoMerge.exe`).
+/// `.exe` inside a zip as an installer (the portable payload itself usually
+/// contains the main binary).
 library;
 
 import 'dart:io';
@@ -16,13 +19,25 @@ import 'package:archive/archive_io.dart';
 
 import 'apply_exception.dart';
 
-/// File name of the macOS disk image inside the outer zip.
-const macosDmgInnerName = 'SvnAutoMerge.dmg';
+String _basename(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  final parts = normalized.split('/');
+  return parts.isEmpty ? path : parts.last;
+}
+
+String _join(String parent, String child) =>
+    '$parent${Platform.pathSeparator}'
+    '${child.replaceAll('/', Platform.pathSeparator)}';
 
 /// Unpacks [archive] into [stagingRoot], expanding an inner `.dmg` when present.
+///
+/// Pass the same [executableName] that [stageUpdate] uses (relative to the
+/// install root, e.g. `Contents/MacOS/MyApp` or `MyApp.exe`). On macOS this is
+/// what lets the expander ignore DMG install helpers.
 Future<void> unpackUpdatePackage({
   required File archive,
   required Directory stagingRoot,
+  String? executableName,
   void Function(String message)? log,
 }) async {
   final note = log ?? (_) {};
@@ -39,14 +54,24 @@ Future<void> unpackUpdatePackage({
     throw ApplyException('could not unpack ${archive.path}', cause: error);
   }
 
-  await expandInnerInstallerIfPresent(stagingRoot, log: note);
+  await expandInnerInstallerIfPresent(
+    stagingRoot,
+    executableName: executableName,
+    log: note,
+  );
 }
 
-/// If [root] contains a `.dmg`, replace [root]'s contents with the DMG payload.
+/// If [root] contains a `.dmg`, replace [root]'s contents with the install root.
+///
+/// When [executableName] is set, only the payload directory that contains that
+/// relative path is kept. Without it, the full DMG payload is copied (legacy
+/// single-item DMGs); multi-item payloads then need [executableName] or
+/// [stageUpdate] will fail to locate the binary.
 ///
 /// No-op when there is no DMG (Windows / legacy flat macOS zip).
 Future<void> expandInnerInstallerIfPresent(
   Directory root, {
+  String? executableName,
   void Function(String message)? log,
 }) async {
   final note = log ?? (_) {};
@@ -74,12 +99,55 @@ Future<void> expandInnerInstallerIfPresent(
 
   final dmg = dmgs.single;
   note('expanding inner DMG ${dmg.path}');
-  await _expandDmgInto(dmg, root, log: note);
+  await _expandDmgInto(
+    dmg,
+    root,
+    executableName: executableName,
+    log: note,
+  );
+}
+
+/// Finds the directory under [payload] that contains [executableName].
+///
+/// Search order:
+/// 1. [payload] itself
+/// 2. each immediate subdirectory, preferring `*.app` when several match
+///
+/// Returns null when nothing contains the executable.
+Directory? selectInstallRootContainingExecutable(
+  Directory payload,
+  String executableName,
+) {
+  final relative = executableName.replaceAll('/', Platform.pathSeparator);
+  final atRoot = File(_join(payload.path, relative));
+  if (atRoot.existsSync()) {
+    return payload;
+  }
+
+  Directory? match;
+  for (final entry in payload.listSync(followLinks: false)) {
+    if (entry is! Directory) {
+      continue;
+    }
+    final candidate = File(_join(entry.path, relative));
+    if (!candidate.existsSync()) {
+      continue;
+    }
+    final isAppBundle = entry.path.toLowerCase().endsWith('.app');
+    if (match == null || isAppBundle) {
+      match = entry;
+      if (isAppBundle) {
+        return entry;
+      }
+    }
+  }
+  return match;
 }
 
 Future<void> _expandDmgInto(
   File dmg,
   Directory destination, {
+  String? executableName,
   required void Function(String message) log,
 }) async {
   final parent = destination.parent;
@@ -138,11 +206,59 @@ Future<void> _expandDmgInto(
       throw ApplyException('ditto from DMG mount failed', cause: detail);
     }
 
+    Directory stagedPayload = extracted;
+    if (executableName != null && executableName.trim().isNotEmpty) {
+      final installRoot = selectInstallRootContainingExecutable(
+        extracted,
+        executableName,
+      );
+      if (installRoot == null) {
+        throw ApplyException(
+          'DMG payload does not contain $executableName under ${extracted.path}',
+        );
+      }
+
+      if (installRoot.path != extracted.path) {
+        final isolated = Directory(
+          '${parent.path}${Platform.pathSeparator}$baseName.dmg-app',
+        );
+        if (isolated.existsSync()) {
+          isolated.deleteSync(recursive: true);
+        }
+        isolated.createSync(recursive: true);
+        final stagedApp = Directory(
+          _join(isolated.path, _basename(installRoot.path)),
+        );
+        final isolate = await Process.run(
+          'ditto',
+          [installRoot.path, stagedApp.path],
+        );
+        if (isolate.exitCode != 0) {
+          final detail = isolate.stderr.toString().trim().isEmpty
+              ? isolate.stdout
+              : isolate.stderr;
+          throw ApplyException(
+            'ditto install root from DMG payload failed',
+            cause: detail,
+          );
+        }
+        stagedPayload = isolated;
+        log(
+          'DMG install root ${_basename(installRoot.path)} staged '
+          '(matched $executableName)',
+        );
+      }
+    }
+
     if (destination.existsSync()) {
       destination.deleteSync(recursive: true);
     }
-    extracted.renameSync(destination.path);
-    log('DMG payload copied into ${destination.path}');
+    stagedPayload.renameSync(destination.path);
+    if (stagedPayload.path == extracted.path) {
+      log('DMG payload copied into ${destination.path}');
+    } else {
+      log('DMG install root ready at ${destination.path}');
+    }
   } finally {
     if (attached) {
       await Process.run(
