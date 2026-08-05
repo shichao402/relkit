@@ -44,7 +44,19 @@ List<Artifact> matchingArtifacts(
 }
 
 bool _matches(Artifact artifact, Map<String, String> clientSelectors) {
-  for (final entry in selectorsToMap(artifact.selectors).entries) {
+  return matchesSelectors(
+    selectorsToMap(artifact.selectors),
+    clientSelectors,
+  );
+}
+
+/// Whether every key in [required] equals the client's value for that key.
+/// An empty [required] map matches every client.
+bool matchesSelectors(
+  Map<String, String> required,
+  Map<String, String> clientSelectors,
+) {
+  for (final entry in required.entries) {
     if (clientSelectors[entry.key] != entry.value) return false;
   }
   return true;

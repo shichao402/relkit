@@ -15,6 +15,7 @@ import (
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
+	"github.com/shichao402/relkit/internal/fallback"
 	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/keys"
 	"github.com/shichao402/relkit/internal/model"
@@ -82,6 +83,8 @@ func run(argv []string) (code int) {
 		err = cmdVerify(rest, configPath)
 	case "publish":
 		err = cmdPublish(rest, configPath)
+	case "fallback":
+		err = cmdFallback(rest, configPath)
 	case "agent-guide":
 		err = cmdAgentGuide(rest)
 	case "backends":
@@ -474,6 +477,109 @@ func cmdPublish(args []string, configPath string) error {
 	return err
 }
 
+func cmdFallback(args []string, configPath string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: relkit fallback set --max-code N --url URL [options]")
+	}
+	subcommand := args[0]
+	rest := args[1:]
+	switch subcommand {
+	case "set":
+		return cmdFallbackSet(rest, configPath)
+	default:
+		return fmt.Errorf("unknown fallback subcommand %q (want set)", subcommand)
+	}
+}
+
+func cmdFallbackSet(args []string, configPath string) error {
+	var to []string
+	dryRun := false
+	clear := false
+	minCode := int64(0)
+	maxCode := int64(0)
+	hasMaxCode := false
+	manualURL := ""
+	message := ""
+	mandatory := false
+	selectors := map[string]string{}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--to":
+			i++
+			to = append(to, mustValue(args, i, "--to"))
+		case arg == "--dry-run":
+			dryRun = true
+		case arg == "--clear":
+			clear = true
+		case arg == "--min-code":
+			i++
+			value, err := strconv.ParseInt(mustValue(args, i, "--min-code"), 10, 64)
+			if err != nil {
+				return fmt.Errorf("--min-code: %w", err)
+			}
+			minCode = value
+		case arg == "--max-code":
+			i++
+			value, err := strconv.ParseInt(mustValue(args, i, "--max-code"), 10, 64)
+			if err != nil {
+				return fmt.Errorf("--max-code: %w", err)
+			}
+			maxCode = value
+			hasMaxCode = true
+		case arg == "--url":
+			i++
+			manualURL = mustValue(args, i, "--url")
+		case arg == "--message":
+			i++
+			message = mustValue(args, i, "--message")
+		case arg == "--mandatory":
+			mandatory = true
+		case arg == "--selector":
+			i++
+			raw := mustValue(args, i, "--selector")
+			key, value, ok := strings.Cut(raw, "=")
+			if !ok || key == "" || value == "" {
+				return fmt.Errorf("--selector expects key=value, got %q", raw)
+			}
+			selectors[key] = value
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown flag %q", arg)
+		default:
+			return fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+
+	opts := fallback.Options{
+		Clear:  clear,
+		To:     to,
+		DryRun: dryRun,
+	}
+	if !clear {
+		if !hasMaxCode {
+			return fmt.Errorf("--max-code is required (or pass --clear)")
+		}
+		opts.Rules = []fallback.RuleInput{{
+			MinCode:   minCode,
+			MaxCode:   maxCode,
+			ManualURL: manualURL,
+			Message:   message,
+			Mandatory: mandatory,
+			Selectors: selectors,
+		}}
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	_, err = fallback.Set(cfg, opts, func(line string) {
+		fmt.Println(line)
+	})
+	return err
+}
+
 func cmdAgentGuide(args []string) error {
 	if len(args) > 0 {
 		return fmt.Errorf("agent-guide takes no arguments")
@@ -772,6 +878,7 @@ Commands:
   simulate
   verify
   publish
+  fallback
   agent-guide
   backends
 `)

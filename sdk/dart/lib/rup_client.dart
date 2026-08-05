@@ -29,6 +29,8 @@ export 'src/gen/rup/v2/objects.pb.dart'
     show
         Artifact,
         DigestRef,
+        Fallback,
+        FallbackRule,
         Index,
         Manifest,
         MetaEntry,

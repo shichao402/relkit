@@ -138,6 +138,15 @@ class Publisher {
 
   Future<Uint8List> sealIndex(Index index) async {
     final payload = Uint8List.fromList(index.writeToBuffer());
+    return _seal(payload);
+  }
+
+  Future<Uint8List> sealFallback(Fallback doc) async {
+    final payload = Uint8List.fromList(doc.writeToBuffer());
+    return _seal(payload);
+  }
+
+  Future<Uint8List> _seal(Uint8List payload) async {
     final signature = await crypto.Ed25519().sign(payload, keyPair: keyPair);
     final envelope = Envelope(
       schema: envelopeSchemaId,
@@ -918,6 +927,117 @@ void main() {
         'os': 'windows',
         'arch': 'x64',
       });
+    });
+  });
+
+
+  group('fallback', () {
+    test('urges manual update when index fails but rule matches', () async {
+      final fallback = await publisher.sealFallback(Fallback(
+        schema: fallbackSchemaId,
+        product: 'demo',
+        sequence: Int64(1),
+        generatedAt: '2026-08-04T00:00:00Z',
+        rules: [
+          FallbackRule(
+            minCode: Int64(0),
+            maxCode: Int64(100),
+            manualUrl: 'https://cdn.example.com/manual/',
+            message: 'Please reinstall from the download page.',
+            mandatory: true,
+          ),
+        ],
+      ));
+
+      final updater = RupUpdater(
+        product: 'demo',
+        channel: 'stable',
+        currentCode: 100,
+        indexUrls: [Uri.parse('http://mirror/index/demo/stable.pb')],
+        fallbackUrls: [Uri.parse('http://mirror/fallback/demo.pb')],
+        trustedKeys: publisher.trusted,
+        clientSelectors: const {'os': 'windows', 'arch': 'x64'},
+        stateStore: MemoryUpdateStateStore(),
+        fetcher: FakeFetcher({
+          'http://mirror/fallback/demo.pb': fallback,
+        }),
+      );
+
+      final result = await updater.check(force: true);
+      expect(result, isA<FallbackRequired>());
+      final urge = result as FallbackRequired;
+      expect(urge.manualUrl, 'https://cdn.example.com/manual/');
+      expect(urge.mandatory, isTrue);
+      expect(urge.message, contains('reinstall'));
+    });
+
+    test('prefers UpdateAvailable over a matching fallback rule', () async {
+      final (fetcher, _, _) = await world();
+      final fallback = await publisher.sealFallback(Fallback(
+        schema: fallbackSchemaId,
+        product: 'demo',
+        sequence: Int64(2),
+        generatedAt: '2026-08-04T00:00:00Z',
+        rules: [
+          FallbackRule(
+            minCode: Int64(0),
+            maxCode: Int64(200),
+            manualUrl: 'https://cdn.example.com/manual/',
+            message: 'manual',
+          ),
+        ],
+      ));
+      fetcher.responses['http://mirror/fallback/demo.pb'] = fallback;
+
+      final withFallback = RupUpdater(
+        product: 'demo',
+        channel: 'stable',
+        currentCode: 100,
+        indexUrls: [Uri.parse('http://mirror/index/demo/stable.pb')],
+        fallbackUrls: [Uri.parse('http://mirror/fallback/demo.pb')],
+        trustedKeys: publisher.trusted,
+        clientSelectors: const {'os': 'windows', 'arch': 'x64'},
+        stateStore: MemoryUpdateStateStore(),
+        fetcher: fetcher,
+      );
+
+      final result = await withFallback.check(force: true);
+      expect(result, isA<UpdateAvailable>());
+    });
+
+    test('rejects fallback signed by an untrusted key', () async {
+      final other = await Publisher.create(keyId: 'other');
+      final fallback = await other.sealFallback(Fallback(
+        schema: fallbackSchemaId,
+        product: 'demo',
+        sequence: Int64(1),
+        generatedAt: '2026-08-04T00:00:00Z',
+        rules: [
+          FallbackRule(
+            minCode: Int64(0),
+            maxCode: Int64(999),
+            manualUrl: 'https://evil.example/manual/',
+            message: 'gotcha',
+          ),
+        ],
+      ));
+
+      final updater = RupUpdater(
+        product: 'demo',
+        channel: 'stable',
+        currentCode: 100,
+        indexUrls: [Uri.parse('http://mirror/missing.pb')],
+        fallbackUrls: [Uri.parse('http://mirror/fallback/demo.pb')],
+        trustedKeys: publisher.trusted,
+        clientSelectors: const {'os': 'windows', 'arch': 'x64'},
+        stateStore: MemoryUpdateStateStore(),
+        fetcher: FakeFetcher({
+          'http://mirror/fallback/demo.pb': fallback,
+        }),
+      );
+
+      final result = await updater.check(force: true);
+      expect(result, isA<CheckFailed>());
     });
   });
 

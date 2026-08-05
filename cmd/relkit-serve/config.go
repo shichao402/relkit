@@ -227,7 +227,7 @@ func Skeleton(dir string) []byte {
 		UploadTokenFile: "relkit-serve.token",
 		MaxUpload:       "4GiB",
 		Cache: &CacheConfig{
-			NoCache:       []string{"index/"},
+			NoCache:       []string{"index/", "fallback/"},
 			Immutable:     []string{"manifest/", "artifact/"},
 			DefaultMaxAge: &maxAge,
 		},

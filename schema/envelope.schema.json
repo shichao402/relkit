@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.invalid/rup/1/envelope.schema.json",
+  "title": "RUP Signed Envelope v1",
+  "description": "index 在网络上传输时必须包裹的签名信封。manifest 与 artifact 禁止使用信封。签名对象是 payload 经 Base64 解码后的原始字节，因此跨语言实现不需要 JSON 规范化。",
+  "type": "object",
+  "required": ["schema", "payload", "signatures"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "rup.envelope/1"
+    },
+    "payload": {
+      "$ref": "#/$defs/base64",
+      "description": "index 对象 UTF-8 序列化后的字节，标准 Base64（RFC 4648 §4，带补位）"
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "description": "允许多个条目以支持密钥轮换：轮换期内用新旧两把私钥各签一次，至少一个验证通过即整体通过",
+      "items": { "$ref": "#/$defs/signature" }
+    }
+  },
+  "$defs": {
+    "base64": {
+      "type": "string",
+      "minLength": 4,
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+    },
+    "signature": {
+      "type": "object",
+      "required": ["keyId", "alg", "sig"],
+      "additionalProperties": false,
+      "properties": {
+        "keyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "description": "公钥标识，客户端据此从内嵌公钥集合中选择公钥"
+        },
+        "alg": {
+          "const": "ed25519",
+          "description": "v1 仅允许 ed25519"
+        },
+        "sig": {
+          "$ref": "#/$defs/base64",
+          "description": "ed25519 签名（64 字节）的标准 Base64 编码，长度固定为 88 个字符"
+        }
+      }
+    }
+  }
+}

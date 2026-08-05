@@ -11,7 +11,7 @@ RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管�
 
 曾用过其它语言做过原型；发布工具正式实现就是本仓库的 Go CLI。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。  
 CLI 与 serve 合并决策见 [`docs/adr/0002-one-repo-cli-and-serve.md`](docs/adr/0002-one-repo-cli-and-serve.md)。  
-Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003-protobuf-v2-wire-format.md)（权威副本在 AgentsHelpMe/update-spec）。  
+Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003-protobuf-v2-wire-format.md)；结构 SSOT 在本仓 [`proto/`](proto/)。  
 项目版本 SSOT 见 [`docs/adr/0004-project-version-ssot.md`](docs/adr/0004-project-version-ssot.md)：`VERSION.json` + `relkit version …`。
 
 ## Agent 开箱（接入项目时先读）
@@ -95,9 +95,15 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 
 ## 设计与规范来源
 
-- 协议规范与夹具：[`AgentsHelpMe/update-spec`](https://github.com/shichao402/AgentsHelpMe/tree/main/update-spec)
-- 发布侧手册：`relkit agent-guide`
-- 服务侧手册：`relkit-serve agent-guide`
+| 内容 | 路径 |
+|---|---|
+| 协议规范 | [`SPEC.md`](SPEC.md) |
+| 发布工具设计 | [`CLI.md`](CLI.md) |
+| Protobuf 结构 SSOT | [`proto/`](proto/)（改完跑 `scripts/gen-proto.ps1`） |
+| JSON Schema（辅助） | [`schema/`](schema/) |
+| 一致性夹具 | [`conformance/`](conformance/) |
+| 发布侧手册 | `relkit agent-guide`（源：[`embed/AGENT-GUIDE.md`](embed/AGENT-GUIDE.md)） |
+| 服务侧手册 | `relkit-serve agent-guide` |
 
 ## Go / Dart 客户端 SDK
 

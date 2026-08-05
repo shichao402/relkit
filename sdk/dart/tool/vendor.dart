@@ -102,7 +102,7 @@ tests in the source repository will never see.
 
 | | |
 |---|---|
-| Source | `update-spec/clients/dart` in AgentsHelpMe |
+| Source | `sdk/dart` in [relkit](https://github.com/shichao402/relkit) |
 | Commit | `$commit`${dirty ? ' (with uncommitted changes)' : ''} |
 | Synced | $date |
 

@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package rup.v2;
+
+option go_package = "github.com/shichao402/relkit/api/rup/v2;rupv2";
+
+// Health is returned by GET /-/health as application/protobuf.
+message Health {
+  string status = 1; // "ok"
+  string version = 2;
+}
+
+// Error is returned on SDK-facing error responses as application/protobuf.
+message Error {
+  string code = 1;
+  string message = 2;
+}

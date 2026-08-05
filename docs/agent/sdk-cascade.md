@@ -32,6 +32,7 @@
 | `channel` | 如 `stable` | 拉错指针或 404 |
 | `currentCode` | 当前已装 code | 选路错误 / 永远 up-to-date |
 | `indexUrls` | 签名 index 的 URL 列表（串行尝试） | check 失败 |
+| `fallbackUrls` | 签名 fallback 的 URL 列表（可选，救急催更） | 无催更 |
 | `trustedKeys` | keyId → ed25519 公钥（**编译期内嵌**） | 验签失败 |
 | `clientSelectors` | 如 `os`/`arch` | 找不到 artifact |
 

@@ -16,24 +16,9 @@ func RepoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-func UpdateSpecRoot(t *testing.T) string {
-	t.Helper()
-	candidates := []string{
-		filepath.Clean(filepath.Join(RepoRoot(t), "..", "AgentsHelpMe", "update-spec")),
-		filepath.Clean(filepath.Join(RepoRoot(t), "testdata")),
-	}
-	for _, root := range candidates {
-		if _, err := os.Stat(filepath.Join(root, "conformance")); err == nil {
-			return root
-		}
-	}
-	t.Fatalf("update-spec/conformance not found; tried: %v", candidates)
-	return ""
-}
-
 func ConformanceRoot(t *testing.T) string {
 	t.Helper()
-	root := filepath.Join(UpdateSpecRoot(t), "conformance")
+	root := filepath.Join(RepoRoot(t), "conformance")
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("conformance root not found: %s", root)
 	}

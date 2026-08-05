@@ -82,8 +82,9 @@ func (x *Signature) GetSig() []byte {
 	return nil
 }
 
-// Envelope wraps a signed Index on the wire (schema rup.envelope/2).
-// payload is the protobuf serialization of Index (not JSON).
+// Envelope wraps a signed payload on the wire (schema rup.envelope/2).
+// payload is the protobuf serialization of Index or Fallback (not JSON).
+// The client knows which message to parse from the logical key / URL it fetched.
 type Envelope struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.envelope/2"

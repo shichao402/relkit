@@ -250,3 +250,56 @@ final $typed_data.Uint8List stagedDescriptor = $convert.base64Decode(
     'X2Zyb20YBSABKANSB21pbkZyb20SGAoHY2hhbm5lbBgGIAEoCVIHY2hhbm5lbBIdCgpjcmVhdG'
     'VkX2F0GAcgASgJUgljcmVhdGVkQXQSFAoFbm90ZXMYCCABKAlSBW5vdGVzEjQKCWFydGlmYWN0'
     'cxgJIAMoCzIWLnJ1cC52Mi5TdGFnZWRBcnRpZmFjdFIJYXJ0aWZhY3Rz');
+
+@$core.Deprecated('Use fallbackRuleDescriptor instead')
+const FallbackRule$json = {
+  '1': 'FallbackRule',
+  '2': [
+    {'1': 'min_code', '3': 1, '4': 1, '5': 3, '10': 'minCode'},
+    {'1': 'max_code', '3': 2, '4': 1, '5': 3, '10': 'maxCode'},
+    {'1': 'manual_url', '3': 3, '4': 1, '5': 9, '10': 'manualUrl'},
+    {'1': 'message', '3': 4, '4': 1, '5': 9, '10': 'message'},
+    {'1': 'mandatory', '3': 5, '4': 1, '5': 8, '10': 'mandatory'},
+    {
+      '1': 'selectors',
+      '3': 6,
+      '4': 3,
+      '5': 11,
+      '6': '.rup.v2.Selector',
+      '10': 'selectors'
+    },
+  ],
+};
+
+/// Descriptor for `FallbackRule`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List fallbackRuleDescriptor = $convert.base64Decode(
+    'CgxGYWxsYmFja1J1bGUSGQoIbWluX2NvZGUYASABKANSB21pbkNvZGUSGQoIbWF4X2NvZGUYAi'
+    'ABKANSB21heENvZGUSHQoKbWFudWFsX3VybBgDIAEoCVIJbWFudWFsVXJsEhgKB21lc3NhZ2UY'
+    'BCABKAlSB21lc3NhZ2USHAoJbWFuZGF0b3J5GAUgASgIUgltYW5kYXRvcnkSLgoJc2VsZWN0b3'
+    'JzGAYgAygLMhAucnVwLnYyLlNlbGVjdG9yUglzZWxlY3RvcnM=');
+
+@$core.Deprecated('Use fallbackDescriptor instead')
+const Fallback$json = {
+  '1': 'Fallback',
+  '2': [
+    {'1': 'schema', '3': 1, '4': 1, '5': 9, '10': 'schema'},
+    {'1': 'product', '3': 2, '4': 1, '5': 9, '10': 'product'},
+    {'1': 'sequence', '3': 3, '4': 1, '5': 3, '10': 'sequence'},
+    {'1': 'generated_at', '3': 4, '4': 1, '5': 9, '10': 'generatedAt'},
+    {
+      '1': 'rules',
+      '3': 5,
+      '4': 3,
+      '5': 11,
+      '6': '.rup.v2.FallbackRule',
+      '10': 'rules'
+    },
+  ],
+};
+
+/// Descriptor for `Fallback`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List fallbackDescriptor = $convert.base64Decode(
+    'CghGYWxsYmFjaxIWCgZzY2hlbWEYASABKAlSBnNjaGVtYRIYCgdwcm9kdWN0GAIgASgJUgdwcm'
+    '9kdWN0EhoKCHNlcXVlbmNlGAMgASgDUghzZXF1ZW5jZRIhCgxnZW5lcmF0ZWRfYXQYBCABKAlS'
+    'C2dlbmVyYXRlZEF0EioKBXJ1bGVzGAUgAygLMhQucnVwLnYyLkZhbGxiYWNrUnVsZVIFcnVsZX'
+    'M=');

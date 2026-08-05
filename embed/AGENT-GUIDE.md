@@ -43,7 +43,7 @@ go install github.com/shichao402/relkit/cmd/relkit@latest
 
 | 能力 | 状态 |
 |---|---|
-| `init` `keygen` `version` `stage` `inspect` `simulate` `publish` `verify` `agent-guide` `backends` | 可用 |
+| `init` `keygen` `version` `stage` `inspect` `simulate` `publish` `fallback` `verify` `agent-guide` `backends` | 可用 |
 | `local` 后端（输出完整 key 目录树，可离线跑通全流程） | 可用 |
 | `static-http` 后端（任何按路径提供 HTTP 下载的托管，校验走真实 HTTP） | 可用 |
 | `http-put` 后端（带鉴权 PUT 上传，配 relkit-serve 或任何 PUT / WebDAV 端点） | 可用 |
@@ -301,3 +301,14 @@ relkit yank 1.5.0 --reason "启动崩溃"
 - `simulate` 的结论，即各起点的升级落点；
 - `verify` 是否通过；
 - 若中途失败：失败发生在写 `index` 指针之前还是之后（这决定了新版本对客户端是否已可见），以及重跑是否安全。
+
+## Fallback 救急催更
+
+当正常 OTA 链坏掉、需要催已装客户端去手工下载页时：
+
+```
+relkit fallback set --max-code 17 --url https://update.example/artifact/myapp/ --message "请前往下载页手动更新" --mandatory
+relkit fallback set --clear
+```
+
+写入签名文档 `fallback/<product>.pb`（与 index 同一套公钥）。客户端 SDK 配置 `fallbackUrls` 后，在无可用 OTA 时返回 `FallbackRequired`。

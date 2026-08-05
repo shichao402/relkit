@@ -5,7 +5,7 @@
 
 ## 决策
 
-RUP 的全部结构化对象与 SDK 可见的服务端响应，以 [`update-spec/proto`](../../proto/) 中的 Protobuf 定义为唯一结构来源。
+RUP 的全部结构化对象与 SDK 可见的服务端响应，以本仓 [`proto/`](../../proto/) 中的 Protobuf 定义为唯一结构来源。
 
 - 线格式：`rup.*/2`，对象为 **protobuf 二进制**（逻辑 key 使用 `.pb` 后缀）。
 - 签名：Ed25519 签的是 `Index` 的 protobuf 字节（经 `Envelope.payload` 承载），不再签 UTF-8 JSON。
@@ -17,5 +17,6 @@ JSON v1（`rup.*/1`、`.json` key）废弃。现网迁移方式：用新版 `rel
 ## 后果
 
 - Go / Dart（及未来语言）SDK 共享同一套字段语义。
-- `relkit` 与 `relkit-serve` 同仓消费生成的 Go API。
+- `relkit` 与 `relkit-serve` 同仓消费生成的 Go API（`api/`）。
+- 改协议：先改 `proto/` + `SPEC.md`，再跑 `scripts/gen-proto.ps1`，并用 `conformance/` 回归。
 - 旧 index 不可被新客户端解析；需 republish。

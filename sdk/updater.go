@@ -27,9 +27,14 @@ type Updater struct {
 	Channel         string
 	CurrentCode     int
 	IndexURLs       []string
+	FallbackURLs    []string // optional; empty disables fallback check
 	TrustedKeys     TrustedKeys
 	ClientSelectors map[string]string
 	HTTPClient      *http.Client
+
+	// LastSeenFallbackSequence is the highest fallback sequence this client has
+	// accepted. Persist it across runs (product-scoped) to reject replays.
+	LastSeenFallbackSequence *int64
 }
 
 // UpdateAvailable is returned when a newer reachable version exists.
@@ -42,17 +47,47 @@ type UpdateAvailable struct {
 	Sequence      int64
 }
 
+// FallbackRequired urges a manual update via a signed rule (SPEC §12.6).
+type FallbackRequired struct {
+	ManualURL string
+	Message   string
+	Mandatory bool
+	Sequence  int64
+	MinCode   int64
+	MaxCode   int64
+}
+
 // CheckResult is the outcome of Check.
 type CheckResult struct {
 	UpToDate  bool
 	Available *UpdateAvailable
+	Fallback  *FallbackRequired
 	Sequence  int64
 	Attempts  []string
 	Err       error
 }
 
 // Check fetches index envelopes, verifies signatures, and selects the next target.
+// When FallbackURLs is configured, also evaluates the fallback document and
+// merges results: Available > Fallback > UpToDate / error.
 func (u *Updater) Check(ctx context.Context) CheckResult {
+	normal := u.checkIndex(ctx)
+	fb, fbAttempts := u.CheckFallback(ctx)
+
+	if normal.Available != nil {
+		normal.Fallback = fb
+		return normal
+	}
+	if fb != nil {
+		return CheckResult{
+			Fallback: fb,
+			Attempts: append(append([]string{}, normal.Attempts...), fbAttempts...),
+		}
+	}
+	return normal
+}
+
+func (u *Updater) checkIndex(ctx context.Context) CheckResult {
 	if u.Product == "" || u.Channel == "" {
 		return CheckResult{Err: fmt.Errorf("product and channel are required")}
 	}
@@ -117,6 +152,88 @@ func (u *Updater) Check(ctx context.Context) CheckResult {
 		Attempts: attempts,
 		Err:      fmt.Errorf("no usable index source (%d attempted)", len(attempts)),
 	}
+}
+
+// CheckFallback evaluates only the signed fallback document (SPEC §12.6).
+// Returns nil when no URLs are configured, no rule matches, or no source works.
+func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []string) {
+	if len(u.FallbackURLs) == 0 {
+		return nil, nil
+	}
+	if u.Product == "" {
+		return nil, []string{"product is required for fallback"}
+	}
+	if len(u.TrustedKeys) == 0 {
+		return nil, []string{"trusted keys are required for fallback"}
+	}
+
+	client := u.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 60 * time.Second}
+	}
+
+	var attempts []string
+	for _, rawURL := range u.FallbackURLs {
+		fbURL := bustCache(rawURL)
+		body, err := getBytes(ctx, client, fbURL)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("%s: fetch: %v", rawURL, err))
+			continue
+		}
+		env, err := rupv2.UnmarshalEnvelope(body)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("%s: envelope: %v", rawURL, err))
+			continue
+		}
+		doc, err := envelope.OpenFallbackEnvelope(env, u.TrustedKeys)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("%s: verify: %v", rawURL, err))
+			continue
+		}
+		if doc.Product != u.Product {
+			attempts = append(attempts, fmt.Sprintf("%s: product mismatch", rawURL))
+			continue
+		}
+		if u.LastSeenFallbackSequence != nil && doc.Sequence < *u.LastSeenFallbackSequence {
+			attempts = append(attempts, fmt.Sprintf("%s: sequence %d older than last seen %d", rawURL, doc.Sequence, *u.LastSeenFallbackSequence))
+			continue
+		}
+
+		if u.LastSeenFallbackSequence == nil || doc.Sequence > *u.LastSeenFallbackSequence {
+			seq := doc.Sequence
+			u.LastSeenFallbackSequence = &seq
+		}
+
+		rule := matchFallbackRule(doc, int64(u.CurrentCode), u.ClientSelectors)
+		if rule == nil {
+			return nil, attempts
+		}
+		return &FallbackRequired{
+			ManualURL: rule.ManualUrl,
+			Message:   rule.Message,
+			Mandatory: rule.Mandatory,
+			Sequence:  doc.Sequence,
+			MinCode:   rule.MinCode,
+			MaxCode:   rule.MaxCode,
+		}, attempts
+	}
+	return nil, attempts
+}
+
+func matchFallbackRule(doc *model.FallbackDocument, currentCode int64, clientSelectors map[string]string) *model.FallbackRule {
+	for _, rule := range doc.Rules {
+		if rule == nil {
+			continue
+		}
+		if currentCode < rule.MinCode || currentCode > rule.MaxCode {
+			continue
+		}
+		if !selectors.MatchesClient(model.SelectorsToMap(rule.Selectors), clientSelectors) {
+			continue
+		}
+		return rule
+	}
+	return nil
 }
 
 func (u *Updater) fetchTarget(ctx context.Context, client *http.Client, index *model.IndexDocument, target *model.VersionNode) (*model.ManifestDocument, *model.ManifestArtifact, error) {

@@ -95,8 +95,9 @@ class Signature extends $pb.GeneratedMessage {
   void clearSig() => $_clearField(3);
 }
 
-/// Envelope wraps a signed Index on the wire (schema rup.envelope/2).
-/// payload is the protobuf serialization of Index (not JSON).
+/// Envelope wraps a signed payload on the wire (schema rup.envelope/2).
+/// payload is the protobuf serialization of Index or Fallback (not JSON).
+/// The client knows which message to parse from the logical key / URL it fetched.
 class Envelope extends $pb.GeneratedMessage {
   factory Envelope({
     $core.String? schema,

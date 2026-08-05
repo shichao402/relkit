@@ -86,6 +86,28 @@ class CheckThrottled extends UpdateCheckResult {
   final DateTime nextAllowedAt;
 }
 
+/// A signed emergency notice matches this build (SPEC.md section 12.6).
+///
+/// The host should show [message] and open [manualUrl] in a browser. This never
+/// carries an auto-download; that is the point of the escape hatch.
+class FallbackRequired extends UpdateCheckResult {
+  const FallbackRequired({
+    required this.manualUrl,
+    required this.message,
+    required this.mandatory,
+    required this.sequence,
+    required this.minCode,
+    required this.maxCode,
+  });
+
+  final String manualUrl;
+  final String message;
+  final bool mandatory;
+  final int sequence;
+  final int minCode;
+  final int maxCode;
+}
+
 /// Checks for, and downloads, updates for one (product, channel).
 class RupUpdater {
   RupUpdater({
@@ -96,10 +118,12 @@ class RupUpdater {
     required this.trustedKeys,
     required this.clientSelectors,
     required this.stateStore,
+    List<Uri>? fallbackUrls,
     Fetcher? fetcher,
     this.policy = const UpdatePolicy(),
     this.log,
-  }) : fetcher = fetcher ?? HttpFetcher() {
+  })  : fallbackUrls = List.unmodifiable(fallbackUrls ?? const <Uri>[]),
+        fetcher = fetcher ?? HttpFetcher() {
     if (indexUrls.isEmpty) {
       throw ArgumentError.value(indexUrls, 'indexUrls', 'must not be empty');
     }
@@ -121,6 +145,10 @@ class RupUpdater {
   final int currentCode;
 
   final List<Uri> indexUrls;
+
+  /// Optional signed fallback notice URLs (SPEC section 12.6). Empty disables it.
+  final List<Uri> fallbackUrls;
+
   final TrustedKeys trustedKeys;
   final Map<String, String> clientSelectors;
   final UpdateStateStore stateStore;
@@ -131,7 +159,55 @@ class RupUpdater {
   /// Runs a check.
   ///
   /// Pass [force] for a user-initiated check, which ignores throttling.
+  /// When [fallbackUrls] is set, also evaluates the fallback document and
+  /// merges: [UpdateAvailable] > [FallbackRequired] > [UpToDate] / [CheckFailed].
   Future<UpdateCheckResult> check({bool force = false}) async {
+    final normal = await _checkIndex(force: force);
+    if (fallbackUrls.isEmpty) return normal;
+
+    final fallback = await checkFallback();
+    if (normal is UpdateAvailable) return normal;
+    if (fallback != null) return fallback;
+    return normal;
+  }
+
+  /// Evaluates only the signed fallback document (SPEC section 12.6).
+  ///
+  /// Returns null when no rule matches or no source can be used. Hosts should
+  /// call this after a download/apply failure to urge a manual update.
+  Future<FallbackRequired?> checkFallback() async {
+    if (fallbackUrls.isEmpty) return null;
+
+    final state = await stateStore.load();
+    final attempts = <String>[];
+
+    for (final url in fallbackUrls) {
+      final outcome = await _loadFallbackFrom(url, state);
+      switch (outcome) {
+        case _FallbackSourceOk(:final doc):
+          state.observeFallbackSequence(doc.sequence.toInt());
+          await stateStore.save(state);
+          final rule = _matchFallbackRule(doc);
+          if (rule == null) return null;
+          return FallbackRequired(
+            manualUrl: rule.manualUrl,
+            message: rule.message,
+            mandatory: rule.mandatory,
+            sequence: doc.sequence.toInt(),
+            minCode: rule.minCode.toInt(),
+            maxCode: rule.maxCode.toInt(),
+          );
+        case _FallbackSourceRejected(:final why):
+          attempts.add('$url: $why');
+          continue;
+      }
+    }
+
+    log?.call('fallback check failed: ${attempts.join('; ')}');
+    return null;
+  }
+
+  Future<UpdateCheckResult> _checkIndex({bool force = false}) async {
     final state = await stateStore.load();
 
     if (!force && !policy.shouldCheck(state)) {
@@ -372,6 +448,59 @@ class RupUpdater {
     throw VerificationException(
         'no usable manifest for ${target.version}: ${failures.join('; ')}');
   }
+
+  Future<_FallbackSourceOutcome> _loadFallbackFrom(
+      Uri url, UpdateState state) async {
+    Uint8List bytes;
+    try {
+      bytes = await fetcher.getBytes(url, timeout: policy.documentTimeout);
+    } on FetchException catch (error) {
+      return _FallbackSourceRejected(error.message);
+    }
+
+    final verified = await openEnvelope(bytes, trustedKeys);
+    if (!verified.accepted) {
+      return _FallbackSourceRejected(
+          'signature check failed (${verified.rejection!.name}: '
+          '${verified.detail})');
+    }
+
+    final Fallback doc;
+    try {
+      doc = parseFallback(verified.payload!);
+    } on RupFormatException catch (error) {
+      return _FallbackSourceRejected('malformed fallback: ${error.message}');
+    }
+
+    if (doc.product != product) {
+      return _FallbackSourceRejected(
+          'fallback is for product "${doc.product}", expected "$product"');
+    }
+
+    final sequence = doc.sequence.toInt();
+    if (!acceptsSequence(sequence, state.lastSeenFallbackSequence)) {
+      log?.call('$url fallback sequence $sequence < '
+          '${state.lastSeenFallbackSequence}, trying the next source');
+      return _FallbackSourceRejected('sequence $sequence is older than the '
+          'last accepted ${state.lastSeenFallbackSequence}');
+    }
+
+    return _FallbackSourceOk(doc);
+  }
+
+  FallbackRule? _matchFallbackRule(Fallback doc) {
+    for (final rule in doc.rules) {
+      final minCode = rule.minCode.toInt();
+      final maxCode = rule.maxCode.toInt();
+      if (currentCode < minCode || currentCode > maxCode) continue;
+      if (!matchesSelectors(selectorsToMap(rule.selectors), clientSelectors)) {
+        continue;
+      }
+      return rule;
+    }
+    return null;
+  }
+
 }
 
 sealed class _SourceOutcome {
@@ -389,3 +518,20 @@ class _SourceRejected extends _SourceOutcome {
 
   final String why;
 }
+
+sealed class _FallbackSourceOutcome {
+  const _FallbackSourceOutcome();
+}
+
+class _FallbackSourceOk extends _FallbackSourceOutcome {
+  const _FallbackSourceOk(this.doc);
+
+  final Fallback doc;
+}
+
+class _FallbackSourceRejected extends _FallbackSourceOutcome {
+  const _FallbackSourceRejected(this.why);
+
+  final String why;
+}
+

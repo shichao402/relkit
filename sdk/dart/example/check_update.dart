@@ -114,6 +114,11 @@ void main(List<String> args) async {
       updater.close();
       exit(1);
 
+    case FallbackRequired(:final manualUrl, :final message, :final mandatory):
+      stdout.writeln('fallback urge: $message');
+      stdout.writeln('  open $manualUrl');
+      stdout.writeln('  mandatory=$mandatory');
+
     case CheckThrottled(:final nextAllowedAt):
       stdout.writeln('throttled until $nextAllowedAt');
   }

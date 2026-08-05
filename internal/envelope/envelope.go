@@ -13,6 +13,7 @@ import (
 const (
 	EnvelopeSchema = model.SchemaEnvelope
 	IndexSchema    = model.SchemaIndex
+	FallbackSchema = model.SchemaFallback
 )
 
 type Error struct {
@@ -46,6 +47,23 @@ func Seal(index *model.IndexDocument, signers []Signer) (*model.Envelope, error)
 		return nil, err
 	}
 
+	return sealPayload(payload, signers)
+}
+
+func SealFallback(doc *model.FallbackDocument, signers []Signer) (*model.Envelope, error) {
+	if len(signers) == 0 {
+		return nil, Error{Message: "at least one signer is required"}
+	}
+
+	payload, err := rupv2.MarshalFallback(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	return sealPayload(payload, signers)
+}
+
+func sealPayload(payload []byte, signers []Signer) (*model.Envelope, error) {
 	signatures := make([]*model.Signature, 0, len(signers))
 	for _, signer := range signers {
 		privateKey := ed25519.NewKeyFromSeed(signer.Seed)
@@ -116,6 +134,38 @@ func AcceptSequence(lastSeenSequence *int, indexSequence int) bool {
 }
 
 func OpenEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.PublicKey) (*model.IndexDocument, error) {
+	payload, err := verifiedEnvelopePayload(env, trustedKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	index, err := rupv2.UnmarshalIndex(payload)
+	if err != nil {
+		return nil, err
+	}
+	if index.Schema != IndexSchema {
+		return nil, Error{Message: fmt.Sprintf("unexpected index schema: %q", index.Schema)}
+	}
+	return index, nil
+}
+
+func OpenFallbackEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.PublicKey) (*model.FallbackDocument, error) {
+	payload, err := verifiedEnvelopePayload(env, trustedKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := rupv2.UnmarshalFallback(payload)
+	if err != nil {
+		return nil, err
+	}
+	if doc.Schema != FallbackSchema {
+		return nil, Error{Message: fmt.Sprintf("unexpected fallback schema: %q", doc.Schema)}
+	}
+	return doc, nil
+}
+
+func verifiedEnvelopePayload(env *model.Envelope, trustedKeys map[string]ed25519.PublicKey) ([]byte, error) {
 	if env == nil {
 		return nil, Error{Message: "envelope is not a protobuf message"}
 	}
@@ -137,15 +187,7 @@ func OpenEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.PublicKey)
 		}
 		return nil, Error{Message: fmt.Sprintf("no trusted key verified this envelope (signed by: %s; trusted: %s)", joinOrNone(keyIDs), joinSortedOrNone(trustedKeys))}
 	}
-
-	index, err := rupv2.UnmarshalIndex(payload)
-	if err != nil {
-		return nil, err
-	}
-	if index.Schema != IndexSchema {
-		return nil, Error{Message: fmt.Sprintf("unexpected index schema: %q", index.Schema)}
-	}
-	return index, nil
+	return payload, nil
 }
 
 func joinOrNone(values []string) string {

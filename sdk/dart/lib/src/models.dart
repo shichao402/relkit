@@ -12,6 +12,8 @@ export 'gen/rup/v2/objects.pb.dart'
     show
         Artifact,
         DigestRef,
+        Fallback,
+        FallbackRule,
         Index,
         Manifest,
         MetaEntry,
@@ -37,6 +39,7 @@ class RupFormatException implements Exception {
 const envelopeSchemaId = 'rup.envelope/2';
 const indexSchemaId = 'rup.index/2';
 const manifestSchemaId = 'rup.manifest/2';
+const fallbackSchemaId = 'rup.fallback/2';
 const publicKeySchemaId = 'rup.publickey/2';
 const privateKeySchemaId = 'rup.privatekey/2';
 const stagedSchemaId = 'rup.staged/2';
@@ -67,11 +70,44 @@ Manifest parseManifest(Uint8List bytes) {
   return manifest;
 }
 
+
+Fallback parseFallback(Uint8List bytes) {
+  final Fallback doc;
+  try {
+    doc = Fallback.fromBuffer(bytes);
+  } catch (error) {
+    throw RupFormatException('fallback is not valid protobuf: $error');
+  }
+  _validateFallback(doc);
+  return doc;
+}
 Map<String, String> selectorsToMap(List<Selector> selectors) =>
     Map.unmodifiable({
       for (final selector in selectors) selector.key: selector.value,
     });
 
+
+void _validateFallback(Fallback doc) {
+  const where = 'fallback';
+  _requireSchema(doc.schema, fallbackSchemaId, where);
+  _requireNonEmptyString(doc.product, '$where.product');
+  _requireNonEmptyString(doc.generatedAt, '$where.generatedAt');
+  _requireAtLeast(doc.sequence.toInt(), 1, '$where.sequence');
+  for (var i = 0; i < doc.rules.length; i++) {
+    final rule = doc.rules[i];
+    final ruleWhere = '$where.rules[$i]';
+    _requireAtLeast(rule.minCode.toInt(), 0, '$ruleWhere.minCode');
+    _requireAtLeast(rule.maxCode.toInt(), 1, '$ruleWhere.maxCode');
+    if (rule.minCode.toInt() > rule.maxCode.toInt()) {
+      _bad('$ruleWhere.minCode must be <= maxCode');
+    }
+    _requireNonEmptyString(rule.manualUrl, '$ruleWhere.manualUrl');
+    for (var j = 0; j < rule.selectors.length; j++) {
+      _requireNonEmptyString(
+          rule.selectors[j].key, '$ruleWhere.selectors[$j].key');
+    }
+  }
+}
 void _validateIndex(Index index) {
   const where = 'index';
 

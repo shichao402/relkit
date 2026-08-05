@@ -88,7 +88,7 @@ func (b *staticHTTPBackend) PutPointer(data []byte, key string) ([]string, error
 }
 
 func (b *staticHTTPBackend) Get(key string) ([]byte, error) {
-	return httpx.Get(*b.URLFor(key), b.timeout, strings.HasPrefix(key, "index/"))
+	return httpx.Get(*b.URLFor(key), b.timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/"))
 }
 
 func (b *staticHTTPBackend) Probe(rawURL string) (bool, *int64, string) {

@@ -803,6 +803,170 @@ func (x *Staged) GetArtifacts() []*StagedArtifact {
 	return nil
 }
 
+// FallbackRule matches a client code range and urges a manual update.
+// Match when min_code <= currentCode <= max_code (inclusive).
+type FallbackRule struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MinCode       int64                  `protobuf:"varint,1,opt,name=min_code,json=minCode,proto3" json:"min_code,omitempty"`      // inclusive; default 0
+	MaxCode       int64                  `protobuf:"varint,2,opt,name=max_code,json=maxCode,proto3" json:"max_code,omitempty"`      // inclusive; MUST be >= 1
+	ManualUrl     string                 `protobuf:"bytes,3,opt,name=manual_url,json=manualUrl,proto3" json:"manual_url,omitempty"` // absolute http(s) URL; host opens in a browser
+	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`                      // user-facing text
+	Mandatory     bool                   `protobuf:"varint,5,opt,name=mandatory,proto3" json:"mandatory,omitempty"`                 // host MUST NOT offer to dismiss without acknowledging
+	Selectors     []*Selector            `protobuf:"bytes,6,rep,name=selectors,proto3" json:"selectors,omitempty"`                  // optional; empty matches all clients
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FallbackRule) Reset() {
+	*x = FallbackRule{}
+	mi := &file_rup_v2_objects_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FallbackRule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FallbackRule) ProtoMessage() {}
+
+func (x *FallbackRule) ProtoReflect() protoreflect.Message {
+	mi := &file_rup_v2_objects_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FallbackRule.ProtoReflect.Descriptor instead.
+func (*FallbackRule) Descriptor() ([]byte, []int) {
+	return file_rup_v2_objects_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *FallbackRule) GetMinCode() int64 {
+	if x != nil {
+		return x.MinCode
+	}
+	return 0
+}
+
+func (x *FallbackRule) GetMaxCode() int64 {
+	if x != nil {
+		return x.MaxCode
+	}
+	return 0
+}
+
+func (x *FallbackRule) GetManualUrl() string {
+	if x != nil {
+		return x.ManualUrl
+	}
+	return ""
+}
+
+func (x *FallbackRule) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *FallbackRule) GetMandatory() bool {
+	if x != nil {
+		return x.Mandatory
+	}
+	return false
+}
+
+func (x *FallbackRule) GetSelectors() []*Selector {
+	if x != nil {
+		return x.Selectors
+	}
+	return nil
+}
+
+// Fallback is a signed emergency notice (schema rup.fallback/2).
+// Logical key: fallback/<product>.pb (product-scoped, not channel).
+type Fallback struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.fallback/2"
+	Product       string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
+	Sequence      int64                  `protobuf:"varint,3,opt,name=sequence,proto3" json:"sequence,omitempty"`                         // >= 1; anti-rollback, independent of index sequence
+	GeneratedAt   string                 `protobuf:"bytes,4,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"` // RFC 3339 UTC
+	Rules         []*FallbackRule        `protobuf:"bytes,5,rep,name=rules,proto3" json:"rules,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Fallback) Reset() {
+	*x = Fallback{}
+	mi := &file_rup_v2_objects_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Fallback) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Fallback) ProtoMessage() {}
+
+func (x *Fallback) ProtoReflect() protoreflect.Message {
+	mi := &file_rup_v2_objects_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Fallback.ProtoReflect.Descriptor instead.
+func (*Fallback) Descriptor() ([]byte, []int) {
+	return file_rup_v2_objects_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *Fallback) GetSchema() string {
+	if x != nil {
+		return x.Schema
+	}
+	return ""
+}
+
+func (x *Fallback) GetProduct() string {
+	if x != nil {
+		return x.Product
+	}
+	return ""
+}
+
+func (x *Fallback) GetSequence() int64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *Fallback) GetGeneratedAt() string {
+	if x != nil {
+		return x.GeneratedAt
+	}
+	return ""
+}
+
+func (x *Fallback) GetRules() []*FallbackRule {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
+}
+
 var File_rup_v2_objects_proto protoreflect.FileDescriptor
 
 const file_rup_v2_objects_proto_rawDesc = "" +
@@ -877,7 +1041,21 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\a \x01(\tR\tcreatedAt\x12\x14\n" +
 	"\x05notes\x18\b \x01(\tR\x05notes\x124\n" +
-	"\tartifacts\x18\t \x03(\v2\x16.rup.v2.StagedArtifactR\tartifactsB\x82\x01\n" +
+	"\tartifacts\x18\t \x03(\v2\x16.rup.v2.StagedArtifactR\tartifacts\"\xcb\x01\n" +
+	"\fFallbackRule\x12\x19\n" +
+	"\bmin_code\x18\x01 \x01(\x03R\aminCode\x12\x19\n" +
+	"\bmax_code\x18\x02 \x01(\x03R\amaxCode\x12\x1d\n" +
+	"\n" +
+	"manual_url\x18\x03 \x01(\tR\tmanualUrl\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\x12\x1c\n" +
+	"\tmandatory\x18\x05 \x01(\bR\tmandatory\x12.\n" +
+	"\tselectors\x18\x06 \x03(\v2\x10.rup.v2.SelectorR\tselectors\"\xa7\x01\n" +
+	"\bFallback\x12\x16\n" +
+	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
+	"\aproduct\x18\x02 \x01(\tR\aproduct\x12\x1a\n" +
+	"\bsequence\x18\x03 \x01(\x03R\bsequence\x12!\n" +
+	"\fgenerated_at\x18\x04 \x01(\tR\vgeneratedAt\x12*\n" +
+	"\x05rules\x18\x05 \x03(\v2\x14.rup.v2.FallbackRuleR\x05rulesB\x82\x01\n" +
 	"\n" +
 	"com.rup.v2B\fObjectsProtoP\x01Z-github.com/shichao402/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
 
@@ -893,7 +1071,7 @@ func file_rup_v2_objects_proto_rawDescGZIP() []byte {
 	return file_rup_v2_objects_proto_rawDescData
 }
 
-var file_rup_v2_objects_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_rup_v2_objects_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_rup_v2_objects_proto_goTypes = []any{
 	(*Selector)(nil),       // 0: rup.v2.Selector
 	(*MetaEntry)(nil),      // 1: rup.v2.MetaEntry
@@ -904,21 +1082,25 @@ var file_rup_v2_objects_proto_goTypes = []any{
 	(*Manifest)(nil),       // 6: rup.v2.Manifest
 	(*StagedArtifact)(nil), // 7: rup.v2.StagedArtifact
 	(*Staged)(nil),         // 8: rup.v2.Staged
+	(*FallbackRule)(nil),   // 9: rup.v2.FallbackRule
+	(*Fallback)(nil),       // 10: rup.v2.Fallback
 }
 var file_rup_v2_objects_proto_depIdxs = []int32{
-	2, // 0: rup.v2.VersionNode.manifest:type_name -> rup.v2.DigestRef
-	3, // 1: rup.v2.Index.versions:type_name -> rup.v2.VersionNode
-	0, // 2: rup.v2.Artifact.selectors:type_name -> rup.v2.Selector
-	1, // 3: rup.v2.Artifact.meta:type_name -> rup.v2.MetaEntry
-	5, // 4: rup.v2.Manifest.artifacts:type_name -> rup.v2.Artifact
-	0, // 5: rup.v2.StagedArtifact.selectors:type_name -> rup.v2.Selector
-	1, // 6: rup.v2.StagedArtifact.meta:type_name -> rup.v2.MetaEntry
-	7, // 7: rup.v2.Staged.artifacts:type_name -> rup.v2.StagedArtifact
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	2,  // 0: rup.v2.VersionNode.manifest:type_name -> rup.v2.DigestRef
+	3,  // 1: rup.v2.Index.versions:type_name -> rup.v2.VersionNode
+	0,  // 2: rup.v2.Artifact.selectors:type_name -> rup.v2.Selector
+	1,  // 3: rup.v2.Artifact.meta:type_name -> rup.v2.MetaEntry
+	5,  // 4: rup.v2.Manifest.artifacts:type_name -> rup.v2.Artifact
+	0,  // 5: rup.v2.StagedArtifact.selectors:type_name -> rup.v2.Selector
+	1,  // 6: rup.v2.StagedArtifact.meta:type_name -> rup.v2.MetaEntry
+	7,  // 7: rup.v2.Staged.artifacts:type_name -> rup.v2.StagedArtifact
+	0,  // 8: rup.v2.FallbackRule.selectors:type_name -> rup.v2.Selector
+	9,  // 9: rup.v2.Fallback.rules:type_name -> rup.v2.FallbackRule
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_rup_v2_objects_proto_init() }
@@ -932,7 +1114,7 @@ func file_rup_v2_objects_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_rup_v2_objects_proto_rawDesc), len(file_rup_v2_objects_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

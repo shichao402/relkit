@@ -23,8 +23,8 @@
 
 | 实现 | 如何跑 |
 |---|---|
-| 发布工具 [relkit](https://github.com/shichao402/relkit) | `go test ./internal/chain ./internal/selectors ./internal/envelope`（权威行为在这些包里） |
-| Dart 客户端 `clients/dart/` | `dart test test/conformance_test.dart` |
+| 发布工具 / Go（本仓） | `go test ./internal/chain ./internal/selectors ./internal/envelope`（权威行为在这些包里） |
+| Dart 客户端 `sdk/dart/` | `cd sdk/dart && dart test test/conformance_test.dart` |
 
 排查「某个升级路径为什么是这个结果」时，直接读 relkit 仓库的 `internal/chain`，比读散文快。
 

@@ -90,6 +90,8 @@ switch (result) {
       },
     );
     // file.file 已通过 sha256；再交给 apply 或提示用户
+  case FallbackRequired(:final manualUrl, :final message):
+    // 展示 message，打开浏览器到 manualUrl（救急手工更新）
   case CheckFailed(:final reason, :final attempts):
     // 展示 reason；细节打日志
   case CheckThrottled():
@@ -98,6 +100,8 @@ switch (result) {
 updater.close();
 ```
 
+构造时把 `fallbackUrls` 一并传入（与 `indexUrls` 同级），例如
+`http://host/fallback/<product>.pb`。未配置则不启用 §12.6。
 ### D2.3b 启动 + 周期自动检查（SDK 能力）
 
 ```dart

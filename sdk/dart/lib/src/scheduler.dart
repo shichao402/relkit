@@ -112,6 +112,9 @@ class UpdateScheduler {
           // Surface to the user, but do not poll the network again until the
           // success interval elapses (install / skip happens on the host).
           _arm(policy.afterSuccess);
+        case FallbackRequired():
+          onResult(result);
+          _arm(policy.afterSuccess);
         case CheckFailed():
           onResult(result);
           _arm(policy.afterFailure);

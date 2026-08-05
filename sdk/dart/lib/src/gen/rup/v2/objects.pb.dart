@@ -1026,6 +1026,215 @@ class Staged extends $pb.GeneratedMessage {
   $pb.PbList<StagedArtifact> get artifacts => $_getList(8);
 }
 
+/// FallbackRule matches a client code range and urges a manual update.
+/// Match when min_code <= currentCode <= max_code (inclusive).
+class FallbackRule extends $pb.GeneratedMessage {
+  factory FallbackRule({
+    $fixnum.Int64? minCode,
+    $fixnum.Int64? maxCode,
+    $core.String? manualUrl,
+    $core.String? message,
+    $core.bool? mandatory,
+    $core.Iterable<Selector>? selectors,
+  }) {
+    final result = create();
+    if (minCode != null) result.minCode = minCode;
+    if (maxCode != null) result.maxCode = maxCode;
+    if (manualUrl != null) result.manualUrl = manualUrl;
+    if (message != null) result.message = message;
+    if (mandatory != null) result.mandatory = mandatory;
+    if (selectors != null) result.selectors.addAll(selectors);
+    return result;
+  }
+
+  FallbackRule._();
+
+  factory FallbackRule.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory FallbackRule.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'FallbackRule',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
+      createEmptyInstance: create)
+    ..aInt64(1, _omitFieldNames ? '' : 'minCode')
+    ..aInt64(2, _omitFieldNames ? '' : 'maxCode')
+    ..aOS(3, _omitFieldNames ? '' : 'manualUrl')
+    ..aOS(4, _omitFieldNames ? '' : 'message')
+    ..aOB(5, _omitFieldNames ? '' : 'mandatory')
+    ..pPM<Selector>(6, _omitFieldNames ? '' : 'selectors',
+        subBuilder: Selector.create)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FallbackRule clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FallbackRule copyWith(void Function(FallbackRule) updates) =>
+      super.copyWith((message) => updates(message as FallbackRule))
+          as FallbackRule;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static FallbackRule create() => FallbackRule._();
+  @$core.override
+  FallbackRule createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static FallbackRule getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<FallbackRule>(create);
+  static FallbackRule? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get minCode => $_getI64(0);
+  @$pb.TagNumber(1)
+  set minCode($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasMinCode() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearMinCode() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get maxCode => $_getI64(1);
+  @$pb.TagNumber(2)
+  set maxCode($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasMaxCode() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearMaxCode() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get manualUrl => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set manualUrl($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasManualUrl() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearManualUrl() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get message => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set message($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasMessage() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearMessage() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.bool get mandatory => $_getBF(4);
+  @$pb.TagNumber(5)
+  set mandatory($core.bool value) => $_setBool(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasMandatory() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearMandatory() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $pb.PbList<Selector> get selectors => $_getList(5);
+}
+
+/// Fallback is a signed emergency notice (schema rup.fallback/2).
+/// Logical key: fallback/<product>.pb (product-scoped, not channel).
+class Fallback extends $pb.GeneratedMessage {
+  factory Fallback({
+    $core.String? schema,
+    $core.String? product,
+    $fixnum.Int64? sequence,
+    $core.String? generatedAt,
+    $core.Iterable<FallbackRule>? rules,
+  }) {
+    final result = create();
+    if (schema != null) result.schema = schema;
+    if (product != null) result.product = product;
+    if (sequence != null) result.sequence = sequence;
+    if (generatedAt != null) result.generatedAt = generatedAt;
+    if (rules != null) result.rules.addAll(rules);
+    return result;
+  }
+
+  Fallback._();
+
+  factory Fallback.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory Fallback.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Fallback',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'schema')
+    ..aOS(2, _omitFieldNames ? '' : 'product')
+    ..aInt64(3, _omitFieldNames ? '' : 'sequence')
+    ..aOS(4, _omitFieldNames ? '' : 'generatedAt')
+    ..pPM<FallbackRule>(5, _omitFieldNames ? '' : 'rules',
+        subBuilder: FallbackRule.create)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Fallback clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Fallback copyWith(void Function(Fallback) updates) =>
+      super.copyWith((message) => updates(message as Fallback)) as Fallback;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static Fallback create() => Fallback._();
+  @$core.override
+  Fallback createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static Fallback getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Fallback>(create);
+  static Fallback? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get schema => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set schema($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSchema() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSchema() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get product => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set product($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasProduct() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearProduct() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get sequence => $_getI64(2);
+  @$pb.TagNumber(3)
+  set sequence($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSequence() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSequence() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get generatedAt => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set generatedAt($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasGeneratedAt() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearGeneratedAt() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $pb.PbList<FallbackRule> get rules => $_getList(4);
+}
+
 const $core.bool _omitFieldNames =
     $core.bool.fromEnvironment('protobuf.omit_field_names');
 const $core.bool _omitMessageNames =

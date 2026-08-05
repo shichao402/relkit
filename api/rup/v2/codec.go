@@ -12,6 +12,7 @@ const (
 	SchemaIndex      = "rup.index/2"
 	SchemaManifest   = "rup.manifest/2"
 	SchemaStaged     = "rup.staged/2"
+	SchemaFallback   = "rup.fallback/2"
 	SchemaEnvelope   = "rup.envelope/2"
 	SchemaPublicKey  = "rup.publickey/2"
 	SchemaPrivateKey = "rup.privatekey/2"
@@ -101,6 +102,28 @@ func MarshalStaged(doc *Staged) ([]byte, error) {
 	return proto.Marshal(NormalizeStaged(doc))
 }
 
+func NormalizeFallback(doc *Fallback) *Fallback {
+	if doc == nil {
+		return nil
+	}
+	cloned := proto.Clone(doc).(*Fallback)
+	cloned.Schema = SchemaFallback
+	for _, rule := range cloned.Rules {
+		if rule == nil {
+			continue
+		}
+		SortSelectors(rule.Selectors)
+	}
+	return cloned
+}
+
+func MarshalFallback(doc *Fallback) ([]byte, error) {
+	if doc == nil {
+		return nil, fmt.Errorf("nil fallback")
+	}
+	return proto.Marshal(NormalizeFallback(doc))
+}
+
 func MarshalEnvelope(doc *Envelope) ([]byte, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("nil envelope")
@@ -152,6 +175,14 @@ func UnmarshalStaged(data []byte) (*Staged, error) {
 	return doc, nil
 }
 
+func UnmarshalFallback(data []byte) (*Fallback, error) {
+	doc := &Fallback{}
+	if err := proto.Unmarshal(data, doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
 func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 	doc := &Envelope{}
 	if err := proto.Unmarshal(data, doc); err != nil {
@@ -182,6 +213,10 @@ func IndexKey(product, channel string) string {
 
 func ManifestKey(product, version string) string {
 	return path.Join("manifest", product, version+".pb")
+}
+
+func FallbackKey(product string) string {
+	return path.Join("fallback", product+".pb")
 }
 
 func normalizeArtifact(artifact *Artifact) {

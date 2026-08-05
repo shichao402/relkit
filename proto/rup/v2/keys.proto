@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package rup.v2;
+
+option go_package = "github.com/shichao402/relkit/api/rup/v2;rupv2";
+
+// PublicKeyDocument is the on-disk / embeddable public key record.
+message PublicKeyDocument {
+  string schema = 1; // "rup.publickey/2"
+  string key_id = 2;
+  string alg = 3; // "ed25519"
+  bytes public_key = 4; // raw 32-byte ed25519 public key
+}
+
+// PrivateKeyDocument is local-only; never publish.
+message PrivateKeyDocument {
+  string schema = 1; // "rup.privatekey/2"
+  string key_id = 2;
+  string alg = 3; // "ed25519"
+  bytes seed = 4; // raw 32-byte seed
+}

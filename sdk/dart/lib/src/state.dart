@@ -25,6 +25,7 @@ class UpdateState {
     this.lastCheckAt,
     this.lastResult,
     this.lastSeenSequence,
+    this.lastSeenFallbackSequence,
     Set<int>? skipped,
   }) : skipped = skipped ?? <int>{};
 
@@ -37,6 +38,7 @@ class UpdateState {
       },
       lastResult: json['lastResult'] as String?,
       lastSeenSequence: json['lastSeenSequence'] as int?,
+      lastSeenFallbackSequence: json['lastSeenFallbackSequence'] as int?,
       skipped: rawSkipped is List ? rawSkipped.whereType<int>().toSet() : null,
     );
   }
@@ -44,8 +46,11 @@ class UpdateState {
   DateTime? lastCheckAt;
   String? lastResult;
 
-  /// The highest sequence ever accepted. Never lower it.
+  /// The highest index sequence ever accepted. Never lower it.
   int? lastSeenSequence;
+
+  /// The highest fallback sequence ever accepted (product-scoped anti-rollback).
+  int? lastSeenFallbackSequence;
 
   /// Codes the user chose to skip. Ignored when an update is mandatory.
   final Set<int> skipped;
@@ -55,6 +60,8 @@ class UpdateState {
           'lastCheckAt': lastCheckAt!.toUtc().toIso8601String(),
         if (lastResult != null) 'lastResult': lastResult,
         if (lastSeenSequence != null) 'lastSeenSequence': lastSeenSequence,
+        if (lastSeenFallbackSequence != null)
+          'lastSeenFallbackSequence': lastSeenFallbackSequence,
         'skipped': skipped.toList()..sort(),
       };
 
@@ -62,6 +69,11 @@ class UpdateState {
   void observeSequence(int sequence) {
     final seen = lastSeenSequence;
     if (seen == null || sequence > seen) lastSeenSequence = sequence;
+  }
+
+  void observeFallbackSequence(int sequence) {
+    final seen = lastSeenFallbackSequence;
+    if (seen == null || sequence > seen) lastSeenFallbackSequence = sequence;
   }
 }
 

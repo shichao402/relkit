@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package rup.v2;
+
+option go_package = "github.com/shichao402/relkit/api/rup/v2;rupv2";
+
+// Signature is one Ed25519 signature over Envelope.payload bytes.
+message Signature {
+  string key_id = 1;
+  string alg = 2; // must be "ed25519"
+  bytes sig = 3; // raw 64-byte signature
+}
+
+// Envelope wraps a signed payload on the wire (schema rup.envelope/2).
+// payload is the protobuf serialization of Index or Fallback (not JSON).
+// The client knows which message to parse from the logical key / URL it fetched.
+message Envelope {
+  string schema = 1; // must be "rup.envelope/2"
+  bytes payload = 2;
+  repeated Signature signatures = 3;
+}

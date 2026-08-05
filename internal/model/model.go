@@ -19,6 +19,7 @@ const (
 	SchemaStaged     = rupv2.SchemaStaged
 	SchemaManifest   = rupv2.SchemaManifest
 	SchemaIndex      = rupv2.SchemaIndex
+	SchemaFallback   = rupv2.SchemaFallback
 	SchemaEnvelope   = rupv2.SchemaEnvelope
 	SchemaPublicKey  = rupv2.SchemaPublicKey
 	SchemaPrivateKey = rupv2.SchemaPrivateKey
@@ -33,6 +34,8 @@ type StagedArtifact = rupv2.StagedArtifact
 type ManifestDocument = rupv2.Manifest
 type ManifestArtifact = rupv2.Artifact
 type IndexDocument = rupv2.Index
+type FallbackDocument = rupv2.Fallback
+type FallbackRule = rupv2.FallbackRule
 type VersionNode = rupv2.VersionNode
 type ManifestRef = rupv2.DigestRef
 type Selector = rupv2.Selector
@@ -163,6 +166,10 @@ func IndexKey(product, channel string) string {
 
 func ManifestKey(product, version string) string {
 	return rupv2.ManifestKey(product, version)
+}
+
+func FallbackKey(product string) string {
+	return rupv2.FallbackKey(product)
 }
 
 func ArtifactKey(product, version, filename string) string {

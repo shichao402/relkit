@@ -116,3 +116,9 @@ func CheckOnce(ctx context.Context) error {
 | HTTP 200 但业务失败 | index 被缓存；`relkit-serve` 须对 `index/` no-cache |
 
 发布/serve 问题改读 `relkit agent-guide` / `relkit-serve agent-guide`。
+
+## Fallback (SPEC section 12.6)
+
+Set `Updater.FallbackURLs` to the signed `fallback/<product>.pb` URLs. `Check` merges
+results so `Available` beats `Fallback`. Call `CheckFallback` after a download/apply
+failure to urge a manual update page.

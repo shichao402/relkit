@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.invalid/rup/1/index.schema.json",
+  "title": "RUP Index v1",
+  "description": "客户端唯一入口。可变文档，每个 (product, channel) 一份，每次发布覆盖。包含版本链条与升级路径约束。本 Schema 校验的是信封 payload 解码后的对象，不是信封本身。注意：本 Schema 无法表达可达性约束（见 SPEC.md §10），发布工具必须额外执行该校验。",
+  "type": "object",
+  "required": ["schema", "product", "channel", "sequence", "generatedAt", "versions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "rup.index/1"
+    },
+    "product": {
+      "$ref": "#/$defs/identifier",
+      "description": "产品标识。客户端必须校验与自身期望一致，防止把 A 产品的更新装到 B 产品上"
+    },
+    "channel": {
+      "$ref": "#/$defs/identifier",
+      "description": "通道名，如 stable / beta。客户端必须校验与当前所处通道一致"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "该 channel 的发布序号，每次发布必须严格递增。客户端据此拒绝重放旧 index 的降级攻击"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC 时间戳。仅供展示与排障，禁止用于任何判定逻辑"
+    },
+    "minSupported": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "最低受支持的 code。客户端 code 小于此值时必须视为强制更新。与 minFrom 正交：本字段回答『当前版本还能不能用』，minFrom 回答『下一跳去哪』"
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "可选。用于缓解冻结攻击，代价是发布方需周期性重签。v1 客户端可以忽略"
+    },
+    "versions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "应该按 code 升序排列，但客户端禁止依赖该顺序（选路必须按 code 取最大值）",
+      "items": { "$ref": "#/$defs/versionNode" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "64 位小写十六进制"
+    },
+    "urls": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "同一份内容的多个镜像地址。禁止为不同镜像生成内容不同的多份文档",
+      "items": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^https?://"
+      }
+    },
+    "versionNode": {
+      "type": "object",
+      "required": ["version", "code", "manifest"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "面向人的版本字符串，任意格式。禁止用于任何比较"
+        },
+        "code": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "机器用的单调版本号，同一 (product, channel) 内必须唯一。唯一的合法比较依据"
+        },
+        "minFrom": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "要直接升级到本节点，客户端当前 code 必须不小于此值。抬高它可强制客户端先经由中间版本"
+        },
+        "releasedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "yanked": {
+          "type": "boolean",
+          "default": false,
+          "description": "撤回标记。为 true 时禁止作为升级目标，但必须保留在数组中（其他节点的 minFrom 可能依赖它的 code）"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "notesUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "manifest": {
+          "type": "object",
+          "required": ["sha256", "size", "urls"],
+          "additionalProperties": false,
+          "properties": {
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "size": { "type": "integer", "minimum": 0 },
+            "urls": { "$ref": "#/$defs/urls" }
+          }
+        },
+        "rollout": {
+          "type": "object",
+          "description": "预留给灰度分流。v1 客户端禁止依赖"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package rup.v2;
+
+option go_package = "github.com/shichao402/relkit/api/rup/v2;rupv2";
+
+// Schema identifiers for v2 documents (wire format is protobuf binary).
+// Logical object keys use a .pb suffix, e.g. index/<product>/<channel>.pb
+
+// Selector is one key/value match constraint.
+// Signed messages MUST NOT use map<>; encode helpers sort by key before Marshal.
+message Selector {
+  string key = 1;
+  string value = 2;
+}
+
+// MetaEntry is opaque host-defined metadata (string values only in v2).
+message MetaEntry {
+  string key = 1;
+  string value = 2;
+}
+
+// DigestRef points at immutable bytes with mirrors.
+message DigestRef {
+  string sha256 = 1; // 64 lowercase hex chars
+  int64 size = 2;
+  repeated string urls = 3; // absolute http(s) URLs, same bytes
+}
+
+// VersionNode is one release in an Index chain.
+message VersionNode {
+  string version = 1; // display only; never compare
+  int64 code = 2;
+  int64 min_from = 3; // default 0
+  bool yanked = 4;
+  DigestRef manifest = 5;
+  string released_at = 6; // RFC 3339 UTC
+  string notes = 7;
+  string notes_url = 8;
+}
+
+// Index is the signed channel pointer (schema rup.index/2).
+message Index {
+  string schema = 1; // must be "rup.index/2"
+  string product = 2;
+  string channel = 3;
+  int64 sequence = 4; // >= 1
+  string generated_at = 5; // RFC 3339 UTC
+  int64 min_supported = 6; // 0 means unset / not enforced
+  bool has_min_supported = 7;
+  string expires_at = 8; // optional RFC 3339
+  repeated VersionNode versions = 9;
+}
+
+// Artifact describes one downloadable file inside a Manifest.
+message Artifact {
+  string id = 1;
+  string filename = 2;
+  int64 size = 3;
+  string sha256 = 4;
+  string kind = 5; // archive|installer|binary|blob
+  repeated Selector selectors = 6; // sorted by key when encoded
+  repeated string urls = 7;
+  repeated MetaEntry meta = 8; // sorted by key when encoded
+}
+
+// Manifest describes all artifacts for one version (schema rup.manifest/2).
+message Manifest {
+  string schema = 1; // must be "rup.manifest/2"
+  string product = 2;
+  string version = 3;
+  int64 code = 4;
+  string released_at = 5;
+  string notes = 6;
+  repeated Artifact artifacts = 7;
+}
+
+// StagedArtifact is local-only; never published with urls.
+message StagedArtifact {
+  string id = 1;
+  string filename = 2;
+  int64 size = 3;
+  string sha256 = 4;
+  string kind = 5;
+  repeated Selector selectors = 6;
+  repeated MetaEntry meta = 7;
+  string source_path = 8; // discarded at publish
+}
+
+// Staged is the offline stage product (schema rup.staged/2).
+message Staged {
+  string schema = 1; // must be "rup.staged/2"
+  string product = 2;
+  string version = 3;
+  int64 code = 4;
+  int64 min_from = 5;
+  string channel = 6;
+  string created_at = 7;
+  string notes = 8;
+  repeated StagedArtifact artifacts = 9;
+}
+
+// FallbackRule matches a client code range and urges a manual update.
+// Match when min_code <= currentCode <= max_code (inclusive).
+message FallbackRule {
+  int64 min_code = 1; // inclusive; default 0
+  int64 max_code = 2; // inclusive; MUST be >= 1
+  string manual_url = 3; // absolute http(s) URL; host opens in a browser
+  string message = 4; // user-facing text
+  bool mandatory = 5; // host MUST NOT offer to dismiss without acknowledging
+  repeated Selector selectors = 6; // optional; empty matches all clients
+}
+
+// Fallback is a signed emergency notice (schema rup.fallback/2).
+// Logical key: fallback/<product>.pb (product-scoped, not channel).
+message Fallback {
+  string schema = 1; // must be "rup.fallback/2"
+  string product = 2;
+  int64 sequence = 3; // >= 1; anti-rollback, independent of index sequence
+  string generated_at = 4; // RFC 3339 UTC
+  repeated FallbackRule rules = 5;
+}

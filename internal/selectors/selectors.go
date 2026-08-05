@@ -15,7 +15,7 @@ type DuplicateSelectors struct {
 func SelectArtifact(manifest *model.ManifestDocument, clientSelectors map[string]string) *model.ManifestArtifact {
 	var matches []*model.ManifestArtifact
 	for _, artifact := range manifest.Artifacts {
-		if artifact != nil && matchesClient(model.SelectorsToMap(artifact.Selectors), clientSelectors) {
+		if artifact != nil && MatchesClient(model.SelectorsToMap(artifact.Selectors), clientSelectors) {
 			matches = append(matches, artifact)
 		}
 	}
@@ -50,13 +50,19 @@ func FindDuplicateSelectors(artifacts []*model.StagedArtifact) []DuplicateSelect
 	return duplicates
 }
 
-func matchesClient(artifactSelectors, clientSelectors map[string]string) bool {
-	for key, value := range artifactSelectors {
+// MatchesClient reports whether every key in requiredSelectors is present in
+// clientSelectors with the same value. An empty required map matches everyone.
+func MatchesClient(requiredSelectors, clientSelectors map[string]string) bool {
+	for key, value := range requiredSelectors {
 		if clientSelectors[key] != value {
 			return false
 		}
 	}
 	return true
+}
+
+func matchesClient(artifactSelectors, clientSelectors map[string]string) bool {
+	return MatchesClient(artifactSelectors, clientSelectors)
 }
 
 func selectorKey(selectors map[string]string) string {
