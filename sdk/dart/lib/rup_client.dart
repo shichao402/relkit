@@ -18,7 +18,11 @@ export 'package:fixnum/fixnum.dart' show Int64;
 
 export 'src/apply/apply.dart';
 export 'src/apply/swap.dart';
-export 'src/apply/unpack.dart' show expandInnerInstallerIfPresent, macosDmgInnerName, unpackUpdatePackage;
+export 'src/apply/unpack.dart'
+    show
+        expandInnerInstallerIfPresent,
+        selectInstallRootContainingExecutable,
+        unpackUpdatePackage;
 export 'src/chain.dart';
 export 'src/download.dart';
 export 'src/envelope.dart';

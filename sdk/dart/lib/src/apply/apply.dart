@@ -55,9 +55,10 @@ class StagedUpdate {
 /// attacker arbitrary file writes.
 ///
 /// The outer file is a zip. On Windows it holds the portable tree directly.
-/// On macOS it holds a single `.dmg`; that image is mounted and copied so the
-/// staged tree matches the Windows layout (`.app` + sidecar tools). A future
-/// Windows `.exe` installer would extend the same unpack step.
+/// On macOS it holds a single `.dmg`; that image is mounted and reduced to the
+/// install root that contains [executableName] (so Applications / Gatekeeper
+/// helpers on a manual-install DMG are ignored). A future Windows `.exe`
+/// installer would extend the same unpack step.
 ///
 /// [executableName] is the application executable's path within the package,
 /// and is required rather than guessed: a package that does not contain it is
@@ -74,21 +75,24 @@ Future<StagedUpdate> stageUpdate({
   await unpackUpdatePackage(
     archive: archive,
     stagingRoot: stagingRoot,
+    executableName: executableName,
     log: note,
   );
 
   // Some packages wrap everything in a single top-level directory and some do
-  // not. Rather than make the caller care, look one level down when the
-  // executable is not where it should be.
+  // not. Look for the directory that actually contains [executableName],
+  // preferring a `*.app` when several match (DMG helpers can leave siblings).
   var root = stagingRoot;
   var executable = File('${root.path}${Platform.pathSeparator}'
       '${executableName.replaceAll('/', Platform.pathSeparator)}');
 
   if (!executable.existsSync()) {
-    final entries = stagingRoot.listSync();
-    final nested = entries.whereType<Directory>().toList();
-    if (entries.length == 1 && nested.length == 1) {
-      root = nested.single;
+    final match = selectInstallRootContainingExecutable(
+      stagingRoot,
+      executableName,
+    );
+    if (match != null && match.path != stagingRoot.path) {
+      root = match;
       executable = File('${root.path}${Platform.pathSeparator}'
           '${executableName.replaceAll('/', Platform.pathSeparator)}');
     }

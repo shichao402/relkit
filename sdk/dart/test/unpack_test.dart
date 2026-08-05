@@ -46,7 +46,7 @@ void main() {
   test('expandInnerInstallerIfPresent rejects dmg on non-macOS', () async {
     final payload = Directory('${root.path}${Platform.pathSeparator}stage')
       ..createSync();
-    File('${payload.path}${Platform.pathSeparator}SvnAutoMerge.dmg')
+    File('${payload.path}${Platform.pathSeparator}App.dmg')
         .writeAsBytesSync(const []);
 
     await expectLater(
@@ -54,4 +54,49 @@ void main() {
       throwsA(isA<ApplyException>()),
     );
   }, skip: Platform.isMacOS);
+
+  test('selectInstallRootContainingExecutable prefers .app among helpers', () {
+    final payload = Directory('${root.path}${Platform.pathSeparator}payload')
+      ..createSync();
+    Link('${payload.path}${Platform.pathSeparator}Applications')
+        .createSync('/Applications');
+
+    final helper = Directory(
+      '${payload.path}${Platform.pathSeparator}OpenPrivacy.app'
+      '${Platform.pathSeparator}Contents${Platform.pathSeparator}MacOS',
+    )..createSync(recursive: true);
+    File('${helper.path}${Platform.pathSeparator}applet').writeAsStringSync('x');
+
+    final mainMacos = Directory(
+      '${payload.path}${Platform.pathSeparator}Product.app'
+      '${Platform.pathSeparator}Contents${Platform.pathSeparator}MacOS',
+    )..createSync(recursive: true);
+    File('${mainMacos.path}${Platform.pathSeparator}Product')
+        .writeAsStringSync('bin');
+
+    final selected = selectInstallRootContainingExecutable(
+      payload,
+      'Contents/MacOS/Product',
+    );
+    expect(selected, isNotNull);
+    expect(selected!.path.endsWith('Product.app'), isTrue);
+  });
+
+  test('selectInstallRootContainingExecutable returns null when missing', () {
+    final payload = Directory('${root.path}${Platform.pathSeparator}payload')
+      ..createSync();
+    final helper = Directory(
+      '${payload.path}${Platform.pathSeparator}helper.app'
+      '${Platform.pathSeparator}Contents${Platform.pathSeparator}MacOS',
+    )..createSync(recursive: true);
+    File('${helper.path}${Platform.pathSeparator}applet').writeAsStringSync('x');
+
+    expect(
+      selectInstallRootContainingExecutable(
+        payload,
+        'Contents/MacOS/Missing',
+      ),
+      isNull,
+    );
+  });
 }
