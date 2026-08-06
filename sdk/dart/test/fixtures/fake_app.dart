@@ -51,12 +51,20 @@ Future<void> main(List<String> args) async {
     executableName: _executableName,
   );
 
+  final sessionPath = valueOf('--apply-session');
+  final timeoutSeconds = int.tryParse(valueOf('--apply-timeout') ?? '');
+
   await launchApply(
     staged: staged,
     installDir: here,
     executableName: _executableName,
     preserve: const ['logs'],
     logFile: File(valueOf('--apply-log')!),
+    sessionFile: sessionPath == null ? null : File(sessionPath),
+    renameTimeout:
+        timeoutSeconds == null ? null : Duration(seconds: timeoutSeconds),
+    targetCode: 2,
+    targetVersion: 'v2',
   );
 
   journal.writeAsStringSync('exiting for update\n', mode: FileMode.append);

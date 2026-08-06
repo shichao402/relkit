@@ -28,10 +28,12 @@ library;
 import 'dart:io';
 
 import 'apply_exception.dart';
+import 'session.dart';
 import 'swap.dart';
 import 'unpack.dart';
 
 export 'apply_exception.dart' show ApplyException;
+export 'session.dart';
 
 /// The argument that tells a copy of the application it was started to replace
 /// an installation rather than to be used.
@@ -68,6 +70,7 @@ Future<StagedUpdate> stageUpdate({
   required File archive,
   required Directory stagingRoot,
   required String executableName,
+  Duration clearTimeout = const Duration(seconds: 30),
   void Function(String message)? log,
 }) async {
   final note = log ?? (_) {};
@@ -76,6 +79,7 @@ Future<StagedUpdate> stageUpdate({
     archive: archive,
     stagingRoot: stagingRoot,
     executableName: executableName,
+    clearTimeout: clearTimeout,
     log: note,
   );
 
@@ -133,12 +137,28 @@ Future<StagedUpdate> stageUpdate({
 ///
 /// Deliberately not doing the exiting itself: a host with unsaved state, an
 /// open database or a window to close has to be the one to decide how.
+///
+/// [sessionFile] is where the update announces itself to any other process
+/// that starts while it runs -- see `session.dart`. It is written here rather
+/// than by the staged copy because the staged copy takes a second or two to
+/// boot, and a user who starts the application inside that window would
+/// otherwise see nothing to warn them. It must live outside both [installDir]
+/// and the staging area, since both are about to be replaced or deleted.
+///
+/// [renameTimeout] is how long the staged copy waits for the installation to
+/// be released. It belongs to the host: how long an update may take before
+/// giving up is a product decision, and the host is also the only side that
+/// knows whether it has arranged for other copies to step aside.
 Future<void> launchApply({
   required StagedUpdate staged,
   required Directory installDir,
   required String executableName,
   List<PreservedEntry> preserve = const [],
   File? logFile,
+  File? sessionFile,
+  Duration? renameTimeout,
+  int? targetCode,
+  String? targetVersion,
   bool relaunch = true,
 }) async {
   final arguments = <String>[
@@ -151,8 +171,28 @@ Future<void> launchApply({
     executableName,
     if (preserve.isNotEmpty) ...['--preserve', preserve.join(',')],
     if (logFile != null) ...['--apply-log', logFile.absolute.path],
+    if (sessionFile != null) ...['--apply-session', sessionFile.absolute.path],
+    if (renameTimeout != null)
+      ...['--apply-timeout', '${renameTimeout.inSeconds}'],
     if (!relaunch) '--no-relaunch',
   ];
+
+  if (sessionFile != null) {
+    final now = DateTime.now();
+    writeApplySession(
+      sessionFile,
+      ApplySession(
+        state: ApplyState.running,
+        pid: pid,
+        startedAt: now,
+        updatedAt: now,
+        installDir: installDir.absolute.path,
+        stagedRoot: staged.directory.absolute.path,
+        targetCode: targetCode,
+        targetVersion: targetVersion,
+      ),
+    );
+  }
 
   await Process.start(
     staged.executable.absolute.path,
@@ -173,6 +213,8 @@ class ApplyRequest {
     required this.preserve,
     required this.relaunch,
     required this.logFile,
+    this.sessionFile,
+    this.renameTimeout,
   });
 
   final Directory installDir;
@@ -187,6 +229,13 @@ class ApplyRequest {
   final List<PreservedEntry> preserve;
   final bool relaunch;
   final File? logFile;
+
+  /// Where to report progress and failure so other processes can see it.
+  final File? sessionFile;
+
+  /// How long to wait for the installation to be released. Null means the
+  /// default in [runApplyMode].
+  final Duration? renameTimeout;
 
   /// Reads a request out of `main`'s arguments, or returns null when this is
   /// an ordinary start.
@@ -214,6 +263,8 @@ class ApplyRequest {
 
     final preserve = value('--preserve');
     final logFile = value('--apply-log');
+    final sessionFile = value('--apply-session');
+    final timeoutSeconds = int.tryParse(value('--apply-timeout') ?? '');
 
     return ApplyRequest(
       installDir: Directory(installDir),
@@ -224,6 +275,10 @@ class ApplyRequest {
           : preserve.split(',').where((e) => e.isNotEmpty).toList(),
       relaunch: !args.contains('--no-relaunch'),
       logFile: logFile == null ? null : File(logFile),
+      sessionFile: sessionFile == null ? null : File(sessionFile),
+      renameTimeout: timeoutSeconds == null || timeoutSeconds <= 0
+          ? null
+          : Duration(seconds: timeoutSeconds),
     );
   }
 }
@@ -277,6 +332,46 @@ Future<void> runApplyMode(
     }
   }
 
+  final sessionFile = request.sessionFile;
+  final startedAt = DateTime.now();
+
+  ApplySession session = ApplySession(
+    state: ApplyState.running,
+    pid: pid,
+    startedAt: startedAt,
+    updatedAt: startedAt,
+    installDir: request.installDir.absolute.path,
+    stagedRoot: request.stagedRoot.absolute.path,
+  );
+  // The host wrote the record before starting this process; keep whatever it
+  // knew that this process does not, such as which version is being installed.
+  if (sessionFile != null) {
+    final handed = readApplySession(sessionFile);
+    if (handed != null) {
+      session = ApplySession(
+        state: ApplyState.running,
+        pid: pid,
+        startedAt: handed.startedAt,
+        updatedAt: startedAt,
+        installDir: session.installDir,
+        stagedRoot: session.stagedRoot,
+        targetCode: handed.targetCode,
+        targetVersion: handed.targetVersion,
+      );
+    }
+    writeApplySession(sessionFile, session);
+  }
+
+  var lastBeat = startedAt;
+  void beat() {
+    if (sessionFile == null) return;
+    final now = DateTime.now();
+    if (now.difference(lastBeat) < heartbeatInterval) return;
+    lastBeat = now;
+    session = session.copyWith(updatedAt: now);
+    writeApplySession(sessionFile, session);
+  }
+
   try {
     final stagedDir = request.stagedRoot;
 
@@ -296,11 +391,22 @@ Future<void> runApplyMode(
       stagedDir: stagedDir,
       preserve: request.preserve,
       keepStaged: true,
-      renameTimeout: renameTimeout,
+      renameTimeout: request.renameTimeout ?? renameTimeout,
+      onWaiting: (_, __) => beat(),
       log: note,
     );
 
     note('replaced');
+
+    if (sessionFile != null) {
+      writeApplySession(
+        sessionFile,
+        session.copyWith(
+          state: ApplyState.succeeded,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    }
 
     if (request.relaunch) {
       final installed = File('${request.installDir.path}'
@@ -319,23 +425,78 @@ Future<void> runApplyMode(
   } on Object catch (error, stack) {
     note('FAILED: $error');
     note(stack.toString());
+
+    // Without this the only trace of a failed update is a log file nobody
+    // opens: this process has no window, and the application it was updating
+    // is not running. The next start reads it and can finally say what
+    // happened.
+    if (sessionFile != null) {
+      writeApplySession(
+        sessionFile,
+        session.copyWith(
+          state: ApplyState.failed,
+          updatedAt: DateTime.now(),
+          message: _describe(error),
+          needsAttention: error is SwapException && !error.rolledBack,
+        ),
+      );
+    }
+
     stderr.writeln(error);
     exit(1);
   }
+}
+
+String _describe(Object error) {
+  if (error is SwapException) return error.message;
+  if (error is ApplyException) return error.message;
+  return error.toString();
 }
 
 /// Deletes a staging directory left behind by a completed update.
 ///
 /// Call on startup. Failure is not worth reporting: the space is reclaimed by
 /// the next update, which clears the directory before using it.
-Future<void> cleanStagingArea(Directory stagingRoot) async {
+///
+/// [keep] names entries directly under [stagingRoot] to leave alone. Its
+/// purpose is the verified package: it is the expensive part of an update, it
+/// is already known to match the signed manifest, and throwing it away means a
+/// user whose update failed pays for the download a second time. A host that
+/// keeps it must also decide when to stop -- see the caller.
+///
+/// **Do not call this while an apply is running.** The staged copy is
+/// executing from inside this directory, so deleting it either fails outright
+/// or removes files the update still needs. `session.dart` is how a host that
+/// might have just started during an update finds out.
+Future<void> cleanStagingArea(
+  Directory stagingRoot, {
+  List<String> keep = const [],
+}) async {
   if (!stagingRoot.existsSync()) return;
-  try {
-    stagingRoot.deleteSync(recursive: true);
-  } on FileSystemException {
-    // Still locked, or gone already. Either way there is nothing to do.
+
+  if (keep.isEmpty) {
+    try {
+      stagingRoot.deleteSync(recursive: true);
+    } on FileSystemException {
+      // Still locked, or gone already. Either way there is nothing to do.
+    }
+    return;
+  }
+
+  final kept = keep.map(_normaliseName).toSet();
+  for (final entry in stagingRoot.listSync(followLinks: false)) {
+    final name = entry.path.split(Platform.pathSeparator).last;
+    if (kept.contains(_normaliseName(name))) continue;
+    try {
+      entry.deleteSync(recursive: true);
+    } on FileSystemException {
+      // Same as above: the next update clears what is in its way.
+    }
   }
 }
+
+String _normaliseName(String name) =>
+    Platform.isWindows ? name.toLowerCase() : name;
 
 bool _samePath(Directory a, Directory b) {
   String normalise(Directory dir) {

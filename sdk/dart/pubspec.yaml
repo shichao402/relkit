@@ -3,7 +3,7 @@ description: >-
   A RUP (Release & Update Protocol) client: fetches a signed index, verifies it,
   picks the next version along the upgrade chain, and downloads a hash-verified
   artifact. Applying the update is left to the host.
-version: 0.3.1
+version: 0.4.0
 repository: https://github.com/shichao402/relkit/tree/main/sdk/dart
 homepage: https://github.com/shichao402/relkit/tree/main/sdk/dart
 

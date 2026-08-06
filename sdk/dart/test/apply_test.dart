@@ -10,6 +10,7 @@ library;
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
+import 'package:rup_client/rup_client.dart';
 import 'package:test/test.dart';
 
 /// Compiling takes a while, so it happens once and every test reuses the
@@ -222,6 +223,123 @@ void main() {
         'v1',
         reason: 'a package that cannot be applied must not disturb anything');
   }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('an update in flight is announced, and says so when it lands', () async {
+    // The session file is the only way a process that starts during an update
+    // can find out that one is happening. Without it the user, seeing the
+    // application vanish, starts it again and locks the update out for good.
+    installVersion(install, 'v1');
+    final package = packageOf('v2');
+    final session = File('${root.path}${Platform.pathSeparator}session.json');
+
+    await run(install, [
+      '--self-update',
+      package.path,
+      '--staging',
+      '${root.path}${Platform.pathSeparator}staging',
+      '--apply-log',
+      applyLog.path,
+      '--apply-session',
+      session.path,
+    ]);
+
+    await waitForJournal('started v2');
+
+    final record = readApplySession(session);
+    expect(record, isNotNull, reason: 'the outcome has to outlive the apply');
+    expect(record!.state, ApplyState.succeeded);
+    expect(record.targetVersion, 'v2',
+        reason: 'the host writes which version it is installing, and the '
+            'applying process must not lose it');
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('a failed apply leaves behind why, not just a log nobody opens',
+      () async {
+    // A blocked update has no window and no application to report through.
+    // If it does not write down what happened, the next start cannot tell the
+    // user anything at all -- which is exactly the case that sent someone
+    // hunting through log files by hand.
+    installVersion(install, 'v1');
+    final package = packageOf('v2');
+    final session = File('${root.path}${Platform.pathSeparator}session.json');
+
+    final held = File('${install.path}${Platform.pathSeparator}version.txt')
+        .openSync(mode: FileMode.append);
+    addTearDown(held.closeSync);
+
+    await run(install, [
+      '--self-update',
+      package.path,
+      '--staging',
+      '${root.path}${Platform.pathSeparator}staging',
+      '--apply-log',
+      applyLog.path,
+      '--apply-session',
+      session.path,
+      '--apply-timeout',
+      '2',
+    ]);
+
+    ApplySession? record;
+    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (DateTime.now().isBefore(deadline)) {
+      record = readApplySession(session);
+      if (record != null && record.state != ApplyState.running) break;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+
+    expect(record, isNotNull);
+    expect(record!.state, ApplyState.failed);
+    expect(record.message, contains('still in use'));
+    expect(record.needsAttention, isFalse,
+        reason: 'a blocked rename changes nothing, so a retry is all it needs');
+    expect(
+        File('${install.path}${Platform.pathSeparator}version.txt')
+            .readAsStringSync(),
+        'v1');
+  },
+      timeout: const Timeout(Duration(minutes: 2)),
+      skip: Platform.isWindows ? null : 'needs mandatory file locking');
+
+  group('cleaning up the staging area', () {
+    test('keeps the verified package so a retry does not download it again',
+        () async {
+      final staging = Directory('${root.path}${Platform.pathSeparator}staging')
+        ..createSync();
+      final download = Directory(
+          '${staging.path}${Platform.pathSeparator}download')
+        ..createSync();
+      final zip = File('${download.path}${Platform.pathSeparator}v2.zip')
+        ..writeAsStringSync('verified bytes');
+      final unpacked =
+          Directory('${staging.path}${Platform.pathSeparator}unpacked')
+            ..createSync();
+      File('${unpacked.path}${Platform.pathSeparator}app.exe')
+          .writeAsStringSync('unpacked');
+
+      await cleanStagingArea(staging, keep: const ['download']);
+
+      expect(zip.readAsStringSync(), 'verified bytes');
+      expect(
+          Directory('${staging.path}${Platform.pathSeparator}unpacked')
+              .existsSync(),
+          isFalse);
+    });
+
+    test('removes everything once nothing needs keeping', () async {
+      final staging = Directory('${root.path}${Platform.pathSeparator}staging')
+        ..createSync();
+      final download =
+          Directory('${staging.path}${Platform.pathSeparator}download')
+            ..createSync();
+      File('${download.path}${Platform.pathSeparator}v2.zip')
+          .writeAsStringSync('done with this');
+
+      await cleanStagingArea(staging);
+
+      expect(staging.existsSync(), isFalse);
+    });
+  });
 
   test('a copy running inside the installation refuses to replace it',
       () async {

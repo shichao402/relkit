@@ -65,6 +65,28 @@ Future<VerifiedFile> downloadArtifact(
   final metaFile = File('${target.path}.part.meta');
   final expectedSize = artifact.size.toInt();
 
+  // A complete copy from an earlier attempt is worth more than a fresh
+  // download: it is the same bytes, and the check below is the same check that
+  // would accept them at the end anyway. This is what makes retrying a failed
+  // *install* free -- the package survives, and only the part that went wrong
+  // is repeated.
+  if (await target.exists() && await _verify(target, artifact) == null) {
+    log?.call('reusing verified ${target.path}');
+    await _deleteQuietly(partial);
+    await _deleteQuietly(metaFile);
+    onProgress?.call(DownloadProgress(
+      received: expectedSize,
+      total: expectedSize,
+      bytesPerSecond: 0,
+      eta: Duration.zero,
+    ));
+    return VerifiedFile(
+      file: target,
+      artifact: artifact,
+      sourceUrl: Uri.file(target.path),
+    );
+  }
+
   final failures = <String>[];
   for (final rawUrl in artifact.urls) {
     final url = Uri.tryParse(rawUrl);

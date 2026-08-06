@@ -62,6 +62,13 @@ class SwapException implements Exception {
 /// How the staged tree gets to its destination. See [swapInstallation].
 typedef PlaceStaged = Future<void> Function(Directory from, Directory to);
 
+/// Called on every failed attempt to take the installation directory.
+///
+/// The wait is the only part of a swap that takes long enough for anyone to
+/// notice, so it is also the only part that has to be observable from outside
+/// this process. Callers use it to keep a heartbeat fresh.
+typedef WaitingForInstall = void Function(Duration waited, int attempts);
+
 Future<void> swapInstallation({
   required Directory installDir,
   required Directory stagedDir,
@@ -69,6 +76,7 @@ Future<void> swapInstallation({
   bool keepStaged = false,
   Duration renameTimeout = const Duration(seconds: 60),
   PlaceStaged? placeStaged,
+  WaitingForInstall? onWaiting,
   void Function(String message)? log,
 }) async {
   final note = log ?? (_) {};
@@ -109,6 +117,7 @@ Future<void> swapInstallation({
     installDir,
     retired,
     timeout: renameTimeout,
+    onWaiting: onWaiting,
     log: note,
   );
 
@@ -231,11 +240,19 @@ Future<void> _renameWithRetry(
   Directory from,
   Directory to, {
   required Duration timeout,
+  WaitingForInstall? onWaiting,
   required void Function(String) log,
 }) async {
-  final deadline = DateTime.now().add(timeout);
+  final startedAt = DateTime.now();
+  final deadline = startedAt.add(timeout);
   var delay = const Duration(milliseconds: 50);
   var attempts = 0;
+  // Logging every attempt would bury the rest of the update log in hundreds of
+  // identical lines, and logging none is how a wait that should have taken
+  // milliseconds went eight seconds without leaving a trace of who was
+  // holding the directory. One line per interval keeps both the cause and the
+  // duration.
+  var nextReport = const Duration(seconds: 2);
   Object? last;
 
   while (true) {
@@ -243,11 +260,26 @@ Future<void> _renameWithRetry(
     try {
       from.renameSync(to.path);
       if (attempts > 1) {
-        log('the installation became free after $attempts attempts');
+        final waited = DateTime.now().difference(startedAt);
+        log('the installation became free after $attempts attempts '
+            '(${waited.inMilliseconds}ms)');
       }
       return;
     } on FileSystemException catch (error) {
       last = error;
+      final waited = DateTime.now().difference(startedAt);
+
+      if (waited >= nextReport) {
+        log('still waiting for ${from.path} after ${waited.inSeconds}s '
+            '($attempts attempts): $error');
+        nextReport += const Duration(seconds: 5);
+      }
+
+      // The caller uses this to tell the rest of the world it is still alive,
+      // which is what stops a user from starting the application again into
+      // the middle of an update.
+      onWaiting?.call(waited, attempts);
+
       if (!DateTime.now().isBefore(deadline)) break;
       await Future<void>.delayed(delay);
       if (delay < const Duration(milliseconds: 500)) {

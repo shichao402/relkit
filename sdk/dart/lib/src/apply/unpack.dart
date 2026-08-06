@@ -34,17 +34,19 @@ String _join(String parent, String child) =>
 /// Pass the same [executableName] that [stageUpdate] uses (relative to the
 /// install root, e.g. `Contents/MacOS/MyApp` or `MyApp.exe`). On macOS this is
 /// what lets the expander ignore DMG install helpers.
+///
+/// [clearTimeout] bounds the wait for [stagingRoot] to be released before
+/// unpacking over it; see `_clearStagingRoot` for what tends to be holding it.
 Future<void> unpackUpdatePackage({
   required File archive,
   required Directory stagingRoot,
   String? executableName,
+  Duration clearTimeout = const Duration(seconds: 30),
   void Function(String message)? log,
 }) async {
   final note = log ?? (_) {};
 
-  if (stagingRoot.existsSync()) {
-    stagingRoot.deleteSync(recursive: true);
-  }
+  await _clearStagingRoot(stagingRoot, timeout: clearTimeout, log: note);
   stagingRoot.createSync(recursive: true);
 
   note('unpacking ${archive.path} into ${stagingRoot.path}');
@@ -59,6 +61,57 @@ Future<void> unpackUpdatePackage({
     executableName: executableName,
     log: note,
   );
+}
+
+/// Empties [stagingRoot], waiting out whatever is still holding it.
+///
+/// The thing most likely to be holding it is an apply from a previous attempt
+/// that has not finished: the staged copy runs from inside this directory, so
+/// on Windows it cannot be deleted until that process exits. Retrying turns
+/// "the update is permanently broken until you reboot" into "the update takes
+/// a few seconds longer", which is the whole difference for a user who just
+/// pressed the button again.
+///
+/// The raw [FileSystemException] is deliberately not what escapes: "Deletion
+/// failed, errno = 5" tells a user nothing they can act on.
+Future<void> _clearStagingRoot(
+  Directory stagingRoot, {
+  Duration timeout = const Duration(seconds: 30),
+  required void Function(String message) log,
+}) async {
+  if (!stagingRoot.existsSync()) return;
+
+  final startedAt = DateTime.now();
+  final deadline = startedAt.add(timeout);
+  var delay = const Duration(milliseconds: 100);
+  var reported = false;
+  Object? last;
+
+  while (true) {
+    try {
+      stagingRoot.deleteSync(recursive: true);
+      return;
+    } on FileSystemException catch (error) {
+      last = error;
+      if (!stagingRoot.existsSync()) return;
+
+      if (!reported) {
+        log('waiting for ${stagingRoot.path} to be released: $error');
+        reported = true;
+      }
+
+      if (!DateTime.now().isBefore(deadline)) break;
+      await Future<void>.delayed(delay);
+      if (delay < const Duration(seconds: 1)) delay *= 2;
+    }
+  }
+
+  throw ApplyException(
+      'could not clear the staging directory ${stagingRoot.path} after '
+      '${timeout.inSeconds}s. Something is still using it -- most likely an '
+      'earlier update that has not finished. Wait for it to end, or restart '
+      'the computer, then try again',
+      cause: last);
 }
 
 /// If [root] contains a `.dmg`, replace [root]'s contents with the install root.

@@ -241,6 +241,39 @@ void main() {
         expect(read(install, 'app.exe'), 'v2');
       }
     });
+
+    test('waiting is reported so the outside world can see it is alive',
+        () async {
+      // Without this callback the wait is invisible: no window, no log until
+      // it is over. That silence is what makes a user start the application
+      // again and lock the update out permanently.
+      write(install, 'app.exe', 'v1');
+      write(staged, 'app.exe', 'v2');
+
+      final held = File('${install.path}${Platform.pathSeparator}app.exe')
+          .openSync(mode: FileMode.append);
+      addTearDown(held.closeSync);
+
+      final waits = <Duration>[];
+      final lines = <String>[];
+
+      await swapInstallation(
+        installDir: install,
+        stagedDir: staged,
+        renameTimeout: const Duration(seconds: 3),
+        onWaiting: (waited, _) => waits.add(waited),
+        log: lines.add,
+      ).then<void>((_) {}, onError: (Object _) {});
+
+      if (Platform.isWindows) {
+        expect(waits, isNotEmpty,
+            reason: 'every blocked attempt has to be observable');
+        expect(lines.where((line) => line.contains('still waiting')), isNotEmpty,
+            reason: 'a wait that leaves no trace cannot be diagnosed later');
+      } else {
+        expect(waits, isEmpty, reason: 'POSIX never blocks on the rename');
+      }
+    });
   });
 
   group('rollback', () {

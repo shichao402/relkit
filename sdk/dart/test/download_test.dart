@@ -60,6 +60,57 @@ void main() {
       expect(progress.last.received, payload.length);
     });
 
+    test('reuses a complete download instead of fetching it again', () async {
+      // What this buys: an update whose *install* failed can be retried
+      // without paying for the package a second time. The bytes were checked
+      // against the signed manifest when they arrived, and are checked again
+      // here, so nothing is trusted merely because it is already on disk.
+      final server = await _RangeServer.bind(payload, supportRange: true);
+      addTearDown(server.close);
+
+      final target = File('${temp.path}${Platform.pathSeparator}app.bin');
+      await target.writeAsBytes(payload, flush: true);
+
+      var requests = 0;
+      server.onRequest = (_) => requests++;
+
+      final fetcher = HttpFetcher();
+      addTearDown(fetcher.close);
+
+      final verified = await downloadArtifact(
+        artifact([server.url]),
+        fetcher: fetcher,
+        destinationDir: temp,
+      );
+
+      expect(verified.file.path, target.path);
+      expect(requests, 0, reason: 'a verified copy makes the network pointless');
+    });
+
+    test('replaces a complete file whose bytes are wrong', () async {
+      // The dangerous half of reuse: a file with the right name and the wrong
+      // contents must never be handed on as verified.
+      final server = await _RangeServer.bind(payload, supportRange: true);
+      addTearDown(server.close);
+
+      final target = File('${temp.path}${Platform.pathSeparator}app.bin');
+      await target.writeAsBytes(
+        Uint8List.fromList(List.filled(payload.length, 0)),
+        flush: true,
+      );
+
+      final fetcher = HttpFetcher();
+      addTearDown(fetcher.close);
+
+      final verified = await downloadArtifact(
+        artifact([server.url]),
+        fetcher: fetcher,
+        destinationDir: temp,
+      );
+
+      expect(await verified.file.readAsBytes(), payload);
+    });
+
     test('resumes a partial single-connection download', () async {
       final server = await _RangeServer.bind(payload, supportRange: true);
       addTearDown(server.close);
@@ -245,6 +296,10 @@ class _RangeServer {
   int failuresServed = 0;
   void Function(String rangeHeader)? onRange;
 
+  /// Every request, including the HEAD probe. Lets a test assert that the
+  /// network was not touched at all.
+  void Function(HttpRequest request)? onRequest;
+
   String get url => 'http://${_server.address.host}:${_server.port}/app.bin';
 
   static Future<_RangeServer> bind(
@@ -262,6 +317,7 @@ class _RangeServer {
   Future<void> close() => _server.close(force: true);
 
   Future<void> _handle(HttpRequest request) async {
+    onRequest?.call(request);
     if (failuresServed < _failTimes) {
       failuresServed++;
       request.response.statusCode = HttpStatus.serviceUnavailable;
