@@ -14,7 +14,10 @@ void main() {
     var checks = 0;
 
     final scheduler = UpdateScheduler(
-      policy: const UpdatePolicy(afterSuccess: Duration(hours: 24)),
+      runtime: const UpdateRuntimeConfig(
+        forceOnStart: false,
+        policy: UpdatePolicy(afterSuccess: Duration(hours: 24)),
+      ),
       check: ({bool force = false}) async {
         checks++;
         expect(force, isFalse);
@@ -106,6 +109,55 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 10));
 
     expect(delays, [const Duration(minutes: 30)]);
+    scheduler.stop();
+  });
+
+  test('forceOnStart runs check(force: true) even when throttled', () async {
+    var checks = 0;
+    bool? firstForce;
+
+    final scheduler = UpdateScheduler(
+      runtime: const UpdateRuntimeConfig(forceOnStart: true),
+      check: ({bool force = false}) async {
+        checks++;
+        firstForce ??= force;
+        return const UpToDate(sequence: 1);
+      },
+      onResult: (_) {},
+      scheduleTimer: (delay, callback) =>
+          Timer(const Duration(days: 365), callback),
+    );
+
+    scheduler.start();
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+
+    expect(checks, 1);
+    expect(firstForce, isTrue);
+    scheduler.stop();
+  });
+
+  test('forceOnStart false allows CheckThrottled on startup', () async {
+    final fixedNow = DateTime.utc(2026, 1, 1, 12);
+    final next = fixedNow.add(const Duration(hours: 3));
+    var checks = 0;
+
+    final scheduler = UpdateScheduler(
+      runtime: const UpdateRuntimeConfig(forceOnStart: false),
+      now: () => fixedNow,
+      check: ({bool force = false}) async {
+        checks++;
+        expect(force, isFalse);
+        return CheckThrottled(next);
+      },
+      onResult: (_) {},
+      scheduleTimer: (delay, callback) =>
+          Timer(const Duration(days: 365), callback),
+    );
+
+    scheduler.start();
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+
+    expect(checks, 1);
     scheduler.stop();
   });
 }

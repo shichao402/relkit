@@ -47,9 +47,43 @@ Generated types: `lib/src/gen/rup/v2/` (re-exported by `package:rup_client/rup_c
 - `RupUpdater.check()` — verify index, select next version, resolve artifact
 - `RupUpdater.download()` — Range multi-connection when possible, resume, retries; `DownloadProgress`
 - `UpdateScheduler` — start + periodic throttled checks
+- `UpdateRuntimeConfig` — host-injected scheduler config (`forceOnStart`, etc.)
 - `src/apply/` — optional portable directory-swap helpers (desktop hosts)
 
-The package does not decide UI, prompts, or silent installs.
+The package does not decide UI, prompts, or silent installs. It does not read
+configuration files: load JSON in the host and pass [UpdateRuntimeConfig].
+
+### Background checks
+
+```dart
+const runtime = UpdateRuntimeConfig(
+  checkOnStart: true,
+  forceOnStart: true, // cold start bypasses throttle; periodic ticks do not
+);
+
+UpdateScheduler(
+  runtime: runtime,
+  check: updater.check,
+  onResult: (result) { /* show UI on UpdateAvailable */ },
+).start();
+```
+
+Example host JSON (`assets/config/rup_update.json`):
+
+```json
+{
+  "checkOnStart": true,
+  "forceOnStart": true,
+  "afterSuccessHours": 24,
+  "afterFailureHours": 1
+}
+```
+
+```dart
+final runtime = UpdateRuntimeConfig.fromJson(jsonDecode(await rootBundle.loadString(...)));
+```
+
+Manual checks from settings should call `updater.check(force: true)` directly.
 
 ## Checking for an update
 

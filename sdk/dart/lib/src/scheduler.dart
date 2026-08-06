@@ -1,28 +1,29 @@
 /// Background check scheduling (SPEC.md section 12.2 companion).
 ///
-/// Throttling already lives in [UpdatePolicy.shouldCheck] / [RupUpdater.check].
-/// This type only wakes on a timer, calls `check(force: false)`, and reschedules
-/// from the result — so hosts do not re-implement "wait 24h / 1h" themselves.
+/// Throttling lives in [UpdatePolicy.shouldCheck] / [RupUpdater.check]. Periodic
+/// ticks call `check(force: false)`. The startup tick may call `check(force: true)`
+/// when [UpdateRuntimeConfig.forceOnStart] is true.
 library;
 
 import 'dart:async';
 
+import 'runtime_config.dart';
 import 'state.dart';
 import 'updater.dart';
 
 /// Runs throttled update checks on start and on a wake timer.
-///
-/// The scheduler never bypasses throttling. User-initiated checks stay on
-/// [RupUpdater.check] with `force: true` outside this type.
 class UpdateScheduler {
   UpdateScheduler({
     required this.check,
     required this.onResult,
-    this.policy = const UpdatePolicy(),
+    UpdateRuntimeConfig? runtime,
+    @Deprecated('Use runtime: UpdateRuntimeConfig(policy: ...) instead')
+    UpdatePolicy? policy,
     this.log,
     this.now,
     this.scheduleTimer,
-  });
+  }) : runtime = runtime ??
+            UpdateRuntimeConfig(policy: policy ?? const UpdatePolicy());
 
   /// Usually `updater.check` or a host wrapper that adds logging / support gates.
   final Future<UpdateCheckResult> Function({bool force}) check;
@@ -31,7 +32,10 @@ class UpdateScheduler {
   /// reschedule). Hosts typically open UI on [UpdateAvailable].
   final void Function(UpdateCheckResult result) onResult;
 
-  final UpdatePolicy policy;
+  final UpdateRuntimeConfig runtime;
+
+  UpdatePolicy get policy => runtime.policy;
+
   final void Function(String message)? log;
 
   /// Injectable clock for tests.
@@ -47,16 +51,25 @@ class UpdateScheduler {
 
   bool get isRunning => _running;
 
-  /// Starts the loop. When [checkOnStart] is true (default), a tick runs
-  /// immediately; otherwise the first wake is [UpdatePolicy.afterFailure]
-  /// (short) so a newly started host still converges quickly after failures.
-  void start({bool checkOnStart = true}) {
+  /// Starts the loop using [UpdateRuntimeConfig.checkOnStart] and
+  /// [UpdateRuntimeConfig.forceOnStart].
+  ///
+  /// Optional [checkOnStart] / [forceOnStart] override [runtime] for one start
+  /// call (tests and legacy hosts).
+  void start({
+    bool? checkOnStart,
+    bool? forceOnStart,
+  }) {
     if (_running) return;
     _running = true;
     _generation++;
-    log?.call('update scheduler started (checkOnStart=$checkOnStart)');
-    if (checkOnStart) {
-      unawaited(_tick());
+    final onStart = checkOnStart ?? runtime.checkOnStart;
+    final force = forceOnStart ?? runtime.forceOnStart;
+    log?.call(
+      'update scheduler started (checkOnStart=$onStart forceOnStart=$force)',
+    );
+    if (onStart) {
+      unawaited(_tick(force: force));
     } else {
       _arm(policy.afterFailure);
     }
@@ -83,7 +96,7 @@ class UpdateScheduler {
     final create = scheduleTimer ?? Timer.new;
     _timer = create(safe, () {
       if (!_running || gen != _generation) return;
-      unawaited(_tick());
+      unawaited(_tick(force: false));
     });
   }
 
@@ -92,12 +105,12 @@ class UpdateScheduler {
     _arm(wait < Duration.zero ? Duration.zero : wait);
   }
 
-  Future<void> _tick() async {
+  Future<void> _tick({bool force = false}) async {
     if (!_running || _inflight) return;
     _inflight = true;
     final gen = _generation;
     try {
-      final result = await check(force: false);
+      final result = await check(force: force);
       if (!_running || gen != _generation) return;
 
       switch (result) {
