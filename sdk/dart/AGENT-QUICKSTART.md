@@ -82,6 +82,9 @@ switch (result) {
   case UpToDate():
     break;
   case UpdateAvailable():
+    // result.releaseNotesMarkdown — 目标版本 Markdown 全文
+    // result.releaseNotesUrl — 仓库 changelog 链接（可选）
+    // result.priorReleaseNotes — 更早版本（优先 notesUrl）
     final file = await updater.download(
       result,
       destinationDir: stagingDownloadDir,

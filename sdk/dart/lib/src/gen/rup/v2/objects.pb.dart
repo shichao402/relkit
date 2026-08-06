@@ -893,6 +893,7 @@ class Staged extends $pb.GeneratedMessage {
     $core.String? createdAt,
     $core.String? notes,
     $core.Iterable<StagedArtifact>? artifacts,
+    $core.String? notesUrl,
   }) {
     final result = create();
     if (schema != null) result.schema = schema;
@@ -904,6 +905,7 @@ class Staged extends $pb.GeneratedMessage {
     if (createdAt != null) result.createdAt = createdAt;
     if (notes != null) result.notes = notes;
     if (artifacts != null) result.artifacts.addAll(artifacts);
+    if (notesUrl != null) result.notesUrl = notesUrl;
     return result;
   }
 
@@ -930,6 +932,7 @@ class Staged extends $pb.GeneratedMessage {
     ..aOS(8, _omitFieldNames ? '' : 'notes')
     ..pPM<StagedArtifact>(9, _omitFieldNames ? '' : 'artifacts',
         subBuilder: StagedArtifact.create)
+    ..aOS(10, _omitFieldNames ? '' : 'notesUrl')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1024,6 +1027,16 @@ class Staged extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(9)
   $pb.PbList<StagedArtifact> get artifacts => $_getList(8);
+
+  /// Optional absolute http(s) URL for release notes (copied onto VersionNode.notes_url).
+  @$pb.TagNumber(10)
+  $core.String get notesUrl => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set notesUrl($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasNotesUrl() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearNotesUrl() => $_clearField(10);
 }
 
 /// FallbackRule matches a client code range and urges a manual update.

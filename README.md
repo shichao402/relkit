@@ -78,6 +78,22 @@ relkit verify --deep
 
 `stage` / `publish` 省略版本参数时读 `VERSION.json`；默认 `codeStrategy` 为 `version-build`（code = `+build`）。
 
+### 更新日志（changelog）
+
+在 `relkit.json` 可选配置：
+
+```json
+"changelog": {
+  "file": "Documents/changelog/CHANGELOG.md",
+  "urlTemplate": "https://git.example.com/org/repo/blob/main/CHANGELOG.md#{anchor}"
+}
+```
+
+- `stage`：未传 `--notes` / `--notes-file` 时，从 `file` 抽取当前版本小节（Markdown）写入 `notes`；`urlTemplate`（或 `--notes-url`）生成 `notesUrl`
+- `publish`：最新版本保留内联 `notes`；更早版本清空 `notes`、只留 `notesUrl`
+- 占位符：`{version}` / `{version_slug}`（`+`→`-`）/ `{anchor}`（`v`+slug）
+- Dart SDK：`UpdateAvailable.releaseNotesMarkdown` / `releaseNotesUrl` / `priorReleaseNotes`
+
 ## relkit-serve（分发服务）
 
 ```bash

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/changelog"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/model"
@@ -168,7 +169,7 @@ func BuildArtifact(source string, pairs map[string]string, report *[]string) (*m
 	)
 }
 
-func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, channel string, notes string, notesFile string, useLink bool, printer Printer) (*model.StagedDocument, error) {
+func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, channel string, notes string, notesFile string, notesURL string, useLink bool, printer Printer) (*model.StagedDocument, error) {
 	if printer == nil {
 		printer = func(string) {}
 	}
@@ -178,12 +179,16 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 		return nil, err
 	}
 
-	if notesFile != "" {
-		data, err := os.ReadFile(notesFile)
-		if err != nil {
-			return nil, Error{Message: fmt.Sprintf("notes file not found: %s", notesFile)}
-		}
-		notes = strings.TrimSpace(string(data))
+	notes, notesURL, err = changelog.ResolveNotes(
+		changelog.Config{File: cfg.Changelog.File, URLTemplate: cfg.Changelog.URLTemplate},
+		cfg.Root,
+		version,
+		notes,
+		notesFile,
+		notesURL,
+	)
+	if err != nil {
+		return nil, Error{Message: err.Error()}
 	}
 
 	if len(adds) == 0 {
@@ -216,9 +221,16 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 		return nil, Error{Message: fmt.Sprintf("artifacts %q and %q declare identical selectors %v, so one of them could never be chosen (SPEC.md 11)", first.FirstID, first.SecondID, first.Selectors)}
 	}
 
-	staged, err := model.NewStagedDocument(cfg.Product, version, code, minFrom, resolvedChannel, artifacts, notes, "")
+	staged, err := model.NewStagedDocument(cfg.Product, version, code, minFrom, resolvedChannel, artifacts, notes, notesURL, "")
 	if err != nil {
 		return nil, err
+	}
+
+	if notes != "" {
+		printer(fmt.Sprintf("notes: %d chars", len(notes)))
+	}
+	if notesURL != "" {
+		printer("notesUrl: " + notesURL)
 	}
 
 	targetDir := ArtifactsDir(cfg.Root, version)

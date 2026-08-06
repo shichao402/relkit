@@ -15,9 +15,9 @@ import 'download.dart';
 import 'envelope.dart';
 import 'fetch.dart';
 import 'models.dart';
+import 'release_notes.dart';
 import 'selectors.dart';
 import 'state.dart';
-
 /// The outcome of a check.
 sealed class UpdateCheckResult {
   const UpdateCheckResult();
@@ -43,6 +43,7 @@ class UpdateAvailable extends UpdateCheckResult {
     required this.mandatory,
     required this.remainingHops,
     required this.sequence,
+    this.priorReleaseNotes = const <PriorReleaseNotes>[],
   });
 
   final VersionNode target;
@@ -60,7 +61,19 @@ class UpdateAvailable extends UpdateCheckResult {
 
   final int sequence;
 
+  /// Earlier releases: prefer [PriorReleaseNotes.notesUrl] over inlined bodies.
+  final List<PriorReleaseNotes> priorReleaseNotes;
+
   bool get isFinalHop => remainingHops == 1;
+
+  /// Markdown release notes for [target] (falls back to [manifest].notes).
+  String get releaseNotesMarkdown => resolveReleaseNotesMarkdown(
+        target: target,
+        manifest: manifest,
+      );
+
+  /// Repository / changelog URL for [target], if the publisher set one.
+  String get releaseNotesUrl => target.notesUrl.trim();
 }
 
 /// No source could be used. Every URL failed, or every one that answered was
@@ -295,6 +308,10 @@ class RupUpdater {
       mandatory: isMandatory(adopted, currentCode),
       remainingHops: resolveUpgradePath(adopted, currentCode).length,
       sequence: adopted.sequence.toInt(),
+      priorReleaseNotes: collectPriorReleaseNotes(
+        adopted,
+        targetCode: target.code.toInt(),
+      ),
     );
   }
 

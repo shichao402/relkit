@@ -15,6 +15,7 @@ import (
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/chain"
+	"github.com/shichao402/relkit/internal/changelog"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/model"
@@ -103,7 +104,11 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 
 	provisionalNode := model.NewIndexNode(staged, strings.Repeat("0", 64), 0, []string{"https://placeholder.invalid/"}, "")
-	provisional, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergeNode(existing.Versions, provisionalNode), model.MinSupportedPtr(existing), "")
+	provisionalVersions := mergeNode(existing.Versions, provisionalNode)
+	if err := changelog.CompactPriorNodes(provisionalVersions, cfg.Changelog.URLTemplate, staged.Code); err != nil {
+		return nil, Error{Message: err.Error()}
+	}
+	provisional, err := model.NewIndex(cfg.Product, channel, baseSequence+1, provisionalVersions, model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +181,11 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 
 	node := model.NewIndexNode(staged, manifestDigest, manifestSize, manifestURLs, "")
-	index, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergeNode(existing.Versions, node), model.MinSupportedPtr(existing), "")
+	versions := mergeNode(existing.Versions, node)
+	if err := changelog.CompactPriorNodes(versions, cfg.Changelog.URLTemplate, staged.Code); err != nil {
+		return nil, Error{Message: err.Error()}
+	}
+	index, err := model.NewIndex(cfg.Product, channel, baseSequence+1, versions, model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}

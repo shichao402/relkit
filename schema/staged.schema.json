@@ -34,6 +34,11 @@
       "type": "string",
       "maxLength": 8192
     },
+    "notesUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://"
+    },
     "artifacts": {
       "type": "array",
       "minItems": 1,

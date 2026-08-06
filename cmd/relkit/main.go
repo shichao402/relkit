@@ -280,7 +280,7 @@ func cmdStage(args []string, configPath string) error {
 	if err != nil {
 		return err
 	}
-	_, err = stage.Run(cfg, opts.version, code, opts.minFrom, opts.adds, opts.channel, opts.notes, opts.notesFile, opts.link, func(line string) {
+	_, err = stage.Run(cfg, opts.version, code, opts.minFrom, opts.adds, opts.channel, opts.notes, opts.notesFile, opts.notesURL, opts.link, func(line string) {
 		fmt.Println(line)
 	})
 	return err
@@ -622,6 +622,7 @@ type stageArgs struct {
 	channel   string
 	notes     string
 	notesFile string
+	notesURL  string
 	link      bool
 	adds      []stage.AddSpec
 }
@@ -654,6 +655,9 @@ func parseStageArgs(args []string) (*stageArgs, error) {
 		case arg == "--notes-file":
 			i++
 			opts.notesFile = mustValue(args, i, "--notes-file")
+		case arg == "--notes-url":
+			i++
+			opts.notesURL = mustValue(args, i, "--notes-url")
 		case arg == "--link":
 			opts.link = true
 		case arg == "--add":

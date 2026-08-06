@@ -41,6 +41,15 @@ type Config struct {
 	Signing        map[string]any
 	Backends       map[string]map[string]any
 	PublishTo      []string
+	// Changelog is optional. When set, stage can auto-fill notes from File and
+	// notesUrl from URLTemplate; publish compacts older index nodes to links.
+	Changelog ChangelogConfig
+}
+
+// ChangelogConfig mirrors the optional relkit.json "changelog" object.
+type ChangelogConfig struct {
+	File        string
+	URLTemplate string
 }
 
 func FindConfig(start string) (string, error) {
@@ -194,6 +203,22 @@ func Load(path string) (*Config, error) {
 	for _, name := range cfg.PublishTo {
 		if _, ok := cfg.Backends[name]; !ok {
 			return nil, Error{Message: fmt.Sprintf("publishTo names unknown backend %q (configured: %s)", name, strings.Join(sortedKeys(cfg.Backends), ", "))}
+		}
+	}
+
+	if value, ok := raw["changelog"]; ok {
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil, Error{Message: "changelog must be an object"}
+		}
+		if file, ok := obj["file"].(string); ok {
+			cfg.Changelog.File = file
+		}
+		if tmpl, ok := obj["urlTemplate"].(string); ok {
+			cfg.Changelog.URLTemplate = tmpl
+		}
+		if cfg.Changelog.File == "" && cfg.Changelog.URLTemplate == "" {
+			return nil, Error{Message: "changelog object needs at least one of file / urlTemplate"}
 		}
 	}
 

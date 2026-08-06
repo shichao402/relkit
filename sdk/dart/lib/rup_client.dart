@@ -43,6 +43,7 @@ export 'src/gen/rup/v2/objects.pb.dart'
         StagedArtifact,
         VersionNode;
 export 'src/models.dart';
+export 'src/release_notes.dart';
 export 'src/runtime_config.dart';
 export 'src/scheduler.dart';
 export 'src/selectors.dart';

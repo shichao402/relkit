@@ -201,8 +201,8 @@ index 与 fallback 在网络上传输时**必须**包裹在 protobuf `Envelope`�
 | `minFrom` | integer ≥ 0 | 否，缺省 `0` | 要**直接**升级到本节点，客户端当前 `code` 必须 ≥ 此值。见 §9 |
 | `releasedAt` | string | 否 | RFC 3339 UTC 时间戳，仅供展示 |
 | `yanked` | boolean | 否，缺省 `false` | 撤回标记。为 `true` 时该节点**禁止**作为升级目标，见 §9.4 |
-| `notes` | string | 否 | 更新说明纯文本 |
-| `notesUrl` | string | 否 | 更新说明的外部地址，用于说明较长时 |
+| `notes` | string | 否 | 更新说明，**推荐 Markdown**。最新版本应内联全文；更早版本发布侧可清空并由 `notesUrl` 指向仓库 changelog |
+| `notesUrl` | string | 否 | 更新说明的外部 http(s) 地址（通常指向仓库内 changelog 路径）。更早版本优先用链接而非内联全文 |
 | `manifest` | object | 是 | 指向该版本的 manifest |
 | `manifest.sha256` | string | 是 | 64 位小写十六进制 |
 | `manifest.size` | integer ≥ 0 | 是 | 字节数 |
@@ -266,7 +266,7 @@ index 与 fallback 在网络上传输时**必须**包裹在 protobuf `Envelope`�
 | `code` | integer | 是 | **必须**与对应 index 节点的 `code` 一致，客户端**必须**校验 |
 | `releasedAt` | string | 否 | 仅供展示 |
 | `artifacts` | array | 是 | 长度 ≥ 1 |
-| `notes` | string | 否 | 仅供展示 |
+| `notes` | string | 否 | 仅供展示；推荐 Markdown |
 
 ### 6.1 artifact 字段
 

@@ -307,7 +307,7 @@ func Sha256Bytes(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func NewStagedDocument(product, version string, code, minFrom int, channel string, artifacts []*StagedArtifact, notes string, createdAt string) (*StagedDocument, error) {
+func NewStagedDocument(product, version string, code, minFrom int, channel string, artifacts []*StagedArtifact, notes, notesURL, createdAt string) (*StagedDocument, error) {
 	if err := CheckIdentifier(product, "product"); err != nil {
 		return nil, err
 	}
@@ -339,6 +339,9 @@ func NewStagedDocument(product, version string, code, minFrom int, channel strin
 	}
 	if notes != "" {
 		doc.Notes = notes
+	}
+	if notesURL != "" {
+		doc.NotesUrl = notesURL
 	}
 	return doc, nil
 }
@@ -432,6 +435,9 @@ func NewIndexNode(staged *StagedDocument, manifestDigest string, manifestSize in
 	}
 	if staged.Notes != "" {
 		node.Notes = staged.Notes
+	}
+	if staged.NotesUrl != "" {
+		node.NotesUrl = staged.NotesUrl
 	}
 	return node
 }

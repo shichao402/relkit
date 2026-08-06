@@ -696,16 +696,18 @@ func (x *StagedArtifact) GetSourcePath() string {
 
 // Staged is the offline stage product (schema rup.staged/2).
 type Staged struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.staged/2"
-	Product       string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
-	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
-	Code          int64                  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`
-	MinFrom       int64                  `protobuf:"varint,5,opt,name=min_from,json=minFrom,proto3" json:"min_from,omitempty"`
-	Channel       string                 `protobuf:"bytes,6,opt,name=channel,proto3" json:"channel,omitempty"`
-	CreatedAt     string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Notes         string                 `protobuf:"bytes,8,opt,name=notes,proto3" json:"notes,omitempty"`
-	Artifacts     []*StagedArtifact      `protobuf:"bytes,9,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Schema    string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.staged/2"
+	Product   string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
+	Version   string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Code      int64                  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`
+	MinFrom   int64                  `protobuf:"varint,5,opt,name=min_from,json=minFrom,proto3" json:"min_from,omitempty"`
+	Channel   string                 `protobuf:"bytes,6,opt,name=channel,proto3" json:"channel,omitempty"`
+	CreatedAt string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Notes     string                 `protobuf:"bytes,8,opt,name=notes,proto3" json:"notes,omitempty"`
+	Artifacts []*StagedArtifact      `protobuf:"bytes,9,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	// Optional absolute http(s) URL for release notes (copied onto VersionNode.notes_url).
+	NotesUrl      string `protobuf:"bytes,10,opt,name=notes_url,json=notesUrl,proto3" json:"notes_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -801,6 +803,13 @@ func (x *Staged) GetArtifacts() []*StagedArtifact {
 		return x.Artifacts
 	}
 	return nil
+}
+
+func (x *Staged) GetNotesUrl() string {
+	if x != nil {
+		return x.NotesUrl
+	}
+	return ""
 }
 
 // FallbackRule matches a client code range and urges a manual update.
@@ -1030,7 +1039,7 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\tselectors\x18\x06 \x03(\v2\x10.rup.v2.SelectorR\tselectors\x12%\n" +
 	"\x04meta\x18\a \x03(\v2\x11.rup.v2.MetaEntryR\x04meta\x12\x1f\n" +
 	"\vsource_path\x18\b \x01(\tR\n" +
-	"sourcePath\"\x88\x02\n" +
+	"sourcePath\"\xa5\x02\n" +
 	"\x06Staged\x12\x16\n" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
 	"\aproduct\x18\x02 \x01(\tR\aproduct\x12\x18\n" +
@@ -1041,7 +1050,9 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\a \x01(\tR\tcreatedAt\x12\x14\n" +
 	"\x05notes\x18\b \x01(\tR\x05notes\x124\n" +
-	"\tartifacts\x18\t \x03(\v2\x16.rup.v2.StagedArtifactR\tartifacts\"\xcb\x01\n" +
+	"\tartifacts\x18\t \x03(\v2\x16.rup.v2.StagedArtifactR\tartifacts\x12\x1b\n" +
+	"\tnotes_url\x18\n" +
+	" \x01(\tR\bnotesUrl\"\xcb\x01\n" +
 	"\fFallbackRule\x12\x19\n" +
 	"\bmin_code\x18\x01 \x01(\x03R\aminCode\x12\x19\n" +
 	"\bmax_code\x18\x02 \x01(\x03R\amaxCode\x12\x1d\n" +

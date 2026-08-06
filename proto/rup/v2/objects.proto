@@ -98,6 +98,8 @@ message Staged {
   string created_at = 7;
   string notes = 8;
   repeated StagedArtifact artifacts = 9;
+  // Optional absolute http(s) URL for release notes (copied onto VersionNode.notes_url).
+  string notes_url = 10;
 }
 
 // FallbackRule matches a client code range and urges a manual update.

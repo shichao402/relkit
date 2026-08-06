@@ -240,6 +240,7 @@ const Staged$json = {
       '6': '.rup.v2.StagedArtifact',
       '10': 'artifacts'
     },
+    {'1': 'notes_url', '3': 10, '4': 1, '5': 9, '10': 'notesUrl'},
   ],
 };
 
@@ -249,7 +250,8 @@ final $typed_data.Uint8List stagedDescriptor = $convert.base64Decode(
     'VjdBIYCgd2ZXJzaW9uGAMgASgJUgd2ZXJzaW9uEhIKBGNvZGUYBCABKANSBGNvZGUSGQoIbWlu'
     'X2Zyb20YBSABKANSB21pbkZyb20SGAoHY2hhbm5lbBgGIAEoCVIHY2hhbm5lbBIdCgpjcmVhdG'
     'VkX2F0GAcgASgJUgljcmVhdGVkQXQSFAoFbm90ZXMYCCABKAlSBW5vdGVzEjQKCWFydGlmYWN0'
-    'cxgJIAMoCzIWLnJ1cC52Mi5TdGFnZWRBcnRpZmFjdFIJYXJ0aWZhY3Rz');
+    'cxgJIAMoCzIWLnJ1cC52Mi5TdGFnZWRBcnRpZmFjdFIJYXJ0aWZhY3RzEhsKCW5vdGVzX3VybB'
+    'gKIAEoCVIIbm90ZXNVcmw=');
 
 @$core.Deprecated('Use fallbackRuleDescriptor instead')
 const FallbackRule$json = {
