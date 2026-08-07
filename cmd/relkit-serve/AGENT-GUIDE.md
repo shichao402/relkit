@@ -106,7 +106,7 @@ curl -sI https://dl.example.com/index/app/stable.json | grep -i cache-control
 
 安全阀：没有可读 index、全部解析失败、或解析后没有本机引用时，**整轮不删任何东西**，只打 `gc: aborted` 日志。
 
-因此「磁盘上只留最新版」取决于发布侧 PUT 的 index 是否只含当前节点。index 里还挂着历史节点时，那些对象会被保留 —— 不要指望本服务去剪裁已签名的 index。业务侧只 PUT，不要也不需要 HTTP DELETE。
+因此「磁盘上只留最新版」取决于发布侧 PUT 的 index 是否只含当前节点（`relkit.json` 的 `retainVersions`）。index 里还挂着历史节点时，那些对象会被保留 —— 不要指望本服务去剪裁已签名的 index。业务侧只 PUT，不要也不需要 HTTP DELETE。
 
 启动日志会写 `gc enabled (interval ...)` 或 `gc disabled`。关掉：`-gc=false`，或配置 `"gc": {"enabled": false}` / `"interval": "0"`。
 

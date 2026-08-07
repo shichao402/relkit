@@ -145,6 +145,44 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	assertContains(t, verifyAfterTamper, "verify passed")
 }
 
+func TestPublishRetainVersionsTrimsIndex(t *testing.T) {
+	exe := buildRelkit(t)
+	project := t.TempDir()
+	dist := filepath.Join(project, "dist")
+	mustMkdirAll(t, dist)
+
+	runRelkit(t, exe, project, nil, 0, "init", "--product", "demoapp")
+	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
+	setPrivateKeyPath(t, project, "keys/k1.private.pb")
+	updateConfigJSON(t, filepath.Join(project, "relkit.json"), func(doc map[string]any) {
+		doc["retainVersions"] = 1
+	})
+
+	writeArtifact(t, dist, "a.zip", "a ", 32)
+	runRelkit(t, exe, project, nil, 0,
+		"stage", "1.0.0+100",
+		"--add", filepath.Join(dist, "a.zip"), "os=windows,arch=x64",
+	)
+	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100")
+
+	writeArtifact(t, dist, "b.zip", "b ", 32)
+	runRelkit(t, exe, project, nil, 0,
+		"stage", "2.0.0+200",
+		"--add", filepath.Join(dist, "b.zip"), "os=windows,arch=x64",
+	)
+	out := runRelkit(t, exe, project, nil, 0, "publish", "2.0.0+200")
+	assertContains(t, out, "retainVersions=1")
+	assertContains(t, out, "1.0.0+100")
+
+	index := loadPublishedIndex(t, project, "demoapp", "stable")
+	if len(index.Versions) != 1 {
+		t.Fatalf("versions = %d, want 1 after retain", len(index.Versions))
+	}
+	if index.Versions[0].Version != "2.0.0+200" {
+		t.Fatalf("kept version = %s, want 2.0.0+200", index.Versions[0].Version)
+	}
+}
+
 func TestStaticHTTPBackend(t *testing.T) {
 	exe := buildRelkit(t)
 	project := t.TempDir()

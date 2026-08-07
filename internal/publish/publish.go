@@ -104,11 +104,16 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 
 	provisionalNode := model.NewIndexNode(staged, strings.Repeat("0", 64), 0, []string{"https://placeholder.invalid/"}, "")
-	provisionalVersions := mergeNode(existing.Versions, provisionalNode)
-	if err := changelog.CompactPriorNodes(provisionalVersions, cfg.Changelog.URLTemplate, staged.Code); err != nil {
+	merged := mergeNode(existing.Versions, provisionalNode)
+	retained, pruned := applyRetainVersions(merged, cfg.RetainVersions)
+	if len(pruned) > 0 {
+		printer(fmt.Sprintf("  retainVersions=%d: dropping %s from index (orphans become GC-eligible after publish)",
+			cfg.RetainVersions, formatVersionList(pruned)))
+	}
+	if err := changelog.CompactPriorNodes(retained, cfg.Changelog.URLTemplate, staged.Code); err != nil {
 		return nil, Error{Message: err.Error()}
 	}
-	provisional, err := model.NewIndex(cfg.Product, channel, baseSequence+1, provisionalVersions, model.MinSupportedPtr(existing), "")
+	provisional, err := model.NewIndex(cfg.Product, channel, baseSequence+1, retained, model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}
@@ -181,11 +186,11 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 
 	node := model.NewIndexNode(staged, manifestDigest, manifestSize, manifestURLs, "")
-	versions := mergeNode(existing.Versions, node)
-	if err := changelog.CompactPriorNodes(versions, cfg.Changelog.URLTemplate, staged.Code); err != nil {
+	mergedFinal, _ := applyRetainVersions(mergeNode(existing.Versions, node), cfg.RetainVersions)
+	if err := changelog.CompactPriorNodes(mergedFinal, cfg.Changelog.URLTemplate, staged.Code); err != nil {
 		return nil, Error{Message: err.Error()}
 	}
-	index, err := model.NewIndex(cfg.Product, channel, baseSequence+1, versions, model.MinSupportedPtr(existing), "")
+	index, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergedFinal, model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +476,57 @@ func mergeNode(existing []*model.VersionNode, node *model.VersionNode) []*model.
 	}
 	versions = append(versions, node)
 	return versions
+}
+
+// applyRetainVersions keeps at most keep highest-code nodes. keep <= 0 means
+// unlimited (full history). Returns the retained slice and the dropped nodes.
+func applyRetainVersions(versions []*model.VersionNode, keep int) (retained, pruned []*model.VersionNode) {
+	if keep <= 0 || len(versions) <= keep {
+		out := make([]*model.VersionNode, len(versions))
+		copy(out, versions)
+		return out, nil
+	}
+
+	ordered := make([]*model.VersionNode, 0, len(versions))
+	for _, version := range versions {
+		if version != nil {
+			ordered = append(ordered, version)
+		}
+	}
+	slices.SortFunc(ordered, func(a, b *model.VersionNode) int {
+		if a.Code != b.Code {
+			if a.Code > b.Code {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Version, b.Version)
+	})
+
+	pruned = append([]*model.VersionNode(nil), ordered[keep:]...)
+	kept := append([]*model.VersionNode(nil), ordered[:keep]...)
+	// Ascending code order matches the usual publish-append history shape.
+	slices.SortFunc(kept, func(a, b *model.VersionNode) int {
+		if a.Code != b.Code {
+			if a.Code < b.Code {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Version, b.Version)
+	})
+	return kept, pruned
+}
+
+func formatVersionList(nodes []*model.VersionNode) string {
+	parts := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s (code %d)", node.Version, node.Code))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func validateIndex(index *model.IndexDocument, what string) ([]string, error) {

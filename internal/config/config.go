@@ -38,6 +38,10 @@ type Config struct {
 	DefaultChannel string
 	Channels       []string
 	CodeStrategy   string
+	// RetainVersions caps how many version nodes remain in a published index.
+	// 0 (default) keeps the full history. N >= 1 keeps only the N highest-code
+	// nodes after merge, so relkit-serve orphan GC can drop older artifacts.
+	RetainVersions int
 	Signing        map[string]any
 	Backends       map[string]map[string]any
 	PublishTo      []string
@@ -161,6 +165,15 @@ func Load(path string) (*Config, error) {
 	}
 	if err := checkCodeStrategy(cfg.CodeStrategy); err != nil {
 		return nil, err
+	}
+
+	cfg.RetainVersions = 0
+	if value, ok := raw["retainVersions"]; ok {
+		n, err := asNonNegativeInt(value, "retainVersions")
+		if err != nil {
+			return nil, err
+		}
+		cfg.RetainVersions = n
 	}
 
 	cfg.Signing = map[string]any{}
@@ -476,6 +489,29 @@ func stringList(value any) ([]string, error) {
 		result = append(result, asString)
 	}
 	return result, nil
+}
+
+func asNonNegativeInt(value any, field string) (int, error) {
+	switch n := value.(type) {
+	case float64:
+		if n != float64(int(n)) || n < 0 {
+			return 0, Error{Message: fmt.Sprintf("%s must be a non-negative integer", field)}
+		}
+		return int(n), nil
+	case int:
+		if n < 0 {
+			return 0, Error{Message: fmt.Sprintf("%s must be a non-negative integer", field)}
+		}
+		return n, nil
+	case json.Number:
+		parsed, err := n.Int64()
+		if err != nil || parsed < 0 {
+			return 0, Error{Message: fmt.Sprintf("%s must be a non-negative integer", field)}
+		}
+		return int(parsed), nil
+	default:
+		return 0, Error{Message: fmt.Sprintf("%s must be a non-negative integer", field)}
+	}
 }
 
 func sortedKeys[V any](input map[string]V) []string {
