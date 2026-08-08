@@ -11,3 +11,7 @@ __pycache__/
 scripts/temp/*
 !scripts/temp/.gitkeep
 
+
+# Local secrets (Dec / Bitwarden landing path; do not commit)
+/relkit.secrets.json
+
