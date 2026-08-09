@@ -15,3 +15,7 @@ scripts/temp/*
 # Local secrets (Dec / Bitwarden landing path; do not commit)
 /relkit.secrets.json
 
+# Dec managed paths (never commit)
+.dec/cache/
+.dec/.version
+/.secrets/
