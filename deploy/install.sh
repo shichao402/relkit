@@ -87,8 +87,8 @@ step "Release directory: $DIR"
 install -d -o "$USER_NAME" -g "$USER_NAME" -m 0755 "$DIR"
 # A directory that already holds unrelated files is a data leak: this service
 # has no listing, but every path in it can be fetched by name.
-if [ -n "$(find "$DIR" -maxdepth 1 -mindepth 1 ! -name index ! -name manifest ! -name artifact -print -quit 2>/dev/null)" ]; then
-	echo "WARNING: $DIR holds files outside index/ manifest/ artifact/."
+if [ -n "$(find "$DIR" -maxdepth 1 -mindepth 1 ! -name index ! -name manifest ! -name artifact ! -name fallback ! -name directory -print -quit 2>/dev/null)" ]; then
+	echo "WARNING: $DIR holds files outside index/ manifest/ artifact/ fallback/ directory/."
 	echo "         Everything here is downloadable by name. See AGENT-GUIDE.md 2.4."
 fi
 
