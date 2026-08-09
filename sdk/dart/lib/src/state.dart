@@ -1,5 +1,5 @@
 /// Persisted client state and the throttling rules around it
-/// (SPEC.md sections 12.2 and 12.4).
+/// (SPEC.md sections 12.2, 12.4, 12.7, and 16.2).
 library;
 
 import 'dart:convert';
@@ -19,6 +19,52 @@ import 'dart:io';
 bool acceptsSequence(int sequence, int? lastSeenSequence) =>
     lastSeenSequence == null || sequence >= lastSeenSequence;
 
+/// Stats for one candidate source key (URL or `service:<id>`).
+class SourceStat {
+  SourceStat({
+    this.successes = 0,
+    this.failures = 0,
+    this.consecutiveFailures = 0,
+    this.lastBytesPerSecond,
+    this.lastSuccessAt,
+    this.lastFailureAt,
+  });
+
+  factory SourceStat.fromJson(Map<String, dynamic> json) => SourceStat(
+        successes: json['successes'] as int? ?? 0,
+        failures: json['failures'] as int? ?? 0,
+        consecutiveFailures: json['consecutiveFailures'] as int? ?? 0,
+        lastBytesPerSecond: json['lastBytesPerSecond'] as int?,
+        lastSuccessAt: switch (json['lastSuccessAt']) {
+          final String value => DateTime.tryParse(value),
+          _ => null,
+        },
+        lastFailureAt: switch (json['lastFailureAt']) {
+          final String value => DateTime.tryParse(value),
+          _ => null,
+        },
+      );
+
+  int successes;
+  int failures;
+  int consecutiveFailures;
+  int? lastBytesPerSecond;
+  DateTime? lastSuccessAt;
+  DateTime? lastFailureAt;
+
+  Map<String, dynamic> toJson() => {
+        'successes': successes,
+        'failures': failures,
+        'consecutiveFailures': consecutiveFailures,
+        if (lastBytesPerSecond != null)
+          'lastBytesPerSecond': lastBytesPerSecond,
+        if (lastSuccessAt != null)
+          'lastSuccessAt': lastSuccessAt!.toUtc().toIso8601String(),
+        if (lastFailureAt != null)
+          'lastFailureAt': lastFailureAt!.toUtc().toIso8601String(),
+      };
+}
+
 /// What the client remembers between runs, per (product, channel).
 class UpdateState {
   UpdateState({
@@ -26,11 +72,28 @@ class UpdateState {
     this.lastResult,
     this.lastSeenSequence,
     this.lastSeenFallbackSequence,
+    this.lastSeenDirectorySequence,
+    this.lastSuccessfulSourceKey,
+    Map<String, SourceStat>? sourceStats,
     Set<int>? skipped,
-  }) : skipped = skipped ?? <int>{};
+  })  : sourceStats = sourceStats ?? <String, SourceStat>{},
+        skipped = skipped ?? <int>{};
 
   factory UpdateState.fromJson(Map<String, dynamic> json) {
     final rawSkipped = json['skipped'];
+    final rawStats = json['sourceStats'];
+    final stats = <String, SourceStat>{};
+    if (rawStats is Map) {
+      for (final entry in rawStats.entries) {
+        final value = entry.value;
+        if (entry.key is String && value is Map<String, dynamic>) {
+          stats[entry.key as String] = SourceStat.fromJson(value);
+        } else if (entry.key is String && value is Map) {
+          stats[entry.key as String] =
+              SourceStat.fromJson(Map<String, dynamic>.from(value));
+        }
+      }
+    }
     return UpdateState(
       lastCheckAt: switch (json['lastCheckAt']) {
         final String value => DateTime.tryParse(value),
@@ -39,6 +102,9 @@ class UpdateState {
       lastResult: json['lastResult'] as String?,
       lastSeenSequence: json['lastSeenSequence'] as int?,
       lastSeenFallbackSequence: json['lastSeenFallbackSequence'] as int?,
+      lastSeenDirectorySequence: json['lastSeenDirectorySequence'] as int?,
+      lastSuccessfulSourceKey: json['lastSuccessfulSourceKey'] as String?,
+      sourceStats: stats,
       skipped: rawSkipped is List ? rawSkipped.whereType<int>().toSet() : null,
     );
   }
@@ -52,6 +118,15 @@ class UpdateState {
   /// The highest fallback sequence ever accepted (product-scoped anti-rollback).
   int? lastSeenFallbackSequence;
 
+  /// The highest directory sequence ever accepted (product-scoped anti-rollback).
+  int? lastSeenDirectorySequence;
+
+  /// Key of the last candidate that fully succeeded (URL or `service:<id>`).
+  String? lastSuccessfulSourceKey;
+
+  /// Per-source outcomes from real attempts only (SPEC §12.7).
+  final Map<String, SourceStat> sourceStats;
+
   /// Codes the user chose to skip. Ignored when an update is mandatory.
   final Set<int> skipped;
 
@@ -62,6 +137,15 @@ class UpdateState {
         if (lastSeenSequence != null) 'lastSeenSequence': lastSeenSequence,
         if (lastSeenFallbackSequence != null)
           'lastSeenFallbackSequence': lastSeenFallbackSequence,
+        if (lastSeenDirectorySequence != null)
+          'lastSeenDirectorySequence': lastSeenDirectorySequence,
+        if (lastSuccessfulSourceKey != null)
+          'lastSuccessfulSourceKey': lastSuccessfulSourceKey,
+        if (sourceStats.isNotEmpty)
+          'sourceStats': {
+            for (final entry in sourceStats.entries)
+              entry.key: entry.value.toJson(),
+          },
         'skipped': skipped.toList()..sort(),
       };
 
@@ -74,6 +158,33 @@ class UpdateState {
   void observeFallbackSequence(int sequence) {
     final seen = lastSeenFallbackSequence;
     if (seen == null || sequence > seen) lastSeenFallbackSequence = sequence;
+  }
+
+  void observeDirectorySequence(int sequence) {
+    final seen = lastSeenDirectorySequence;
+    if (seen == null || sequence > seen) lastSeenDirectorySequence = sequence;
+  }
+
+  void recordSourceSuccess(String key, {int? bytesPerSecond}) {
+    if (key.isEmpty) return;
+    final stat = sourceStats.putIfAbsent(key, SourceStat.new);
+    stat
+      ..successes += 1
+      ..consecutiveFailures = 0
+      ..lastSuccessAt = DateTime.now().toUtc();
+    if (bytesPerSecond != null && bytesPerSecond > 0) {
+      stat.lastBytesPerSecond = bytesPerSecond;
+    }
+    lastSuccessfulSourceKey = key;
+  }
+
+  void recordSourceFailure(String key) {
+    if (key.isEmpty) return;
+    final stat = sourceStats.putIfAbsent(key, SourceStat.new);
+    stat
+      ..failures += 1
+      ..consecutiveFailures += 1
+      ..lastFailureAt = DateTime.now().toUtc();
   }
 }
 

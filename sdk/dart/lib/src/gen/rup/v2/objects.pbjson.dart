@@ -305,3 +305,53 @@ final $typed_data.Uint8List fallbackDescriptor = $convert.base64Decode(
     '9kdWN0EhoKCHNlcXVlbmNlGAMgASgDUghzZXF1ZW5jZRIhCgxnZW5lcmF0ZWRfYXQYBCABKAlS'
     'C2dlbmVyYXRlZEF0EioKBXJ1bGVzGAUgAygLMhQucnVwLnYyLkZhbGxiYWNrUnVsZVIFcnVsZX'
     'M=');
+
+@$core.Deprecated('Use directoryServiceDescriptor instead')
+const DirectoryService$json = {
+  '1': 'DirectoryService',
+  '2': [
+    {'1': 'id', '3': 1, '4': 1, '5': 9, '10': 'id'},
+    {'1': 'priority', '3': 2, '4': 1, '5': 5, '10': 'priority'},
+    {'1': 'index_url', '3': 3, '4': 1, '5': 9, '10': 'indexUrl'},
+    {'1': 'fallback_url', '3': 4, '4': 1, '5': 9, '10': 'fallbackUrl'},
+    {'1': 'channel', '3': 5, '4': 1, '5': 9, '10': 'channel'},
+  ],
+};
+
+/// Descriptor for `DirectoryService`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List directoryServiceDescriptor = $convert.base64Decode(
+    'ChBEaXJlY3RvcnlTZXJ2aWNlEg4KAmlkGAEgASgJUgJpZBIaCghwcmlvcml0eRgCIAEoBVIIcH'
+    'Jpb3JpdHkSGwoJaW5kZXhfdXJsGAMgASgJUghpbmRleFVybBIhCgxmYWxsYmFja191cmwYBCAB'
+    'KAlSC2ZhbGxiYWNrVXJsEhgKB2NoYW5uZWwYBSABKAlSB2NoYW5uZWw=');
+
+@$core.Deprecated('Use updateDirectoryDescriptor instead')
+const UpdateDirectory$json = {
+  '1': 'UpdateDirectory',
+  '2': [
+    {'1': 'schema', '3': 1, '4': 1, '5': 9, '10': 'schema'},
+    {'1': 'product', '3': 2, '4': 1, '5': 9, '10': 'product'},
+    {
+      '1': 'directory_sequence',
+      '3': 3,
+      '4': 1,
+      '5': 3,
+      '10': 'directorySequence'
+    },
+    {'1': 'updated_at', '3': 4, '4': 1, '5': 9, '10': 'updatedAt'},
+    {
+      '1': 'services',
+      '3': 5,
+      '4': 3,
+      '5': 11,
+      '6': '.rup.v2.DirectoryService',
+      '10': 'services'
+    },
+  ],
+};
+
+/// Descriptor for `UpdateDirectory`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List updateDirectoryDescriptor = $convert.base64Decode(
+    'Cg9VcGRhdGVEaXJlY3RvcnkSFgoGc2NoZW1hGAEgASgJUgZzY2hlbWESGAoHcHJvZHVjdBgCIA'
+    'EoCVIHcHJvZHVjdBItChJkaXJlY3Rvcnlfc2VxdWVuY2UYAyABKANSEWRpcmVjdG9yeVNlcXVl'
+    'bmNlEh0KCnVwZGF0ZWRfYXQYBCABKAlSCXVwZGF0ZWRBdBI0CghzZXJ2aWNlcxgFIAMoCzIYLn'
+    'J1cC52Mi5EaXJlY3RvcnlTZXJ2aWNlUghzZXJ2aWNlcw==');

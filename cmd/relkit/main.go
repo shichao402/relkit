@@ -14,6 +14,7 @@ import (
 	relkitembed "github.com/shichao402/relkit/embed"
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/directory"
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/fallback"
 	"github.com/shichao402/relkit/internal/jsonio"
@@ -85,6 +86,8 @@ func run(argv []string) (code int) {
 		err = cmdPublish(rest, configPath)
 	case "fallback":
 		err = cmdFallback(rest, configPath)
+	case "directory":
+		err = cmdDirectory(rest, configPath)
 	case "agent-guide":
 		err = cmdAgentGuide(rest)
 	case "backends":
@@ -580,6 +583,111 @@ func cmdFallbackSet(args []string, configPath string) error {
 	return err
 }
 
+func cmdDirectory(args []string, configPath string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: relkit directory set [--from-config] [--service id=...,index-url=...] [--to name] [--dry-run]")
+	}
+	subcommand := args[0]
+	rest := args[1:]
+	switch subcommand {
+	case "set":
+		return cmdDirectorySet(rest, configPath)
+	default:
+		return fmt.Errorf("unknown directory subcommand %q (want set)", subcommand)
+	}
+}
+
+func cmdDirectorySet(args []string, configPath string) error {
+	var to []string
+	dryRun := false
+	fromConfig := false
+	var services []directory.ServiceInput
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--to":
+			i++
+			to = append(to, mustValue(args, i, "--to"))
+		case arg == "--dry-run":
+			dryRun = true
+		case arg == "--from-config":
+			fromConfig = true
+		case arg == "--service":
+			i++
+			service, err := parseDirectoryServiceFlag(mustValue(args, i, "--service"))
+			if err != nil {
+				return err
+			}
+			services = append(services, service)
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown flag %q", arg)
+		default:
+			return fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+
+	if fromConfig && len(services) > 0 {
+		return fmt.Errorf("--from-config cannot be combined with --service")
+	}
+	if !fromConfig && len(services) == 0 {
+		// Default to config services when present; otherwise require explicit input.
+		fromConfig = true
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	opts := directory.Options{
+		To:     to,
+		DryRun: dryRun,
+	}
+	if !fromConfig {
+		opts.Services = services
+	}
+	_, err = directory.Set(cfg, opts, func(line string) {
+		fmt.Println(line)
+	})
+	return err
+}
+
+func parseDirectoryServiceFlag(raw string) (directory.ServiceInput, error) {
+	service := directory.ServiceInput{Priority: 100}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(part, "=")
+		if !ok || key == "" || value == "" {
+			return directory.ServiceInput{}, fmt.Errorf("--service expects key=value pairs, got %q in %q", part, raw)
+		}
+		switch strings.ToLower(key) {
+		case "id":
+			service.ID = value
+		case "priority":
+			n, err := strconv.ParseInt(value, 10, 32)
+			if err != nil {
+				return directory.ServiceInput{}, fmt.Errorf("--service priority: %w", err)
+			}
+			service.Priority = int32(n)
+		case "index-url", "indexurl":
+			service.IndexURL = value
+		case "fallback-url", "fallbackurl":
+			service.FallbackURL = value
+		case "channel":
+			service.Channel = value
+		default:
+			return directory.ServiceInput{}, fmt.Errorf("unknown --service field %q", key)
+		}
+	}
+	if service.ID == "" || service.IndexURL == "" {
+		return directory.ServiceInput{}, fmt.Errorf("--service requires id= and index-url=")
+	}
+	return service, nil
+}
+
 func cmdAgentGuide(args []string) error {
 	if len(args) > 0 {
 		return fmt.Errorf("agent-guide takes no arguments")
@@ -883,6 +991,7 @@ Commands:
   verify
   publish
   fallback
+  directory
   agent-guide
   backends
 `)

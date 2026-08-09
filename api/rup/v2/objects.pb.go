@@ -976,6 +976,165 @@ func (x *Fallback) GetRules() []*FallbackRule {
 	return nil
 }
 
+// DirectoryService is one update-service takeout point discovered via UpdateDirectory.
+type DirectoryService struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                      // stable id for preference learning; unique within UpdateDirectory
+	Priority    int32                  `protobuf:"varint,2,opt,name=priority,proto3" json:"priority,omitempty"`                         // smaller is preferred when no learning data exists
+	IndexUrl    string                 `protobuf:"bytes,3,opt,name=index_url,json=indexUrl,proto3" json:"index_url,omitempty"`          // absolute URL to a signed Index envelope
+	FallbackUrl string                 `protobuf:"bytes,4,opt,name=fallback_url,json=fallbackUrl,proto3" json:"fallback_url,omitempty"` // optional absolute URL to a signed Fallback envelope
+	// Optional channel binding. Empty means "applicable to any channel" (host
+	// still must only use entries that match the running channel when set).
+	Channel       string `protobuf:"bytes,5,opt,name=channel,proto3" json:"channel,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DirectoryService) Reset() {
+	*x = DirectoryService{}
+	mi := &file_rup_v2_objects_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DirectoryService) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DirectoryService) ProtoMessage() {}
+
+func (x *DirectoryService) ProtoReflect() protoreflect.Message {
+	mi := &file_rup_v2_objects_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DirectoryService.ProtoReflect.Descriptor instead.
+func (*DirectoryService) Descriptor() ([]byte, []int) {
+	return file_rup_v2_objects_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DirectoryService) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DirectoryService) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
+}
+
+func (x *DirectoryService) GetIndexUrl() string {
+	if x != nil {
+		return x.IndexUrl
+	}
+	return ""
+}
+
+func (x *DirectoryService) GetFallbackUrl() string {
+	if x != nil {
+		return x.FallbackUrl
+	}
+	return ""
+}
+
+func (x *DirectoryService) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+// UpdateDirectory is the signed bootstrap document (schema rup.directory/2).
+// Logical key: directory/<product>.pb (product-scoped).
+// Named UpdateDirectory (not Directory) so generated Dart does not clash with dart:io.
+// MUST NOT carry artifact download URLs; it only points at signed Index/Fallback.
+type UpdateDirectory struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Schema            string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.directory/2"
+	Product           string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
+	DirectorySequence int64                  `protobuf:"varint,3,opt,name=directory_sequence,json=directorySequence,proto3" json:"directory_sequence,omitempty"` // >= 1; anti-rollback for the directory doc
+	UpdatedAt         string                 `protobuf:"bytes,4,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`                          // optional RFC 3339 UTC
+	Services          []*DirectoryService    `protobuf:"bytes,5,rep,name=services,proto3" json:"services,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *UpdateDirectory) Reset() {
+	*x = UpdateDirectory{}
+	mi := &file_rup_v2_objects_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateDirectory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateDirectory) ProtoMessage() {}
+
+func (x *UpdateDirectory) ProtoReflect() protoreflect.Message {
+	mi := &file_rup_v2_objects_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateDirectory.ProtoReflect.Descriptor instead.
+func (*UpdateDirectory) Descriptor() ([]byte, []int) {
+	return file_rup_v2_objects_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *UpdateDirectory) GetSchema() string {
+	if x != nil {
+		return x.Schema
+	}
+	return ""
+}
+
+func (x *UpdateDirectory) GetProduct() string {
+	if x != nil {
+		return x.Product
+	}
+	return ""
+}
+
+func (x *UpdateDirectory) GetDirectorySequence() int64 {
+	if x != nil {
+		return x.DirectorySequence
+	}
+	return 0
+}
+
+func (x *UpdateDirectory) GetUpdatedAt() string {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return ""
+}
+
+func (x *UpdateDirectory) GetServices() []*DirectoryService {
+	if x != nil {
+		return x.Services
+	}
+	return nil
+}
+
 var File_rup_v2_objects_proto protoreflect.FileDescriptor
 
 const file_rup_v2_objects_proto_rawDesc = "" +
@@ -1066,7 +1225,20 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\aproduct\x18\x02 \x01(\tR\aproduct\x12\x1a\n" +
 	"\bsequence\x18\x03 \x01(\x03R\bsequence\x12!\n" +
 	"\fgenerated_at\x18\x04 \x01(\tR\vgeneratedAt\x12*\n" +
-	"\x05rules\x18\x05 \x03(\v2\x14.rup.v2.FallbackRuleR\x05rulesB\x82\x01\n" +
+	"\x05rules\x18\x05 \x03(\v2\x14.rup.v2.FallbackRuleR\x05rules\"\x98\x01\n" +
+	"\x10DirectoryService\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bpriority\x18\x02 \x01(\x05R\bpriority\x12\x1b\n" +
+	"\tindex_url\x18\x03 \x01(\tR\bindexUrl\x12!\n" +
+	"\ffallback_url\x18\x04 \x01(\tR\vfallbackUrl\x12\x18\n" +
+	"\achannel\x18\x05 \x01(\tR\achannel\"\xc7\x01\n" +
+	"\x0fUpdateDirectory\x12\x16\n" +
+	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
+	"\aproduct\x18\x02 \x01(\tR\aproduct\x12-\n" +
+	"\x12directory_sequence\x18\x03 \x01(\x03R\x11directorySequence\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x04 \x01(\tR\tupdatedAt\x124\n" +
+	"\bservices\x18\x05 \x03(\v2\x18.rup.v2.DirectoryServiceR\bservicesB\x82\x01\n" +
 	"\n" +
 	"com.rup.v2B\fObjectsProtoP\x01Z-github.com/shichao402/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
 
@@ -1082,19 +1254,21 @@ func file_rup_v2_objects_proto_rawDescGZIP() []byte {
 	return file_rup_v2_objects_proto_rawDescData
 }
 
-var file_rup_v2_objects_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_rup_v2_objects_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_rup_v2_objects_proto_goTypes = []any{
-	(*Selector)(nil),       // 0: rup.v2.Selector
-	(*MetaEntry)(nil),      // 1: rup.v2.MetaEntry
-	(*DigestRef)(nil),      // 2: rup.v2.DigestRef
-	(*VersionNode)(nil),    // 3: rup.v2.VersionNode
-	(*Index)(nil),          // 4: rup.v2.Index
-	(*Artifact)(nil),       // 5: rup.v2.Artifact
-	(*Manifest)(nil),       // 6: rup.v2.Manifest
-	(*StagedArtifact)(nil), // 7: rup.v2.StagedArtifact
-	(*Staged)(nil),         // 8: rup.v2.Staged
-	(*FallbackRule)(nil),   // 9: rup.v2.FallbackRule
-	(*Fallback)(nil),       // 10: rup.v2.Fallback
+	(*Selector)(nil),         // 0: rup.v2.Selector
+	(*MetaEntry)(nil),        // 1: rup.v2.MetaEntry
+	(*DigestRef)(nil),        // 2: rup.v2.DigestRef
+	(*VersionNode)(nil),      // 3: rup.v2.VersionNode
+	(*Index)(nil),            // 4: rup.v2.Index
+	(*Artifact)(nil),         // 5: rup.v2.Artifact
+	(*Manifest)(nil),         // 6: rup.v2.Manifest
+	(*StagedArtifact)(nil),   // 7: rup.v2.StagedArtifact
+	(*Staged)(nil),           // 8: rup.v2.Staged
+	(*FallbackRule)(nil),     // 9: rup.v2.FallbackRule
+	(*Fallback)(nil),         // 10: rup.v2.Fallback
+	(*DirectoryService)(nil), // 11: rup.v2.DirectoryService
+	(*UpdateDirectory)(nil),  // 12: rup.v2.UpdateDirectory
 }
 var file_rup_v2_objects_proto_depIdxs = []int32{
 	2,  // 0: rup.v2.VersionNode.manifest:type_name -> rup.v2.DigestRef
@@ -1107,11 +1281,12 @@ var file_rup_v2_objects_proto_depIdxs = []int32{
 	7,  // 7: rup.v2.Staged.artifacts:type_name -> rup.v2.StagedArtifact
 	0,  // 8: rup.v2.FallbackRule.selectors:type_name -> rup.v2.Selector
 	9,  // 9: rup.v2.Fallback.rules:type_name -> rup.v2.FallbackRule
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	11, // 10: rup.v2.UpdateDirectory.services:type_name -> rup.v2.DirectoryService
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_rup_v2_objects_proto_init() }
@@ -1125,7 +1300,7 @@ func file_rup_v2_objects_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_rup_v2_objects_proto_rawDesc), len(file_rup_v2_objects_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

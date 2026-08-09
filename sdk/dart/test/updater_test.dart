@@ -146,6 +146,11 @@ class Publisher {
     return _seal(payload);
   }
 
+  Future<Uint8List> sealDirectory(UpdateDirectory doc) async {
+    final payload = Uint8List.fromList(doc.writeToBuffer());
+    return _seal(payload);
+  }
+
   Future<Uint8List> _seal(Uint8List payload) async {
     final signature = await crypto.Ed25519().sign(payload, keyPair: keyPair);
     final envelope = Envelope(
@@ -1061,6 +1066,263 @@ void main() {
     test('refuses a public key of the wrong length', () {
       expect(() => TrustedKeys({'k': List.filled(31, 0)}),
           throwsA(isA<ArgumentError>()));
+    });
+
+    test('refuses to build without indexUrls or entryUrls', () {
+      expect(
+        () => RupUpdater(
+          product: 'demo',
+          channel: 'stable',
+          currentCode: 1,
+          trustedKeys: TrustedKeys({'k': List.filled(32, 0)}),
+          clientSelectors: const {},
+          stateStore: MemoryUpdateStateStore(),
+          fetcher: FakeFetcher(const {}),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
+  group('directory bootstrap', () {
+    test('loads index via signed directory entryUrls', () async {
+      final body = utf8Bytes('directory-boot-payload' * 32);
+      final manifest = Uint8List.fromList(manifestDoc(artifacts: [
+        artifactDoc(
+          id: 'app-windows-x64',
+          filename: 'demo-1.1.0-win-x64.zip',
+          body: body,
+          urls: ['http://cn/artifact.zip', 'http://eu/artifact.zip'],
+        ),
+      ]).writeToBuffer());
+      final index = await publisher.sealIndex(indexDoc(versions: [
+        versionDoc(
+          version: '1.1.0',
+          code: 110,
+          manifestBytes: manifest,
+          urls: ['http://cn/manifest.pb', 'http://eu/manifest.pb'],
+        ),
+      ]));
+      final directory = await publisher.sealDirectory(UpdateDirectory(
+        schema: directorySchemaId,
+        product: 'demo',
+        directorySequence: Int64(3),
+        services: [
+          DirectoryService(
+            id: 'eu',
+            priority: 20,
+            indexUrl: 'http://eu/index.pb',
+            channel: 'stable',
+          ),
+          DirectoryService(
+            id: 'cn',
+            priority: 10,
+            indexUrl: 'http://cn/index.pb',
+            channel: 'stable',
+          ),
+        ],
+      ));
+
+      final fetcher = FakeFetcher({
+        'http://entry/primary.pb': directory,
+        'http://cn/index.pb': index,
+        'http://eu/index.pb': index,
+        'http://cn/manifest.pb': manifest,
+        'http://eu/manifest.pb': manifest,
+        'http://cn/artifact.zip': body,
+        'http://eu/artifact.zip': body,
+      });
+
+      final store = MemoryUpdateStateStore();
+      final updater = RupUpdater(
+        product: 'demo',
+        channel: 'stable',
+        currentCode: 100,
+        entryUrls: [
+          Uri.parse('http://entry/primary.pb'),
+          Uri.parse('http://entry/backup.pb'),
+        ],
+        // Must be ignored when entryUrls is set.
+        indexUrls: [Uri.parse('http://should-not-hit/index.pb')],
+        trustedKeys: publisher.trusted,
+        clientSelectors: const {'os': 'windows', 'arch': 'x64'},
+        stateStore: store,
+        fetcher: fetcher,
+      );
+
+      final result = await updater.check(force: true);
+      expect(result, isA<UpdateAvailable>());
+      expect(
+        fetcher.requested,
+        containsAllInOrder([
+          'http://entry/primary.pb',
+          'http://cn/index.pb',
+          'http://cn/manifest.pb',
+        ]),
+      );
+      expect(fetcher.requested, isNot(contains('http://should-not-hit/index.pb')));
+      expect(fetcher.requested, isNot(contains('http://entry/backup.pb')));
+
+      final state = await store.load();
+      expect(state.lastSeenDirectorySequence, 3);
+      expect(state.sourceStats.containsKey(directoryServiceKey('cn')), isTrue);
+      expect(state.sourceStats[directoryServiceKey('cn')]!.successes, greaterThan(0));
+      expect(state.lastSuccessfulSourceKey, 'http://cn/manifest.pb');
+    });
+
+    test('skips primary entry and uses backup directory', () async {
+      final body = utf8Bytes('backup-entry' * 16);
+      final manifest = Uint8List.fromList(manifestDoc(artifacts: [
+        artifactDoc(
+          id: 'app-windows-x64',
+          filename: 'demo-1.1.0-win-x64.zip',
+          body: body,
+          urls: ['http://mirror/artifact.zip'],
+        ),
+      ]).writeToBuffer());
+      final index = await publisher.sealIndex(indexDoc(versions: [
+        versionDoc(
+          version: '1.1.0',
+          code: 110,
+          manifestBytes: manifest,
+          urls: ['http://mirror/manifest.pb'],
+        ),
+      ]));
+      final directory = await publisher.sealDirectory(UpdateDirectory(
+        schema: directorySchemaId,
+        product: 'demo',
+        directorySequence: Int64(1),
+        services: [
+          DirectoryService(
+            id: 'only',
+            priority: 1,
+            indexUrl: 'http://mirror/index.pb',
+          ),
+        ],
+      ));
+
+      final fetcher = FakeFetcher({
+        'http://entry/primary.pb':
+            FetchException(Uri.parse('http://entry/primary.pb'), 'down'),
+        'http://entry/backup.pb': directory,
+        'http://mirror/index.pb': index,
+        'http://mirror/manifest.pb': manifest,
+        'http://mirror/artifact.zip': body,
+      });
+
+      final updater = RupUpdater(
+        product: 'demo',
+        channel: 'stable',
+        currentCode: 100,
+        entryUrls: [
+          Uri.parse('http://entry/primary.pb'),
+          Uri.parse('http://entry/backup.pb'),
+        ],
+        trustedKeys: publisher.trusted,
+        clientSelectors: const {'os': 'windows', 'arch': 'x64'},
+        stateStore: MemoryUpdateStateStore(),
+        fetcher: fetcher,
+      );
+
+      expect(await updater.check(force: true), isA<UpdateAvailable>());
+      expect(
+        fetcher.requested.take(3).toList(),
+        [
+          'http://entry/primary.pb',
+          'http://entry/backup.pb',
+          'http://mirror/index.pb',
+        ],
+      );
+    });
+
+    test('prefers previously successful service on next check', () async {
+      final body = utf8Bytes('learn-order' * 16);
+      final manifest = Uint8List.fromList(manifestDoc(artifacts: [
+        artifactDoc(
+          id: 'app-windows-x64',
+          filename: 'demo-1.1.0-win-x64.zip',
+          body: body,
+          urls: ['http://mirror/artifact.zip'],
+        ),
+      ]).writeToBuffer());
+      final index = await publisher.sealIndex(indexDoc(versions: [
+        versionDoc(
+          version: '1.1.0',
+          code: 110,
+          manifestBytes: manifest,
+          urls: ['http://mirror/manifest.pb'],
+        ),
+      ]));
+      final directory = await publisher.sealDirectory(UpdateDirectory(
+        schema: directorySchemaId,
+        product: 'demo',
+        directorySequence: Int64(1),
+        services: [
+          DirectoryService(
+            id: 'cn',
+            priority: 10,
+            indexUrl: 'http://cn/index.pb',
+          ),
+          DirectoryService(
+            id: 'eu',
+            priority: 20,
+            indexUrl: 'http://eu/index.pb',
+          ),
+        ],
+      ));
+
+      final store = MemoryUpdateStateStore(UpdateState(
+        lastSuccessfulSourceKey: directoryServiceKey('eu'),
+        sourceStats: {
+          directoryServiceKey('eu'): SourceStat(successes: 2, lastBytesPerSecond: 5),
+        },
+      ));
+
+      final fetcher = FakeFetcher({
+        'http://entry/dir.pb': directory,
+        'http://cn/index.pb': index,
+        'http://eu/index.pb': index,
+        'http://mirror/manifest.pb': manifest,
+        'http://mirror/artifact.zip': body,
+      });
+
+      final updater = RupUpdater(
+        product: 'demo',
+        channel: 'stable',
+        currentCode: 100,
+        entryUrls: [Uri.parse('http://entry/dir.pb')],
+        trustedKeys: publisher.trusted,
+        clientSelectors: const {'os': 'windows', 'arch': 'x64'},
+        stateStore: store,
+        fetcher: fetcher,
+      );
+
+      await updater.check(force: true);
+      expect(
+        fetcher.requested,
+        containsAllInOrder([
+          'http://entry/dir.pb',
+          'http://eu/index.pb',
+        ]),
+      );
+      expect(fetcher.requested, isNot(contains('http://cn/index.pb')));
+    });
+  });
+
+  group('preference learning', () {
+    test('ranks last success first without inventing probes', () {
+      final state = UpdateState(
+        lastSuccessfulSourceKey: 'b',
+        sourceStats: {
+          'a': SourceStat(lastBytesPerSecond: 100),
+          'b': SourceStat(successes: 1, lastBytesPerSecond: 10),
+          'c': SourceStat(consecutiveFailures: 3),
+        },
+      );
+      expect(
+        rankUrlStrings(['a', 'b', 'c'], state),
+        ['b', 'a', 'c'],
+      );
     });
   });
 }

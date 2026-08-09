@@ -1248,6 +1248,212 @@ class Fallback extends $pb.GeneratedMessage {
   $pb.PbList<FallbackRule> get rules => $_getList(4);
 }
 
+/// DirectoryService is one update-service takeout point discovered via UpdateDirectory.
+class DirectoryService extends $pb.GeneratedMessage {
+  factory DirectoryService({
+    $core.String? id,
+    $core.int? priority,
+    $core.String? indexUrl,
+    $core.String? fallbackUrl,
+    $core.String? channel,
+  }) {
+    final result = create();
+    if (id != null) result.id = id;
+    if (priority != null) result.priority = priority;
+    if (indexUrl != null) result.indexUrl = indexUrl;
+    if (fallbackUrl != null) result.fallbackUrl = fallbackUrl;
+    if (channel != null) result.channel = channel;
+    return result;
+  }
+
+  DirectoryService._();
+
+  factory DirectoryService.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory DirectoryService.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DirectoryService',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'id')
+    ..aI(2, _omitFieldNames ? '' : 'priority')
+    ..aOS(3, _omitFieldNames ? '' : 'indexUrl')
+    ..aOS(4, _omitFieldNames ? '' : 'fallbackUrl')
+    ..aOS(5, _omitFieldNames ? '' : 'channel')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DirectoryService clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DirectoryService copyWith(void Function(DirectoryService) updates) =>
+      super.copyWith((message) => updates(message as DirectoryService))
+          as DirectoryService;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static DirectoryService create() => DirectoryService._();
+  @$core.override
+  DirectoryService createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static DirectoryService getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<DirectoryService>(create);
+  static DirectoryService? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get id => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set id($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get priority => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set priority($core.int value) => $_setSignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasPriority() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearPriority() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get indexUrl => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set indexUrl($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasIndexUrl() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearIndexUrl() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get fallbackUrl => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set fallbackUrl($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasFallbackUrl() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearFallbackUrl() => $_clearField(4);
+
+  /// Optional channel binding. Empty means "applicable to any channel" (host
+  /// still must only use entries that match the running channel when set).
+  @$pb.TagNumber(5)
+  $core.String get channel => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set channel($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasChannel() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearChannel() => $_clearField(5);
+}
+
+/// UpdateDirectory is the signed bootstrap document (schema rup.directory/2).
+/// Logical key: directory/<product>.pb (product-scoped).
+/// Named UpdateDirectory (not Directory) so generated Dart does not clash with dart:io.
+/// MUST NOT carry artifact download URLs; it only points at signed Index/Fallback.
+class UpdateDirectory extends $pb.GeneratedMessage {
+  factory UpdateDirectory({
+    $core.String? schema,
+    $core.String? product,
+    $fixnum.Int64? directorySequence,
+    $core.String? updatedAt,
+    $core.Iterable<DirectoryService>? services,
+  }) {
+    final result = create();
+    if (schema != null) result.schema = schema;
+    if (product != null) result.product = product;
+    if (directorySequence != null) result.directorySequence = directorySequence;
+    if (updatedAt != null) result.updatedAt = updatedAt;
+    if (services != null) result.services.addAll(services);
+    return result;
+  }
+
+  UpdateDirectory._();
+
+  factory UpdateDirectory.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory UpdateDirectory.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'UpdateDirectory',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'schema')
+    ..aOS(2, _omitFieldNames ? '' : 'product')
+    ..aInt64(3, _omitFieldNames ? '' : 'directorySequence')
+    ..aOS(4, _omitFieldNames ? '' : 'updatedAt')
+    ..pPM<DirectoryService>(5, _omitFieldNames ? '' : 'services',
+        subBuilder: DirectoryService.create)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateDirectory clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateDirectory copyWith(void Function(UpdateDirectory) updates) =>
+      super.copyWith((message) => updates(message as UpdateDirectory))
+          as UpdateDirectory;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static UpdateDirectory create() => UpdateDirectory._();
+  @$core.override
+  UpdateDirectory createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static UpdateDirectory getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<UpdateDirectory>(create);
+  static UpdateDirectory? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get schema => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set schema($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSchema() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSchema() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get product => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set product($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasProduct() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearProduct() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get directorySequence => $_getI64(2);
+  @$pb.TagNumber(3)
+  set directorySequence($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDirectorySequence() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDirectorySequence() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get updatedAt => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set updatedAt($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasUpdatedAt() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearUpdatedAt() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $pb.PbList<DirectoryService> get services => $_getList(4);
+}
+
 const $core.bool _omitFieldNames =
     $core.bool.fromEnvironment('protobuf.omit_field_names');
 const $core.bool _omitMessageNames =

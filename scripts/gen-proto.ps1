@@ -7,7 +7,8 @@ $Proto = Join-Path $Root "proto"
 
 Push-Location $Proto
 try {
-    & buf dep update 2>&1 | Out-Null
+    # buf dep update may write WARN to stderr when there are no deps; ignore it.
+    & buf dep update 2>$null | Out-Null
     & buf generate
     if ($LASTEXITCODE -ne 0) { throw "buf generate failed with exit $LASTEXITCODE" }
 } finally {

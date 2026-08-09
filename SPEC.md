@@ -22,6 +22,7 @@
 3. **跨语言零分歧。** 版本比较、选路、验签这三处逻辑必须在 Go / Dart / Node / C# 等实现中给出完全一致的结果，由 `conformance/` 用例强制约束。
 4. **纯本地阶段可离线、可重复、可单测。** 计算哈希、固化版本信息不得依赖网络或后端。
 5. **完整性可验证。** 单一签名根 + 逐级哈希，能防篡改与防降级。
+6. **稳定引导入口与可迁移更新服务。** 客户端**可以**只内嵌极少变更的 directory 入口 URL 列表（`entryUrls`），从签名的 directory 文档发现当前 index / fallback 取货点；加减机房与更换 serve **应该**优先改 directory 与发布双写，而不是改客户端常量。directory 与 index / fallback **必须**使用同一组发布公钥所对应的签名体系（见 §4、§16）。
 
 ### 1.2 非目标
 
@@ -29,47 +30,53 @@
 2. **不定义"如何安装"。** 替换二进制、唤起系统安装器、解压覆盖资源目录，这些完全由宿主决定，协议只负责把正确的字节和元数据交到宿主手里。
 3. **不做服务端灰度分流。** v1 的 index 是一份对所有客户端相同的静态文档。`rollout` 字段已预留，但 v1 **禁止**依赖它。
 4. **~~不提供多语言运行时 SDK~~（已撤销）。** v2 起提供官方 Go / Dart SDK；结构以 Protobuf 生成代码为唯一读写入口，各语言只实现编排逻辑。
+5. **不依赖付费智能 DNS / Anycast / 全球 CDN 做就近调度。** 多区域可达性由 directory 列表 + 客户端对真实下载历史的排序解决（§12.7）；协议**禁止**把「每次检查前的专用连通性探测 / 测速下载」规定为选源前提。
 
 ---
 
 ## 2. 概念模型（规范性）
 
-网络上存在四类对象，外加一类**只存在于本地**的中间产物。
+网络上存在五类对象，外加一类**只存在于本地**的中间产物。
 
 | 对象 | 可变性 | 数量 | 作用 |
 |---|---|---|---|
+| **directory** | 可变，服务拓扑变更时覆盖 | 每个 product 一份 | 引导文档：给出该 product 可用的 index / fallback 绝对 URL 列表。**必须签名。** 不承载版本链，不替代 index。 |
 | **index** | 可变，每次发布覆盖 | 每个 (product, channel) 一份 | 正常 OTA 入口。包含版本链条、升级路径约束、每份 manifest 的哈希与 URL。**必须签名。** |
 | **manifest** | 不可变 | 每个版本一份 | 描述该版本包含哪些产物、每个产物的哈希、大小、URL、选择器。 |
 | **artifact** | 不可变 | 每个版本 N 份 | 产物本体。 |
 | **fallback** | 可变，救急时覆盖 | 每个 product 一份 | 当正常 OTA 链失效或某批版本被点名时，下发催促手工更新的规则与链接。**必须签名。** 不承载下载/安装。 |
 | **staged**（本地） | — | 每个待发布版本一份 | 「已固化但尚未上网」的版本描述。**禁止**包含任何 URL 或后端信息。 |
 
-**信任链：** 客户端内嵌公钥 → 验证 index 的签名 → 用 index 中的 `sha256` 校验 manifest → 用 manifest 中的 `sha256` 校验 artifact。因此 **manifest 与 artifact 禁止单独签名**，它们的完整性由 index 的签名传递而来。这使得整个更新流程只需一次签名验证。
+**信任链：** 客户端内嵌公钥 →（可选）验证 directory 的签名并读取其中的 index URL → 验证 index 的签名 → 用 index 中的 `sha256` 校验 manifest → 用 manifest 中的 `sha256` 校验 artifact。因此 **manifest 与 artifact 禁止单独签名**，它们的完整性由 index 的签名传递而来。directory **禁止**携带 artifact 下载 URL；它只回答「去哪里取签名的 index / fallback」。
+
+**Directory 信任链：** 同一套内嵌公钥 → 验证 directory 的签名信封 → 采用其中的服务列表。directory 使用的 `key_id` / 算法规则与 index、fallback **必须**一致（同一信任根）。
 
 **Fallback 信任链：** 同一套内嵌公钥 → 验证 fallback 的签名信封 → 采用其中的规则与 `manualUrl`。Fallback **禁止**代替 index 完成自动下载；它只提供用户可打开的手工更新链接。
 
-**发布的提交点（commit point）：** 一次发布中，写入 index 是**最后一步**。在 index 被更新之前，即使 artifact 和 manifest 已全部上传完毕，该版本对客户端也**必须**不可见。这消除了「清单指向尚不可下载的 URL」这一类不一致窗口。Fallback 的提交点是写入 `fallback/<product>.pb` 本身（独立于 index）。
+**发布的提交点（commit point）：** 一次**版本**发布中，写入 index 是**最后一步**。在 index 被更新之前，即使 artifact 和 manifest 已全部上传完毕，该版本对客户端也**必须**不可见。这消除了「清单指向尚不可下载的 URL」这一类不一致窗口。Fallback 的提交点是写入 `fallback/<product>.pb` 本身（独立于 index）。Directory 的提交点是写入 `directory/<product>.pb`（独立于单次版本发布；通常在服务拓扑变更时更新）。若 directory 与多份 index 镜像一并变更，发布方**必须**先保证各镜像上的 index / 产物字节已一致可见，再更新 directory。
 
 ---
 
 ## 3. 文件布局与后端映射（规范性）
 
-发布工具在逻辑上操作四个 **key**：
+发布工具在逻辑上操作五个 **key**：
 
 ```
+directory/<product>.pb
 index/<product>/<channel>.pb
 manifest/<product>/<version>.pb
 artifact/<product>/<version>/<filename>
 fallback/<product>.pb
 ```
 
-文档对象（index / manifest / fallback / envelope）在网络上以 **protobuf 二进制**传输，`Content-Type` 宜为 `application/protobuf`（或 `application/x-protobuf`）。artifact 仍是原始文件字节。
+文档对象（directory / index / manifest / fallback / envelope）在网络上以 **protobuf 二进制**传输，`Content-Type` 宜为 `application/protobuf`（或 `application/x-protobuf`）。artifact 仍是原始文件字节。
 
 key 是逻辑标识，**不是** URL。后端插件负责把 key 映射到物理位置并返回可访问的 URL。
 
 **路径型后端**（本地目录 / COS / S3 / 自建静态服务器）直接把 key 当作路径：
 
 ```
+https://cdn.example.com/directory/myapp.pb
 https://cdn.example.com/index/myapp/stable.pb
 https://cdn.example.com/manifest/myapp/1.5.0.pb
 https://cdn.example.com/artifact/myapp/1.5.0/myapp-1.5.0-win-x64.zip
@@ -80,6 +87,7 @@ https://cdn.example.com/fallback/myapp.pb
 
 | key | tag | asset name |
 |---|---|---|
+| `directory/myapp.pb` | `directory`（固定 tag，反复覆盖） | `directory-myapp.pb` |
 | `index/myapp/stable.pb` | `channel-stable`（固定 tag，反复覆盖） | `index-stable.pb` |
 | `manifest/myapp/1.5.0.pb` | `v1.5.0` | `manifest-1.5.0.pb` |
 | `artifact/myapp/1.5.0/app.zip` | `v1.5.0` | `app.zip` |
@@ -91,7 +99,7 @@ asset 名**禁止**包含 `/`。同一 tag 下 asset 名**必须**唯一。
 
 ### 3.1 缓存策略（规范性）
 
-- index 与 fallback 是可变的，后端**应该**为其设置短缓存（≤ 60 秒）或禁用缓存。客户端在请求它们时**应该**追加一个缓存击穿查询参数（如 `?t=<unix秒>`）或发送 `Cache-Control: no-cache`。
+- directory、index 与 fallback 是可变的，后端**应该**为其设置短缓存（≤ 60 秒）或禁用缓存。客户端在请求它们时**应该**追加一个缓存击穿查询参数（如 `?t=<unix秒>`）或发送 `Cache-Control: no-cache`。
 - manifest 与 artifact 是不可变的，**应该**设置长缓存（≥ 1 年）。客户端**禁止**对它们做缓存击穿。
 
 > 这一条是必须写进协议的，因为 `raw.githubusercontent.com` 与 jsdelivr 都有分钟级 CDN 缓存，不处理会导致「已发布但客户端几分钟内看不到」。
@@ -108,12 +116,12 @@ asset 名**禁止**包含 `/`。同一 tag 下 asset 名**必须**唯一。
 
 ## 4. 签名信封 envelope（规范性）
 
-index 与 fallback 在网络上传输时**必须**包裹在 protobuf `Envelope`（`rup.envelope/2`）中。manifest 与 artifact **禁止**使用信封。字段定义见 [`proto/rup/v2/envelope.proto`](proto/rup/v2/envelope.proto)。
+directory、index 与 fallback 在网络上传输时**必须**包裹在 protobuf `Envelope`（`rup.envelope/2`）中。manifest 与 artifact **禁止**使用信封。字段定义见 [`proto/rup/v2/envelope.proto`](proto/rup/v2/envelope.proto)。
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `schema` | string | 是 | 固定 `"rup.envelope/2"` |
-| `payload` | bytes | 是 | **Index 或 Fallback 消息的 protobuf 序列化字节**（由拉取的逻辑 key 决定解析成哪一种） |
+| `payload` | bytes | 是 | **Directory、Index 或 Fallback 消息的 protobuf 序列化字节**（由拉取的逻辑 key 决定解析成哪一种） |
 | `signatures` | repeated | 是 | 至少一个元素 |
 | `signatures[].key_id` | string | 是 | 公钥标识 |
 | `signatures[].alg` | string | 是 | 仅允许 `"ed25519"` |
@@ -218,6 +226,8 @@ index 与 fallback 在网络上传输时**必须**包裹在 protobuf `Envelope`�
 > 现有实践对照：RemoteCam 目前为 GitHub 和 Gitee 各生成一份内容不同的 `update_config_*.json`，并靠 `convert_config_to_gitee.py` 做 URL 替换，正是本节禁止的做法。改为 `urls` 数组后，全网只有一份字节完全相同的 index 和 manifest，签名只需一次。
 
 由此得出发布顺序的规范性约束：一次发布中，**所有**镜像的 artifact 必须先全部上传完毕、所有 URL 收集齐，才能生成 manifest；所有镜像的 manifest 上传完毕后，才能生成并写入 index。
+
+directory（§16）中列出的多个 `index_url` **必须**指向上述**同一份**已签名 index 字节的取货点（可位于不同区域 / 主机）。**禁止**为「中国机房」「欧洲机房」等分别签发内容不同（例如 `urls` 子集不同）的 index。区域差异**只**通过同一文档内的 `urls[]` 表达。
 
 ---
 
@@ -506,12 +516,16 @@ index 会随发布次数增长。每个节点约 300 字节，1000 次发布约 
 
 ### 12.1 检查更新的流程（规范性）
 
-1. 依次尝试内嵌的 index URL 列表，取第一个成功获取的响应。
+0. **解析 index URL 列表（引导）：**
+   - 若宿主配置了 `entryUrls`（directory 入口）：依次尝试（§12.7 可重排顺序），取第一个验签通过且 `product` 匹配的 directory（§16）；再从其 `services` 得到 index URL 有序列表（同样可经 §12.7 重排）。directory 验签失败或 `product` 不匹配则**必须**视为该入口不可用并试下一个；**禁止**降级为不验签使用。
+   - 若宿主直接配置了 `indexUrls`：跳过 directory，使用该列表。
+   - 宿主**可以**同时配置二者：此时**必须**先成功得到一份 directory，再用 directory 中的列表；**禁止**在 directory 可用时静默改用过期的内嵌 `indexUrls` 充当「更快的路径」（内嵌 `indexUrls` 仅可作为未配置 `entryUrls` 时的兼容模式）。
+1. 依次尝试上一步得到的 index URL 列表，取第一个成功获取的响应。
 2. 验签（§4.1）。失败则**必须**视为该源不可用，继续尝试下一个源；**禁止**降级为不验签使用。
 3. 校验 `product` 与 `channel` 与自身期望一致，不一致则拒绝该源。
 4. 校验 `sequence`（§12.4）。
 5. 执行 `selectNextTarget`。为 null 则本次无更新。
-6. 从目标节点的 `manifest.urls` 依次尝试下载 manifest，校验 `size` 与 `sha256`。不匹配则**必须**丢弃并尝试下一个 URL。
+6. 从目标节点的 `manifest.urls` 依次尝试下载 manifest（顺序可经 §12.7 重排），校验 `size` 与 `sha256`。不匹配则**必须**丢弃并尝试下一个 URL。
 7. 校验 manifest 的 `product` / `version` / `code` 与 index 节点一致。
 8. 按 §11 选出 artifact。
 
@@ -521,12 +535,12 @@ index 会随发布次数增长。每个节点约 300 字节，1000 次发布约 
 |---|---|---|
 | 成功检查后的最小间隔 | 24 小时 | |
 | 失败后的重试间隔 | 1 小时 | |
-| index / manifest 请求超时 | 10 秒 | |
+| index / manifest / directory 请求超时 | 10 秒 | |
 | artifact 下载超时 | 无总时长上限，但空闲（无数据）超时 60 秒 | 大文件不能用固定总超时 |
 
 宿主**可以**调整这些默认值，**应该**允许用户手动触发一次忽略节流的检查。
 
-状态**必须**持久化在宿主的用户数据目录，至少包含：`lastCheckAt`、`lastResult`、`lastSeenSequence`、`skipped`（用户选择跳过的 code 列表）。状态**必须**按 (product, channel) 分别存储。
+状态**必须**持久化在宿主的用户数据目录，至少包含：`lastCheckAt`、`lastResult`、`lastSeenSequence`、`skipped`（用户选择跳过的 code 列表）。若使用 directory，**应该**持久化 `lastSeenDirectorySequence`。为支持 §12.7，**应该**持久化各候选源的最近成功/失败与可选吞吐记录。状态**必须**按 (product, channel) 分别存储（directory 序号可按 product 存储）。
 
 ### 12.3 下载与校验（规范性）
 
@@ -592,6 +606,18 @@ Fallback 是正常 OTA（§12.1）之外的**救急通道**：当某些已装版
 SDK **应该**额外暴露仅跑 §12.6 的入口，供下载/安装失败后再次催更。
 
 Fallback **禁止**执行自动下载或 apply；宿主只展示 `message` 并打开 `manual_url`。
+
+### 12.7 多源顺序与学习（规范性）
+
+本节适用于：`entryUrls`、directory 内的 `services`、以及文档中的 `urls[]`。
+
+1. **禁止**为「选择从哪里下载」而单独发起探测、测速或预下载；**禁止**因此产生随后丢弃的流量。
+2. 多个候选之间**必须**顺序尝试；**禁止**并行请求同一个逻辑对象（与 §12.3 一致）。
+3. 客户端**可以**根据本机在**真实**更新流程中记录的成功/失败与可选吞吐，对候选列表重排；无历史时**必须**保持文档/配置给出的默认顺序（directory 内按 `priority` 升序，同优先按数组序；`urls[]` 按数组序）。
+4. 记账**必须**只发生在真实的 directory / index / manifest / artifact 请求完成之后（成功或失败）。
+5. 学习数据**禁止**削弱验签、`sha256` 或 `sequence` / `directory_sequence` 防降级规则：被拒绝的响应不得记为「成功源」。
+
+推荐排序（非唯一算法，但合规实现**应该**语义接近）：上次完整成功的候选优先 → 有吞吐记录的按吞吐降序 → 默认序；近期连续失败的**可以**暂时后置，**禁止**永久拉黑到无法再试（除非已不在当前 directory / 文档列表中）。
 
 ---
 
@@ -661,11 +687,14 @@ get(key: str) -> bytes | None
 | 传输损坏 | artifact 的 `sha256` |
 | 篡改 artifact | manifest 的 `sha256` + index 的签名 |
 | 篡改 manifest | index 中记录的 `manifest.sha256` + index 的签名 |
-| 篡改或伪造 index | ed25519 签名，公钥内嵌于客户端 |
+| 篡改或伪造 index / fallback / directory | ed25519 签名，公钥内嵌于客户端 |
+| 篡改 directory 以指引错误取货点 | directory 验签；即使误导，装包仍受 index 签名与哈希约束 |
 | 重放旧 index 实施降级 | `sequence` 单调性检查（§12.4） |
+| 重放旧 directory | `directory_sequence` 单调性检查（§16.2） |
 | 冻结（一直返回旧的合法 index，使客户端不知道有新版本） | 部分缓解，见 §14.3 |
 | 恶意 `filename` 造成路径穿越 | §14.4 |
 | 私钥泄露 | 多签名信封支持密钥轮换（§4.1） |
+| 以探测为名的流量浪费 / 元数据泄露 | §12.7 禁止专用探测 |
 
 ### 14.2 密钥管理
 
@@ -698,6 +727,55 @@ get(key: str) -> bytes | None
 
 ---
 
+## 16. directory 对象（规范性）
+
+directory 是 product 级的**引导文档**：告诉客户端「当前该去哪些绝对 URL 拉取签名的 index / fallback」。它**不是**第二套版本清单。
+
+设计说明（非规范性）：客户端内嵌的 `entryUrls` 一主多备（例如公网静态主站 + CNB raw + GitHub raw）只托管这份小文档的镜像；真正的更新流量仍由 directory 指向的更新服务及 index 内 `urls[]` 承担。细节见 [`docs/design/bootstrap-directory.md`](docs/design/bootstrap-directory.md) 与 ADR 0005。
+
+### 16.1 字段
+
+字段的 protobuf SSOT 见 [`proto/rup/v2/objects.proto`](proto/rup/v2/objects.proto) 中的 `UpdateDirectory`（消息名；逻辑对象仍称 directory，schema 为 `rup.directory/2`）。
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `schema` | string | 是 | 必须为 `"rup.directory/2"` |
+| `product` | string | 是 | 必须与客户端期望的 product 一致 |
+| `directory_sequence` | integer ≥ 1 | 是 | 该 product 目录文档的发布序号，每次覆盖写入**必须**严格递增 |
+| `updated_at` | string | 否 | RFC 3339 UTC，仅供展示与排障 |
+| `services` | repeated | 是 | 长度 ≥ 1 |
+
+`services[]`：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `id` | string | 是 | 稳定标识，供 §12.7 学习偏好引用；同一 directory 内唯一 |
+| `priority` | integer | 是 | 无学习数据时的默认序；**数值越小越优先** |
+| `index_url` | string | 是 | 绝对 URL，指向该 product 某 channel 所用 index 的取货点（宿主按 channel 选择对应 service 或由发布方保证 URL 已按 channel 区分；见下） |
+| `fallback_url` | string | 否 | 绝对 URL，指向签名 fallback |
+
+Channel：v2 首版 directory **可以**为每个 `(product)` 提供面向默认 channel 的 `index_url`，或由发布约定 `services` 内用 `id` / 约定命名区分 channel。若同一 product 多 channel 需要互不干扰的引导，发布方**应该**使用明确可区分的 `index_url`（例如路径中含 channel），客户端**必须**只采用与当前 channel 匹配的条目（实现可用 `id` 前缀或后续可选 `channel` 字段；加入可选 `channel` 字段属同主版本兼容扩展）。
+
+### 16.2 校验与防降级（规范性）
+
+1. 拉取后**必须**按 §4.1 验签；失败则丢弃该入口。
+2. **必须**校验 `product`。
+3. 客户端**应该**持久化 `lastSeenDirectorySequence`；若某入口返回的 `directory_sequence` **小于**已知值，**必须**拒绝该份 directory，并试下一个 `entryUrl`。该拒绝**禁止**当作用户可见的更新失败（与 §12.4 同类）。
+4. `services[].index_url` / `fallback_url` **必须**为绝对 URL；客户端**禁止**拼接。
+
+### 16.3 发布约束（规范性）
+
+1. directory 与 index / fallback **必须**由同一信任根签名（通常同一组发布私钥）。
+2. 签名**一次**，再把**相同字节**分发到各个 `entryUrls` 镜像。**禁止**为不同入口生成内容不同的 directory。
+3. `services` 内各 `index_url` 在目录生效时**必须**能取到**字节一致**的已签名 index（§5.3）。
+4. 持钥签名动作**必须**集中；上传到多个静态宿主**可以**并行，且**禁止**要求每个宿主各自持有私钥。
+
+### 16.4 与直接配置 `indexUrls` 的关系
+
+未使用 directory 的宿主仍可只配置 `indexUrls`，行为与历史 §12.1 兼容。新宿主**应该**优先 `entryUrls` + directory，以便在不发版客户端的情况下迁移更新服务拓扑。
+
+---
+
 ## 附录 A：与现有两个项目的映射
 
 | 概念 | Dec | RemoteCam | 本协议 |
@@ -705,7 +783,7 @@ get(key: str) -> bytes | None
 | index | `ReleaseLatest` 分支的 `version.json`（仅一个版本号） | 固定 tag 的 `update_config_*.json`（index 与 manifest 合并） | `index/<product>/<channel>.json`，已签名，含完整版本链 |
 | manifest | 无（URL 从平台名推导） | 与 index 合并，只有最新一份 | 每版本一份不可变文档 |
 | 版本比较 | 手写三段整数，丢弃 `-beta` | 只比 `x.y.z`，丢弃 `+build` | 仅比较 `code` 整数 |
-| 多源 | 版本检查三源回退；下载单源 | 检查双源并行竞速；下载失败回退 | `urls` 数组，顺序回退，全网同一份字节 |
+| 多源 | 版本检查三源回退；下载单源 | 检查双源并行竞速；下载失败回退 | directory 引导 + `urls` 数组，顺序回退；全网同一份 index/manifest 字节；**禁止**为选源并行竞速（§12.7） |
 | 校验 | 无 | per-file SHA256 | 签名 + 逐级 SHA256 |
 | 升级路径 | 无，只有 latest | 无，只有 latest | `minFrom` + `selectNextTarget` |
 | 历史版本 | 覆盖后丢失 | 覆盖后丢失 | index 中保留全部节点 |

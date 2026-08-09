@@ -33,6 +33,7 @@ export 'src/gen/rup/v2/objects.pb.dart'
     show
         Artifact,
         DigestRef,
+        DirectoryService,
         Fallback,
         FallbackRule,
         Index,
@@ -41,8 +42,10 @@ export 'src/gen/rup/v2/objects.pb.dart'
         Selector,
         Staged,
         StagedArtifact,
+        UpdateDirectory,
         VersionNode;
 export 'src/models.dart';
+export 'src/preference.dart';
 export 'src/release_notes.dart';
 export 'src/runtime_config.dart';
 export 'src/scheduler.dart';

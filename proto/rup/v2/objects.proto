@@ -122,3 +122,26 @@ message Fallback {
   string generated_at = 4; // RFC 3339 UTC
   repeated FallbackRule rules = 5;
 }
+
+// DirectoryService is one update-service takeout point discovered via UpdateDirectory.
+message DirectoryService {
+  string id = 1; // stable id for preference learning; unique within UpdateDirectory
+  int32 priority = 2; // smaller is preferred when no learning data exists
+  string index_url = 3; // absolute URL to a signed Index envelope
+  string fallback_url = 4; // optional absolute URL to a signed Fallback envelope
+  // Optional channel binding. Empty means "applicable to any channel" (host
+  // still must only use entries that match the running channel when set).
+  string channel = 5;
+}
+
+// UpdateDirectory is the signed bootstrap document (schema rup.directory/2).
+// Logical key: directory/<product>.pb (product-scoped).
+// Named UpdateDirectory (not Directory) so generated Dart does not clash with dart:io.
+// MUST NOT carry artifact download URLs; it only points at signed Index/Fallback.
+message UpdateDirectory {
+  string schema = 1; // must be "rup.directory/2"
+  string product = 2;
+  int64 directory_sequence = 3; // >= 1; anti-rollback for the directory doc
+  string updated_at = 4; // optional RFC 3339 UTC
+  repeated DirectoryService services = 5;
+}

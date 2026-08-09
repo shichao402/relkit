@@ -15,9 +15,14 @@ import 'download.dart';
 import 'envelope.dart';
 import 'fetch.dart';
 import 'models.dart';
+import 'preference.dart';
 import 'release_notes.dart';
 import 'selectors.dart';
 import 'state.dart';
+
+/// Preference key for a directory service id (SPEC §12.7 / §16).
+String directoryServiceKey(String id) => 'service:$id';
+
 /// The outcome of a check.
 sealed class UpdateCheckResult {
   const UpdateCheckResult();
@@ -127,18 +132,22 @@ class RupUpdater {
     required this.product,
     required this.channel,
     required this.currentCode,
-    required this.indexUrls,
     required this.trustedKeys,
     required this.clientSelectors,
     required this.stateStore,
+    List<Uri>? indexUrls,
+    List<Uri>? entryUrls,
     List<Uri>? fallbackUrls,
     Fetcher? fetcher,
     this.policy = const UpdatePolicy(),
     this.log,
-  })  : fallbackUrls = List.unmodifiable(fallbackUrls ?? const <Uri>[]),
+  })  : indexUrls = List.unmodifiable(indexUrls ?? const <Uri>[]),
+        entryUrls = List.unmodifiable(entryUrls ?? const <Uri>[]),
+        fallbackUrls = List.unmodifiable(fallbackUrls ?? const <Uri>[]),
         fetcher = fetcher ?? HttpFetcher() {
-    if (indexUrls.isEmpty) {
-      throw ArgumentError.value(indexUrls, 'indexUrls', 'must not be empty');
+    if (this.indexUrls.isEmpty && this.entryUrls.isEmpty) {
+      throw ArgumentError(
+          'indexUrls or entryUrls must contain at least one URL');
     }
     if (trustedKeys.isEmpty) {
       // Without a key the signature check can only ever fail, and a client
@@ -157,9 +166,15 @@ class RupUpdater {
   /// release. Use a value above every published code instead.
   final int currentCode;
 
+  /// Direct index mirrors (compatibility / hosts that skip directory).
+  /// Ignored for the check path when [entryUrls] is non-empty (SPEC §12.1).
   final List<Uri> indexUrls;
 
-  /// Optional signed fallback notice URLs (SPEC section 12.6). Empty disables it.
+  /// Signed directory entry URLs (primary → backups). Preferred bootstrap path.
+  final List<Uri> entryUrls;
+
+  /// Optional signed fallback notice URLs (SPEC section 12.6). Empty disables
+  /// unless a loaded directory supplies `fallback_url` values.
   final List<Uri> fallbackUrls;
 
   final TrustedKeys trustedKeys;
@@ -169,6 +184,9 @@ class RupUpdater {
   final UpdatePolicy policy;
   final void Function(String message)? log;
 
+  /// Last directory adopted during [check] / [checkFallback] in this process.
+  UpdateDirectory? _lastDirectory;
+
   /// Runs a check.
   ///
   /// Pass [force] for a user-initiated check, which ignores throttling.
@@ -176,8 +194,6 @@ class RupUpdater {
   /// merges: [UpdateAvailable] > [FallbackRequired] > [UpToDate] / [CheckFailed].
   Future<UpdateCheckResult> check({bool force = false}) async {
     final normal = await _checkIndex(force: force);
-    if (fallbackUrls.isEmpty) return normal;
-
     final fallback = await checkFallback();
     if (normal is UpdateAvailable) return normal;
     if (fallback != null) return fallback;
@@ -189,16 +205,19 @@ class RupUpdater {
   /// Returns null when no rule matches or no source can be used. Hosts should
   /// call this after a download/apply failure to urge a manual update.
   Future<FallbackRequired?> checkFallback() async {
-    if (fallbackUrls.isEmpty) return null;
-
     final state = await stateStore.load();
+    final urls = await _resolveFallbackUrls(state);
+    if (urls.isEmpty) return null;
+
     final attempts = <String>[];
 
-    for (final url in fallbackUrls) {
+    for (final url in urls) {
       final outcome = await _loadFallbackFrom(url, state);
       switch (outcome) {
         case _FallbackSourceOk(:final doc):
-          state.observeFallbackSequence(doc.sequence.toInt());
+          state
+            ..recordSourceSuccess(url.toString())
+            ..observeFallbackSequence(doc.sequence.toInt());
           await stateStore.save(state);
           final rule = _matchFallbackRule(doc);
           if (rule == null) return null;
@@ -211,11 +230,13 @@ class RupUpdater {
             maxCode: rule.maxCode.toInt(),
           );
         case _FallbackSourceRejected(:final why):
+          state.recordSourceFailure(url.toString());
           attempts.add('$url: $why');
           continue;
       }
     }
 
+    await stateStore.save(state);
     log?.call('fallback check failed: ${attempts.join('; ')}');
     return null;
   }
@@ -231,15 +252,28 @@ class RupUpdater {
     }
 
     final attempts = <String>[];
-    Index? adopted;
+    final plan = await _resolveIndexPlan(state, attempts);
+    if (plan == null || plan.isEmpty) {
+      state
+        ..lastCheckAt = DateTime.now()
+        ..lastResult = 'error';
+      await stateStore.save(state);
+      return CheckFailed('no usable directory or index source', attempts);
+    }
 
-    for (final url in indexUrls) {
-      final outcome = await _loadIndexFrom(url, state);
+    Index? adopted;
+    String? adoptedKey;
+
+    for (final candidate in plan) {
+      final outcome = await _loadIndexFrom(candidate.url, state);
       switch (outcome) {
         case _SourceOk(:final index):
           adopted = index;
+          adoptedKey = candidate.preferenceKey;
+          state.recordSourceSuccess(candidate.preferenceKey);
         case _SourceRejected(:final why):
-          attempts.add('$url: $why');
+          state.recordSourceFailure(candidate.preferenceKey);
+          attempts.add('${candidate.url}: $why');
           continue;
       }
       break;
@@ -270,7 +304,7 @@ class RupUpdater {
 
     final Manifest manifest;
     try {
-      manifest = await _loadManifest(target);
+      manifest = await _loadManifest(target, state);
     } on VerificationException catch (error) {
       attempts.add('manifest for ${target.version}: ${error.message}');
       state
@@ -296,14 +330,21 @@ class RupUpdater {
       );
     }
 
+    final rankedArtifact = artifact.clone()
+      ..urls.clear()
+      ..urls.addAll(rankUrlStrings(artifact.urls, state));
+
     state
       ..lastCheckAt = DateTime.now()
       ..lastResult = 'update-available';
     await stateStore.save(state);
 
+    log?.call(
+        'adopted index via $adoptedKey (sequence ${adopted.sequence.toInt()})');
+
     return UpdateAvailable(
       target: target,
-      artifact: artifact,
+      artifact: rankedArtifact,
       manifest: manifest,
       mandatory: isMandatory(adopted, currentCode),
       remainingHops: resolveUpgradePath(adopted, currentCode).length,
@@ -320,15 +361,36 @@ class RupUpdater {
     UpdateAvailable update, {
     required Directory destinationDir,
     ProgressCallback? onProgress,
-  }) =>
-      downloadArtifact(
-        update.artifact,
-        fetcher: fetcher,
-        destinationDir: destinationDir,
-        policy: policy,
-        onProgress: onProgress,
-        log: log,
+  }) async {
+    final state = await stateStore.load();
+    final ranked = update.artifact.clone()
+      ..urls.clear()
+      ..urls.addAll(rankUrlStrings(update.artifact.urls, state));
+
+    var lastBps = 0;
+    final verified = await downloadArtifact(
+      ranked,
+      fetcher: fetcher,
+      destinationDir: destinationDir,
+      policy: policy,
+      onProgress: (progress) {
+        if (progress.bytesPerSecond > 0) {
+          lastBps = progress.bytesPerSecond.round();
+        }
+        onProgress?.call(progress);
+      },
+      log: log,
+    );
+
+    if (!verified.sourceUrl.isScheme('file')) {
+      state.recordSourceSuccess(
+        verified.sourceUrl.toString(),
+        bytesPerSecond: lastBps > 0 ? lastBps : null,
       );
+      await stateStore.save(state);
+    }
+    return verified;
+  }
 
   /// Marks a version as skipped so later checks stay quiet about it.
   ///
@@ -346,6 +408,152 @@ class RupUpdater {
   }
 
   void close() => fetcher.close();
+
+  Future<List<_IndexCandidate>?> _resolveIndexPlan(
+    UpdateState state,
+    List<String> attempts,
+  ) async {
+    if (entryUrls.isEmpty) {
+      return [
+        for (final url in rankUris(indexUrls, state))
+          _IndexCandidate(url: url, preferenceKey: url.toString()),
+      ];
+    }
+
+    for (final entry in rankUris(entryUrls, state)) {
+      final outcome = await _loadDirectoryFrom(entry, state);
+      switch (outcome) {
+        case _DirectorySourceOk(:final doc):
+          _lastDirectory = doc;
+          state
+            ..recordSourceSuccess(entry.toString())
+            ..observeDirectorySequence(doc.directorySequence.toInt());
+          await stateStore.save(state);
+          final services = _servicesForChannel(doc);
+          if (services.isEmpty) {
+            attempts.add('$entry: no services for channel "$channel"');
+            continue;
+          }
+          final ranked = rankByLearning<DirectoryService>(
+            items: services,
+            keyOf: (service) => directoryServiceKey(service.id),
+            state: state,
+          );
+          final plan = <_IndexCandidate>[];
+          for (final service in ranked) {
+            final url = Uri.tryParse(service.indexUrl);
+            if (url == null) {
+              attempts.add(
+                  '$entry service ${service.id}: bad indexUrl ${service.indexUrl}');
+              continue;
+            }
+            plan.add(_IndexCandidate(
+              url: url,
+              preferenceKey: directoryServiceKey(service.id),
+            ));
+          }
+          if (plan.isEmpty) {
+            attempts.add('$entry: no usable indexUrl in directory');
+            continue;
+          }
+          return plan;
+        case _DirectorySourceRejected(:final why):
+          state.recordSourceFailure(entry.toString());
+          attempts.add('$entry: $why');
+          continue;
+      }
+    }
+    return null;
+  }
+
+  Future<List<Uri>> _resolveFallbackUrls(UpdateState state) async {
+    if (fallbackUrls.isNotEmpty) {
+      return rankUris(fallbackUrls, state);
+    }
+    if (entryUrls.isEmpty) return const [];
+
+    var doc = _lastDirectory;
+    if (doc == null) {
+      for (final entry in rankUris(entryUrls, state)) {
+        final outcome = await _loadDirectoryFrom(entry, state);
+        if (outcome case _DirectorySourceOk(:final doc)) {
+          _lastDirectory = doc;
+          state
+            ..recordSourceSuccess(entry.toString())
+            ..observeDirectorySequence(doc.directorySequence.toInt());
+          await stateStore.save(state);
+          break;
+        }
+        if (outcome case _DirectorySourceRejected()) {
+          state.recordSourceFailure(entry.toString());
+        }
+      }
+      doc = _lastDirectory;
+    }
+    if (doc == null) return const [];
+
+    final urls = <Uri>[];
+    for (final service in _servicesForChannel(doc)) {
+      if (service.fallbackUrl.isEmpty) continue;
+      final url = Uri.tryParse(service.fallbackUrl);
+      if (url != null) urls.add(url);
+    }
+    return rankUris(urls, state);
+  }
+
+  List<DirectoryService> _servicesForChannel(UpdateDirectory doc) {
+    final matched = doc.services
+        .where(
+            (service) => service.channel.isEmpty || service.channel == channel)
+        .toList();
+    matched.sort((a, b) {
+      final byPriority = a.priority.compareTo(b.priority);
+      if (byPriority != 0) return byPriority;
+      return a.id.compareTo(b.id);
+    });
+    return matched;
+  }
+
+  Future<_DirectorySourceOutcome> _loadDirectoryFrom(
+    Uri url,
+    UpdateState state,
+  ) async {
+    Uint8List bytes;
+    try {
+      bytes = await fetcher.getBytes(url, timeout: policy.documentTimeout);
+    } on FetchException catch (error) {
+      return _DirectorySourceRejected(error.message);
+    }
+
+    final verified = await openEnvelope(bytes, trustedKeys);
+    if (!verified.accepted) {
+      return _DirectorySourceRejected(
+          'signature check failed (${verified.rejection!.name}: '
+          '${verified.detail})');
+    }
+
+    final UpdateDirectory doc;
+    try {
+      doc = parseDirectory(verified.payload!);
+    } on RupFormatException catch (error) {
+      return _DirectorySourceRejected('malformed directory: ${error.message}');
+    }
+
+    if (doc.product != product) {
+      return _DirectorySourceRejected(
+          'directory is for product "${doc.product}", expected "$product"');
+    }
+
+    final sequence = doc.directorySequence.toInt();
+    if (!acceptsSequence(sequence, state.lastSeenDirectorySequence)) {
+      log?.call('$url directory sequence $sequence < '
+          '${state.lastSeenDirectorySequence}, trying the next entry');
+      return _DirectorySourceRejected('directory_sequence $sequence is older '
+          'than the last accepted ${state.lastSeenDirectorySequence}');
+    }
+
+    return _DirectorySourceOk(doc);
+  }
 
   Future<_SourceOutcome> _loadIndexFrom(Uri url, UpdateState state) async {
     Uint8List bytes;
@@ -400,10 +608,10 @@ class RupUpdater {
   /// as trustworthy as the index itself. That is why the manifest carries no
   /// signature of its own: one signature over a document that pins the hash of
   /// everything else is both cheaper and harder to get wrong.
-  Future<Manifest> _loadManifest(VersionNode target) async {
+  Future<Manifest> _loadManifest(VersionNode target, UpdateState state) async {
     final failures = <String>[];
 
-    for (final rawUrl in target.manifest.urls) {
+    for (final rawUrl in rankUrlStrings(target.manifest.urls, state)) {
       final url = Uri.tryParse(rawUrl);
       if (url == null) {
         failures.add('$rawUrl: not a valid URL');
@@ -414,18 +622,21 @@ class RupUpdater {
       try {
         bytes = await fetcher.getBytes(url, timeout: policy.documentTimeout);
       } on FetchException catch (error) {
+        state.recordSourceFailure(rawUrl);
         failures.add('$rawUrl: ${error.message}');
         continue;
       }
 
       final expectedSize = target.manifest.size.toInt();
       if (bytes.length != expectedSize) {
+        state.recordSourceFailure(rawUrl);
         failures.add('$rawUrl: expected $expectedSize bytes, '
             'got ${bytes.length}');
         continue;
       }
       final digest = sha256OfBytes(bytes);
       if (digest != target.manifest.sha256) {
+        state.recordSourceFailure(rawUrl);
         failures.add('$rawUrl: sha256 mismatch');
         continue;
       }
@@ -434,6 +645,7 @@ class RupUpdater {
       try {
         manifest = parseManifest(bytes);
       } on RupFormatException catch (error) {
+        state.recordSourceFailure(rawUrl);
         failures.add('$rawUrl: ${error.message}');
         continue;
       }
@@ -443,22 +655,26 @@ class RupUpdater {
       // disagree. Refusing is the only safe reading: acting on it would install
       // a different version than the chain says.
       if (manifest.product != product) {
+        state.recordSourceFailure(rawUrl);
         failures.add('$rawUrl: manifest names product "${manifest.product}"');
         continue;
       }
       final manifestCode = manifest.code.toInt();
       final targetCode = target.code.toInt();
       if (manifestCode != targetCode) {
+        state.recordSourceFailure(rawUrl);
         failures.add('$rawUrl: manifest code $manifestCode does not match '
             'index node $targetCode');
         continue;
       }
       if (manifest.version != target.version) {
+        state.recordSourceFailure(rawUrl);
         failures.add('$rawUrl: manifest version "${manifest.version}" does not '
             'match index node "${target.version}"');
         continue;
       }
 
+      state.recordSourceSuccess(rawUrl);
       return manifest;
     }
 
@@ -548,6 +764,29 @@ class _FallbackSourceOk extends _FallbackSourceOutcome {
 
 class _FallbackSourceRejected extends _FallbackSourceOutcome {
   const _FallbackSourceRejected(this.why);
+
+  final String why;
+}
+
+class _IndexCandidate {
+  const _IndexCandidate({required this.url, required this.preferenceKey});
+
+  final Uri url;
+  final String preferenceKey;
+}
+
+sealed class _DirectorySourceOutcome {
+  const _DirectorySourceOutcome();
+}
+
+class _DirectorySourceOk extends _DirectorySourceOutcome {
+  const _DirectorySourceOk(this.doc);
+
+  final UpdateDirectory doc;
+}
+
+class _DirectorySourceRejected extends _DirectorySourceOutcome {
+  const _DirectorySourceRejected(this.why);
 
   final String why;
 }

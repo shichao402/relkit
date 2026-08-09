@@ -111,7 +111,7 @@ func (b *httpPutBackend) Get(key string) ([]byte, error) {
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
 	}
-	return httpx.Get(*b.URLFor(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/"))
+	return httpx.Get(*b.URLFor(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
 }
 
 func (b *httpPutBackend) Probe(rawURL string) (bool, *int64, string) {

@@ -45,9 +45,29 @@ type Config struct {
 	Signing        map[string]any
 	Backends       map[string]map[string]any
 	PublishTo      []string
+	// Directory is optional bootstrap-document publish settings (SPEC §16).
+	Directory *DirectoryConfig
 	// Changelog is optional. When set, stage can auto-fill notes from File and
 	// notesUrl from URLTemplate; publish compacts older index nodes to links.
 	Changelog ChangelogConfig
+}
+
+// DirectoryConfig mirrors the optional relkit.json "directory" object.
+type DirectoryConfig struct {
+	PublishTo []string
+	// EntryURLs documents the App-embedded entry list (primary → backups).
+	// Not uploaded by the CLI; publish writes directory/<product>.pb to PublishTo.
+	EntryURLs []string
+	Services  []DirectoryServiceConfig
+}
+
+// DirectoryServiceConfig is one UpdateDirectory.services entry template.
+type DirectoryServiceConfig struct {
+	ID          string
+	Priority    int32
+	IndexURL    string
+	FallbackURL string
+	Channel     string
 }
 
 // ChangelogConfig mirrors the optional relkit.json "changelog" object.
@@ -217,6 +237,60 @@ func Load(path string) (*Config, error) {
 		if _, ok := cfg.Backends[name]; !ok {
 			return nil, Error{Message: fmt.Sprintf("publishTo names unknown backend %q (configured: %s)", name, strings.Join(sortedKeys(cfg.Backends), ", "))}
 		}
+	}
+
+	if value, ok := raw["directory"]; ok {
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil, Error{Message: "directory must be an object"}
+		}
+		dir := &DirectoryConfig{}
+		if publishTo, exists := obj["publishTo"]; exists {
+			list, err := stringList(publishTo)
+			if err != nil {
+				return nil, Error{Message: "directory.publishTo must be a string array"}
+			}
+			dir.PublishTo = list
+			for _, name := range dir.PublishTo {
+				if _, ok := cfg.Backends[name]; !ok {
+					return nil, Error{Message: fmt.Sprintf("directory.publishTo names unknown backend %q", name)}
+				}
+			}
+		}
+		if entryURLs, exists := obj["entryUrls"]; exists {
+			list, err := stringList(entryURLs)
+			if err != nil {
+				return nil, Error{Message: "directory.entryUrls must be a string array"}
+			}
+			dir.EntryURLs = list
+		}
+		if services, exists := obj["services"]; exists {
+			list, ok := services.([]any)
+			if !ok {
+				return nil, Error{Message: "directory.services must be an array"}
+			}
+			for i, rawService := range list {
+				serviceObj, ok := rawService.(map[string]any)
+				if !ok {
+					return nil, Error{Message: fmt.Sprintf("directory.services[%d] must be an object", i)}
+				}
+				service := DirectoryServiceConfig{}
+				id, _ := serviceObj["id"].(string)
+				service.ID = id
+				if priority, exists := serviceObj["priority"]; exists {
+					n, err := asNonNegativeInt(priority, fmt.Sprintf("directory.services[%d].priority", i))
+					if err != nil {
+						return nil, err
+					}
+					service.Priority = int32(n)
+				}
+				service.IndexURL, _ = serviceObj["indexUrl"].(string)
+				service.FallbackURL, _ = serviceObj["fallbackUrl"].(string)
+				service.Channel, _ = serviceObj["channel"].(string)
+				dir.Services = append(dir.Services, service)
+			}
+		}
+		cfg.Directory = dir
 	}
 
 	if value, ok := raw["changelog"]; ok {

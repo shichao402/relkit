@@ -12,6 +12,7 @@ export 'gen/rup/v2/objects.pb.dart'
     show
         Artifact,
         DigestRef,
+        DirectoryService,
         Fallback,
         FallbackRule,
         Index,
@@ -20,6 +21,7 @@ export 'gen/rup/v2/objects.pb.dart'
         Selector,
         Staged,
         StagedArtifact,
+        UpdateDirectory,
         VersionNode;
 
 /// A document that does not conform to the protocol.
@@ -40,6 +42,7 @@ const envelopeSchemaId = 'rup.envelope/2';
 const indexSchemaId = 'rup.index/2';
 const manifestSchemaId = 'rup.manifest/2';
 const fallbackSchemaId = 'rup.fallback/2';
+const directorySchemaId = 'rup.directory/2';
 const publicKeySchemaId = 'rup.publickey/2';
 const privateKeySchemaId = 'rup.privatekey/2';
 const stagedSchemaId = 'rup.staged/2';
@@ -81,6 +84,18 @@ Fallback parseFallback(Uint8List bytes) {
   _validateFallback(doc);
   return doc;
 }
+
+UpdateDirectory parseDirectory(Uint8List bytes) {
+  final UpdateDirectory doc;
+  try {
+    doc = UpdateDirectory.fromBuffer(bytes);
+  } catch (error) {
+    throw RupFormatException('directory is not valid protobuf: $error');
+  }
+  _validateDirectory(doc);
+  return doc;
+}
+
 Map<String, String> selectorsToMap(List<Selector> selectors) =>
     Map.unmodifiable({
       for (final selector in selectors) selector.key: selector.value,
@@ -108,6 +123,39 @@ void _validateFallback(Fallback doc) {
     }
   }
 }
+
+void _validateDirectory(UpdateDirectory doc) {
+  const where = 'directory';
+  _requireSchema(doc.schema, directorySchemaId, where);
+  _requireNonEmptyString(doc.product, '$where.product');
+  _requireAtLeast(doc.directorySequence.toInt(), 1, '$where.directorySequence');
+  if (doc.services.isEmpty) {
+    _bad('$where.services must be a non-empty array');
+  }
+  final ids = <String>{};
+  for (var i = 0; i < doc.services.length; i++) {
+    final service = doc.services[i];
+    final serviceWhere = '$where.services[$i]';
+    _requireNonEmptyString(service.id, '$serviceWhere.id');
+    if (!ids.add(service.id)) {
+      _bad('$serviceWhere.id "${service.id}" is duplicated');
+    }
+    _requireNonEmptyString(service.indexUrl, '$serviceWhere.indexUrl');
+    final indexUri = Uri.tryParse(service.indexUrl);
+    if (indexUri == null || !indexUri.hasScheme || indexUri.host.isEmpty) {
+      _bad('$serviceWhere.indexUrl must be an absolute URL');
+    }
+    if (service.fallbackUrl.isNotEmpty) {
+      final fallbackUri = Uri.tryParse(service.fallbackUrl);
+      if (fallbackUri == null ||
+          !fallbackUri.hasScheme ||
+          fallbackUri.host.isEmpty) {
+        _bad('$serviceWhere.fallbackUrl must be an absolute URL');
+      }
+    }
+  }
+}
+
 void _validateIndex(Index index) {
   const where = 'index';
 

@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	EnvelopeSchema = model.SchemaEnvelope
-	IndexSchema    = model.SchemaIndex
-	FallbackSchema = model.SchemaFallback
+	EnvelopeSchema  = model.SchemaEnvelope
+	IndexSchema     = model.SchemaIndex
+	FallbackSchema  = model.SchemaFallback
+	DirectorySchema = model.SchemaDirectory
 )
 
 type Error struct {
@@ -56,6 +57,19 @@ func SealFallback(doc *model.FallbackDocument, signers []Signer) (*model.Envelop
 	}
 
 	payload, err := rupv2.MarshalFallback(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	return sealPayload(payload, signers)
+}
+
+func SealDirectory(doc *model.UpdateDirectory, signers []Signer) (*model.Envelope, error) {
+	if len(signers) == 0 {
+		return nil, Error{Message: "at least one signer is required"}
+	}
+
+	payload, err := rupv2.MarshalDirectory(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +175,22 @@ func OpenFallbackEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.Pu
 	}
 	if doc.Schema != FallbackSchema {
 		return nil, Error{Message: fmt.Sprintf("unexpected fallback schema: %q", doc.Schema)}
+	}
+	return doc, nil
+}
+
+func OpenDirectoryEnvelope(env *model.Envelope, trustedKeys map[string]ed25519.PublicKey) (*model.UpdateDirectory, error) {
+	payload, err := verifiedEnvelopePayload(env, trustedKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := rupv2.UnmarshalDirectory(payload)
+	if err != nil {
+		return nil, err
+	}
+	if doc.Schema != DirectorySchema {
+		return nil, Error{Message: fmt.Sprintf("unexpected directory schema: %q", doc.Schema)}
 	}
 	return doc, nil
 }
