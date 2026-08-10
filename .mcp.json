@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "dec-agents-board": {
+      "command": "mise",
+      "args": [
+        "exec",
+        "node@20",
+        "--",
+        "node",
+        "${workspaceFolder}/.dec/cache/agents-board/skills/agents-board/mcp/run.mjs"
+      ]
+    }
+  }
+}
