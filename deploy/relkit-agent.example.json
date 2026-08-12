@@ -1,0 +1,12 @@
+{
+  "addr": "127.0.0.1:8787",
+  "uploadTokenFile": "/etc/relkit-agent/token",
+  "maxUpload": "8GiB",
+  "maxFiles": 10000,
+  "stateDir": "/var/lib/relkit-agent",
+  "products": {
+    "dec": {
+      "root": "/srv/relkit/dec"
+    }
+  }
+}

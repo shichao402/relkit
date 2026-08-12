@@ -1,0 +1,15 @@
+# Caddy reverse proxy for relkit-agent.
+# Agent listens on 127.0.0.1:8787; Caddy terminates TLS for publish.<domain>.
+
+publish.firoyang.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:8787
+
+	request_body {
+		max_size 8GB
+	}
+
+	log {
+		output file /var/log/caddy/relkit-agent.log
+	}
+}

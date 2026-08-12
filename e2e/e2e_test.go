@@ -31,6 +31,7 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	assertContains(t, backendsOut, "local")
 	assertContains(t, backendsOut, "static-http")
 	assertContains(t, backendsOut, "http-put")
+	assertContains(t, backendsOut, "s3-compatible")
 
 	guideOut := runRelkit(t, exe, project, nil, 0, "agent-guide")
 	assertContains(t, guideOut, "RUP 发布操作手册")
@@ -276,6 +277,127 @@ func TestHTTPPutBackend(t *testing.T) {
 	missingToken := runRelkit(t, exe, project, nil, 2, "publish", "1.2.0+120")
 	assertContains(t, missingToken, "RELKIT_UPLOAD_TOKEN")
 }
+
+func TestS3CompatibleBackend(t *testing.T) {
+	exe := buildRelkit(t)
+	project := t.TempDir()
+	dist := filepath.Join(project, "dist")
+	store := filepath.Join(project, "store")
+	mustMkdirAll(t, dist)
+	mustMkdirAll(t, store)
+
+	accessKey := "AKIAe2e"
+	secretKey := "e2e-secret-key"
+	server := httptest.NewServer(newFakeS3Handler(t, store, accessKey, secretKey, "us-east-1"))
+	defer server.Close()
+
+	runRelkit(t, exe, project, nil, 0, "init", "--product", "cosapp")
+	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "cos", "--out", "keys", "--update-config")
+	setPrivateKeyPath(t, project, "keys/cos.private.pb")
+	addBackend(t, project, "cos", map[string]any{
+		"type":           "s3-compatible",
+		"endpoint":       server.URL,
+		"bucket":         "release",
+		"prefix":         "rup/",
+		"baseUrl":        server.URL + "/release/rup/",
+		"accessKeyEnv":   "COS_SECRET_ID",
+		"secretKeyEnv":   "COS_SECRET_KEY",
+		"region":         "us-east-1",
+		"forcePathStyle": true,
+	})
+	setPublishTo(t, project, []string{"cos"})
+
+	env := map[string]string{
+		"COS_SECRET_ID":  accessKey,
+		"COS_SECRET_KEY": secretKey,
+	}
+	writeArtifact(t, dist, "cosapp-1.0.0-win-x64.zip", "cos 1.0.0 ", 4096)
+	runRelkit(t, exe, project, nil, 0,
+		"stage", "1.0.0+100",
+		"--add", filepath.Join(dist, "cosapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
+	)
+	runRelkit(t, exe, project, env, 0, "publish", "1.0.0+100")
+	out := runRelkit(t, exe, project, env, 0, "verify", "--deep")
+	assertContains(t, out, "verify passed")
+
+	writeArtifact(t, dist, "cosapp-1.1.0-win-x64.zip", "cos 1.1.0 ", 4096)
+	runRelkit(t, exe, project, nil, 0,
+		"stage", "1.1.0+110",
+		"--add", filepath.Join(dist, "cosapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
+	)
+	denied := runRelkit(t, exe, project, nil, 2, "publish", "1.1.0+110")
+	assertContains(t, denied, "COS_SECRET_ID")
+}
+
+// newFakeS3Handler is a path-style S3 stand-in: SigV4 for writes/signed reads,
+// anonymous GET/HEAD for client/baseUrl probing.
+func newFakeS3Handler(t *testing.T, dir string, accessKey string, secretKey string, region string) http.Handler {
+	t.Helper()
+	return &e2eFakeS3{t: t, dir: dir, accessKey: accessKey, secretKey: secretKey, region: region}
+}
+
+type e2eFakeS3 struct {
+	t         *testing.T
+	dir       string
+	accessKey string
+	secretKey string
+	region    string
+}
+
+func (f *e2eFakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPut || r.Header.Get("Authorization") != "" {
+		if err := f.verify(r); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" || strings.Contains(path, "..") {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	target := filepath.Join(append([]string{f.dir}, strings.Split(path, "/")...)...)
+	switch r.Method {
+	case http.MethodPut:
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			f.t.Fatalf("mkdir: %v", err)
+		}
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			f.t.Fatalf("read: %v", err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			f.t.Fatalf("write: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	case http.MethodGet, http.MethodHead:
+		http.FileServer(http.Dir(f.dir)).ServeHTTP(w, r)
+	default:
+		http.Error(w, "method", http.StatusMethodNotAllowed)
+	}
+}
+
+func (f *e2eFakeS3) verify(r *http.Request) error {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "AWS4-HMAC-SHA256 ") {
+		return errString("missing sigv4")
+	}
+	if r.Header.Get("X-Amz-Date") == "" || r.Header.Get("X-Amz-Content-Sha256") == "" {
+		return errString("missing amz headers")
+	}
+	// Enough to prove the client attached SigV4; full canonical re-sign lives in unit tests.
+	if !strings.Contains(auth, "Credential="+f.accessKey+"/") {
+		return errString("wrong access key")
+	}
+	if !strings.Contains(auth, "/"+f.region+"/s3/") {
+		return errString("wrong region/service")
+	}
+	return nil
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
 
 func buildRelkit(t *testing.T) string {
 	t.Helper()

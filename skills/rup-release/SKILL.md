@@ -36,9 +36,9 @@ description: >
 
 跑 `relkit --version`，不要假设。失败就直接告知用户工具不可用并询问是先安装还是先实现，**禁止**声称执行了 `relkit` 命令，**禁止**编造命令输出。
 
-已实现：`init` `keygen` `stage` `inspect` `simulate` `publish` `verify` `agent-guide` `backends`；后端有 `local`（离线全流程）、`static-http`（任何按路径提供 HTTP 下载的托管，不配 `stageDir` 则为只读审计用）、`http-put`（带鉴权 PUT 上传）。要自托管下载，用同仓的 `relkit-serve`（`cmd/relkit-serve`）。
+已实现：`init` `keygen` `stage` `inspect` `simulate` `publish` `verify` `agent-guide` `backends`；后端有 `local`（离线全流程）、`static-http`（任何按路径提供 HTTP 下载的托管，不配 `stageDir` 则为只读审计用）、`http-put`（带鉴权 PUT 上传）、`s3-compatible`（COS / S3 / MinIO，SigV4）。要自托管下载，也可用同仓的 `relkit-serve`（`cmd/relkit-serve`）。
 
-**未实现：`s3-compatible`（COS）/ `github-release` / `cnb-release` 后端，以及 `yank` / `unyank` / `min-supported`。** 用 `relkit backends` 确认当前构建实到哪一步。需要工具自带凭据上传到对象存储的场景得先实现对应后端；**禁止**用 `local` 后端加手工上传冒充正式发布 —— 那样绕过了「指针最后写」的保证，改用 `static-http` + `stageDir` 或 `http-put`。
+**未实现：`github-release` / `cnb-release` 后端，以及 `yank` / `unyank` / `min-supported`。** 用 `relkit backends` 确认当前构建实到哪一步。推荐对外入口拓扑（自有域名 + COS、迁移 runbook）见仓库 `docs/design/update-ingress-cos.md`；操作侧以 AGENT-GUIDE 为准。**禁止**用 `local` 后端加手工上传冒充正式发布 —— 那样绕过了「指针最后写」的保证，改用 `static-http` + `stageDir`、`http-put` 或 `s3-compatible`。
 
 自检：在本仓库跑 `go test ./internal/chain ./internal/selectors ./internal/envelope`。
 

@@ -326,7 +326,7 @@ type Backend interface {
 | `local` | 鍐欐湰鍦扮洰褰?| **宸插疄鐜?* |
 | `static-http` | 鍐欐湰鍦扮洰褰曪紝浜ょ粰浠撳簱 CI / rsync / 涓婁紶姝ラ鎺ユ墜锛涗笉閰嶅垯鍙 | **宸插疄鐜?* |
 | `http-put` | 甯﹂壌鏉冪殑 PUT 涓婁紶锛堥厤 relkit-serve锛屾垨浠讳綍 PUT / WebDAV 绔偣锛?| **宸插疄鐜?* |
-| `s3-compatible` | COS / S3 / MinIO锛孴C3 鎴?SigV4 绛惧悕 | 鏈疄鐜帮紝鎺ュ叆 COS 鐨勫墠缃?|
+| `s3-compatible` | COS / S3 / MinIO，SigV4 签名 | **已实现** |
 
 **Release 鍨?*蹇呴』鏁翠綋瀹炵幇锛屽洜涓?URL 鐢变笂浼犲搷搴旇繑鍥烇細
 
@@ -406,7 +406,67 @@ CNB 鐨勫埗鍝佸簱鍙湁鐢熸€佷笓鐢ㄧ被鍨嬶紙Docker / Helm / 
 
 ---
 
-## 7. CI 闆嗘垚
+
+
+### 6.5 推荐对外入口（自有域名 + COS）
+
+拓扑已冻结（详见设计文档）；`s3-compatible` **已实现**（SigV4）：
+
+- 客户端 `entryUrls` 的主 URL 应为**自有域名绑定腾讯云 COS**（可选 CDN）上的固定绝对路径，例如 `https://updates.firoyang.com/rup/directory/<product>.pb`。
+- 发布控制面在可信 CVM / CI（持钥签名）；写桶走 `s3-compatible`。COS **不是** `relkit-serve` 那种 Bearer 上传服务。
+- `directory` / `index` / `fallback` / `manifest` / `artifact` 都是静态对象，**可以**整棵进 COS；镜像切换靠双写再改 directory / `urls[]`（见设计文档 §8）。
+- 本仓库自用实装（桶 / DNS / CVM）见设计文档 §10。
+
+权威说明：[`docs/design/update-ingress-cos.md`](docs/design/update-ingress-cos.md)。相关：[`docs/design/bootstrap-directory.md`](docs/design/bootstrap-directory.md)、ADR 0005。
+
+---
+
+
+### 6.6 `s3-compatible`
+
+路径型后端：上传走 S3 兼容 API（SigV4），客户端下载仍只看 `baseUrl + key`（自有域名 / CDN）。适用于腾讯云 COS、AWS S3、MinIO。
+
+```json
+{
+  "type": "s3-compatible",
+  "endpoint": "https://cos.ap-guangzhou.myqcloud.com",
+  "bucket": "relkit-updates-1251882798",
+  "region": "ap-guangzhou",
+  "prefix": "rup/",
+  "baseUrl": "https://updates.firoyang.com/rup/",
+  "accessKeyEnv": "COS_SECRET_ID",
+  "secretKeyEnv": "COS_SECRET_KEY"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `baseUrl` | 是 | 客户端下载基址；URL = `baseUrl + key` |
+| `endpoint` | 是 | 对象存储 API 基址（不含 bucket） |
+| `bucket` | 是 | 桶名 |
+| `accessKeyEnv` / `secretKeyEnv` | 是 | 凭据所在环境变量名 |
+| `prefix` | 否 | 对象 key 前缀，自动补末尾 `/` |
+| `region` | 否 | 签名区域；COS 可从 `endpoint` 推导（如 `ap-guangzhou`） |
+| `forcePathStyle` | 否 | 强制 path-style；自定义/本地 endpoint 默认开启，COS/AWS 默认 virtual-hosted |
+| `timeoutSeconds` | 否 | 上传超时，默认 600 |
+
+拓扑与缓存约定见 [`docs/design/update-ingress-cos.md`](docs/design/update-ingress-cos.md)。
+
+---
+
+### 6.7 `relkit-agent`（发布机）
+
+CI 只 `stage`，发布机持钥 `publish`。二进制：`cmd/relkit-agent`。
+
+- `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer）
+- `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
+- `GET /-/health`
+
+部署样例与 Caddy 反代见 [`deploy/`](deploy/)。设计说明：[`docs/design/publish-agent.md`](docs/design/publish-agent.md)。
+
+---
+
+## 7. CI 集成
 
 鍙戝竷渚у彧闇€瑕佷袱涓幆澧冨彉閲忥細涓€涓悗绔?token锛屼竴涓閽ャ€備簩杩涘埗浠?Releases 涓嬭浇锛屾垨鍦?runner 涓?`go install`銆?
 
@@ -449,7 +509,7 @@ internal/model/ jsonio/     瀵硅薄鏋勯€犮€佺‘瀹氭€у簭鍒楀�
 internal/config/ keys/      閰嶇疆涓庡瘑閽?
 internal/stage/ publish/    鍥哄寲涓庡崄姝ュ彂甯冪紪鎺?
 internal/verify/ simulate/  鏍￠獙涓庨€夎矾妯℃嫙
-internal/httpx/ backends/   HTTP 涓?local / static-http / http-put
+internal/httpx/ backends/   HTTP 涓?local / static-http / http-put / s3-compatible
 e2e/                        绂荤嚎涓庣湡瀹?HTTP 绔埌绔?
 testdata/conformance/       鍗忚澶瑰叿鍓湰锛堜笌鏈洰褰曞悓姝ワ級
 ```

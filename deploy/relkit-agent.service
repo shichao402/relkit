@@ -1,0 +1,20 @@
+[Unit]
+Description=relkit publish agent
+After=network.target
+
+[Service]
+Type=simple
+User=relkit
+Group=relkit
+WorkingDirectory=/srv/relkit
+ExecStart=/usr/local/bin/relkit-agent -config /etc/relkit-agent/relkit-agent.json
+Restart=on-failure
+RestartSec=3
+EnvironmentFile=-/etc/relkit-agent/env
+# Signing / COS credentials live in EnvironmentFile, never in the unit:
+# RELKIT_PRIVATE_KEY=...
+# COS_SECRET_ID=...
+# COS_SECRET_KEY=...
+
+[Install]
+WantedBy=multi-user.target

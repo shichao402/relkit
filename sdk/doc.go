@@ -8,7 +8,8 @@
 // in this directory, and docs/agent/README.md at the repo root for the
 // toolchain + SDK cascade entrypoint.
 //
-// The client fetches a signed Index envelope, verifies Ed25519 signatures over
-// the Index protobuf bytes, selects the next version along the upgrade chain,
-// and downloads a hash-verified artifact. Applying the update is left to the host.
+// The client resolves entryUrls → signed directory (optional), fetches a signed
+// Index envelope, verifies Ed25519 signatures, selects the next version along
+// the upgrade chain, and downloads a hash-verified artifact. Single-binary
+// self-replace helpers live in sdk/apply; directory-swap apply remains host/Dart.
 package sdk

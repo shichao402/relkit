@@ -6,9 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
+	"sort"
 	"time"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
@@ -26,25 +24,30 @@ type Updater struct {
 	Product         string
 	Channel         string
 	CurrentCode     int
-	IndexURLs       []string
-	FallbackURLs    []string // optional; empty disables fallback check
+	IndexURLs       []string // ignored when EntryURLs is non-empty
+	EntryURLs       []string // signed directory bootstrap (SPEC §12.1 step 0 / §16)
+	FallbackURLs    []string // optional; also filled from directory services
 	TrustedKeys     TrustedKeys
 	ClientSelectors map[string]string
-	HTTPClient      *http.Client
+	Fetcher         Fetcher
+	StateStore      StateStore
+	Policy          Policy
 
-	// LastSeenFallbackSequence is the highest fallback sequence this client has
-	// accepted. Persist it across runs (product-scoped) to reject replays.
+	// Deprecated: prefer StateStore. Still honored when StateStore is nil.
 	LastSeenFallbackSequence *int64
+
+	state *UpdateState
 }
 
 // UpdateAvailable is returned when a newer reachable version exists.
 type UpdateAvailable struct {
-	Target        *model.VersionNode
-	Manifest      *model.ManifestDocument
-	Artifact      *model.ManifestArtifact
-	Mandatory     bool
-	RemainingHops int
-	Sequence      int64
+	Target             *rupv2.VersionNode
+	Manifest           *rupv2.Manifest
+	Artifact           *rupv2.Artifact
+	Mandatory          bool
+	RemainingHops      int
+	Sequence           int64
+	PriorReleaseNotes  []PriorReleaseNotes
 }
 
 // FallbackRequired urges a manual update via a signed rule (SPEC §12.6).
@@ -59,93 +62,326 @@ type FallbackRequired struct {
 
 // CheckResult is the outcome of Check.
 type CheckResult struct {
-	UpToDate  bool
-	Available *UpdateAvailable
-	Fallback  *FallbackRequired
-	Sequence  int64
-	Attempts  []string
-	Err       error
+	UpToDate         bool
+	CurrentIsYanked  bool
+	Available        *UpdateAvailable
+	Fallback         *FallbackRequired
+	Throttled        bool
+	NextAllowedAt    time.Time
+	Sequence         int64
+	Attempts         []string
+	Err              error
+}
+
+// PriorReleaseNotes is a historical notes link collected from the index.
+type PriorReleaseNotes struct {
+	Version string
+	Code    int64
+	Notes   string
+	NotesURL string
+}
+
+func (u *Updater) policy() Policy {
+	p := u.Policy
+	def := DefaultPolicy()
+	if p.AfterSuccess <= 0 {
+		p.AfterSuccess = def.AfterSuccess
+	}
+	if p.AfterFailure <= 0 {
+		p.AfterFailure = def.AfterFailure
+	}
+	if p.DocumentTimeout <= 0 {
+		p.DocumentTimeout = def.DocumentTimeout
+	}
+	if p.DownloadIdleTimeout <= 0 {
+		p.DownloadIdleTimeout = def.DownloadIdleTimeout
+	}
+	if p.DownloadRetries <= 0 {
+		p.DownloadRetries = def.DownloadRetries
+	}
+	if p.DownloadWorkers <= 0 {
+		p.DownloadWorkers = def.DownloadWorkers
+	}
+	if p.DownloadChunkSize <= 0 {
+		p.DownloadChunkSize = def.DownloadChunkSize
+	}
+	return p
+}
+
+func (u *Updater) fetcher() Fetcher {
+	if u.Fetcher != nil {
+		return u.Fetcher
+	}
+	p := u.policy()
+	return &HTTPFetcher{DocumentTimeout: p.DocumentTimeout, IdleTimeout: p.DownloadIdleTimeout}
+}
+
+func (u *Updater) loadState() *UpdateState {
+	if u.state != nil {
+		return u.state
+	}
+	if u.StateStore != nil {
+		st, err := u.StateStore.Load()
+		if err != nil || st == nil {
+			st = &UpdateState{}
+		}
+		u.state = st
+		return st
+	}
+	st := &UpdateState{LastSeenFallbackSequence: u.LastSeenFallbackSequence}
+	u.state = st
+	return st
+}
+
+func (u *Updater) saveState() {
+	if u.state == nil {
+		return
+	}
+	if u.StateStore != nil {
+		_ = u.StateStore.Save(u.state)
+	}
+	if u.state.LastSeenFallbackSequence != nil {
+		u.LastSeenFallbackSequence = u.state.LastSeenFallbackSequence
+	}
+}
+
+// Skip records that the user chose to skip a version code.
+func (u *Updater) Skip(code int) {
+	st := u.loadState()
+	st.Skip(code)
+	u.saveState()
+}
+
+// IsSkipped reports whether code is in the persisted skip list.
+func (u *Updater) IsSkipped(code int) bool {
+	return u.loadState().IsSkipped(code)
 }
 
 // Check fetches index envelopes, verifies signatures, and selects the next target.
-// When FallbackURLs is configured, also evaluates the fallback document and
-// merges results: Available > Fallback > UpToDate / error.
+// When force is false, SPEC §12.2 throttling may return Throttled.
 func (u *Updater) Check(ctx context.Context) CheckResult {
-	normal := u.checkIndex(ctx)
-	fb, fbAttempts := u.CheckFallback(ctx)
+	return u.CheckForce(ctx, false)
+}
 
-	if normal.Available != nil {
-		normal.Fallback = fb
-		return normal
-	}
-	if fb != nil {
+// CheckForce is Check with an explicit force flag (ignore throttle when true).
+func (u *Updater) CheckForce(ctx context.Context, force bool) CheckResult {
+	st := u.loadState()
+	p := u.policy()
+	if !force && !p.ShouldCheck(st.LastCheckAt, st.LastResult) {
 		return CheckResult{
-			Fallback: fb,
-			Attempts: append(append([]string{}, normal.Attempts...), fbAttempts...),
+			Throttled:     true,
+			NextAllowedAt: p.NextAllowedAt(st.LastCheckAt, st.LastResult),
 		}
 	}
-	return normal
+
+	normal := u.checkIndex(ctx)
+	fb, fbAttempts := u.CheckFallback(ctx)
+	normal.Attempts = append(normal.Attempts, fbAttempts...)
+
+	now := time.Now().UTC()
+	st.LastCheckAt = &now
+	switch {
+	case normal.Available != nil:
+		st.LastResult = "available"
+		normal.Fallback = fb
+		u.saveState()
+		return normal
+	case fb != nil:
+		st.LastResult = "fallback"
+		u.saveState()
+		return CheckResult{
+			Fallback: fb,
+			Attempts: normal.Attempts,
+			Sequence: fb.Sequence,
+		}
+	case normal.UpToDate:
+		st.LastResult = "success"
+		u.saveState()
+		return normal
+	case normal.Err != nil:
+		st.LastResult = "failure"
+		u.saveState()
+		return normal
+	default:
+		st.LastResult = "success"
+		u.saveState()
+		return normal
+	}
+}
+
+type indexCandidate struct {
+	URL            string
+	PreferenceKey  string
+	FallbackURL    string
+}
+
+func (u *Updater) resolveIndexPlan(ctx context.Context) (candidates []indexCandidate, fallbackURLs []string, attempts []string) {
+	fallbackURLs = append([]string{}, u.FallbackURLs...)
+	st := u.loadState()
+
+	if len(u.EntryURLs) > 0 {
+		entries := RankURLStrings(u.EntryURLs, st)
+		for _, entryURL := range entries {
+			doc, err := u.loadDirectory(ctx, entryURL)
+			if err != nil {
+				attempts = append(attempts, fmt.Sprintf("%s: %v", entryURL, err))
+				st.RecordSourceFailure(entryURL)
+				continue
+			}
+			st.RecordSourceSuccess(entryURL, 0)
+			st.ObserveDirectorySequence(doc.DirectorySequence)
+			services := servicesForChannel(doc, u.Channel)
+			for _, svc := range services {
+				if svc.IndexUrl == "" {
+					continue
+				}
+				candidates = append(candidates, indexCandidate{
+					URL:           svc.IndexUrl,
+					PreferenceKey: DirectoryServiceKey(svc.Id),
+					FallbackURL:   svc.FallbackUrl,
+				})
+				if svc.FallbackUrl != "" {
+					fallbackURLs = append(fallbackURLs, svc.FallbackUrl)
+				}
+			}
+			if len(candidates) > 0 {
+				break
+			}
+			attempts = append(attempts, fmt.Sprintf("%s: no services for channel %q", entryURL, u.Channel))
+		}
+		candidates = RankByLearning(candidates, func(c indexCandidate) string { return c.PreferenceKey }, st)
+		return candidates, uniqueStrings(fallbackURLs), attempts
+	}
+
+	for _, url := range RankURLStrings(u.IndexURLs, st) {
+		candidates = append(candidates, indexCandidate{URL: url, PreferenceKey: url})
+	}
+	return candidates, uniqueStrings(fallbackURLs), attempts
+}
+
+func (u *Updater) loadDirectory(ctx context.Context, rawURL string) (*rupv2.UpdateDirectory, error) {
+	body, err := u.fetcher().GetBytes(ctx, bustCache(rawURL))
+	if err != nil {
+		return nil, fmt.Errorf("fetch: %w", err)
+	}
+	env, err := rupv2.UnmarshalEnvelope(body)
+	if err != nil {
+		return nil, fmt.Errorf("envelope: %w", err)
+	}
+	doc, err := envelope.OpenDirectoryEnvelope(env, u.TrustedKeys)
+	if err != nil {
+		return nil, fmt.Errorf("verify: %w", err)
+	}
+	if doc.Product != u.Product {
+		return nil, fmt.Errorf("product mismatch")
+	}
+	st := u.loadState()
+	if !AcceptsSequence(doc.DirectorySequence, st.LastSeenDirectorySequence) {
+		return nil, fmt.Errorf("directory sequence %d older than last seen", doc.DirectorySequence)
+	}
+	return doc, nil
+}
+
+func servicesForChannel(doc *rupv2.UpdateDirectory, channel string) []*rupv2.DirectoryService {
+	var matched []*rupv2.DirectoryService
+	for _, svc := range doc.Services {
+		if svc == nil {
+			continue
+		}
+		if svc.Channel != "" && svc.Channel != channel {
+			continue
+		}
+		matched = append(matched, svc)
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		if matched[i].Priority != matched[j].Priority {
+			return matched[i].Priority < matched[j].Priority
+		}
+		return matched[i].Id < matched[j].Id
+	})
+	return matched
 }
 
 func (u *Updater) checkIndex(ctx context.Context) CheckResult {
 	if u.Product == "" || u.Channel == "" {
 		return CheckResult{Err: fmt.Errorf("product and channel are required")}
 	}
-	if len(u.IndexURLs) == 0 {
-		return CheckResult{Err: fmt.Errorf("at least one index URL is required")}
-	}
 	if len(u.TrustedKeys) == 0 {
 		return CheckResult{Err: fmt.Errorf("trusted keys are required")}
 	}
-
-	client := u.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+	if len(u.EntryURLs) == 0 && len(u.IndexURLs) == 0 {
+		return CheckResult{Err: fmt.Errorf("at least one entry URL or index URL is required")}
 	}
 
-	var attempts []string
-	for _, rawURL := range u.IndexURLs {
-		indexURL := bustCache(rawURL)
-		body, err := getBytes(ctx, client, indexURL)
+	st := u.loadState()
+	candidates, _, attempts := u.resolveIndexPlan(ctx)
+	if len(candidates) == 0 {
+		return CheckResult{
+			Attempts: attempts,
+			Err:      fmt.Errorf("no usable directory/index source (%d attempted)", len(attempts)),
+		}
+	}
+
+	for _, cand := range candidates {
+		indexURL := bustCache(cand.URL)
+		body, err := u.fetcher().GetBytes(ctx, indexURL)
 		if err != nil {
-			attempts = append(attempts, fmt.Sprintf("%s: fetch: %v", rawURL, err))
+			attempts = append(attempts, fmt.Sprintf("%s: fetch: %v", cand.URL, err))
+			st.RecordSourceFailure(cand.PreferenceKey)
 			continue
 		}
 		env, err := rupv2.UnmarshalEnvelope(body)
 		if err != nil {
-			attempts = append(attempts, fmt.Sprintf("%s: envelope: %v", rawURL, err))
+			attempts = append(attempts, fmt.Sprintf("%s: envelope: %v", cand.URL, err))
+			st.RecordSourceFailure(cand.PreferenceKey)
 			continue
 		}
 		index, err := envelope.OpenEnvelope(env, u.TrustedKeys)
 		if err != nil {
-			attempts = append(attempts, fmt.Sprintf("%s: verify: %v", rawURL, err))
+			attempts = append(attempts, fmt.Sprintf("%s: verify: %v", cand.URL, err))
+			st.RecordSourceFailure(cand.PreferenceKey)
 			continue
 		}
 		if index.Product != u.Product || index.Channel != u.Channel {
-			attempts = append(attempts, fmt.Sprintf("%s: product/channel mismatch", rawURL))
+			attempts = append(attempts, fmt.Sprintf("%s: product/channel mismatch", cand.URL))
+			st.RecordSourceFailure(cand.PreferenceKey)
+			continue
+		}
+		if !AcceptsSequence(index.Sequence, st.LastSeenSequence) {
+			attempts = append(attempts, fmt.Sprintf("%s: sequence %d older than last seen", cand.URL, index.Sequence))
 			continue
 		}
 
+		st.RecordSourceSuccess(cand.PreferenceKey, 0)
+		st.ObserveSequence(index.Sequence)
+
+		yanked := currentIsYanked(index, u.CurrentCode)
 		path := chain.ResolveUpgradePath(index, u.CurrentCode)
 		if len(path) == 0 {
-			return CheckResult{UpToDate: true, Sequence: index.Sequence}
+			return CheckResult{UpToDate: true, CurrentIsYanked: yanked, Sequence: index.Sequence, Attempts: attempts}
 		}
 		target := path[0]
-		manifest, artifact, err := u.fetchTarget(ctx, client, index, &target)
+		if !chain.IsMandatory(index, u.CurrentCode) && st.IsSkipped(int(target.Code)) {
+			return CheckResult{UpToDate: true, CurrentIsYanked: yanked, Sequence: index.Sequence, Attempts: attempts}
+		}
+		manifest, artifact, err := u.fetchTarget(ctx, index, &target)
 		if err != nil {
-			attempts = append(attempts, fmt.Sprintf("%s: target: %v", rawURL, err))
+			attempts = append(attempts, fmt.Sprintf("%s: target: %v", cand.URL, err))
 			continue
 		}
 		return CheckResult{
 			Available: &UpdateAvailable{
-				Target:        &target,
-				Manifest:      manifest,
-				Artifact:      artifact,
-				Mandatory:     chain.IsMandatory(index, u.CurrentCode),
-				RemainingHops: len(path),
-				Sequence:      index.Sequence,
+				Target:            &target,
+				Manifest:          manifest,
+				Artifact:          artifact,
+				Mandatory:         chain.IsMandatory(index, u.CurrentCode),
+				RemainingHops:     len(path),
+				Sequence:          index.Sequence,
+				PriorReleaseNotes: collectPriorReleaseNotes(index, u.CurrentCode),
 			},
-			Sequence: index.Sequence,
+			CurrentIsYanked: yanked,
+			Sequence:        index.Sequence,
+			Attempts:        attempts,
 		}
 	}
 	return CheckResult{
@@ -154,28 +390,56 @@ func (u *Updater) checkIndex(ctx context.Context) CheckResult {
 	}
 }
 
+func currentIsYanked(index *rupv2.Index, currentCode int) bool {
+	for _, v := range index.Versions {
+		if v != nil && int(v.Code) == currentCode {
+			return v.Yanked
+		}
+	}
+	return false
+}
+
+func collectPriorReleaseNotes(index *rupv2.Index, currentCode int) []PriorReleaseNotes {
+	var out []PriorReleaseNotes
+	for _, v := range index.Versions {
+		if v == nil || int(v.Code) <= currentCode {
+			continue
+		}
+		if v.Notes == "" && v.NotesUrl == "" {
+			continue
+		}
+		out = append(out, PriorReleaseNotes{
+			Version:  v.Version,
+			Code:     v.Code,
+			Notes:    v.Notes,
+			NotesURL: v.NotesUrl,
+		})
+	}
+	return out
+}
+
 // CheckFallback evaluates only the signed fallback document (SPEC §12.6).
-// Returns nil when no URLs are configured, no rule matches, or no source works.
 func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []string) {
-	if len(u.FallbackURLs) == 0 {
-		return nil, nil
+	_, fallbackURLs, planAttempts := u.resolveIndexPlan(ctx)
+	urls := fallbackURLs
+	if len(urls) == 0 {
+		urls = u.FallbackURLs
+	}
+	if len(urls) == 0 {
+		return nil, planAttempts
 	}
 	if u.Product == "" {
-		return nil, []string{"product is required for fallback"}
+		return nil, append(planAttempts, "product is required for fallback")
 	}
 	if len(u.TrustedKeys) == 0 {
-		return nil, []string{"trusted keys are required for fallback"}
+		return nil, append(planAttempts, "trusted keys are required for fallback")
 	}
 
-	client := u.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
-	}
-
+	st := u.loadState()
 	var attempts []string
-	for _, rawURL := range u.FallbackURLs {
-		fbURL := bustCache(rawURL)
-		body, err := getBytes(ctx, client, fbURL)
+	attempts = append(attempts, planAttempts...)
+	for _, rawURL := range RankURLStrings(urls, st) {
+		body, err := u.fetcher().GetBytes(ctx, bustCache(rawURL))
 		if err != nil {
 			attempts = append(attempts, fmt.Sprintf("%s: fetch: %v", rawURL, err))
 			continue
@@ -194,15 +458,11 @@ func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []strin
 			attempts = append(attempts, fmt.Sprintf("%s: product mismatch", rawURL))
 			continue
 		}
-		if u.LastSeenFallbackSequence != nil && doc.Sequence < *u.LastSeenFallbackSequence {
-			attempts = append(attempts, fmt.Sprintf("%s: sequence %d older than last seen %d", rawURL, doc.Sequence, *u.LastSeenFallbackSequence))
+		if !AcceptsSequence(doc.Sequence, st.LastSeenFallbackSequence) {
+			attempts = append(attempts, fmt.Sprintf("%s: sequence %d older than last seen", rawURL, doc.Sequence))
 			continue
 		}
-
-		if u.LastSeenFallbackSequence == nil || doc.Sequence > *u.LastSeenFallbackSequence {
-			seq := doc.Sequence
-			u.LastSeenFallbackSequence = &seq
-		}
+		st.ObserveFallbackSequence(doc.Sequence)
 
 		rule := matchFallbackRule(doc, int64(u.CurrentCode), u.ClientSelectors)
 		if rule == nil {
@@ -220,7 +480,7 @@ func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []strin
 	return nil, attempts
 }
 
-func matchFallbackRule(doc *model.FallbackDocument, currentCode int64, clientSelectors map[string]string) *model.FallbackRule {
+func matchFallbackRule(doc *rupv2.Fallback, currentCode int64, clientSelectors map[string]string) *rupv2.FallbackRule {
 	for _, rule := range doc.Rules {
 		if rule == nil {
 			continue
@@ -236,40 +496,49 @@ func matchFallbackRule(doc *model.FallbackDocument, currentCode int64, clientSel
 	return nil
 }
 
-func (u *Updater) fetchTarget(ctx context.Context, client *http.Client, index *model.IndexDocument, target *model.VersionNode) (*model.ManifestDocument, *model.ManifestArtifact, error) {
+func (u *Updater) fetchTarget(ctx context.Context, index *rupv2.Index, target *rupv2.VersionNode) (*rupv2.Manifest, *rupv2.Artifact, error) {
 	if target.Manifest == nil || len(target.Manifest.Urls) == 0 {
 		return nil, nil, fmt.Errorf("target has no manifest urls")
 	}
+	st := u.loadState()
+	urls := RankURLStrings(target.Manifest.Urls, st)
 	var last error
-	for _, url := range target.Manifest.Urls {
-		body, err := getBytes(ctx, client, url)
+	for _, url := range urls {
+		body, err := u.fetcher().GetBytes(ctx, url)
 		if err != nil {
 			last = err
+			st.RecordSourceFailure(url)
 			continue
 		}
 		sum := sha256.Sum256(body)
 		if hex.EncodeToString(sum[:]) != target.Manifest.Sha256 {
 			last = fmt.Errorf("manifest sha256 mismatch")
+			st.RecordSourceFailure(url)
 			continue
 		}
 		if int64(len(body)) != target.Manifest.Size {
 			last = fmt.Errorf("manifest size mismatch")
+			st.RecordSourceFailure(url)
 			continue
 		}
 		manifest, err := rupv2.UnmarshalManifest(body)
 		if err != nil {
 			last = err
+			st.RecordSourceFailure(url)
 			continue
 		}
 		if manifest.Product != index.Product || manifest.Version != target.Version || manifest.Code != target.Code {
 			last = fmt.Errorf("manifest identity mismatch")
+			st.RecordSourceFailure(url)
 			continue
 		}
 		artifact := selectors.SelectArtifact(manifest, u.ClientSelectors)
 		if artifact == nil {
 			last = fmt.Errorf("no artifact matches selectors")
+			st.RecordSourceFailure(url)
 			continue
 		}
+		st.RecordSourceSuccess(url, 0)
 		return manifest, artifact, nil
 	}
 	if last == nil {
@@ -283,70 +552,36 @@ func (u *Updater) Download(ctx context.Context, available *UpdateAvailable, dest
 	if available == nil || available.Artifact == nil {
 		return fmt.Errorf("nil update")
 	}
-	client := u.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 0}
-	}
-	var last error
-	for _, url := range available.Artifact.Urls {
-		if err := downloadAndVerify(ctx, client, url, available.Artifact.Sha256, available.Artifact.Size, destPath); err != nil {
-			last = err
-			continue
+	st := u.loadState()
+	urls := RankURLStrings(available.Artifact.Urls, st)
+	art := *available.Artifact
+	art.Urls = urls
+	verified, err := DownloadArtifact(ctx, u.fetcher(), &art, destPath, u.policy(), nil)
+	if err != nil {
+		for _, url := range urls {
+			st.RecordSourceFailure(url)
 		}
-		return nil
-	}
-	if last == nil {
-		last = fmt.Errorf("all artifact mirrors failed")
-	}
-	return last
-}
-
-func downloadAndVerify(ctx context.Context, client *http.Client, rawURL, wantSHA string, wantSize int64, destPath string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
+		u.saveState()
 		return err
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
+	if verified.SourceURL != "" {
+		st.RecordSourceSuccess(verified.SourceURL, 0)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	f, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), resp.Body)
-	if err != nil {
-		return err
-	}
-	if n != wantSize {
-		return fmt.Errorf("size mismatch: got %d want %d", n, wantSize)
-	}
-	if hex.EncodeToString(h.Sum(nil)) != wantSHA {
-		return fmt.Errorf("sha256 mismatch")
-	}
+	u.saveState()
 	return nil
 }
 
-func getBytes(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	return out
 }
 
 func bustCache(rawURL string) string {

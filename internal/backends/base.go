@@ -149,13 +149,15 @@ func Create(name string, cfg *config.Config, root string) (Backend, error) {
 		return newStaticHTTPBackend(name, entry, root)
 	case "http-put":
 		return newHTTPPutBackend(name, entry, root)
+	case "s3-compatible":
+		return newS3CompatibleBackend(name, entry, root)
 	default:
-		return nil, Error{Message: fmt.Sprintf("unsupported backend type %q for backend %q (available: http-put, local, static-http)", backendType, name)}
+		return nil, Error{Message: fmt.Sprintf("unsupported backend type %q for backend %q (available: http-put, local, s3-compatible, static-http)", backendType, name)}
 	}
 }
 
 func AvailableTypes() []string {
-	return []string{"http-put", "local", "static-http"}
+	return []string{"http-put", "local", "s3-compatible", "static-http"}
 }
 
 func SummaryFor(backendType string) (summary string, required []string, optional []string) {
@@ -166,6 +168,8 @@ func SummaryFor(backendType string) (summary string, required []string, optional
 		return "any host serving files over HTTP at a predictable path; without stageDir it is read-only", []string{"baseUrl"}, []string{"stageDir", "timeoutSeconds"}
 	case "http-put":
 		return "uploads with authenticated PUT and serves over HTTP; works with relkit-serve or any PUT/WebDAV endpoint", []string{"baseUrl", "tokenEnv"}, []string{"uploadUrl", "timeoutSeconds"}
+	case "s3-compatible":
+		return "uploads with SigV4 to COS / S3 / MinIO; clients download via baseUrl (custom domain or CDN)", []string{"baseUrl", "endpoint", "bucket", "accessKeyEnv", "secretKeyEnv"}, []string{"prefix", "region", "forcePathStyle", "timeoutSeconds"}
 	default:
 		return "", nil, nil
 	}

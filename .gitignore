@@ -1,5 +1,6 @@
 .relkit/
 dist/
+tmp/
 *.exe
 *.private.json
 coverage.out

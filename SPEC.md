@@ -731,7 +731,7 @@ get(key: str) -> bytes | None
 
 directory 是 product 级的**引导文档**：告诉客户端「当前该去哪些绝对 URL 拉取签名的 index / fallback」。它**不是**第二套版本清单。
 
-设计说明（非规范性）：客户端内嵌的 `entryUrls` 一主多备（例如公网静态主站 + CNB raw + GitHub raw）只托管这份小文档的镜像；真正的更新流量仍由 directory 指向的更新服务及 index 内 `urls[]` 承担。细节见 [`docs/design/bootstrap-directory.md`](docs/design/bootstrap-directory.md) 与 ADR 0005。
+设计说明（非规范性）：客户端内嵌的 `entryUrls` 一主多备（例如**自有域名 COS 主** + CNB raw + GitHub raw）只托管这份小文档的镜像；真正的更新流量仍由 directory 指向的取货点及 index 内 `urls[]` 承担。细节见 [`docs/design/bootstrap-directory.md`](docs/design/bootstrap-directory.md)、[`docs/design/update-ingress-cos.md`](docs/design/update-ingress-cos.md) 与 ADR 0005。
 
 ### 16.1 字段
 

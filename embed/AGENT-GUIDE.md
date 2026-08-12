@@ -47,16 +47,21 @@ go install github.com/shichao402/relkit/cmd/relkit@latest
 | `local` 后端（输出完整 key 目录树，可离线跑通全流程） | 可用 |
 | `static-http` 后端（任何按路径提供 HTTP 下载的托管，校验走真实 HTTP） | 可用 |
 | `http-put` 后端（带鉴权 PUT 上传，配 relkit-serve 或任何 PUT / WebDAV 端点） | 可用 |
-| `s3-compatible`（COS）/ `github-release` / `cnb-release` 后端 | **未实现** |
+| `s3-compatible` 后端（COS / S3 / MinIO，SigV4 上传；客户端经 `baseUrl` 下载） | 可用 |
+| `github-release` / `cnb-release` 后端 | **未实现** |
 | `yank` / `unyank` / `min-supported` 命令 | **未实现** |
 | JSON Schema 完整校验（`verify` 目前只检查关键字段的结构） | **未实现** |
 
 关于后端怎么选，看两件事：**产物由谁送上去**、**URL 是否可预测**。
 
+**推荐生产拓扑**（详见仓库 `docs/design/update-ingress-cos.md`）：客户端内嵌几乎不变的 `entryUrls`，主入口为**自有域名绑定 COS** 上的 `directory/<product>.pb`；发布在可信 CVM 上持钥执行，再经 `s3-compatible` 写到 COS（及 CNB/GitHub 备援）。directory / index 等是签名文档，可以进 COS；Bearer 式上传服务进不了 COS。
+
 - 托管方按可预测路径提供 HTTP 下载，且产物已有别的机制送达（仓库 CI、rsync、独立上传步骤）→ 用 `static-http`，配 `stageDir` 指向那个机制会取用的目录。CNB 仓库直链属于这一类。
-- 自己掌管一台服务器 → 部署同仓的 `relkit-serve`（Go 单文件：Range 并发下载、RUP 缓存语义、带鉴权上传；部署照 `relkit` 仓库 `cmd/relkit-serve/AGENT-GUIDE.md`，或装好后跑 `relkit-serve agent-guide`），用 `http-put` 后端，发布与分发一步完成。token 只从环境变量读。
-- 需要工具自己带凭据上传到对象存储（COS / S3）→ 还没有，得先实现 `s3-compatible`。
+- 自己掌管一台服务器 → 部署同仓的 `relkit-serve`（Go 单文件：Range 并发下载、RUP 缓存语义、带鉴权上传；部署照 `relkit` 仓库 `cmd/relkit-serve/AGENT-GUIDE.md`，或装好后跑 `relkit-serve agent-guide`），用 `http-put` 后端，发布与分发一步完成。token 只从环境变量读。**serve 适合调试/内网/可选镜像，不作推荐的长期主入口。**
+- 需要工具自己带凭据上传到对象存储（COS / S3）→ 用 `s3-compatible`（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`；可选 `region` / `forcePathStyle` / `timeoutSeconds`）。
 - 只想审计别人发布的站点 → `static-http` 不配 `stageDir`，得到一个只读后端，`verify` 可用而 `publish` 会直接拒绝。
+
+后端镜像切换（如 COS → CNB）靠双写 + 改 directory / `urls[]`，不改客户端常量；步骤与旧 manifest 单 URL 陷阱见 `docs/design/update-ingress-cos.md` §8。
 
 **禁止**用 `local` 后端加手工上传冒充一次正式发布。手工上传绕过了「指针最后写」这个保证，中途出错会让客户端看到半个发布。若产物确实由外部机制搬运，那就用 `static-http` + `stageDir`，让工具仍然掌管写入顺序。
 
@@ -196,9 +201,9 @@ relkit verify --deep   # 逐个 artifact 发 HEAD，确认可匿名访问
 
 **4. 先跑通 `local` 后端。** 它把完整目录树输出到本地，整个发布流程可以完全离线验证。**在 `local` 端到端跑通之前，不要接真实后端** —— 否则一旦出问题，你无法区分是流程错了还是后端配置错了。
 
-**5. 客户端侧。** 客户端需要内嵌：公钥（含 `keyId`）、`index` 的一个或多个 URL、自身的 `product` / `channel` / `code`、以及本平台的 selectors。客户端行为按 `SPEC.md` §12 实现，实现完成后用 `conformance/` 验证 —— 特别是 `version-select/unordered.json`（防"取数组最后一个"）与 `signature/`（防降级与验签绕过）。
+**5. 客户端侧。** 客户端需要内嵌：公钥（含 `keyId`）、几乎不变的 `entryUrls`（指向签名 directory；推荐主 URL 为自有域名 COS，见 `docs/design/update-ingress-cos.md`），或兼容模式下的 `index` URL 列表、自身的 `product` / `channel` / `code`、以及本平台的 selectors。客户端行为按 `SPEC.md` §12 / §16 实现，实现完成后用 `conformance/` 验证 —— 特别是 `version-select/unordered.json`（防"取数组最后一个"）与 `signature/`（防降级与验签绕过）。
 
-**6. 接入真实后端。** 后端能力存疑时（例如 CNB 的 Release 附件是否支持匿名下载），先按 `CLI.md` §6.4 的方法在未认证环境下实测，再决定是否把它作为客户端下载源。凡是「按可预测路径提供 HTTP 下载」的托管（仓库直链、对象存储挂域名、Nginx、CDN），用 `static-http` 即可，不需要专门实现；若托管方是 relkit-serve 或任何 PUT / WebDAV 端点，用 `http-put` 可以让发布一步完成。
+**6. 接入真实后端。** 后端能力存疑时（例如 CNB 的 Release 附件是否支持匿名下载），先按 `CLI.md` §6.4 的方法在未认证环境下实测，再决定是否把它作为客户端下载源。凡是「按可预测路径提供 HTTP 下载」的托管（仓库直链、对象存储挂域名、Nginx、CDN），用 `static-http` 即可，不需要专门实现；若托管方是 relkit-serve 或任何 PUT / WebDAV 端点，用 `http-put` 可以让发布一步完成。推荐生产主数据面为自有域名 COS：用 `s3-compatible` 由 CLI 直接写桶；迁移镜像时见 `docs/design/update-ingress-cos.md` §8。
 
 ---
 
@@ -276,7 +281,7 @@ relkit yank 1.5.0 --reason "启动崩溃"
 4. **`sequence` 是否倒退** —— 客户端持久化记录见过的最大 `sequence`，更小的一律拒绝，且按规范**不会**上报为错误。检查是否某个镜像落后于其他后端。
 5. **selectors 是否匹配该客户端平台** —— artifact 声明的每个 selector 键都必须在客户端集合里相等。客户端缺少某个键就不匹配，症状是"检查到新版本但没有可下载的产物"。
 6. **是否被节流** —— 缺省成功检查后 24 小时内不再请求。手动触发检查可排除。
-7. **CDN 缓存** —— `index` 应为短缓存并附缓存击穿参数。刚发布后短时间内看不到，先怀疑这里。
+7. **CDN / 对象存储缓存** —— `directory` / `index` / `fallback` 应为短缓存（或 no-cache）并附缓存击穿参数；`manifest` / `artifact` 可长缓存。刚发布后短时间内看不到，先怀疑可变前缀被缓存过久（COS 自定义域名场景见 `docs/design/update-ingress-cos.md` §5）。
 
 ---
 

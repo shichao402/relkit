@@ -42,23 +42,25 @@ func CheckOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	supportDir := os.TempDir() // 换成应用 support/config 目录
 	u := &sdk.Updater{
 		Product:     "<product>",
 		Channel:     "stable",
-		CurrentCode: 0, // 换成真实已装 code；version-build 时通常等于 VERSION +build
-		IndexURLs: []string{
-			"http://<host>/index/<product>/stable.pb",
+		CurrentCode: 0, // 换成真实已装 code；可用 sdk.SemverCode(version)
+		EntryURLs: []string{
+			"https://updates.example.com/rup/directory/<product>.pb",
 		},
 		TrustedKeys: sdk.TrustedKeys{
 			"<key-id>": pub,
 		},
 		ClientSelectors: map[string]string{
 			"os":   "windows", // 或 linux / darwin —— 必须与 stage 时 selectors 一致
-			"arch": "x64",
+			"arch": "amd64",
 		},
+		StateStore: sdk.NewFileStateStore(supportDir, "<product>", "stable"),
 	}
 
-	res := u.Check(ctx)
+	res := u.CheckForce(ctx, true)
 	if res.Err != nil {
 		return fmt.Errorf("check: %w (attempts=%v)", res.Err, res.Attempts)
 	}
@@ -72,8 +74,8 @@ func CheckOnce(ctx context.Context) error {
 		return fmt.Errorf("download: %w", err)
 	}
 	fmt.Println("verified file:", dest)
-	// Apply：宿主自己负责（换文件、重启服务等）。本 SDK 故意不包含。
-	_ = os.Remove // 占位提醒：失败清理由宿主定策略
+	// 单二进制自替换见 sdk/apply；目录型应用仍由宿主处理。
+	_ = os.Remove
 	return nil
 }
 ```
@@ -84,27 +86,26 @@ func CheckOnce(ctx context.Context) error {
 |----------|------------|
 | `Product` | `relkit.json` `product` |
 | `Channel` | index 路径中的 channel |
-| `CurrentCode` | 已安装版本的 RUP code（常 = `relkit version code`） |
-| `IndexURLs` | `http(s)://…/index/<product>/<channel>.pb` |
+| `CurrentCode` | 已安装版本的 RUP code（可用 `sdk.SemverCode`） |
+| `EntryURLs` | 自有域名上的 `directory/<product>.pb`（优先于 IndexURLs） |
+| `IndexURLs` | 无 directory 时的直连兜底 |
 | `TrustedKeys` | `keygen` 公钥；**编译进二进制**，禁止运行时下载 |
 | `ClientSelectors` | 与 `relkit stage --add … os=…,arch=…` 一致 |
 
 ## G4. 能力边界（避免重复造轮）
 
-当前 Go SDK：
+当前 Go SDK（与 Dart 对齐矩阵见 [`README.md`](README.md)）：
 
-- 有：`Check`、镜像串行、`Download` + size/sha256
-- 无 / 弱：进度回调、多线程 Range、断点续传、Apply（Dart 侧已更强；Go 对齐见 roadmap，未完成前不要假称支持）
-
-若产品需要强下载体验且是 Dart/Flutter UI，优先 Dart `rup_client`。
+- 有：`Check` / `CheckForce`、`EntryURLs` directory 引导、StateStore 节流、源学习排序、`Download`（Range 续传 / 并行分块 / 进度）、`sdk/apply` 单二进制自替换、`UpdateScheduler`
+- 未对齐 Dart：便携目录 swap / macOS DMG 解包（留给宿主或 Dart SDK）
 
 ## G5. 开箱 Done
 
 - [ ] `go build` 含 sdk 导入通过
-- [ ] 对真实或 `local` 发布的 index：`Check` 返回预期
+- [ ] 对真实或 `local` 发布的 directory/index：`CheckForce` 返回预期
 - [ ] `Download` 后文件 hash 与 manifest 一致
 - [ ] README/内部文档写明公钥轮换：先双钥并存发一版，再删旧钥
-- [ ] Apply 策略有书面说明（哪怕是「仅下载人工安装」）
+- [ ] Apply 策略有书面说明（`sdk/apply` 或宿主自定义）
 
 ## G6. 排障
 
@@ -113,12 +114,13 @@ func CheckOnce(ctx context.Context) error {
 | 验签失败 | keyId/公钥是否与签名 index 一致；是否用了错误环境的 key |
 | 总是 up-to-date | `CurrentCode` 是否已经 ≥ head |
 | 无 artifact | selectors 与 stage 不匹配；或该版本只发了单平台 |
-| HTTP 200 但业务失败 | index 被缓存；`relkit-serve` 须对 `index/` no-cache |
+| HTTP 200 但业务失败 | index 被缓存；COS/CDN 须对 `directory/`/`index/` 短缓存 |
+| Throttled | `CheckForce(ctx, true)` 强制检查；或清 StateStore |
 
-发布/serve 问题改读 `relkit agent-guide` / `relkit-serve agent-guide`。
+发布/serve/agent 问题改读 `relkit agent-guide` / `docs/design/publish-agent.md`。
 
 ## Fallback (SPEC section 12.6)
 
-Set `Updater.FallbackURLs` to the signed `fallback/<product>.pb` URLs. `Check` merges
+Set `Updater.FallbackURLs`（或由 directory `services[].fallbackUrl` 自动带上）。`Check` merges
 results so `Available` beats `Fallback`. Call `CheckFallback` after a download/apply
 failure to urge a manual update page.
