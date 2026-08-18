@@ -1,13 +1,29 @@
 {
   "mcpServers": {
     "dec-agents-board": {
-      "command": "mise",
+      "command": "dec",
       "args": [
         "exec",
-        "node@20",
+        "--project-root",
+        "${workspaceFolder}",
+        "--bundle",
+        "agents-board",
         "--",
         "node",
         "${workspaceFolder}/.dec/cache/agents-board/skills/agents-board/mcp/run.mjs"
+      ]
+    },
+    "dec-tencent-cloud": {
+      "command": "dec",
+      "args": [
+        "exec",
+        "--project-root",
+        "${workspaceFolder}",
+        "--bundle",
+        "tencent-cloud",
+        "--",
+        "node",
+        "${workspaceFolder}/.dec/cache/tencent-cloud/skills/tencent-cloud/server/run.mjs"
       ]
     }
   }

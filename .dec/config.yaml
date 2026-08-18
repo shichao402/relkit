@@ -17,3 +17,4 @@ version: v2
 project_name: relkit
 enabled_bundles:
     - agents-board
+    - tencent-cloud
