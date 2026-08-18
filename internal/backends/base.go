@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shichao402/relkit/internal/config"
-	"github.com/shichao402/relkit/internal/httpx"
+	"cnb.cool/shichao402/relkit/internal/config"
+	"cnb.cool/shichao402/relkit/internal/httpx"
 )
 
 type Error struct {

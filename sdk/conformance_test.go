@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/testutil"
-	"github.com/shichao402/relkit/sdk"
+	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/testutil"
+	"cnb.cool/shichao402/relkit/sdk"
 )
 
 func TestVersionSelectConformanceDelegated(t *testing.T) {

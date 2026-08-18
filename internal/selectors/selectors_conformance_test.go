@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shichao402/relkit/internal/model"
-	"github.com/shichao402/relkit/internal/selectors"
-	"github.com/shichao402/relkit/internal/testutil"
+	"cnb.cool/shichao402/relkit/internal/model"
+	"cnb.cool/shichao402/relkit/internal/selectors"
+	"cnb.cool/shichao402/relkit/internal/testutil"
 )
 
 type selectorFixture struct {

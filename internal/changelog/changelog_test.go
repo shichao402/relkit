@@ -3,7 +3,7 @@ package changelog
 import (
 	"testing"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 )
 
 func TestExtractSection(t *testing.T) {

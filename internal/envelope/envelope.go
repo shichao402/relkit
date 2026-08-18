@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/model"
+	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/model"
 )
 
 const (

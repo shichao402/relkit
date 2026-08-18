@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package rup.v2;
 
-option go_package = "github.com/shichao402/relkit/api/rup/v2;rupv2";
+option go_package = "cnb.cool/shichao402/relkit/api/rup/v2;rupv2";
 
 // PublicKeyDocument is the on-disk / embeddable public key record.
 message PublicKeyDocument {

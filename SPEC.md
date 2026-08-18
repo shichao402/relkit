@@ -5,7 +5,7 @@
 > 协议标识前缀：`rup.`
 > 结构 SSOT：[`proto/`](proto/)（见 ADR 0003）
 
-本文定义**发布侧**与**客户端运行时**之间的唯一契约。协议与实现语言无关：发布侧由 [`relkit`](https://github.com/shichao402/relkit) 实现（见 `CLI.md`），客户端运行时由各语言 **SDK**（生成类型 + 手写编排逻辑）实现。双方只通过本文与 `.proto` 定义的 **protobuf 文档**通信。
+本文定义**发布侧**与**客户端运行时**之间的唯一契约。协议与实现语言无关：发布侧由 [`relkit`](https://cnb.cool/shichao402/relkit) 实现（见 `CLI.md`），客户端运行时由各语言 **SDK**（生成类型 + 手写编排逻辑）实现。双方只通过本文与 `.proto` 定义的 **protobuf 文档**通信。
 
 **v1 JSON 线格式已废弃。** 旧的 `schema/*.json` 仅作历史对照。
 

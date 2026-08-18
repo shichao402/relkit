@@ -1,6 +1,6 @@
-﻿# 鍙戝竷宸ュ叿璁捐锛堟殏鍚?`relkit`锛?
+# 鍙戝竷宸ュ叿璁捐锛堟殏鍚?`relkit`锛?
 
-> 鐘舵€侊細璁捐绋匡紙璇箟浠嶉€傜敤锛夈€?*姝ｅ紡瀹炵幇鏄?Go 鍗曚簩杩涘埗**锛歔github.com/shichao402/relkit](https://github.com/shichao402/relkit)銆?
+> 鐘舵€侊細璁捐绋匡紙璇箟浠嶉€傜敤锛夈€?*姝ｅ紡瀹炵幇鏄?Go 鍗曚簩杩涘埗**锛歔cnb.cool/shichao402/relkit](https://cnb.cool/shichao402/relkit)銆?
 > 宸ュ叿鍚嶅緟瀹氾紝鏈枃涓€寰嬬敤 `relkit` 鍗犱綅
 
 鏈枃鎻忚堪 RUP 鍗忚**鍙戝竷渚?*鐨勫懡浠や笌鍚庣璇箟銆傚鎴风杩愯鏃朵笉鍦ㄦ湰鏂囪寖鍥村唴 鈥斺€?鍚勫涓婚」鐩寜 `SPEC.md` 鑷瀹炵幇锛屽苟鐢?`conformance/` 楠岃瘉銆?
@@ -11,9 +11,9 @@
 
 ## 1. 纭害鏉?
 
-1. **Go 鍗曚簩杩涘埗锛屾爣鍑嗗簱涓轰富銆?* 涓氬姟鏂?CI / 鏈満鐩存帴璺?`relkit`锛屼笉蹇?vendor 婧愮爜銆佷笉蹇呰嚜鍐欎笂浼犻€昏緫銆備粨搴擄細`github.com/shichao402/relkit`銆?
+1. **Go 鍗曚簩杩涘埗锛屾爣鍑嗗簱涓轰富銆?* 涓氬姟鏂?CI / 鏈満鐩存帴璺?`relkit`锛屼笉蹇?vendor 婧愮爜銆佷笉蹇呰嚜鍐欎笂浼犻€昏緫銆備粨搴擄細`cnb.cool/shichao402/relkit`銆?
 2. 鑻ユ煇涓姛鑳界‘瀹為渶瑕侀澶栦緷璧栵紝**鍏堣皟鏁村姛鑳借璁?*锛涘彧鏈夊湪鍔熻兘涓嶅彲鏀惧純鏃讹紝鎵嶅紩鍏ュ苟鍦ㄦ枃浠跺ご娉ㄦ槑鐞嗙敱銆?
-3. **鍙崟鏂囦欢鍒嗗彂銆?* `go build` / GitHub Releases 澶氬钩鍙颁簩杩涘埗锛涗篃鍙敤 `go install github.com/shichao402/relkit/cmd/relkit@latest`銆?
+3. **鍙崟鏂囦欢鍒嗗彂銆?* `go build` / GitHub Releases 澶氬钩鍙颁簩杩涘埗锛涗篃鍙敤 `go install cnb.cool/shichao402/relkit/cmd/relkit@latest`銆?
 4. **Ed25519 鐢ㄨ繍琛屾椂鍘熺敓瀹炵幇**锛圙o锛歚crypto/ed25519`锛夈€傜鍚嶅璞℃槸 index payload 鐨勫師濮嬪瓧鑺傦紝瑙?SPEC.md 搂4銆?
 5. **閰嶇疆鏂囦欢鐢?JSON**锛坄relkit.json`锛夛紝渚夸簬鎻愪氦杩涗粨搴撲笖璺ㄥ钩鍙颁竴鑷淬€傚嚟鎹彧閫氳繃鐜鍙橀噺鎴栨湰鏈虹閽ユ枃浠惰矾寰勪紶鍏ワ紝浠庝笉鍐欒繘閰嶇疆鍐呭銆?
 
@@ -474,7 +474,7 @@ CI 只 `stage`，发布机持钥 `publish`。二进制：`cmd/relkit-agent`。
 - name: Install relkit
   run: |
     curl -fsSL -o relkit.tgz \
-      "https://github.com/shichao402/relkit/releases/download/v0.1.0/relkit-linux-amd64"
+      "https://cnb.cool/shichao402/relkit/releases/download/v0.1.0/relkit-linux-amd64"
     # 瀹為檯璧勪骇鍚嶈瀵瑰簲 release锛沇indows 鐢?.exe
     install -m 755 relkit-linux-amd64 /usr/local/bin/relkit
 
@@ -498,7 +498,7 @@ CI 只 `stage`，发布机持钥 `publish`。二进制：`cmd/relkit-agent`。
 
 ## 8. 瀹炵幇浣嶇疆
 
-姝ｅ紡浠ｇ爜鍦?[github.com/shichao402/relkit](https://github.com/shichao402/relkit)锛堝惈 `cmd/relkit` 涓?`cmd/relkit-serve`锛夛細
+姝ｅ紡浠ｇ爜鍦?[cnb.cool/shichao402/relkit](https://cnb.cool/shichao402/relkit)锛堝惈 `cmd/relkit` 涓?`cmd/relkit-serve`锛夛細
 
 ```
 cmd/relkit/                 CLI 鍏ュ彛

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shichao402/relkit/version"
+	"cnb.cool/shichao402/relkit/version"
 )
 
 func TestParseAndBump(t *testing.T) {

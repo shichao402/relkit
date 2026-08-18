@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/shichao402/relkit/internal/model"
+	"cnb.cool/shichao402/relkit/internal/model"
 )
 
 const (

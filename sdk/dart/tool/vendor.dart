@@ -102,7 +102,7 @@ tests in the source repository will never see.
 
 | | |
 |---|---|
-| Source | `sdk/dart` in [relkit](https://github.com/shichao402/relkit) |
+| Source | `sdk/dart` in [relkit](https://cnb.cool/shichao402/relkit) |
 | Commit | `$commit`${dirty ? ' (with uncommitted changes)' : ''} |
 | Synced | $date |
 

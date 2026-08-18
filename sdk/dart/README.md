@@ -1,10 +1,10 @@
-﻿# rup_client (Dart RUP SDK)
+# rup_client (Dart RUP SDK)
 
-Official Dart client for [RUP](https://github.com/shichao402/relkit) protobuf v2:
+Official Dart client for [RUP](https://cnb.cool/shichao402/relkit) protobuf v2:
 signed index → version chain → hash-verified download (optional apply helpers).
 
 **This directory (`relkit/sdk/dart`) is the source of truth.**  
-Go peer SDK: `../` (`github.com/shichao402/relkit/sdk`).  
+Go peer SDK: `../` (`cnb.cool/shichao402/relkit/sdk`).  
 Agent onboarding: [`AGENT-QUICKSTART.md`](AGENT-QUICKSTART.md) · hub: [`../../docs/agent/README.md`](../../docs/agent/README.md).
 
 Pure Dart (no Flutter SDK dependency).
@@ -25,7 +25,7 @@ From Git:
 dependencies:
   rup_client:
     git:
-      url: https://github.com/shichao402/relkit.git
+      url: https://cnb.cool/shichao402/relkit.git
       path: sdk/dart
       ref: main   # or a release tag
 ```

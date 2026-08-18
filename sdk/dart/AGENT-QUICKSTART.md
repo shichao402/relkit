@@ -14,7 +14,7 @@
 dependencies:
   rup_client:
     git:
-      url: https://github.com/shichao402/relkit.git
+      url: https://cnb.cool/shichao402/relkit.git
       path: sdk/dart
 ```
 

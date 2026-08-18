@@ -27,10 +27,10 @@
 relkit --version
 ```
 
-正式工具是 Go 单二进制（[github.com/shichao402/relkit](https://github.com/shichao402/relkit)）。安装任选其一：
+正式工具是 Go 单二进制（[cnb.cool/shichao402/relkit](https://cnb.cool/shichao402/relkit)）。安装任选其一：
 
 ```bash
-go install github.com/shichao402/relkit/cmd/relkit@latest
+go install cnb.cool/shichao402/relkit/cmd/relkit@latest
 # 或从 GitHub Releases 下载对应平台二进制并放进 PATH
 ```
 

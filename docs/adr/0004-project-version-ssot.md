@@ -30,7 +30,7 @@ relkit version code
 relkit version path
 ```
 
-任意语言 / CI 只调上述 CLI（或 Go 包 `github.com/shichao402/relkit/version`），不各自解析 JSON。
+任意语言 / CI 只调上述 CLI（或 Go 包 `cnb.cool/shichao402/relkit/version`），不各自解析 JSON。
 
 ### 与线格式的关系
 

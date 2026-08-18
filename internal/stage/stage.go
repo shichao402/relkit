@@ -8,12 +8,12 @@ import (
 	"sort"
 	"strings"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/changelog"
-	"github.com/shichao402/relkit/internal/config"
-	"github.com/shichao402/relkit/internal/jsonio"
-	"github.com/shichao402/relkit/internal/model"
-	"github.com/shichao402/relkit/internal/selectors"
+	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/changelog"
+	"cnb.cool/shichao402/relkit/internal/config"
+	"cnb.cool/shichao402/relkit/internal/jsonio"
+	"cnb.cool/shichao402/relkit/internal/model"
+	"cnb.cool/shichao402/relkit/internal/selectors"
 )
 
 const stagingRoot = ".relkit/staged"

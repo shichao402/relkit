@@ -2,7 +2,7 @@
 //
 // Install:
 //
-//	go get github.com/shichao402/relkit/sdk@latest
+//	go get cnb.cool/shichao402/relkit/sdk@latest
 //
 // Agent onboarding (first read when wiring a host): see AGENT-QUICKSTART.md
 // in this directory, and docs/agent/README.md at the repo root for the

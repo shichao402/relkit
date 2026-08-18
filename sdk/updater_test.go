@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/envelope"
-	"github.com/shichao402/relkit/sdk"
+	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/envelope"
+	"cnb.cool/shichao402/relkit/sdk"
 )
 
 func TestCheckAndDownload(t *testing.T) {

@@ -22,7 +22,7 @@ if (Test-Cmd "relkit") {
     try { Write-Output ("OK  relkit: " + (relkit --version 2>$null)) }
     catch { Write-Output "OK  relkit: present" }
 } else {
-    Write-Output "MISSING  relkit (go install github.com/shichao402/relkit/cmd/relkit@latest)"
+    Write-Output "MISSING  relkit (go install cnb.cool/shichao402/relkit/cmd/relkit@latest)"
 }
 if (Test-Cmd "relkit-serve") {
     try { Write-Output ("OK  relkit-serve: " + (relkit-serve -version 2>$null)) }

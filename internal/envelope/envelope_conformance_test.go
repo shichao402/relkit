@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/envelope"
-	"github.com/shichao402/relkit/internal/keys"
-	"github.com/shichao402/relkit/internal/model"
-	"github.com/shichao402/relkit/internal/testutil"
+	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/envelope"
+	"cnb.cool/shichao402/relkit/internal/keys"
+	"cnb.cool/shichao402/relkit/internal/model"
+	"cnb.cool/shichao402/relkit/internal/testutil"
 	"google.golang.org/protobuf/proto"
 )
 

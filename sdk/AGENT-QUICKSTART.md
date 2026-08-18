@@ -16,10 +16,10 @@ Dart 同级 SDK：[`dart/AGENT-QUICKSTART.md`](dart/AGENT-QUICKSTART.md)
 ## G1. 安装
 
 ```bash
-go get github.com/shichao402/relkit/sdk@latest
+go get cnb.cool/shichao402/relkit/sdk@latest
 ```
 
-模块路径：`github.com/shichao402/relkit/sdk`。
+模块路径：`cnb.cool/shichao402/relkit/sdk`。
 
 ## G2. 最小可运行片段
 
@@ -34,7 +34,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/shichao402/relkit/sdk"
+	"cnb.cool/shichao402/relkit/sdk"
 )
 
 func CheckOnce(ctx context.Context) error {

@@ -13,10 +13,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/shichao402/relkit/internal/config"
-	"github.com/shichao402/relkit/internal/directory"
-	"github.com/shichao402/relkit/internal/publish"
-	"github.com/shichao402/relkit/internal/stage"
+	"cnb.cool/shichao402/relkit/internal/config"
+	"cnb.cool/shichao402/relkit/internal/directory"
+	"cnb.cool/shichao402/relkit/internal/publish"
+	"cnb.cool/shichao402/relkit/internal/stage"
 )
 
 type ProductConfig struct {

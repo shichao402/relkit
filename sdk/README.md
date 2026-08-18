@@ -5,7 +5,7 @@ serving stay in `cmd/relkit`, `cmd/relkit-serve`, and `cmd/relkit-agent`.
 
 | Path | Language | Module / package | Agent onboarding |
 |------|----------|------------------|------------------|
-| [`./`](.) (Go sources at this level) | Go | `github.com/shichao402/relkit/sdk` | [`AGENT-QUICKSTART.md`](AGENT-QUICKSTART.md) |
+| [`./`](.) (Go sources at this level) | Go | `cnb.cool/shichao402/relkit/sdk` | [`AGENT-QUICKSTART.md`](AGENT-QUICKSTART.md) |
 | [`dart/`](dart/) | Dart | package `rup_client` | [`dart/AGENT-QUICKSTART.md`](dart/AGENT-QUICKSTART.md) |
 
 ## Go ↔ Dart alignment
@@ -24,7 +24,7 @@ serving stay in `cmd/relkit`, `cmd/relkit-serve`, and `cmd/relkit-agent`.
 | Apply: portable directory swap / DMG | yes | **not aligned** (host or Dart) |
 
 Go files stay at `sdk/*.go` so the existing module path does not break
-(`go get github.com/shichao402/relkit/sdk`). Dart is nested under `sdk/dart/`.
+(`go get cnb.cool/shichao402/relkit/sdk`). Dart is nested under `sdk/dart/`.
 
 Greenfield Agent entry: [`../docs/agent/README.md`](../docs/agent/README.md).
 Publish topology: [`../docs/design/update-ingress-cos.md`](../docs/design/update-ingress-cos.md),

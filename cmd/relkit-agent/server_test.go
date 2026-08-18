@@ -14,10 +14,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/config"
-	"github.com/shichao402/relkit/internal/keys"
-	"github.com/shichao402/relkit/internal/stage"
+	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/config"
+	"cnb.cool/shichao402/relkit/internal/keys"
+	"cnb.cool/shichao402/relkit/internal/stage"
 )
 
 func TestAgentStagedAndPublishDryRun(t *testing.T) {

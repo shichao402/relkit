@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shichao402/relkit/internal/httpx"
+	"cnb.cool/shichao402/relkit/internal/httpx"
 )
 
 var contentTypes = map[string]string{

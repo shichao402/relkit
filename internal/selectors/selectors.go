@@ -3,7 +3,7 @@ package selectors
 import (
 	"sort"
 
-	"github.com/shichao402/relkit/internal/model"
+	"cnb.cool/shichao402/relkit/internal/model"
 )
 
 type DuplicateSelectors struct {

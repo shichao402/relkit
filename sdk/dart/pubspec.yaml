@@ -4,8 +4,8 @@ description: >-
   picks the next version along the upgrade chain, and downloads a hash-verified
   artifact. Applying the update is left to the host.
 version: 0.4.0
-repository: https://github.com/shichao402/relkit/tree/main/sdk/dart
-homepage: https://github.com/shichao402/relkit/tree/main/sdk/dart
+repository: https://cnb.cool/shichao402/relkit/tree/main/sdk/dart
+homepage: https://cnb.cool/shichao402/relkit/tree/main/sdk/dart
 
 environment:
   sdk: ^3.6.0

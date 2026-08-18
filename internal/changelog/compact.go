@@ -1,6 +1,6 @@
 package changelog
 
-import rupv2 "github.com/shichao402/relkit/api/rup/v2"
+import rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 
 // CompactPriorNodes rewrites older index nodes so only the newest release keeps
 // an inlined markdown body. For every other node:

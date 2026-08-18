@@ -17,7 +17,7 @@
 
 | 语言 | 包 / 模块 | 开箱文档 | 依赖安装 |
 |------|-----------|----------|----------|
-| Go | `github.com/shichao402/relkit/sdk` | [`../../sdk/AGENT-QUICKSTART.md`](../../sdk/AGENT-QUICKSTART.md) | `go get github.com/shichao402/relkit/sdk@latest` |
+| Go | `cnb.cool/shichao402/relkit/sdk` | [`../../sdk/AGENT-QUICKSTART.md`](../../sdk/AGENT-QUICKSTART.md) | `go get cnb.cool/shichao402/relkit/sdk@latest` |
 | Dart | `rup_client`（**SSOT：`sdk/dart/`**） | [`../../sdk/dart/AGENT-QUICKSTART.md`](../../sdk/dart/AGENT-QUICKSTART.md) | git `path: sdk/dart`；内网宿主可镜像，见该产品 `VENDORED.md` |
 
 目录说明见 [`../../sdk/README.md`](../../sdk/README.md)。

@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shichao402/relkit/internal/config"
-	"github.com/shichao402/relkit/internal/jsonio"
-	projver "github.com/shichao402/relkit/version"
+	"cnb.cool/shichao402/relkit/internal/config"
+	"cnb.cool/shichao402/relkit/internal/jsonio"
+	projver "cnb.cool/shichao402/relkit/version"
 )
 
 func cmdVersion(args []string, configPath string) error {

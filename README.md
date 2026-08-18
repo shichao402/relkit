@@ -27,13 +27,13 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 
 ## 安装
 
-从 [Releases](https://github.com/shichao402/relkit/releases) 下载对应平台二进制，或：
+从 [Releases](https://cnb.cool/shichao402/relkit/releases) 下载对应平台二进制，或：
 
 ```bash
-go install github.com/shichao402/relkit/cmd/relkit@latest
-go install github.com/shichao402/relkit/cmd/relkit-serve@latest
-go get github.com/shichao402/relkit/sdk@latest       # Go 客户端 SDK
-go get github.com/shichao402/relkit/version@latest   # 项目 VERSION.json 读写（Go）
+go install cnb.cool/shichao402/relkit/cmd/relkit@latest
+go install cnb.cool/shichao402/relkit/cmd/relkit-serve@latest
+go get cnb.cool/shichao402/relkit/sdk@latest       # Go 客户端 SDK
+go get cnb.cool/shichao402/relkit/version@latest   # 项目 VERSION.json 读写（Go）
 ```
 
 本地构建：
@@ -127,11 +127,11 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 
 | | |
 |--|--|
-| Go | `sdk/*.go` → `go get github.com/shichao402/relkit/sdk@latest` · [`sdk/AGENT-QUICKSTART.md`](sdk/AGENT-QUICKSTART.md) |
+| Go | `sdk/*.go` → `go get cnb.cool/shichao402/relkit/sdk@latest` · [`sdk/AGENT-QUICKSTART.md`](sdk/AGENT-QUICKSTART.md) |
 | Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/AGENT-QUICKSTART.md`](sdk/dart/AGENT-QUICKSTART.md) |
 
 ```go
-import "github.com/shichao402/relkit/sdk"
+import "cnb.cool/shichao402/relkit/sdk"
 
 u := &sdk.Updater{
     Product: "myapp", Channel: "stable", CurrentCode: 100,

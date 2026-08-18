@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/shichao402/relkit/api
+      value: cnb.cool/shichao402/relkit/api
 plugins:
   - remote: buf.build/protocolbuffers/go
     out: ../api

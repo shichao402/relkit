@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/shichao402/relkit/sdk/apply"
+	"cnb.cool/shichao402/relkit/sdk/apply"
 )
 
 func TestReplaceFileAndCleanup(t *testing.T) {

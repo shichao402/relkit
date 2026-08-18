@@ -26,8 +26,8 @@ String? publisherUnavailable() {
     }
   } catch (error) {
     return 'relkit could not be started ($error); install from '
-        'https://github.com/shichao402/relkit/releases or '
-        '`go install github.com/shichao402/relkit/cmd/relkit@latest`';
+        'https://cnb.cool/shichao402/relkit/releases or '
+        '`go install cnb.cool/shichao402/relkit/cmd/relkit@latest`';
   }
 
   final project = Directory.systemTemp.createTempSync('rup-relkit-probe-');

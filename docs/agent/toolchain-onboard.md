@@ -12,14 +12,14 @@ relkit --version
 失败则先安装（任选）：
 
 ```bash
-go install github.com/shichao402/relkit/cmd/relkit@latest
-# 或从 https://github.com/shichao402/relkit/releases 下载二进制并加入 PATH
+go install cnb.cool/shichao402/relkit/cmd/relkit@latest
+# 或从 https://cnb.cool/shichao402/relkit/releases 下载二进制并加入 PATH
 ```
 
 自托管分发时再装 serve：
 
 ```bash
-go install github.com/shichao402/relkit/cmd/relkit-serve@latest
+go install cnb.cool/shichao402/relkit/cmd/relkit-serve@latest
 ```
 
 确认工作目录是**宿主应用仓库根**（将出现 `relkit.json` 的地方），不是随便一个子目录。
