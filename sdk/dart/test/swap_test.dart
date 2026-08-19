@@ -357,4 +357,111 @@ void main() {
           reason: 'the old version must still be recoverable by hand');
     }, skip: Platform.isWindows ? null : 'needs mandatory file locking');
   });
+
+  group('versionedDir', () {
+    test('copies payload beside the launcher and switches active.json',
+        () async {
+      write(install, 'SvnAutoMerge.exe', 'launcher');
+      write(install, 'versions/0.1.2+80/app.exe', 'v80');
+      writeActivePointer(
+        install,
+        ActivePointer(
+          code: 80,
+          version: '0.1.2+80',
+          path: 'versions/0.1.2+80',
+          executable: 'versions/0.1.2+80/app.exe',
+        ),
+      );
+      write(staged, 'app.exe', 'v81');
+      write(staged, 'data/x.txt', 'payload');
+
+      await swapVersionedInstallation(
+        installDir: install,
+        payloadDir: staged,
+        code: 81,
+        version: '0.1.2+81',
+        executableName: 'app.exe',
+      );
+
+      expect(read(install, 'SvnAutoMerge.exe'), 'launcher');
+      expect(read(install, 'versions/0.1.2+81/app.exe'), 'v81');
+      expect(read(install, 'versions/0.1.2+80/app.exe'), 'v80');
+      final pointer = readActivePointer(install);
+      expect(pointer!.version, '0.1.2+81');
+      expect(pointer.path, 'versions/0.1.2+81');
+    });
+
+    test('prunes versions beyond the retain window of two', () async {
+      write(install, 'versions/0.1.2+79/app.exe', 'v79');
+      write(install, 'versions/0.1.2+80/app.exe', 'v80');
+      writeActivePointer(
+        install,
+        ActivePointer(
+          code: 80,
+          version: '0.1.2+80',
+          path: 'versions/0.1.2+80',
+        ),
+      );
+      write(staged, 'app.exe', 'v81');
+
+      await swapVersionedInstallation(
+        installDir: install,
+        payloadDir: staged,
+        code: 81,
+        version: '0.1.2+81',
+        retainVersions: 2,
+      );
+
+      expect(read(install, 'versions/0.1.2+81/app.exe'), 'v81');
+      expect(read(install, 'versions/0.1.2+80/app.exe'), 'v80');
+      expect(read(install, 'versions/0.1.2+79/app.exe'), isNull);
+    });
+
+    test('refreshes install-root files when they differ', () async {
+      write(install, 'SvnAutoMerge.exe', 'old-launcher');
+      write(install, 'relkit-apply.exe', 'old-apply');
+      write(staged, 'app.exe', 'v81');
+      final zipRoot =
+          Directory('${root.path}${Platform.pathSeparator}zip')..createSync();
+      write(zipRoot, 'SvnAutoMerge.exe', 'new-launcher');
+      write(zipRoot, 'relkit-apply.exe', 'new-apply');
+
+      await swapVersionedInstallation(
+        installDir: install,
+        payloadDir: staged,
+        code: 81,
+        version: '0.1.2+81',
+        executableName: 'app.exe',
+        rootFiles: [
+          File('${zipRoot.path}${Platform.pathSeparator}SvnAutoMerge.exe'),
+          File('${zipRoot.path}${Platform.pathSeparator}relkit-apply.exe'),
+        ],
+      );
+
+      expect(read(install, 'SvnAutoMerge.exe'), 'new-launcher');
+      expect(read(install, 'relkit-apply.exe'), 'new-apply');
+      expect(read(install, 'SvnAutoMerge.exe.old-81'), isNull);
+    });
+
+    test('leaves identical root files alone', () async {
+      write(install, 'SvnAutoMerge.exe', 'same');
+      write(staged, 'app.exe', 'v81');
+      final zipRoot =
+          Directory('${root.path}${Platform.pathSeparator}zip')..createSync();
+      write(zipRoot, 'SvnAutoMerge.exe', 'same');
+
+      await swapVersionedInstallation(
+        installDir: install,
+        payloadDir: staged,
+        code: 81,
+        version: '0.1.2+81',
+        rootFiles: [
+          File('${zipRoot.path}${Platform.pathSeparator}SvnAutoMerge.exe'),
+        ],
+      );
+
+      expect(read(install, 'SvnAutoMerge.exe'), 'same');
+      expect(read(install, 'SvnAutoMerge.exe.old-81'), isNull);
+    });
+  });
 }

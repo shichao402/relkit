@@ -13,6 +13,8 @@ library;
 
 import 'dart:io';
 
+import 'active.dart';
+
 /// A directory kept from the old installation instead of taking the new
 /// package's copy.
 ///
@@ -339,3 +341,268 @@ Future<void> _copyDirectory(Directory from, Directory to) async {
     }
   }
 }
+
+/// Writes a new payload beside the current one and switches [active.json].
+///
+/// The install root is never renamed, so a running launcher at the root can
+/// exit without blocking this, and old payload DLLs stay in their own
+/// directory. [payloadDir] is copied to `versions/<version>/`. The previous
+/// `active.json` target is kept as the rollback copy; older version
+/// directories are deleted after the pointer has switched.
+Future<void> swapVersionedInstallation({
+  required Directory installDir,
+  required Directory payloadDir,
+  required int code,
+  required String version,
+  String? executableName,
+  int retainVersions = 2,
+  List<PreservedEntry> preserve = const [],
+  List<File> rootFiles = const [],
+  void Function(String message)? log,
+}) async {
+  final note = log ?? (_) {};
+  if (!installDir.existsSync()) {
+    throw SwapException(
+        'installation directory does not exist: ${installDir.path}');
+  }
+  if (!payloadDir.existsSync()) {
+    throw SwapException(
+        'payload directory does not exist: ${payloadDir.path}');
+  }
+  if (retainVersions < 1) {
+    throw ArgumentError('retainVersions must be at least 1');
+  }
+
+  final id = versionDirectoryName(version);
+  final versionsRoot =
+      Directory('${installDir.path}${Platform.pathSeparator}versions');
+  final dest = Directory('${versionsRoot.path}${Platform.pathSeparator}$id');
+  final previous = readActivePointer(installDir);
+
+  if (_sameDirectory(payloadDir, dest)) {
+    throw SwapException(
+        'refusing to install ${payloadDir.path} onto itself');
+  }
+
+  versionsRoot.createSync(recursive: true);
+
+  if (dest.existsSync()) {
+    note('removing a leftover ${dest.path}');
+    try {
+      dest.deleteSync(recursive: true);
+    } on FileSystemException catch (error) {
+      throw SwapException(
+          'could not replace an existing version directory: ${dest.path}',
+          cause: error);
+    }
+  }
+
+  try {
+    note('copying ${payloadDir.path} to ${dest.path}');
+    await _copyDirectory(payloadDir, dest);
+  } on Object catch (error) {
+    if (dest.existsSync()) {
+      try {
+        dest.deleteSync(recursive: true);
+      } on FileSystemException {
+        // Pointer was not switched; leftover dest is unused.
+      }
+    }
+    throw SwapException('could not copy the new version into place',
+        cause: error);
+  }
+
+  final relativePath = 'versions/$id';
+  final relativeExe = executableName == null || executableName.isEmpty
+      ? null
+      : '$relativePath/${executableName.replaceAll(r'\', '/')}';
+
+  try {
+    writeActivePointer(
+      installDir,
+      ActivePointer(
+        code: code,
+        version: version,
+        path: relativePath,
+        executable: relativeExe,
+      ),
+    );
+  } on Object catch (error) {
+    try {
+      dest.deleteSync(recursive: true);
+    } on FileSystemException {
+      // Pointer still names the previous version.
+    }
+    throw SwapException('could not switch active.json', cause: error);
+  }
+
+  _refreshRootFiles(
+    installDir: installDir,
+    files: rootFiles,
+    code: code,
+    log: note,
+  );
+
+  for (final entry in preserve) {
+    final source = Directory(
+        '${payloadDir.path}${Platform.pathSeparator}$entry');
+    if (!source.existsSync()) continue;
+    final target = Directory(
+        '${installDir.path}${Platform.pathSeparator}$entry');
+    if (target.existsSync()) continue;
+    try {
+      note('creating preserved $entry at install root');
+      await _copyDirectory(source, target);
+    } on Object catch (error) {
+      note('could not create preserved $entry: $error');
+    }
+  }
+
+  await _pruneVersionDirectories(
+    versionsRoot: versionsRoot,
+    keep: <String>{
+      id,
+      if (previous != null) versionDirectoryName(previous.version),
+    },
+    retainVersions: retainVersions,
+    log: note,
+  );
+}
+
+void _refreshRootFiles({
+  required Directory installDir,
+  required List<File> files,
+  required int code,
+  required void Function(String) log,
+}) {
+  for (final source in files) {
+    if (!source.existsSync()) continue;
+    final name = _fileName(source);
+    final dest = File(
+      '${installDir.path}${Platform.pathSeparator}$name',
+    );
+    _pruneAsideFiles(installDir, name, log);
+    try {
+      if (dest.existsSync() && _sameFileBytes(source, dest)) {
+        log('root file $name unchanged');
+        continue;
+      }
+      File? aside;
+      if (dest.existsSync()) {
+        aside = File('${dest.path}.old-$code');
+        if (aside.existsSync()) {
+          try {
+            aside.deleteSync();
+          } on FileSystemException {
+            // Next copy still works if the aside name is free enough.
+          }
+        }
+        dest.renameSync(aside.path);
+      }
+      try {
+        source.copySync(dest.path);
+      } on Object catch (error) {
+        if (aside != null && aside.existsSync() && !dest.existsSync()) {
+          try {
+            aside.renameSync(dest.path);
+          } on FileSystemException {
+            // Pointer already switched; a missing launcher is logged below.
+          }
+        }
+        log('could not refresh $name: $error');
+        continue;
+      }
+      log('refreshed $name');
+      if (aside != null && aside.existsSync()) {
+        try {
+          aside.deleteSync();
+        } on FileSystemException {
+          log('left aside ${aside.path}');
+        }
+      }
+    } on Object catch (error) {
+      log('could not refresh $name: $error');
+    }
+  }
+}
+
+void _pruneAsideFiles(
+  Directory installDir,
+  String fileName,
+  void Function(String) log,
+) {
+  if (!installDir.existsSync()) return;
+  final prefix = '$fileName.old-';
+  for (final entity in installDir.listSync(followLinks: false)) {
+    if (entity is! File) continue;
+    final name = _fileName(entity);
+    if (!name.startsWith(prefix)) continue;
+    try {
+      entity.deleteSync();
+      log('removed leftover $name');
+    } on FileSystemException {
+      // Still locked; the next update tries again.
+    }
+  }
+}
+
+String _fileName(File file) {
+  return file.uri.pathSegments.lastWhere((segment) => segment.isNotEmpty);
+}
+
+bool _sameFileBytes(File a, File b) {
+  final aBytes = a.readAsBytesSync();
+  final bBytes = b.readAsBytesSync();
+  if (aBytes.length != bBytes.length) return false;
+  for (var i = 0; i < aBytes.length; i++) {
+    if (aBytes[i] != bBytes[i]) return false;
+  }
+  return true;
+}
+
+bool _sameDirectory(Directory a, Directory b) {
+  String normalise(Directory dir) {
+    var path = dir.absolute.path.replaceAll('/', Platform.pathSeparator);
+    while (path.length > 1 && path.endsWith(Platform.pathSeparator)) {
+      path = path.substring(0, path.length - 1);
+    }
+    return Platform.isWindows ? path.toLowerCase() : path;
+  }
+
+  return normalise(a) == normalise(b);
+}
+
+Future<void> _pruneVersionDirectories({
+  required Directory versionsRoot,
+  required Set<String> keep,
+  required int retainVersions,
+  required void Function(String) log,
+}) async {
+  if (!versionsRoot.existsSync()) return;
+  final extraKeep = <String>{};
+  if (keep.length < retainVersions) {
+    final others = versionsRoot
+        .listSync(followLinks: false)
+        .whereType<Directory>()
+        .map((dir) => dir.uri.pathSegments
+            .lastWhere((segment) => segment.isNotEmpty))
+        .where((name) => !keep.contains(name))
+        .toList()
+      ..sort();
+    extraKeep.addAll(others.reversed.take(retainVersions - keep.length));
+  }
+  final retain = {...keep, ...extraKeep};
+  for (final entity in versionsRoot.listSync(followLinks: false)) {
+    if (entity is! Directory) continue;
+    final name = entity.uri.pathSegments
+        .lastWhere((segment) => segment.isNotEmpty);
+    if (retain.contains(name)) continue;
+    log('removing retired version $name');
+    try {
+      entity.deleteSync(recursive: true);
+    } on FileSystemException catch (error) {
+      log('could not delete retired $name, leaving it: $error');
+    }
+  }
+}
+

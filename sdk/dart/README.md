@@ -48,7 +48,9 @@ Generated types: `lib/src/gen/rup/v2/` (re-exported by `package:rup_client/rup_c
 - `RupUpdater.download()` — Range multi-connection when possible, resume, retries; `DownloadProgress`
 - `UpdateScheduler` — start + periodic throttled checks
 - `UpdateRuntimeConfig` — host-injected scheduler config (`forceOnStart`, etc.)
-- `src/apply/` — optional portable directory-swap helpers (desktop hosts)
+- `src/apply/` — optional install helpers: `wholeRoot` (directory swap) and
+  `versionedDir` (`versions/<id>/` + atomic `active.json`). Defaults:
+  Windows `versionedDir`, macOS `wholeRoot`. Not protocol; see SPEC appendix B.
 
 The package does not decide UI, prompts, or silent installs. It does not read
 configuration files: load JSON in the host and pass [UpdateRuntimeConfig].
