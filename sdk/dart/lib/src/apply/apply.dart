@@ -27,12 +27,16 @@ library;
 
 import 'dart:io';
 
+import 'active.dart';
 import 'apply_exception.dart';
+import 'layout.dart';
 import 'session.dart';
 import 'swap.dart';
 import 'unpack.dart';
 
+export 'active.dart';
 export 'apply_exception.dart' show ApplyException;
+export 'layout.dart';
 export 'session.dart';
 
 /// The argument that tells a copy of the application it was started to replace
@@ -160,7 +164,15 @@ Future<void> launchApply({
   int? targetCode,
   String? targetVersion,
   bool relaunch = true,
+  InstallLayout layout = InstallLayout.wholeRoot,
+  File? applyExecutable,
+  int retainVersions = 2,
 }) async {
+  ensureInstallLayoutSupported(
+    operatingSystem: Platform.operatingSystem,
+    layout: layout,
+  );
+
   final arguments = <String>[
     applyFlag,
     '--install-dir',
@@ -169,11 +181,17 @@ Future<void> launchApply({
     staged.directory.absolute.path,
     '--executable',
     executableName,
+    '--layout',
+    layout.name,
+    '--retain-versions',
+    '$retainVersions',
     if (preserve.isNotEmpty) ...['--preserve', preserve.join(',')],
     if (logFile != null) ...['--apply-log', logFile.absolute.path],
     if (sessionFile != null) ...['--apply-session', sessionFile.absolute.path],
     if (renameTimeout != null)
       ...['--apply-timeout', '${renameTimeout.inSeconds}'],
+    if (targetCode != null) ...['--target-code', '$targetCode'],
+    if (targetVersion != null) ...['--target-version', targetVersion],
     if (!relaunch) '--no-relaunch',
   ];
 
@@ -194,10 +212,18 @@ Future<void> launchApply({
     );
   }
 
+  final process = resolveApplyProcess(
+    staged: staged,
+    layout: layout,
+    executableName: executableName,
+    applyExecutable: applyExecutable,
+    targetVersion: targetVersion,
+  );
+
   await Process.start(
-    staged.executable.absolute.path,
+    process.absolute.path,
     arguments,
-    workingDirectory: staged.directory.absolute.path,
+    workingDirectory: process.parent.absolute.path,
     // Detached, because the parent is about to exit and a child in the same
     // process group would be taken down with it on some shutdown paths.
     mode: ProcessStartMode.detached,
@@ -215,6 +241,10 @@ class ApplyRequest {
     required this.logFile,
     this.sessionFile,
     this.renameTimeout,
+    this.layout = InstallLayout.wholeRoot,
+    this.targetCode,
+    this.targetVersion,
+    this.retainVersions = 2,
   });
 
   final Directory installDir;
@@ -236,6 +266,11 @@ class ApplyRequest {
   /// How long to wait for the installation to be released. Null means the
   /// default in [runApplyMode].
   final Duration? renameTimeout;
+
+  final InstallLayout layout;
+  final int? targetCode;
+  final String? targetVersion;
+  final int retainVersions;
 
   /// Reads a request out of `main`'s arguments, or returns null when this is
   /// an ordinary start.
@@ -265,6 +300,10 @@ class ApplyRequest {
     final logFile = value('--apply-log');
     final sessionFile = value('--apply-session');
     final timeoutSeconds = int.tryParse(value('--apply-timeout') ?? '');
+    final retainVersions = int.tryParse(value('--retain-versions') ?? '');
+    final targetCode = int.tryParse(value('--target-code') ?? '');
+    final layout = installLayoutByName(value('--layout')) ??
+        InstallLayout.wholeRoot;
 
     return ApplyRequest(
       installDir: Directory(installDir),
@@ -279,6 +318,11 @@ class ApplyRequest {
       renameTimeout: timeoutSeconds == null || timeoutSeconds <= 0
           ? null
           : Duration(seconds: timeoutSeconds),
+      layout: layout,
+      targetCode: targetCode,
+      targetVersion: value('--target-version'),
+      retainVersions:
+          retainVersions == null || retainVersions < 1 ? 2 : retainVersions,
     );
   }
 }
@@ -384,17 +428,44 @@ Future<void> runApplyMode(
           'inside it');
     }
 
-    note('replacing ${request.installDir.path} from ${stagedDir.path}');
+    note('replacing ${request.installDir.path} from ${stagedDir.path} '
+        '(layout ${request.layout.name})');
 
-    await swapInstallation(
-      installDir: request.installDir,
-      stagedDir: stagedDir,
-      preserve: request.preserve,
-      keepStaged: true,
-      renameTimeout: request.renameTimeout ?? renameTimeout,
-      onWaiting: (_, __) => beat(),
-      log: note,
-    );
+    if (request.layout == InstallLayout.versionedDir) {
+      final version = request.targetVersion;
+      final code = request.targetCode;
+      if (version == null || version.isEmpty || code == null) {
+        throw ApplyException(
+            '$applyFlag with layout versionedDir needs --target-version '
+            'and --target-code');
+      }
+      final payload = _versionedPayloadDir(stagedDir, version);
+      await swapVersionedInstallation(
+        installDir: request.installDir,
+        payloadDir: payload,
+        code: code,
+        version: version,
+        executableName: request.executableName,
+        retainVersions: request.retainVersions,
+        preserve: request.preserve,
+        rootFiles: versionedRootFiles(
+          stagedRoot: stagedDir,
+          version: version,
+          executableName: request.executableName,
+        ),
+        log: note,
+      );
+    } else {
+      await swapInstallation(
+        installDir: request.installDir,
+        stagedDir: stagedDir,
+        preserve: request.preserve,
+        keepStaged: true,
+        renameTimeout: request.renameTimeout ?? renameTimeout,
+        onWaiting: (_, __) => beat(),
+        log: note,
+      );
+    }
 
     note('replaced');
 
@@ -508,4 +579,84 @@ bool _samePath(Directory a, Directory b) {
   }
 
   return normalise(a) == normalise(b);
+}
+
+/// Payload to copy into `versions/<id>/`.
+///
+/// A full versioned zip already contains `versions/<id>/`. A flat staged tree
+/// (data/ next to the exe) is itself the payload.
+Directory _versionedPayloadDir(Directory stagedRoot, String version) {
+  final nested = Directory(
+    '${stagedRoot.path}${Platform.pathSeparator}versions'
+    '${Platform.pathSeparator}${versionDirectoryName(version)}',
+  );
+  if (nested.existsSync()) return nested;
+  return stagedRoot;
+}
+
+/// Which process [launchApply] should start.
+///
+/// A versionedDir package puts the launcher at [StagedUpdate.executable]. That
+/// binary does not speak [applyFlag], so without [applyExecutable] we start the
+/// payload copy instead.
+File resolveApplyProcess({
+  required StagedUpdate staged,
+  required InstallLayout layout,
+  required String executableName,
+  File? applyExecutable,
+  String? targetVersion,
+}) {
+  if (applyExecutable != null) {
+    return applyExecutable;
+  }
+  if (layout != InstallLayout.versionedDir) {
+    return staged.executable;
+  }
+  if (targetVersion == null || targetVersion.isEmpty) {
+    throw ApplyException(
+        'versionedDir apply without relkit-apply needs --target-version '
+        'to find the payload executable');
+  }
+  final payloadDir = Directory(
+    '${staged.directory.path}${Platform.pathSeparator}versions'
+    '${Platform.pathSeparator}${versionDirectoryName(targetVersion)}',
+  );
+  final payloadExe = File(
+    '${payloadDir.path}${Platform.pathSeparator}'
+    '${executableName.replaceAll('/', Platform.pathSeparator)}',
+  );
+  if (!payloadExe.existsSync()) {
+    throw ApplyException(
+        'versionedDir apply without relkit-apply needs ${payloadExe.path}');
+  }
+  return payloadExe;
+}
+
+/// Files at the zip root that should refresh the install root after a
+/// versionedDir swap (launcher and optional relkit-apply).
+///
+/// Empty when the staged tree is payload-only, so a Flutter copy used as the
+/// apply process is not copied over the launcher.
+List<File> versionedRootFiles({
+  required Directory stagedRoot,
+  required String version,
+  required String executableName,
+}) {
+  final nested = Directory(
+    '${stagedRoot.path}${Platform.pathSeparator}versions'
+    '${Platform.pathSeparator}${versionDirectoryName(version)}',
+  );
+  if (!nested.existsSync()) return const [];
+  final files = <File>[];
+  final launcherName =
+      executableName.replaceAll('\\', '/').split('/').last;
+  final launcher =
+      File('${stagedRoot.path}${Platform.pathSeparator}$launcherName');
+  if (launcher.existsSync()) files.add(launcher);
+  final applyName =
+      Platform.isWindows ? 'relkit-apply.exe' : 'relkit-apply';
+  final applyBin =
+      File('${stagedRoot.path}${Platform.pathSeparator}$applyName');
+  if (applyBin.existsSync()) files.add(applyBin);
+  return files;
 }

@@ -789,3 +789,16 @@ Channel：v2 首版 directory **可以**为每个 `(product)` 提供面向默认
 | 历史版本 | 覆盖后丢失 | 覆盖后丢失 | index 中保留全部节点 |
 | 平台维度 | 命名约定 `dec-{os}-{arch}` | 固定嵌套 `platforms.{macos,windows,android}` | 扁平数组 + `selectors` |
 | 发布顺序 | 产物先于指针 | manifest 先于产物（存在不一致窗口） | 产物 → manifest → index，index 为提交点 |
+
+---
+
+## 附录 B：可选的 SDK 安装布局（非协议）
+
+§1.2 明确：**如何安装不是协议。** 下列布局是 Dart/Go SDK 提供的宿主助手，**禁止**当作 RUP 对象或出现在 index/manifest 的规范性字段里（manifest 可以在非规范性 meta 中记录产物形状，供宿主自检）。
+
+| 名称 | 行为 | 默认平台 |
+|------|------|----------|
+| `wholeRoot` | 整安装根替换（便携目录 / `.app`） | macOS |
+| `versionedDir` | 写入 `versions/<version>/`，原子切换 `active.json` | Windows |
+
+SDK **必须**拒绝未支持的组合（当前：`macos` + `versionedDir`）。`active.json` 与 session 路径公式由 SDK 规范化：`versionedDir` 的 session 在安装根；`wholeRoot` 的 session 在应用支持目录。本地 `versionedDir` **应该**只保留 2 个版本目录（当前 + 上一个）。
