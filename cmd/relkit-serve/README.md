@@ -117,7 +117,7 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 | 路径 | 内容 |
 |---|---|
 | `/` | **产品门户**：一台机器上的每个产品一张卡片，每个 channel 一行（当前版本、code、发布日期，以及本平台的下载链接） |
-| `/-/p/<product>` | 单产品：各 channel 的 sequence、最新版本的文件（文件名 / 平台 / 大小 / 下载次数 / sha256）、固定链接、版本链 |
+| `/-/p/<product>` | 单产品下载页：每个 channel 一张卡片，默认只显示最新版、平台包和固定下载入口；sequence / index / manifest / SHA / 版本链收进 `Technical details` |
 | `/-/latest/<product>/<channel>/<artifact-id>` | 长期有效的下载地址；读取发布时写好的 `latest/<product>/<channel>.json` 后 302 到具体产物 |
 | `/<dir>/` | 原来的目录列表：名字、大小、修改时间 |
 | `/?files=1` | 强制回到根目录的文件列表 |
@@ -141,7 +141,7 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 }
 ```
 
-页面无 JavaScript、无外部字体与图片，全部内联，因此在不通公网的内网浏览器里也能正常渲染；深色模式跟随 `prefers-color-scheme`。
+页面无外部字体与图片，全部内联，因此在不通公网的内网浏览器里也能正常渲染。主题默认跟随 `prefers-color-scheme`，右上角可切换 System / Light / Dark；唯一的内联 JavaScript 只负责把这项偏好保存在浏览器 `localStorage`，不参与发布内容渲染。
 
 ---
 
@@ -259,4 +259,4 @@ go test ./...                              # 功能
 go test -run "^$" -bench . -benchtime 2s   # 吞吐
 ```
 
-覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、产品门户（多产品、channel 排序、坏 index 退回列表、`?files=1`、HEAD 无正文、不可缓存）、产品页（最新版本产物与版本链、固定链接、未知产品 404）、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。
+覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、产品门户（多产品、channel 排序、坏 index 退回列表、`?files=1`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。

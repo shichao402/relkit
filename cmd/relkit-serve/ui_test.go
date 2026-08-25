@@ -116,10 +116,13 @@ func TestProductPageShowsArtifactsOfLatestVersion(t *testing.T) {
 		"stable",
 		"2.0.0",
 		"app.zip",
+		`class="release-card"`,
+		`class="download-btn"`,
+		`<details class="technical">`,
 		`href="/artifact/app/2.0.0/app.zip"`,
 		`href="/manifest/app/2.0.0.pb"`,
 		strings.Repeat("b", 12), // sha256 prefix from the manifest fixture
-		"sequence",
+		"Sequence",
 	)
 	// The page links back to where the visitor came from.
 	mustContain(t, "product page", body, `href="/"`)
@@ -352,8 +355,7 @@ func TestArtifactDownloadsAreCounted(t *testing.T) {
 	}
 
 	body := getBody(t, srv.URL+"/-/p/app")
-	mustContain(t, "product page", body, "<th class=\"num\">Downloads</th>", "Download counts are in-memory")
-	if !strings.Contains(body, `<td class="num">2</td>`) {
+	if !strings.Contains(body, `2 downloads`) {
 		t.Errorf("expected 2 counted downloads (plain + range from zero)\n%s", body)
 	}
 
@@ -398,6 +400,23 @@ func TestSiteConfigSuppliesTitlesAndBlurbs(t *testing.T) {
 
 	product := getBody(t, srv.URL+"/-/p/app")
 	mustContain(t, "product page", product, "Demo App", "Internal build distribution")
+}
+
+func TestPagesOfferSystemLightAndDarkThemes(t *testing.T) {
+	srv, dir := newTestServer(t, false)
+	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
+
+	for _, page := range []string{getBody(t, srv.URL+"/"), getBody(t, srv.URL+"/-/p/app")} {
+		mustContain(t, "theme control", page,
+			`<html lang="en" data-theme="system">`,
+			`id="theme-select"`,
+			`<option value="system">System</option>`,
+			`<option value="light">Light</option>`,
+			`<option value="dark">Dark</option>`,
+			`prefers-color-scheme:dark`,
+			`localStorage.setItem("relkit-theme",v)`,
+		)
+	}
 }
 
 func TestPublishedSiteCopyOverridesServerFallback(t *testing.T) {
