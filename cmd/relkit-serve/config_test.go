@@ -26,7 +26,8 @@ func TestLoadFileConfig(t *testing.T) {
 	  "dir": "/srv/releases",
 	  "maxUpload": "512MiB",
 	  "cache": {"noCache": ["index/"], "immutable": ["artifact/"], "defaultMaxAge": 30},
-	  "gc": {"enabled": false, "interval": "15m"}
+	  "gc": {"enabled": false, "interval": "15m"},
+	  "publish": {"minProtocol": 2}
 	}`)
 
 	cfg, used, err := LoadFileConfig(path)
@@ -44,6 +45,18 @@ func TestLoadFileConfig(t *testing.T) {
 	}
 	if cfg.GC == nil || cfg.GC.Enabled == nil || *cfg.GC.Enabled || cfg.GC.Interval != "15m" {
 		t.Errorf("gc not parsed: %+v", cfg.GC)
+	}
+	if cfg.Publish == nil || cfg.Publish.MinProtocol != 2 {
+		t.Errorf("publish policy not parsed: %+v", cfg.Publish)
+	}
+}
+
+func TestLoadFileConfigRejectsNegativePublishProtocol(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfigFile(t, dir, ConfigName, `{"publish":{"minProtocol":-1}}`)
+	if _, _, err := LoadFileConfig(path); err == nil ||
+		!strings.Contains(err.Error(), "publish.minProtocol") {
+		t.Fatalf("LoadFileConfig error = %v", err)
 	}
 }
 

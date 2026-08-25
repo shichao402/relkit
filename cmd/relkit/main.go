@@ -21,6 +21,7 @@ import (
 	"cnb.cool/shichao402/relkit/internal/keys"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/publish"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"cnb.cool/shichao402/relkit/internal/simulate"
 	"cnb.cool/shichao402/relkit/internal/stage"
 	"cnb.cool/shichao402/relkit/internal/verify"
@@ -37,6 +38,7 @@ func main() {
 }
 
 func run(argv []string) (code int) {
+	publishproto.PublisherVersion = version
 	defer func() {
 		recovered := recover()
 		if recovered == nil {

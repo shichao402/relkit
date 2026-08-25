@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/webmeta"
 )
 
 const (
@@ -147,6 +147,30 @@ func (c *config) gcOnce() (gcResult, error) {
 		return gcResult{}, fmt.Errorf("parsed %d index file(s) but found no local manifest references", parsed)
 	}
 
+	// A latest pointer is intentionally written after the index commit. If that
+	// convenience write fails, keep its old target alive so the long-lived URL
+	// does not turn into a 404 before the publisher retries.
+	if latestFiles, err := listFilesUnder(c.root, "latest"); err == nil {
+		for _, name := range latestFiles {
+			raw, err := c.root.ReadFile(name)
+			if err != nil {
+				continue
+			}
+			doc, err := webmeta.UnmarshalLatest(raw)
+			if err != nil {
+				continue
+			}
+			for _, artifact := range doc.Artifacts {
+				for _, rawURL := range artifact.URLs {
+					if key, ok := localKeyFromURL(rawURL); ok &&
+						strings.HasPrefix(key, "artifact/") {
+						live[key] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
 	// Expand each live local manifest into its artifact keys. A missing or
 	// broken referenced manifest aborts the round so we never delete the
 	// artifacts a still-published index expects.
@@ -270,20 +294,9 @@ func localKeyFromURL(raw string) (string, bool) {
 }
 
 func readIndexManifestURLs(root *os.Root, name string) ([]string, error) {
-	raw, err := root.ReadFile(name)
+	index, err := readIndexDoc(root, name)
 	if err != nil {
 		return nil, err
-	}
-	env, err := rupv2.UnmarshalEnvelope(raw)
-	if err != nil {
-		return nil, fmt.Errorf("envelope protobuf: %w", err)
-	}
-	if env.Schema != rupv2.SchemaEnvelope {
-		return nil, fmt.Errorf("unexpected envelope schema %q", env.Schema)
-	}
-	index, err := rupv2.UnmarshalIndex(env.Payload)
-	if err != nil {
-		return nil, fmt.Errorf("index payload: %w", err)
 	}
 	if len(index.Versions) == 0 {
 		return nil, fmt.Errorf("index has no versions")
@@ -302,11 +315,7 @@ func readIndexManifestURLs(root *os.Root, name string) ([]string, error) {
 }
 
 func readManifestArtifactURLs(root *os.Root, name string) ([]string, error) {
-	raw, err := root.ReadFile(name)
-	if err != nil {
-		return nil, err
-	}
-	doc, err := rupv2.UnmarshalManifest(raw)
+	doc, err := readManifestDoc(root, name)
 	if err != nil {
 		return nil, fmt.Errorf("manifest protobuf: %w", err)
 	}

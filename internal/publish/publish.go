@@ -20,6 +20,7 @@ import (
 	"cnb.cool/shichao402/relkit/internal/envelope"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/stage"
+	"cnb.cool/shichao402/relkit/internal/webmeta"
 )
 
 type Error struct {
@@ -67,6 +68,15 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 	if len(unwritable) > 0 {
 		return nil, Error{Message: fmt.Sprintf("backend(s) %s are read-only and cannot be published to", strings.Join(unwritable, ", "))}
+	}
+	if !dryRun {
+		for _, backend := range openedBackends {
+			if preflighter, ok := backend.(backends.PublishPreflighter); ok {
+				if err := preflighter.Preflight(); err != nil {
+					return nil, Error{Message: fmt.Sprintf("publisher compatibility check failed for %s: %v", backend.Name(), err)}
+				}
+			}
+		}
 	}
 
 	var signers []envelope.Signer
@@ -141,6 +151,10 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 		}
 		printer("  " + model.ManifestKey(cfg.Product, version))
 		printer("  " + model.IndexKey(cfg.Product, channel) + "  <- pointer, written last")
+		if hasSiteCopy(cfg) {
+			printer("  " + webmeta.SiteKey(cfg.Product) + "  <- portal copy")
+		}
+		printer("  " + webmeta.LatestKey(cfg.Product, channel) + "  <- fixed latest links")
 		return nil, nil
 	}
 
@@ -213,6 +227,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	printer("writing pointer (commit point)...")
 	indexKey := model.IndexKey(cfg.Product, channel)
 	var written []string
+	var committed []backends.Backend
 	var failures []string
 	for _, backend := range openedBackends {
 		if _, err := backend.PutPointer(envelopeBytes, indexKey); err != nil {
@@ -221,10 +236,21 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 			continue
 		}
 		written = append(written, backend.Name())
+		committed = append(committed, backend)
 		printer(fmt.Sprintf("  %-12s %s", backend.Name(), indexKey))
 	}
+
+	// These documents are deliberately written after the signed index commit:
+	// a fixed "latest" URL must never advertise a release that clients cannot
+	// yet see. They are derived entirely from this publish, so the HTTP request
+	// path only reads a pointer; it never scans index/manifest to calculate one.
+	webFailures, err := writeWebPointers(cfg, staged, manifest, committed, printer)
+	if err != nil {
+		return nil, err
+	}
+	failures = append(failures, webFailures...)
 	if len(failures) > 0 && !allowPartial {
-		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (succeeded on: %s). Clients reading a lagging backend see an older sequence and treat it as 'no update' rather than an error, so this is not an outage; re-run to finish.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
+		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a portal/latest pointer is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
 	}
 
 	printer("")
@@ -243,6 +269,78 @@ func openBackends(cfg *config.Config, names []string) ([]backends.Backend, error
 		result = append(result, backend)
 	}
 	return result, nil
+}
+
+func hasSiteCopy(cfg *config.Config) bool {
+	return cfg.Site.Title != "" || cfg.Site.Description != "" || cfg.Site.Homepage != ""
+}
+
+func writeWebPointers(
+	cfg *config.Config,
+	staged *model.StagedDocument,
+	manifest *model.ManifestDocument,
+	targets []backends.Backend,
+	printer Printer,
+) ([]string, error) {
+	var documents []struct {
+		label string
+		key   string
+		data  []byte
+	}
+
+	if hasSiteCopy(cfg) {
+		data, err := webmeta.MarshalSite(webmeta.Site{
+			Product:     cfg.Product,
+			Title:       cfg.Site.Title,
+			Description: cfg.Site.Description,
+			Homepage:    cfg.Site.Homepage,
+			UpdatedAt:   model.UTCNow(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		documents = append(documents, struct {
+			label string
+			key   string
+			data  []byte
+		}{"site", webmeta.SiteKey(cfg.Product), data})
+	}
+
+	// Every channel gets its own pointer: a beta link has to keep tracking beta,
+	// and a page that only knew the default channel could not offer the others.
+	data, err := webmeta.MarshalLatest(webmeta.Latest{
+		Product:     cfg.Product,
+		Channel:     staged.Channel,
+		Version:     staged.Version,
+		Code:        staged.Code,
+		PublishedAt: manifest.ReleasedAt,
+		Artifacts:   webmeta.ArtifactsFromManifest(manifest),
+	})
+	if err != nil {
+		return nil, err
+	}
+	documents = append(documents, struct {
+		label string
+		key   string
+		data  []byte
+	}{"latest", webmeta.LatestKey(cfg.Product, staged.Channel), data})
+
+	if len(documents) == 0 || len(targets) == 0 {
+		return nil, nil
+	}
+	printer("writing web pointers...")
+	var failures []string
+	for _, backend := range targets {
+		for _, document := range documents {
+			if _, err := backend.PutPointer(document.data, document.key); err != nil {
+				failures = append(failures, fmt.Sprintf("%s %s: %v", backend.Name(), document.label, err))
+				printer(fmt.Sprintf("  %-12s %s FAILED: %v", backend.Name(), document.key, err))
+				continue
+			}
+			printer(fmt.Sprintf("  %-12s %s", backend.Name(), document.key))
+		}
+	}
+	return failures, nil
 }
 
 func trustedKeys(cfg *config.Config, signers []envelope.Signer) map[string]ed25519.PublicKey {

@@ -1,0 +1,87 @@
+# CNB 云原生构建：CI + Release
+# 文档：https://docs.cnb.cool/zh/build/grammar.html
+# Release 附件：git:release 建 Release，再由 cnbcool/attachments 上传二进制
+
+main:
+  push: &ci
+    - name: ci
+      docker:
+        image: golang:1.26
+      stages:
+        - name: go test
+          script: go test ./...
+        - name: serve lint and race
+          script: |
+            unformatted=$(gofmt -l ./cmd/relkit-serve)
+            if [ -n "$unformatted" ]; then
+              echo "not gofmt'd:"; echo "$unformatted"; exit 1
+            fi
+            go vet ./cmd/relkit-serve/...
+            go test -race ./cmd/relkit-serve/...
+        - name: shellcheck
+          script: |
+            apt-get update && apt-get install -y shellcheck
+            shellcheck deploy/install.sh deploy/build-serve.sh
+  pull_request: *ci
+
+# tag_push 时 $CNB_BRANCH 为 tag 名（如 v0.2.0），不是分支名
+"v*":
+  tag_push:
+    - name: release
+      docker:
+        image: golang:1.26
+      stages:
+        - name: build publisher binaries
+          script: |
+            set -eu
+            mkdir -p dist
+            version="${CNB_BRANCH#v}"
+            for pair in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
+              os="${pair%/*}"
+              arch="${pair#*/}"
+              out="dist/relkit-${os}-${arch}"
+              if [ "$os" = windows ]; then out="${out}.exe"; fi
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+                go build -trimpath -ldflags "-s -w -X main.version=${version}" \
+                -o "$out" ./cmd/relkit
+            done
+        - name: build serve binaries
+          script: ./deploy/build-serve.sh "${CNB_BRANCH#v}" dist
+        - name: verify linux serve binaries are static
+          script: |
+            set -eu
+            apt-get update && apt-get install -y file
+            for f in dist/relkit-serve-linux-*; do
+              if file "$f" | grep -q "dynamically linked"; then
+                echo "$f is dynamically linked"; exit 1
+              fi
+              echo "$f: static"
+            done
+        - name: checksums
+          script: cd dist && sha256sum * > SHA256SUMS
+        - name: write release notes
+          script: |
+            cat > RELEASE_BODY.md <<'EOF'
+            ## Binaries
+
+            - `relkit-*` — publisher CLI (`stage` / `publish` / …)
+            - `relkit-serve-*` — self-hosted RUP download + authenticated PUT
+
+            Install the server on Linux with systemd:
+
+            ```
+            sudo ./deploy/install.sh --binary ./relkit-serve-linux-amd64
+            ```
+
+            Guides: `relkit agent-guide` · `relkit-serve agent-guide`
+            EOF
+        - name: create CNB Release
+          type: git:release
+          options:
+            latest: true
+            descriptionFromFile: RELEASE_BODY.md
+        - name: upload release attachments
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - "./dist/*"

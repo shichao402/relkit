@@ -27,7 +27,7 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 
 ## 安装
 
-从 [Releases](https://cnb.cool/shichao402/relkit/releases) 下载对应平台二进制，或：
+从 [Releases](https://cnb.cool/shichao402/relkit/-/releases) 下载对应平台二进制，或：
 
 ```bash
 go install cnb.cool/shichao402/relkit/cmd/relkit@latest
@@ -93,6 +93,25 @@ relkit verify --deep
 - `publish`：最新版本保留内联 `notes`；更早版本清空 `notes`、只留 `notesUrl`
 - 占位符：`{version}` / `{version_slug}`（`+`→`-`）/ `{anchor}`（`v`+slug）
 - Dart SDK：`UpdateAvailable.releaseNotesMarkdown` / `releaseNotesUrl` / `priorReleaseNotes`
+
+### 产品页与固定下载地址
+
+产品团队可在 `relkit.json` 维护给人看的文案：
+
+```json
+"site": {
+  "title": "Demo App",
+  "description": "一句话说明这个产品是什么、给谁用。",
+  "homepage": "https://git.example.com/org/demoapp"
+}
+```
+
+发布完成后，relkit 还会写两类**不属于 RUP 信任链**的网页辅助指针：
+
+- 每个 channel 发布都覆盖 `site/<product>.json`，由 `relkit-serve` 产品门户读取。
+- 每个 channel 发布只覆盖自己那份 `latest/<product>/<channel>.json`，在发布时固化本版各 artifact 的 ID、selectors 与 URL。dev 发布不影响 stable 的指针。
+
+因此 `relkit-serve` 可按 channel 提供 `/-/latest/<product>/<channel>/<artifact-id>` 这种长期有效地址，例如 `/-/latest/demoapp/stable/windows`。请求只读取已发布的 latest 指针并跳转，不实时扫描 index / manifest。
 
 ## relkit-serve（分发服务）
 

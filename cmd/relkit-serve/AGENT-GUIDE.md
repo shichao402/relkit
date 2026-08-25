@@ -59,9 +59,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 签名机制在这里帮不上忙 —— 攻击者替换产物会被 manifest 里的 sha256 拦住，但他若能写目录，也就能写 `index`；他缺的只是签名私钥。所以**保住私钥是这道防线的全部**，而私钥不应该出现在这台机器上。
 
-### 2.2 `noCache` 必须包含 `index/`
+### 2.2 `noCache` 必须包含可变指针
 
-`index` 是可变指针，是一次发布的提交点。它一旦被缓存，**已经成功完成的发布在缓存过期前对客户端不可见**。现场表现是"发布完了但没人收到更新"，排查方向会被带到客户端和签名上去，而真正的原因在一个 HTTP 响应头里。
+`index` 是协议提交点；`site` 与 `latest` 是网页文案和固定下载地址的发布指针。它们一旦被缓存，客户端或页面会继续看到旧发布。`cache.noCache` 至少包含 `index/`、`site/`、`latest/`（directory / fallback 同样建议不缓存）。
 
 反过来，`immutable` 必须包含 `artifact/`：产物一旦发布就不再改变，不给永久缓存意味着每次检查更新都重传真正大的那部分。
 
@@ -77,7 +77,7 @@ token 只走三条路：配置文件的 `uploadToken`（文件须 0600）、`upl
 
 ### 2.4 服务目录里只能放发布树
 
-根路径 `/` 与各子目录会返回 HTML 目录列表，方便运维查看已发布内容。同时**任何路径都能被直接取走**。目录里若有备份、构建日志、密钥、`.git`，打开列表或猜到名字就能拿到。
+根路径 `/` 返回产品门户（每个产品一张卡片，`/-/p/<product>` 是单产品页），各子目录返回 HTML 目录列表，`/?files=1` 强制回到根目录列表。方便运维查看已发布内容，同时**任何路径都能被直接取走**。目录里若有备份、构建日志、密钥、`.git`，打开列表或猜到名字就能拿到。
 
 不要把发布目录设在家目录、项目工作区或已有内容的共享目录上。用一个专用目录（约定 `/srv/releases`）。
 
@@ -176,7 +176,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -r 0-0 $BASE/probe.txt
 
 # 5) 根目录可浏览
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/
-# 期望 200，正文是 HTML 目录列表
+# 期望 200。有可解析的 index 时正文是产品门户，否则是文件列表；
+# $BASE/?files=1 任何时候都给文件列表
 
 curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" $BASE/probe.txt 2>/dev/null || \
   sudo rm -f /srv/releases/probe.txt   # 服务不支持 DELETE，探针文件手工清掉
@@ -271,15 +272,25 @@ Environment=RELKIT_SERVE_TOKEN=<新 token>
 | `uploadToken` | 无 | 无 | token 明文；文件须 0600 |
 | `uploadTokenFile` | `-token-file` | 无 | token 文件路径，相对路径按配置文件所在目录解析 |
 | `maxUpload` | `-max-upload` | `4GiB` | 单次上传上限，接受 `512MiB` 这类写法 |
-| `cache.noCache` | `-nocache` | `["index/"]` | 这些前缀按 no-cache 返回，见 §2.2 |
+| `publish.minProtocol` | 无 | `0` | 发布者最低 HTTP 协议版本；设为 `2` 会拒绝没有新版协议头的旧 relkit |
+| `cache.noCache` | `-nocache` | `["index/","site/","latest/"]` | 这些可变指针前缀按 no-cache 返回，见 §2.2 |
 | `cache.immutable` | `-immutable` | `["manifest/","artifact/"]` | 这些前缀按永久缓存返回 |
 | `cache.defaultMaxAge` | `-default-max-age` | `60` | 两个列表都不命中时的 `max-age` |
 | `gc.enabled` | `-gc` | `true` | 是否启用孤儿 `manifest/` / `artifact/` 清理，见 §2.7 |
 | `gc.interval` | `-gc-interval` | `1h` | 定时扫盘间隔；`0` 与 `enabled=false` 一样关闭 GC |
 | `shutdownTimeout` | `-shutdown-timeout` | `30s` | 收到停止信号后留给进行中下载的时间 |
 | `logRequests` | `-quiet` | `true` | 是否打印请求日志 |
+| `site.title` | 无 | `Releases` | 首页大标题 |
+| `site.products.<id>` | 无 | 无 | 旧部署的网页文案 fallback；新项目应在自身 `relkit.json` 维护并随发布写入 |
+
+`site` 只影响给人看的网页，协议客户端读不到。整站标题属于服务端；各产品的标题、简介和主页属于产品团队，正常来源是发布树中的 `site/<product>.json`。服务端 `site.products` 仅作旧部署迁移 fallback，同一产品的发布文档存在时以后者为准。
 
 `uploadToken` 与 `uploadTokenFile` 只能给一个，同时给会启动失败。都不给则服务只读，`PUT` 返回 405 —— 这是默认状态，也就是说默认安全。
+
+`publish.minProtocol` 只约束已鉴权的写请求，不影响 SDK 下载。设为 `2` 后，旧
+发布器因没有 `X-Relkit-Publish-Protocol` 而收到 426，并且服务端会在创建目录或
+临时文件之前拒绝。新版 `relkit publish` 还会先 POST `/-/publish/preflight`，
+所以正常情况下 CI 在上传第一个 artifact 前就能报告需要升级。
 
 优先级是**命令行 > 环境变量 > 配置文件**。环境变量放在中间，是为了让容器或 systemd drop-in 能轮换 token 而不必改一个可能由配置管理系统托管的文件。
 

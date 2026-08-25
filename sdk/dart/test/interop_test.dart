@@ -26,7 +26,7 @@ String? publisherUnavailable() {
     }
   } catch (error) {
     return 'relkit could not be started ($error); install from '
-        'https://cnb.cool/shichao402/relkit/releases or '
+        'https://cnb.cool/shichao402/relkit/-/releases or '
         '`go install cnb.cool/shichao402/relkit/cmd/relkit@latest`';
   }
 

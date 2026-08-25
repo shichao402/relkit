@@ -19,6 +19,7 @@ import (
 	"cnb.cool/shichao402/relkit/internal/jsonio"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/testutil"
+	"cnb.cool/shichao402/relkit/internal/webmeta"
 )
 
 func TestCLIEndToEndLocalBackend(t *testing.T) {
@@ -53,6 +54,8 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	dryRun := runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100", "--dry-run")
 	assertContains(t, dryRun, "nothing uploaded")
 	assertContains(t, dryRun, "pointer, written last")
+	assertContains(t, dryRun, "site/demoapp.json")
+	assertContains(t, dryRun, "latest/demoapp/stable.json")
 	if _, err := os.Stat(filepath.Join(project, "dist", "publish")); !os.IsNotExist(err) {
 		t.Fatalf("dry run unexpectedly created dist/publish")
 	}
@@ -64,6 +67,53 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	}
 	if len(index.Versions) != 1 {
 		t.Fatalf("versions mismatch: got %d want 1", len(index.Versions))
+	}
+	siteRaw, err := os.ReadFile(filepath.Join(project, "dist", "publish", "site", "demoapp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	site, err := webmeta.UnmarshalSite(siteRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if site.Product != "demoapp" || site.Title != "demoapp" {
+		t.Fatalf("site = %+v, want demoapp copy", site)
+	}
+	latestRaw, err := os.ReadFile(filepath.Join(project, "dist", "publish", "latest", "demoapp", "stable.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := webmeta.UnmarshalLatest(latestRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Version != "1.0.0+100" || latest.Channel != "stable" || len(latest.Artifacts) != 2 {
+		t.Fatalf("latest = %+v, want stable 1.0.0+100 with 2 artifacts", latest)
+	}
+
+	writeArtifact(t, dist, "demoapp-1.0.1-dev-win-x64.zip", "dev 1.0.1 ", 64)
+	runRelkit(t, exe, project, nil, 0,
+		"stage", "1.0.1+101", "--channel", "beta",
+		"--add", filepath.Join(dist, "demoapp-1.0.1-dev-win-x64.zip"), "os=windows,arch=x64",
+	)
+	runRelkit(t, exe, project, nil, 0, "publish", "1.0.1+101")
+	afterBeta, err := os.ReadFile(filepath.Join(project, "dist", "publish", "latest", "demoapp", "stable.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterBeta) != string(latestRaw) {
+		t.Fatal("a beta publish changed the stable fixed pointer")
+	}
+	betaRaw, err := os.ReadFile(filepath.Join(project, "dist", "publish", "latest", "demoapp", "beta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := webmeta.UnmarshalLatest(betaRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beta.Version != "1.0.1+101" || beta.Channel != "beta" {
+		t.Fatalf("beta pointer = %+v, want beta 1.0.1+101", beta)
 	}
 
 	inspectOut := runRelkit(t, exe, project, nil, 0, "inspect", "--file", filepath.Join(project, "dist", "publish", "index", "demoapp", "stable.pb"))

@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -36,11 +38,101 @@ func newTestConfig(t *testing.T, withToken bool) (*config, string) {
 		noCache:       []string{"index/"},
 		immutable:     []string{"manifest/", "artifact/"},
 		defaultMaxAge: 60,
+		stats:         newDownloadStats(),
 	}
 	if withToken {
 		cfg.uploadToken = hashToken(testToken)
 	}
 	return cfg, dir
+}
+
+func TestPublishProtocolIsEnforcedBeforeWrite(t *testing.T) {
+	cfg, dir := newTestConfig(t, true)
+	cfg.minPublishProtocol = publishproto.Current
+	srv := newLocalServer(t, cfg)
+	t.Cleanup(srv.Close)
+
+	put := func(protocol string, authorized bool) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/artifact/app/1.0.0/app.zip", strings.NewReader("payload"))
+		if authorized {
+			req.Header.Set("Authorization", "Bearer "+testToken)
+		}
+		if protocol != "" {
+			req.Header.Set(publishproto.ProtocolHeader, protocol)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PUT: %v", err)
+		}
+		return resp
+	}
+
+	// Authentication remains the first gate; anonymous callers do not learn
+	// which publisher generation the deployment requires.
+	resp := put("", false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized PUT status = %d, want 401", resp.StatusCode)
+	}
+
+	for _, protocol := range []string{"", "1", "not-a-number"} {
+		resp = put(protocol, true)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUpgradeRequired {
+			t.Errorf("protocol %q status = %d, want 426; body=%s", protocol, resp.StatusCode, body)
+		}
+		if !strings.Contains(string(body), "publisher_upgrade_required") {
+			t.Errorf("protocol %q body = %s", protocol, body)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "artifact", "app")); !os.IsNotExist(err) {
+			t.Errorf("protocol %q created files before rejection", protocol)
+		}
+	}
+
+	resp = put(strconv.Itoa(publishproto.Current), true)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("current protocol status = %d, want 201", resp.StatusCode)
+	}
+}
+
+func TestPublishPreflight(t *testing.T) {
+	cfg, _ := newTestConfig(t, true)
+	cfg.minPublishProtocol = publishproto.Current
+	srv := newLocalServer(t, cfg)
+	t.Cleanup(srv.Close)
+
+	request := func(protocol string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+publishproto.PreflightPath, nil)
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		if protocol != "" {
+			req.Header.Set(publishproto.ProtocolHeader, protocol)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST preflight: %v", err)
+		}
+		return resp
+	}
+
+	resp := request("1")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUpgradeRequired {
+		t.Fatalf("old protocol status = %d, want 426", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Upgrade"); got != "relkit-publish/2" {
+		t.Errorf("Upgrade = %q, want relkit-publish/2", got)
+	}
+
+	resp = request(strconv.Itoa(publishproto.Current))
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"ok":true`) {
+		t.Fatalf("current protocol status = %d body=%s", resp.StatusCode, body)
+	}
 }
 
 func newTestServer(t *testing.T, withToken bool) (*httptest.Server, string) {
@@ -241,6 +333,8 @@ func TestRejectsTraversal(t *testing.T) {
 func TestDirectoryListing(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeFile(t, dir, "artifact/app/1.0.0/app.zip", []byte("inside"))
+	// An index that does not decode leaves no product to show, so the root
+	// stays a file listing. That is also the plain-static-host case.
 	writeFile(t, dir, "index/app/stable.pb", []byte("x"))
 
 	resp, err := http.Get(srv.URL + "/")
@@ -254,8 +348,7 @@ func TestDirectoryListing(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	html := string(body)
 	for _, want := range []string{
-		"Index of /",
-		"<th>Name</th><th>Size</th><th>Modified</th>",
+		`<th>Name</th><th class="num">Size</th><th class="num">Modified</th>`,
 		`href="artifact/"`,
 		`href="index/"`,
 		"artifact/",
@@ -266,7 +359,7 @@ func TestDirectoryListing(t *testing.T) {
 		}
 	}
 	// mtime column should show a formatted timestamp for each entry.
-	if !regexp.MustCompile(`class="mtime">\d{4}-\d{2}-\d{2} \d{2}:\d{2}<`).MatchString(html) {
+	if !regexp.MustCompile(`class="num">\d{4}-\d{2}-\d{2} \d{2}:\d{2}<`).MatchString(html) {
 		t.Errorf("GET / body missing formatted mtime\n%s", html)
 	}
 

@@ -35,6 +35,12 @@ type Backend interface {
 	Probe(rawURL string) (bool, *int64, string)
 }
 
+// PublishPreflighter is optional. Backends that can negotiate writer
+// capabilities implement it; storage backends such as local and S3 do not.
+type PublishPreflighter interface {
+	Preflight() error
+}
+
 type baseBackend struct {
 	name        string
 	backendType string

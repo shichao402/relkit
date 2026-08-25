@@ -30,6 +30,9 @@ func (c *config) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !c.requirePublishProtocol(w, r) {
+		return
+	}
 
 	name, ok := cleanKey(r.URL.Path)
 	if !ok {

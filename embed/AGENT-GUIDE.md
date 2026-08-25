@@ -31,7 +31,7 @@ relkit --version
 
 ```bash
 go install cnb.cool/shichao402/relkit/cmd/relkit@latest
-# 或从 GitHub Releases 下载对应平台二进制并放进 PATH
+# 或从 https://cnb.cool/shichao402/relkit/-/releases 下载对应平台二进制并放进 PATH
 ```
 
 `relkit --version` 失败就说明工具在当前环境不可用。此时：

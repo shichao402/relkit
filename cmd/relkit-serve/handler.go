@@ -1,7 +1,6 @@
 package main
 
 import (
-	"html"
 	"io"
 	"log"
 	"net"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -36,6 +36,24 @@ func (c *config) handler() http.Handler {
 			return
 		}
 		w.Write(body)
+	})
+	mux.HandleFunc(publishproto.PreflightPath, c.servePublishPreflight)
+
+	mux.HandleFunc(productPathPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.serveProduct(w, r)
+	})
+	mux.HandleFunc(latestPathPrefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.serveLatest(w, r)
 	})
 
 	mux.HandleFunc("/", c.serve)
@@ -85,11 +103,21 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	}
 	if info.IsDir() {
 		// Directory browsing is for operators checking what is on the box.
-		// Protocol clients still fetch only the signed index; a listing is
-		// not a trust boundary.
+		// Protocol clients still fetch only the signed index; neither the
+		// listing nor the portal is a trust boundary.
 		if name != "." && !strings.HasSuffix(r.URL.Path, "/") {
 			http.Redirect(w, r, r.URL.Path+"/", http.StatusMovedPermanently)
 			return
+		}
+		// One box distributes several products, so the root is a product
+		// portal rather than the raw key space. ?files=1 is the way back to
+		// the listing, and a tree with no readable index falls back to it on
+		// its own -- that is the plain-static-host case.
+		if name == "." && !r.URL.Query().Has("files") {
+			if products := c.scanProducts(guessPlatform(r.UserAgent())); len(products) > 0 {
+				c.servePortal(w, r, products)
+				return
+			}
 		}
 		c.listDir(w, r, file, name)
 		return
@@ -100,17 +128,23 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct)
 	}
 
+	if r.Method == http.MethodGet && strings.HasPrefix(name, "artifact/") &&
+		countableRange(r.Header.Get("Range")) {
+		c.stats.record(name)
+	}
+
 	// ServeContent handles Range, If-Range, If-Modified-Since and 206
 	// responses. Passing the *os.File rather than a wrapper is what lets the
 	// copy reach sendfile(2) on Linux.
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
-// listDir renders a plain HTML index of one directory.
+// listDir renders one directory: name, size, mtime, nothing else.
 //
-// Kept deliberately dull: no JS, no icons, just name, size, and mtime. The
-// audience is an operator pasting a URL into a browser to see what has been
-// published.
+// This is the operator view of the raw key space, reached from the portal or
+// by pasting a path into a browser. It stays deliberately dull -- no icons, no
+// previews, no JavaScript -- because its job is to answer "is the file on the
+// box" and nothing more.
 func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, name string) {
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
@@ -132,70 +166,41 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 		display = "/" + name + "/"
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	if r.Method == http.MethodHead {
-		w.WriteHeader(http.StatusOK)
-		return
+	page := &listingPage{
+		pageChrome: pageChrome{
+			Title:   display,
+			Version: version,
+			Note:    plural(len(entries), "entry", "entries"),
+			Crumbs:  breadcrumbs(name),
+		},
+		Display: display,
+		Count:   len(entries),
 	}
-
-	var b strings.Builder
-	b.WriteString("<!doctype html>\n<html><head><meta charset=\"utf-8\">")
-	b.WriteString("<title>")
-	b.WriteString(html.EscapeString(display))
-	b.WriteString("</title>")
-	b.WriteString("<style>")
-	b.WriteString("body{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;")
-	b.WriteString("margin:2rem;color:#222}")
-	b.WriteString("h1{font-size:1.1rem;font-weight:600}")
-	b.WriteString("table{border-collapse:collapse;width:100%;max-width:56rem}")
-	b.WriteString("th,td{text-align:left;padding:.25rem .75rem .25rem 0;border-bottom:1px solid #eee}")
-	b.WriteString("th{color:#666;font-weight:500}")
-	b.WriteString("td.size,td.mtime{text-align:right;color:#666;white-space:nowrap}")
-	b.WriteString("a{color:#06c;text-decoration:none}a:hover{text-decoration:underline}")
-	b.WriteString(".meta{color:#888;margin-top:1.5rem}")
-	b.WriteString("</style></head><body>")
-	b.WriteString("<h1>Index of ")
-	b.WriteString(html.EscapeString(display))
-	b.WriteString("</h1>\n<table><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>\n")
-
 	if name != "." {
-		b.WriteString("<tr><td><a href=\"../\">../</a></td><td class=\"size\">-</td><td class=\"mtime\">-</td></tr>\n")
+		page.Parent = "../"
 	}
 
 	for _, entry := range entries {
-		entryName := entry.Name()
-		href := entryName
-		label := entryName
-		size := "-"
-		mtime := "-"
-		if entry.IsDir() {
-			href += "/"
-			label += "/"
+		row := listingEntry{
+			Name: entry.Name(),
+			Href: entry.Name(),
+			Size: "-",
+			Dir:  entry.IsDir(),
+		}
+		if row.Dir {
+			row.Name += "/"
+			row.Href += "/"
 		}
 		if info, err := entry.Info(); err == nil {
-			if !entry.IsDir() {
-				size = humanBytes(info.Size())
+			if !row.Dir {
+				row.Size = humanBytes(info.Size())
 			}
-			mtime = info.ModTime().Format("2006-01-02 15:04")
+			row.Mtime = info.ModTime().Format(stampLayout)
 		}
-		b.WriteString("<tr><td><a href=\"")
-		b.WriteString(html.EscapeString(href))
-		b.WriteString("\">")
-		b.WriteString(html.EscapeString(label))
-		b.WriteString("</a></td><td class=\"size\">")
-		b.WriteString(html.EscapeString(size))
-		b.WriteString("</td><td class=\"mtime\">")
-		b.WriteString(html.EscapeString(mtime))
-		b.WriteString("</td></tr>\n")
+		page.Entries = append(page.Entries, row)
 	}
 
-	b.WriteString("</tbody></table>")
-	b.WriteString("<p class=\"meta\">relkit-serve · ")
-	b.WriteString(html.EscapeString(itoa(len(entries))))
-	b.WriteString(" entries</p>")
-	b.WriteString("</body></html>\n")
-	io.WriteString(w, b.String())
+	c.renderPage(w, r, "listing", page)
 }
 
 // cacheControl distinguishes the mutable pointer from immutable content.

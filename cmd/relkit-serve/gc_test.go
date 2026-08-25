@@ -11,6 +11,7 @@ import (
 	"time"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/webmeta"
 )
 
 func mustEnvelope(t *testing.T, index *rupv2.Index) []byte {
@@ -115,6 +116,32 @@ func TestGCRemovesUnreferencedRelease(t *testing.T) {
 	}
 	if !fileExists(dir, "index/app/stable.pb") {
 		t.Fatal("index was deleted")
+	}
+}
+
+func TestGCKeepsArtifactBehindStaleLatestPointer(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	writeRelease(t, dir, "app", "stable", "2.0.0", 200)
+	writeFile(t, dir, "artifact/app/1.0.0/app.zip", []byte("old"))
+
+	raw, err := webmeta.MarshalLatest(webmeta.Latest{
+		Product: "app", Channel: "stable", Version: "1.0.0", Code: 100,
+		PublishedAt: "2026-08-01T00:00:00Z",
+		Artifacts: []webmeta.Artifact{{
+			ID: "app", Filename: "app.zip",
+			URLs: []string{"http://example.com/artifact/app/1.0.0/app.zip"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, webmeta.LatestKey("app", "stable"), raw)
+
+	if _, err := cfg.gcOnce(); err != nil {
+		t.Fatalf("gcOnce: %v", err)
+	}
+	if !fileExists(dir, "artifact/app/1.0.0/app.zip") {
+		t.Fatal("artifact referenced by latest pointer was deleted")
 	}
 }
 

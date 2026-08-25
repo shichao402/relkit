@@ -50,6 +50,9 @@ type Config struct {
 	// Changelog is optional. When set, stage can auto-fill notes from File and
 	// notesUrl from URLTemplate; publish compacts older index nodes to links.
 	Changelog ChangelogConfig
+	// Site is optional copy for the human-facing release portal. Publish writes
+	// it to site/<product>.json; protocol clients never read it.
+	Site SiteConfig
 }
 
 // DirectoryConfig mirrors the optional relkit.json "directory" object.
@@ -74,6 +77,12 @@ type DirectoryServiceConfig struct {
 type ChangelogConfig struct {
 	File        string
 	URLTemplate string
+}
+
+type SiteConfig struct {
+	Title       string
+	Description string
+	Homepage    string
 }
 
 func FindConfig(start string) (string, error) {
@@ -309,6 +318,26 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	if value, ok := raw["site"]; ok {
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil, Error{Message: "site must be an object"}
+		}
+		var err error
+		if cfg.Site.Title, err = optionalString(obj, "title", "site.title"); err != nil {
+			return nil, err
+		}
+		if cfg.Site.Description, err = optionalString(obj, "description", "site.description"); err != nil {
+			return nil, err
+		}
+		if cfg.Site.Homepage, err = optionalString(obj, "homepage", "site.homepage"); err != nil {
+			return nil, err
+		}
+		if cfg.Site.Title == "" && cfg.Site.Description == "" && cfg.Site.Homepage == "" {
+			return nil, Error{Message: "site needs at least one of title / description / homepage"}
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -456,6 +485,11 @@ func Skeleton(product string) map[string]any {
 			},
 		},
 		"publishTo": []string{"local"},
+		"site": map[string]any{
+			"title":       product,
+			"description": "",
+			"homepage":    "",
+		},
 	}
 }
 
@@ -563,6 +597,18 @@ func stringList(value any) ([]string, error) {
 		result = append(result, asString)
 	}
 	return result, nil
+}
+
+func optionalString(obj map[string]any, key, field string) (string, error) {
+	value, exists := obj[key]
+	if !exists {
+		return "", nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", Error{Message: field + " must be a string"}
+	}
+	return strings.TrimSpace(text), nil
 }
 
 func asNonNegativeInt(value any, field string) (int, error) {

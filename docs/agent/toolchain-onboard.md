@@ -13,7 +13,7 @@ relkit --version
 
 ```bash
 go install cnb.cool/shichao402/relkit/cmd/relkit@latest
-# 或从 https://cnb.cool/shichao402/relkit/releases 下载二进制并加入 PATH
+# 或从 https://cnb.cool/shichao402/relkit/-/releases 下载二进制并加入 PATH
 ```
 
 自托管分发时再装 serve：

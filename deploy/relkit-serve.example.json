@@ -4,7 +4,7 @@
   "uploadTokenFile": "/etc/relkit-serve/relkit-serve.token",
   "maxUpload": "4GiB",
   "cache": {
-    "noCache": ["index/", "fallback/", "directory/"],
+    "noCache": ["index/", "fallback/", "directory/", "site/", "latest/"],
     "immutable": ["manifest/", "artifact/"],
     "defaultMaxAge": 60
   },
@@ -12,6 +12,12 @@
     "enabled": true,
     "interval": "1h"
   },
+  "publish": {
+    "minProtocol": 2
+  },
   "shutdownTimeout": "30s",
-  "logRequests": true
+  "logRequests": true,
+  "site": {
+    "title": "Releases"
+  }
 }

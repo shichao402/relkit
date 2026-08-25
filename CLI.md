@@ -13,7 +13,7 @@
 
 1. **Go 鍗曚簩杩涘埗锛屾爣鍑嗗簱涓轰富銆?* 涓氬姟鏂?CI / 鏈満鐩存帴璺?`relkit`锛屼笉蹇?vendor 婧愮爜銆佷笉蹇呰嚜鍐欎笂浼犻€昏緫銆備粨搴擄細`cnb.cool/shichao402/relkit`銆?
 2. 鑻ユ煇涓姛鑳界‘瀹為渶瑕侀澶栦緷璧栵紝**鍏堣皟鏁村姛鑳借璁?*锛涘彧鏈夊湪鍔熻兘涓嶅彲鏀惧純鏃讹紝鎵嶅紩鍏ュ苟鍦ㄦ枃浠跺ご娉ㄦ槑鐞嗙敱銆?
-3. **鍙崟鏂囦欢鍒嗗彂銆?* `go build` / GitHub Releases 澶氬钩鍙颁簩杩涘埗锛涗篃鍙敤 `go install cnb.cool/shichao402/relkit/cmd/relkit@latest`銆?
+3. **鍙崟鏂囦欢鍒嗗彂銆?* `go build` / CNB Releases 澶氬钩鍙颁簩杩涘埗锛涗篃鍙敤 `go install cnb.cool/shichao402/relkit/cmd/relkit@latest`銆?
 4. **Ed25519 鐢ㄨ繍琛屾椂鍘熺敓瀹炵幇**锛圙o锛歚crypto/ed25519`锛夈€傜鍚嶅璞℃槸 index payload 鐨勫師濮嬪瓧鑺傦紝瑙?SPEC.md 搂4銆?
 5. **閰嶇疆鏂囦欢鐢?JSON**锛坄relkit.json`锛夛紝渚夸簬鎻愪氦杩涗粨搴撲笖璺ㄥ钩鍙颁竴鑷淬€傚嚟鎹彧閫氳繃鐜鍙橀噺鎴栨湰鏈虹閽ユ枃浠惰矾寰勪紶鍏ワ紝浠庝笉鍐欒繘閰嶇疆鍐呭銆?
 
@@ -474,7 +474,7 @@ CI 只 `stage`，发布机持钥 `publish`。二进制：`cmd/relkit-agent`。
 - name: Install relkit
   run: |
     curl -fsSL -o relkit.tgz \
-      "https://cnb.cool/shichao402/relkit/releases/download/v0.1.0/relkit-linux-amd64"
+      "https://cnb.cool/shichao402/relkit/-/releases/download/v0.1.0/relkit-linux-amd64"
     # 瀹為檯璧勪骇鍚嶈瀵瑰簲 release锛沇indows 鐢?.exe
     install -m 755 relkit-linux-amd64 /usr/local/bin/relkit
 

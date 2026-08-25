@@ -54,7 +54,7 @@ func Get(rawURL string, timeout time.Duration, noCache bool) ([]byte, error) {
 	return body, nil
 }
 
-func PutFile(rawURL string, path string, token string, timeout time.Duration, contentType string) (int, error) {
+func PutFile(rawURL string, path string, token string, timeout time.Duration, contentType string, extraHeaders map[string]string) (int, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -73,11 +73,14 @@ func PutFile(rawURL string, path string, token string, timeout time.Duration, co
 	if token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
 
 	return put(rawURL, file, info.Size(), timeout, headers)
 }
 
-func PutBytes(rawURL string, data []byte, token string, timeout time.Duration, contentType string) (int, error) {
+func PutBytes(rawURL string, data []byte, token string, timeout time.Duration, contentType string, extraHeaders map[string]string) (int, error) {
 	headers := map[string]string{
 		"Content-Length": strconv.Itoa(len(data)),
 		"Content-Type":   chooseContentType(contentType),
@@ -85,7 +88,23 @@ func PutBytes(rawURL string, data []byte, token string, timeout time.Duration, c
 	if token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
 	return put(rawURL, bytes.NewReader(data), int64(len(data)), timeout, headers)
+}
+
+// Post sends a small authenticated control request and returns the response
+// unchanged so callers can distinguish a legacy 404/405 from a policy failure.
+func Post(rawURL string, token string, timeout time.Duration, extraHeaders map[string]string) (int, http.Header, []byte, error) {
+	headers := make(map[string]string, len(extraHeaders)+1)
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	return request(rawURL, http.MethodPost, nil, timeout, headers, 1, false)
 }
 
 func Probe(rawURL string, timeout time.Duration) (bool, *int64, string) {

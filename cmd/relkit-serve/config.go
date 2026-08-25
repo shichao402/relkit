@@ -37,11 +37,47 @@ type FileConfig struct {
 
 	MaxUpload string `json:"maxUpload"`
 
-	Cache *CacheConfig `json:"cache"`
-	GC    *GCConfig    `json:"gc"`
+	Cache   *CacheConfig   `json:"cache"`
+	GC      *GCConfig      `json:"gc"`
+	Site    *SiteConfig    `json:"site,omitempty"`
+	Publish *PublishConfig `json:"publish,omitempty"`
 
 	ShutdownTimeout string `json:"shutdownTimeout"`
 	LogRequests     *bool  `json:"logRequests"`
+}
+
+// SiteConfig is the operator's copy for the human-facing pages. None of it
+// reaches protocol clients.
+//
+// It lives here rather than in the release tree because a product blurb is not
+// part of a release: it changes on its own schedule, and whoever holds the
+// upload token should not be able to rewrite what the site says about other
+// products.
+type SiteConfig struct {
+	Title string `json:"title"`
+	// Keyed by the directory name under index/, which is the product id used
+	// everywhere else in RUP.
+	Products map[string]*ProductConfig `json:"products"`
+}
+
+type ProductConfig struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Homepage    string `json:"homepage"`
+}
+
+// PublishConfig gates authenticated writers without affecting update clients.
+// Zero keeps compatibility with generic PUT clients; a positive value requires
+// every PUT to advertise at least that publish protocol.
+type PublishConfig struct {
+	MinProtocol int `json:"minProtocol"`
+}
+
+func (s *SiteConfig) product(id string) *ProductConfig {
+	if s == nil || s.Products == nil {
+		return nil
+	}
+	return s.Products[id]
 }
 
 type CacheConfig struct {
@@ -90,6 +126,9 @@ func LoadFileConfig(explicit string) (*FileConfig, string, error) {
 	var cfg FileConfig
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, path, fmt.Errorf("%s: %w", path, err)
+	}
+	if cfg.Publish != nil && cfg.Publish.MinProtocol < 0 {
+		return nil, path, fmt.Errorf("%s: publish.minProtocol must not be negative", path)
 	}
 	return &cfg, path, nil
 }
@@ -227,7 +266,7 @@ func Skeleton(dir string) []byte {
 		UploadTokenFile: "relkit-serve.token",
 		MaxUpload:       "4GiB",
 		Cache: &CacheConfig{
-			NoCache:       []string{"index/", "fallback/", "directory/"},
+			NoCache:       []string{"index/", "fallback/", "directory/", "site/", "latest/"},
 			Immutable:     []string{"manifest/", "artifact/"},
 			DefaultMaxAge: &maxAge,
 		},
@@ -235,6 +274,7 @@ func Skeleton(dir string) []byte {
 			Enabled:  &gcEnabled,
 			Interval: "1h",
 		},
+		Publish:         &PublishConfig{MinProtocol: 0},
 		ShutdownTimeout: "30s",
 		LogRequests:     &logRequests,
 	}
