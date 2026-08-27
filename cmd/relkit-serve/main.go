@@ -100,7 +100,7 @@ func runServer() {
 		dir           = flag.String("dir", ".", "directory to serve")
 		tokenFile     = flag.String("token-file", "", "file holding the upload token; enables PUT")
 		maxUpload     = flag.String("max-upload", "4GiB", "largest accepted upload")
-		noCache       = flag.String("nocache", "index/,site/,latest/", "comma-separated prefixes served with no-cache")
+		noCache       = flag.String("nocache", "index/,site/,latest/,browse/", "comma-separated prefixes served with no-cache")
 		immutable     = flag.String("immutable", "manifest/,artifact/", "comma-separated prefixes served as immutable")
 		defaultMaxAge = flag.Int("default-max-age", 60, "max-age for paths matching neither list")
 		shutdownWait  = flag.Duration("shutdown-timeout", 30*time.Second, "how long to let in-flight downloads finish on shutdown")

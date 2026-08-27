@@ -1,0 +1,11 @@
+{
+  "product": "svn-auto-merge",
+  "publishTo": ["disk"],
+  "backends": {
+    "disk": {
+      "type": "local",
+      "outputDir": "/data/relkit-serve",
+      "baseUrl": "https://update.devcloud.woa.com/"
+    }
+  }
+}

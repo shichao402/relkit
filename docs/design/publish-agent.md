@@ -12,7 +12,9 @@ related: docs/design/update-ingress-cos.md, CLI.md, cmd/relkit-agent
 ## 1. 决议
 
 CI **不持** RUP 签名私钥，也 **不持** COS 写密钥。  
-CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-agent`；agent 持钥执行 `publish.Run` 写 COS。
+CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-agent`；agent 持钥执行 `publish.Run` 写入数据面。
+
+数据面只是地点不同：公网 `s3-compatible` → COS；内网 `local` → WOA 磁盘。客户端永远不连 agent。
 
 ## 2. 信任边界
 
@@ -20,7 +22,7 @@ CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-
 |---|---|---|
 | CI runner | 源码、产物、`RELKIT_AGENT_TOKEN` | 签名私钥、COS SecretKey |
 | relkit-agent | 私钥、COS 密钥、产品 `relkit.json` | 客户端下载流量 |
-| COS | 匿名读对象 | 签名动作 |
+| COS / 内网磁盘 | 匿名读已发布文件 | 签名动作 |
 
 ## 3. HTTP 表面
 
@@ -41,6 +43,8 @@ Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请
 见 [`deploy/`](../../deploy/)：
 
 - `relkit-agent.example.json`
+- `relkit-agent.intranet.example.json`（WOA：agent 写本地目录）
+- `relkit-intranet-product.example.json`（产品 `relkit.json` 的 `local` 后端）
 - `relkit-agent.service`
 - `Caddyfile.relkit-agent.example`（`publish.firoyang.com` → `127.0.0.1:8787`）
 - `install-agent.sh`
@@ -65,3 +69,23 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 2. 滚动重启 agent  
 3. 更新 CI secret `RELKIT_AGENT_TOKEN`  
 4. 旧 token 立即失效（无宽限期；需要宽限时跑双 token 需另实现）
+
+## 7. 内网：WOA 上同样跑 agent
+
+内网不必把产物发到公网 COS。控制面仍是 agent，数据面仍是 WOA 目录（现有 `https://update.devcloud.woa.com/` 的 GET 树）。
+
+1. 在箱上安装 `relkit-agent`（`deploy/install-agent.sh`），配置见 `deploy/relkit-agent.intranet.example.json`。
+2. 每个产品的 `relkit.json` 把 `publishTo` 指到 `local`，`outputDir` 为 serve / nginx 对外 GET 的根（例：`/data/relkit-serve`），`baseUrl` 为现有内网更新域名。样例：`deploy/relkit-intranet-product.example.json`。
+3. 私钥只在这台机上。CI 仍只持 agent Bearer。
+4. 对外继续匿名 GET 现有域名。`relkit-serve` 可以继续提供 Range GET；新产品不要再走 serve 的 PUT。旧产品的 `http-put` 可留到迁完。
+
+给 agent 的 token 按产品拆，或与 serve 的 `uploadTokens` 对齐到迁完为止。不要把某产品的 token 发给无关仓库。
+
+## 8. 给人看的索引页
+
+`publish.Run` 会写出 `browse/<product>.html`、合并后的 `browse/index.html` 与 `browse/catalog.json`：
+
+- **内网 `local` / 遗留 `http-put`**：写入数据面，GET 即可打开。serve 若发现 `browse/index.html`，根路径不再现场拼页。
+- **公网 `s3-compatible`**：不把 HTML 写入 COS。同一份文件落在产品树 `.relkit/browse/`，再推到 EdgeOne Makers（`sites/updates-index/`）。
+
+协议客户端不读这些页。页上不把 `.pb` 当导航，也不加载外链字体或图。

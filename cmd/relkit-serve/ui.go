@@ -510,6 +510,10 @@ func (c *config) serveProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if c.serveExistingFile(w, r, "browse/"+product+".html") {
+		return
+	}
+
 	page, ok := c.productDetail(product)
 	if !ok {
 		http.Error(w, "not found", http.StatusNotFound)

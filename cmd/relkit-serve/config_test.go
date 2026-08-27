@@ -249,12 +249,16 @@ func TestProductAllowsKey(t *testing.T) {
 		"directory/app.pb",
 		"fallback/app.pb",
 		"site/app.json",
+		"browse/app.html",
 	}
 	denied := []string{
 		"index/other/stable.pb",
 		"index/app2/stable.pb",
 		"directory/other.pb",
 		"site/other.json",
+		"browse/other.html",
+		"browse/index.html",
+		"browse/catalog.json",
 		"probe.txt",
 		"index/app",
 		"artifact/app",
@@ -370,6 +374,10 @@ func TestSkeletonIsUsableAndComplete(t *testing.T) {
 	}
 	if len(cfg.Cache.NoCache) == 0 || cfg.Cache.NoCache[0] != "index/" {
 		t.Errorf("noCache must contain index/, got %v", cfg.Cache.NoCache)
+	}
+	joined := strings.Join(cfg.Cache.NoCache, ",")
+	if !strings.Contains(joined, "browse/") {
+		t.Errorf("noCache must contain browse/, got %v", cfg.Cache.NoCache)
 	}
 	if len(cfg.Cache.Immutable) != 2 {
 		t.Errorf("immutable should cover manifest/ and artifact/, got %v", cfg.Cache.Immutable)

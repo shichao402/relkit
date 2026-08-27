@@ -42,11 +42,13 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 ## 1. 适用判定
 
-**适用：** 需要在自己掌管的机器上托管 RUP 发布树；或需要一个能被 `relkit` 的 `http-put` 后端直接推送的下载端点。
+**适用：** 需要在自己掌管的机器上对已经写好的 RUP 树做 Range GET（内网数据面）。发布写入应走同机或旁路的 `relkit-agent`（`local` 后端），见 `docs/design/publish-agent.md` §7。
+
+**仍可用、但是遗留：** `http-put` 打到本服务的鉴权 PUT。旧产品可留到迁完。
 
 **不适用：**
 
-- 产物由仓库 CI、rsync、对象存储等别的机制送达 → 那边已经有 HTTP 下载了，`relkit` 用 `static-http` 后端即可，不需要部署本服务。
+- 产物由 agent、rsync、对象存储等别的机制送达 → 只要 HTTP GET；也可以换成 nginx。`relkit` 客户端用 `static-http` 或把 `baseUrl` 指到本机域名。
 - 需要 HTTPS、限速、IP 白名单、多站点 → 在本服务前面挂一层 Nginx / Caddy 反代，而不是改本服务。反代时见 §2.6。
 
 ---
@@ -63,7 +65,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 ### 2.2 `noCache` 必须包含可变指针
 
-`index` 是协议提交点；`site` 与 `latest` 是网页文案和固定下载地址的发布指针。它们一旦被缓存，客户端或页面会继续看到旧发布。`cache.noCache` 至少包含 `index/`、`site/`、`latest/`（directory / fallback 同样建议不缓存）。
+`index` 是协议提交点；`site`、`latest` 与 `browse` 是网页文案、固定下载地址和给人看的索引页。它们一旦被缓存，客户端或页面会继续看到旧发布。`cache.noCache` 至少包含 `index/`、`site/`、`latest/`、`browse/`（directory / fallback 同样建议不缓存）。
 
 反过来，`immutable` 必须包含 `artifact/`：产物一旦发布就不再改变，不给永久缓存意味着每次检查更新都重传真正大的那部分。
 
@@ -75,7 +77,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 **运营方 token**（全树可写）只走三条路：配置文件的 `uploadToken`（文件须 0600）、`uploadTokenFile` 指向的文件（0600）、环境变量 `RELKIT_SERVE_TOKEN`。不要把它发给某个产品的 CI。
 
-**产品 token** 写在 `uploadTokens`：每个条目一个文件 + 允许写入的 product id 列表。该 token 只能 PUT 该产品的 RUP key（`index/<p>/`、`manifest/<p>/`、`artifact/<p>/`、`latest/<p>/`，以及 `directory/<p>.pb`、`fallback/<p>.pb`、`site/<p>.json`）。拿成别的产品的 token 会 403；无效 token 仍是 401。
+**产品 token** 写在 `uploadTokens`：每个条目一个文件 + 允许写入的 product id 列表。该 token 只能 PUT 该产品的 RUP key（`index/<p>/`、`manifest/<p>/`、`artifact/<p>/`、`latest/<p>/`，以及 `directory/<p>.pb`、`fallback/<p>.pb`、`site/<p>.json`、`browse/<p>.html`）。拿成别的产品的 token 会 403；无效 token 仍是 401。`browse/index.html` 与 `browse/catalog.json` 是整站目录，只有运营方 token 能写。
 
 含 token 的文件权限过宽时服务会在启动日志里打 `WARNING`。**看到这条警告要处理，不要忽略。**
 

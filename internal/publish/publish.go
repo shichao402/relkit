@@ -14,6 +14,7 @@ import (
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 	"cnb.cool/shichao402/relkit/internal/backends"
+	"cnb.cool/shichao402/relkit/internal/browse"
 	"cnb.cool/shichao402/relkit/internal/chain"
 	"cnb.cool/shichao402/relkit/internal/changelog"
 	"cnb.cool/shichao402/relkit/internal/config"
@@ -152,9 +153,11 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 		printer("  " + model.ManifestKey(cfg.Product, version))
 		printer("  " + model.IndexKey(cfg.Product, channel) + "  <- pointer, written last")
 		if hasSiteCopy(cfg) {
-			printer("  " + webmeta.SiteKey(cfg.Product) + "  <- portal copy")
+			printer("  " + webmeta.SiteKey(cfg.Product) + "  <- site copy")
 		}
 		printer("  " + webmeta.LatestKey(cfg.Product, channel) + "  <- fixed latest links")
+		printer("  " + browse.ProductKey(cfg.Product) + "  <- human index (dump + local/http-put)")
+		printer("  " + browse.IndexKey() + "  <- human catalog page (dump + local)")
 		return nil, nil
 	}
 
@@ -250,7 +253,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 	failures = append(failures, webFailures...)
 	if len(failures) > 0 && !allowPartial {
-		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a portal/latest pointer is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
+		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest/browse pointer is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
 	}
 
 	printer("")
@@ -308,14 +311,15 @@ func writeWebPointers(
 
 	// Every channel gets its own pointer: a beta link has to keep tracking beta,
 	// and a page that only knew the default channel could not offer the others.
-	data, err := webmeta.MarshalLatest(webmeta.Latest{
+	latestDoc := webmeta.Latest{
 		Product:     cfg.Product,
 		Channel:     staged.Channel,
 		Version:     staged.Version,
 		Code:        staged.Code,
 		PublishedAt: manifest.ReleasedAt,
 		Artifacts:   webmeta.ArtifactsFromManifest(manifest),
-	})
+	}
+	data, err := webmeta.MarshalLatest(latestDoc)
 	if err != nil {
 		return nil, err
 	}
@@ -325,13 +329,67 @@ func writeWebPointers(
 		data  []byte
 	}{"latest", webmeta.LatestKey(cfg.Product, staged.Channel), data})
 
+	var siteDoc *webmeta.Site
+	if hasSiteCopy(cfg) {
+		siteDoc = &webmeta.Site{
+			Product:     cfg.Product,
+			Title:       cfg.Site.Title,
+			Description: cfg.Site.Description,
+			Homepage:    cfg.Site.Homepage,
+			UpdatedAt:   model.UTCNow(),
+		}
+	}
+	catalog := browse.ApplyPublish(loadBrowseCatalog(cfg, targets), siteDoc, latestDoc, model.UTCNow())
+	indexHTML, err := browse.RenderIndex(catalog)
+	if err != nil {
+		return nil, err
+	}
+	productHTML, err := browse.RenderProduct(browse.ProductPage(catalog, cfg.Product))
+	if err != nil {
+		return nil, err
+	}
+	catalogJSON, err := browse.MarshalCatalog(catalog)
+	if err != nil {
+		return nil, err
+	}
+	if err := browse.WriteDump(cfg.Root, map[string][]byte{
+		browse.IndexKey():              indexHTML,
+		browse.ProductKey(cfg.Product): productHTML,
+		browse.CatalogKey():            catalogJSON,
+	}); err != nil {
+		return nil, err
+	}
+
 	if len(documents) == 0 || len(targets) == 0 {
 		return nil, nil
 	}
 	printer("writing web pointers...")
 	var failures []string
 	for _, backend := range targets {
-		for _, document := range documents {
+		toWrite := documents
+		if holdsHumanIndex(backend) {
+			toWrite = append(append([]struct {
+				label string
+				key   string
+				data  []byte
+			}{}, documents...), struct {
+				label string
+				key   string
+				data  []byte
+			}{"browse-product", browse.ProductKey(cfg.Product), productHTML})
+			if backend.Type() == "local" {
+				toWrite = append(toWrite, struct {
+					label string
+					key   string
+					data  []byte
+				}{"browse-index", browse.IndexKey(), indexHTML}, struct {
+					label string
+					key   string
+					data  []byte
+				}{"browse-catalog", browse.CatalogKey(), catalogJSON})
+			}
+		}
+		for _, document := range toWrite {
 			if _, err := backend.PutPointer(document.data, document.key); err != nil {
 				failures = append(failures, fmt.Sprintf("%s %s: %v", backend.Name(), document.label, err))
 				printer(fmt.Sprintf("  %-12s %s FAILED: %v", backend.Name(), document.key, err))
@@ -341,6 +399,36 @@ func writeWebPointers(
 		}
 	}
 	return failures, nil
+}
+
+func holdsHumanIndex(backend backends.Backend) bool {
+	switch backend.Type() {
+	case "local", "http-put":
+		return true
+	default:
+		return false
+	}
+}
+
+func loadBrowseCatalog(cfg *config.Config, targets []backends.Backend) *browse.Catalog {
+	if dumped := browse.ReadDumpCatalog(cfg.Root); dumped != nil {
+		return dumped
+	}
+	for _, backend := range targets {
+		if !holdsHumanIndex(backend) {
+			continue
+		}
+		raw, err := backend.Get(browse.CatalogKey())
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		doc, err := browse.UnmarshalCatalog(raw)
+		if err != nil {
+			continue
+		}
+		return doc
+	}
+	return nil
 }
 
 func trustedKeys(cfg *config.Config, signers []envelope.Signer) map[string]ed25519.PublicKey {

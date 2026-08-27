@@ -4,19 +4,27 @@
 title: 更新入口拓扑（COS 固定入口）
 category: design
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-27
 status: approved
 related: ADR 0005, docs/design/bootstrap-directory.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
 ---
 
 ## 1. 决议
 
-**对外核心方案：自有域名绑定腾讯云 COS（可再挂 CDN），作为客户端长期稳定入口。**
+**只记一套角色：CI 打包 → 控制面 agent 持钥写入 → 数据面只提供已经存在的文件 → 客户端匿名 GET。**
 
-发布在发布方自己的 CVM（或等价可信机）上完成：持钥签名，再把同一字节写到 COS（主数据面）以及 CNB / GitHub raw 等 directory 备援。  
-CVM **不是**客户端默认主入口；`relkit-serve` 仍可用，但降为调试 / 内网 / 可选镜像，不替代本决议中的固定域名入口。
+发布完成之后，树上每一项都已经是普通文件（或 COS 里的普通对象），URL 和路径一一对应。下载路径上不再查库、不现场拼给人看的索引、不验 Bearer（Bearer 只在控制面）。公网文件在 COS，内网文件在 WOA 磁盘上；看起来都是「按路径取文件」。
 
-`s3-compatible` 后端（SigV4 Put/Get）已实现，是本拓扑的发布侧前提；凭据只经环境变量传入。
+| 角色 | 公网（如 Dec） | 内网（如 SvnMergeTool） |
+|---|---|---|
+| CI | `relkit stage`，把 staged 树交给 agent | 同左 |
+| 控制面 | `relkit-agent`（如 `publish.firoyang.com`） | 同一套 agent，写本机目录 |
+| 数据面 | COS 桶前缀（如 `rup/`） | WOA 上一棵同样布局的目录 |
+| 给人看的索引页 | 发布时写好的 HTML，托管在 **EdgeOne Makers**；**不**塞进 COS | 写入发布树 `browse/`，由 GET 原样返回（对齐前 serve 仍可现算一页） |
+
+CVM / 发布机 **不是**客户端默认主入口。`relkit-serve` 是内网数据面的一种实现（Range GET；历史 PUT 为遗留），不是另一套发布协议。
+
+`s3-compatible` 后端（SigV4 Put/Get）已实现，是公网写桶的前提；凭据只经环境变量传入。
 
 ## 2. 规范前提：什么「永远不要变」
 
@@ -108,7 +116,7 @@ flowchart TB
 - `publish.Run` **不幂等**：同版本重发会让 `sequence` 继续 +1，所以发布入口必须自带幂等键与串行化。
 - 发布机 **不必**出现在客户端 `entryUrls` 里；它只是控制面。
 
-发布 agent（`cmd/relkit-agent`，含上述 PUT / publish 端点）**尚未实现**，当前等价做法是在发布机上手工或用脚本跑 `relkit publish`。
+发布控制面是 `cmd/relkit-agent`（`PUT /v1/staged`、`POST /v1/publish`）。CI 只交 staged 包；私钥与 COS 密钥留在发布机。内网也可以跑同一二进制，把 `publishTo` 指到 `local`（写 WOA 磁盘）而不是 COS。
 
 ### 4.2 下载流程（引导 → 选路 → 校验）
 
@@ -163,15 +171,16 @@ flowchart TB
 
 常见误解：把 index / directory 说成「进不了 COS 的服务」。协议里它们是**签名过的可变指针文档**，恰恰适合对象存储 + 短缓存。
 
-### 4.5 与 `relkit-serve` / 发布 agent 的关系
+### 4.5 控制面永远是 agent，serve 只是内网数据面的一种实现
 
-三者语义完全不同，不要混为一谈：
+不要把「内网有一台 HTTP」记成另一套发布协议。角色已经一样，只是内网曾经把两台机器的工作塞进一个二进制：
 
-- **`relkit-serve`** = 分发端。鉴权 PUT 写**它自己所在机器的目录**，再对外 GET。它不认识 COS，也不认识 CNB，**不会**把收到的 PUT 转发到任何对象存储。需要内网即时调试或自托管下载时用 `http-put` + serve。
-- **发布 agent** = 控制面入口。收 staged 包并触发签名发布，写对象走 `s3-compatible` / `static-http`。它不提供客户端下载。
-- **COS 自有域名** = 数据面。只读静态对象，是推荐的客户端主入口。
+- **控制面永远是 `relkit-agent`**：持私钥、串行 publish、写入数据面。客户端永远不连它。公网写 COS（`s3-compatible`）；内网写本地目录（`local`，或 agent 写盘、前面再挂 nginx / serve GET）。
+- **数据面只是文件**：匿名 GET 返回已写入的字节。公网 = COS；内网 = WOA 磁盘。COS、nginx 裸目录、CDN 都能干这件事。
+- **`relkit-serve`** = 内网数据面的一种实现：正确的 Range GET、按前缀分流缓存、可选孤儿 GC。鉴权 PUT 是迁到 agent 之前的遗留写入面，不是新产品该走的发布控制面。它不认识 COS，也不会把 PUT 转发到对象存储。
+- **给人看的索引页也是文件**（发布时写好）。协议客户端不读它。公网 HTML 走 EdgeOne Makers，COS 只留协议对象；内网写在 `browse/`。打开更新域名应看到产品/版本/下载，而不是把 `.pb` 当导航。
 
-serve 若保留，只作为 `urls[]` 或 directory 备援之一，且须与 COS 上对象**字节一致**。`baseUrl`（客户端下载）与上传端点分离：上传走 API，不等于给客户端用的自定义域名。
+`baseUrl`（客户端下载）与控制面域名分开：`publish.*` 只给 CI，`updates.*` / `raw.*` / 内网更新域名只给 GET。
 
 ## 5. 缓存硬约束
 
@@ -204,8 +213,8 @@ serve 若保留，只作为 `urls[]` 或 directory 备援之一，且须与 COS 
 |---|---|---|
 | COS 自定义域名整树托管，CLI 直接写桶 | `s3-compatible` | **已实现**；字段见 CLI.md（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`，可选 `region` / `forcePathStyle` / `timeoutSeconds`） |
 | CNB / GitHub 仓库直链托管 directory 或整树 | `static-http` + `stageDir` | **已实现** |
-| 自建 serve 鉴权上传 | `http-put` | **已实现**；不作本决议的默认主入口 |
-| 离线演练 | `local` | **已实现** |
+| 自建磁盘上的发布树（内网 agent 写盘，或离线演练） | `local` | **已实现**；内网主路径 |
+| 遗留：经 serve 鉴权 PUT | `http-put` | **已实现**；新产品改走 agent；旧产品可暂留直到迁完 |
 
 正式发布优先配置 `s3-compatible`。**禁止**手工打乱「产物 → manifest → 指针最后写」顺序冒充正式发布（见 AGENT-GUIDE）。
 
@@ -267,8 +276,10 @@ manifest / artifact **发布后不可变**。若某历史版本的 manifest 当�
 
 | 项 | 值 |
 |---|---|
-| 更新域名 | `updates.firoyang.com` |
-| DNS | `updates` CNAME → `relkit-updates-1251882798.cos.ap-guangzhou.myqcloud.com`（DNSPod，TTL 600） |
+| 协议对象域名（迁完后） | `raw.firoyang.com`（与 `updates` **双挂同一 COS 桶**，直到旧客户端升完） |
+| 给人看的索引域名（迁完后） | `updates.firoyang.com` → EdgeOne Makers；迁域前仍指向 COS |
+| 更新域名（现网 / 旧客户端 `entryUrls`） | `updates.firoyang.com` |
+| DNS | `updates` CNAME → `relkit-updates-1251882798.cos.ap-guangzhou.myqcloud.com`（DNSPod，TTL 600）；`raw` 应 CNAME 到同一 COS 主机 |
 | COS 桶 | `relkit-updates-1251882798` |
 | 地域 | `ap-guangzhou` |
 | AppId | `1251882798` |
@@ -288,19 +299,23 @@ manifest / artifact **发布后不可变**。若某历史版本的 manifest 当�
   "bucket": "relkit-updates-1251882798",
   "region": "ap-guangzhou",
   "prefix": "rup/",
-  "baseUrl": "https://updates.firoyang.com/rup/",
+  "baseUrl": "https://raw.firoyang.com/rup/",
   "accessKeyEnv": "COS_SECRET_ID",
   "secretKeyEnv": "COS_SECRET_KEY"
 }
 ```
 
-客户端内嵌主入口（产品名替换）：
+客户端内嵌主入口：已装上的版本写死了 `updates.`，**不会自己改这串字**。新 directory / 新客户端改 `raw.`；旧客户端升完后再把 `updates.` 让给索引站。
 
 ```text
-https://updates.firoyang.com/rup/directory/<product>.pb
+https://raw.firoyang.com/rup/directory/<product>.pb
 ```
 
+（现网旧客户端仍是 `https://updates.firoyang.com/rup/directory/<product>.pb`，双挂期间两边必须能 GET 到同一对象。）
+
 **不要**为了赶时间先用默认桶域名发一版：`entryUrls` 一旦随二进制发出去就几乎不可变，那样等于把厂商、地域、桶名焊进所有老客户端，之后只能按 §8 双写迁移收场。
+
+给人看的索引页没有编译进客户端，换托管或换域名只影响书签，**不影响**已装客户端的更新链。COS 只放协议对象：根路径 `GET /` 403 是 REST 源站拒 ListBucket，不要为此打开「静态网站源站」。索引站用腾讯云 **EdgeOne Makers**（Git 部署静态站，与 EdgeOne 个人版 CDN 套餐不是同一产品）。生成物见仓库 `sites/updates-index/` 与发布时写出的 `.relkit/browse/`。
 
 ### 10.1 证书（已完成，含续期义务）
 
@@ -319,8 +334,20 @@ https://updates.firoyang.com/rup/directory/<product>.pb
 1. 按 §5 为 `directory/` / `index/` / `fallback/` 设短缓存，`manifest/` / `artifact/` 设长缓存。
 2. 证书续期自动化（见 §10.1）。
 3. 需要边缘加速时再挂 CDN 加速域名（届时 CNAME 改指 `*.cdn.dnsv1.com`，证书托管随之迁到 CDN）。
+4. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
+5. 把 `.relkit/browse/` 推到 EdgeOne Makers（`sites/updates-index/`）。
 
 凭据：`COS_SECRET_ID` / `COS_SECRET_KEY` 只进发布机环境（或 mise 私密配置），**禁止**写入仓库。
+
+### 10.3 域名切：`raw.` 双挂 COS，再把 `updates.` 让给索引站
+
+`entryUrls` 改不起；索引站域名改得起。顺序：
+
+1. **DNS**：`raw` CNAME 到与 `updates` 相同的 COS 主机（`relkit-updates-1251882798.cos.ap-guangzhou.myqcloud.com`）。**已完成。**
+2. **COS 自定义源站域名**绑定 `raw.firoyang.com`，并部署 HTTPS 证书（与 `updates` 同一套续期流程，§10.1）。**已完成**；匿名 GET 已通。
+3. 新发版 `baseUrl` / 新客户端 `entryUrls` 走 `https://raw.firoyang.com/rup/...`。
+4. 把发布写出的 `browse/*.html` 推到 EdgeOne Makers（见 `sites/updates-index/README.md`）。
+5. 旧客户端都升到认 `raw.` 之后，再把 `updates` CNAME 改到 EdgeOne Makers。在此之前不要动 `updates`，否则已装 Dec 会找不到 directory。
 
 ## 11. 交叉引用
 
@@ -329,4 +356,6 @@ https://updates.firoyang.com/rup/directory/<product>.pb
 - 决策记录：[`../adr/0005-signed-bootstrap-directory.md`](../adr/0005-signed-bootstrap-directory.md)
 - 工具接口与后端表：[`CLI.md`](../../CLI.md) §6
 - 操作手册：[`embed/AGENT-GUIDE.md`](../../embed/AGENT-GUIDE.md)
+- 给人看的索引站：[`sites/updates-index/README.md`](../../sites/updates-index/README.md)
 - 实装参数：本文 §10
+- 发布 agent（含内网）：[`publish-agent.md`](publish-agent.md)

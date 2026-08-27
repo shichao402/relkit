@@ -114,6 +114,9 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 		// the listing, and a tree with no readable index falls back to it on
 		// its own -- that is the plain-static-host case.
 		if name == "." && !r.URL.Query().Has("files") {
+			if c.serveExistingFile(w, r, "browse/index.html") {
+				return
+			}
 			if products := c.scanProducts(guessPlatform(r.UserAgent())); len(products) > 0 {
 				c.servePortal(w, r, products)
 				return
@@ -137,6 +140,24 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	// responses. Passing the *os.File rather than a wrapper is what lets the
 	// copy reach sendfile(2) on Linux.
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func (c *config) serveExistingFile(w http.ResponseWriter, r *http.Request, name string) bool {
+	file, err := c.root.Open(name)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		return false
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	if ct := contentType(name); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+	return true
 }
 
 // listDir renders one directory: name, size, mtime, nothing else.
@@ -239,6 +260,8 @@ func (c *config) cacheControl(name string) string {
 
 func contentType(name string) string {
 	switch path.Ext(name) {
+	case ".html":
+		return "text/html; charset=utf-8"
 	case ".pb":
 		return "application/protobuf"
 	case ".json":

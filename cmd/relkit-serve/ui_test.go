@@ -107,6 +107,26 @@ func TestFilesQueryForcesListing(t *testing.T) {
 	}
 }
 
+func TestWrittenBrowseIndexIsServedAtRoot(t *testing.T) {
+	srv, dir := newTestServer(t, false)
+	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
+	writeFile(t, dir, "browse/index.html", []byte("<html><body>static catalog app-from-disk</body></html>"))
+	writeFile(t, dir, "browse/app.html", []byte("<html><body>static product page</body></html>"))
+
+	root := getBody(t, srv.URL+"/")
+	if !strings.Contains(root, "static catalog app-from-disk") {
+		t.Fatalf("GET / should serve browse/index.html\n%s", root)
+	}
+	product := getBody(t, srv.URL+"/-/p/app")
+	if !strings.Contains(product, "static product page") {
+		t.Fatalf("GET /-/p/app should serve browse/app.html\n%s", product)
+	}
+	listing := getBody(t, srv.URL+"/?files=1")
+	if !strings.Contains(listing, `href="index/"`) {
+		t.Fatalf("?files=1 should still list the tree\n%s", listing)
+	}
+}
+
 func TestProductPageShowsArtifactsOfLatestVersion(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)

@@ -57,7 +57,7 @@ go install cnb.cool/shichao402/relkit/cmd/relkit@latest
 **推荐生产拓扑**（详见仓库 `docs/design/update-ingress-cos.md`）：客户端内嵌几乎不变的 `entryUrls`，主入口为**自有域名绑定 COS** 上的 `directory/<product>.pb`；发布在可信 CVM 上持钥执行，再经 `s3-compatible` 写到 COS（及 CNB/GitHub 备援）。directory / index 等是签名文档，可以进 COS；Bearer 式上传服务进不了 COS。
 
 - 托管方按可预测路径提供 HTTP 下载，且产物已有别的机制送达（仓库 CI、rsync、独立上传步骤）→ 用 `static-http`，配 `stageDir` 指向那个机制会取用的目录。CNB 仓库直链属于这一类。
-- 自己掌管一台服务器 → 部署同仓的 `relkit-serve`（Go 单文件：Range 并发下载、RUP 缓存语义、带鉴权上传；部署照 `relkit` 仓库 `cmd/relkit-serve/AGENT-GUIDE.md`，或装好后跑 `relkit-serve agent-guide`），用 `http-put` 后端，发布与分发一步完成。token 只从环境变量读。**serve 适合调试/内网/可选镜像，不作推荐的长期主入口。**
+- 自己掌管一台服务器 → 数据面用 `relkit-serve` 或 nginx 做 Range GET；**写入走 `relkit-agent`**（`local` 后端写同一目录）。`http-put` + serve PUT 是遗留路径。token 只从环境变量读。serve **不作**公网推荐主入口（公网数据面是 COS）。
 - 需要工具自己带凭据上传到对象存储（COS / S3）→ 用 `s3-compatible`（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`；可选 `region` / `forcePathStyle` / `timeoutSeconds`）。
 - 只想审计别人发布的站点 → `static-http` 不配 `stageDir`，得到一个只读后端，`verify` 可用而 `publish` 会直接拒绝。
 

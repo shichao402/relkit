@@ -320,7 +320,8 @@ func productAllowsKey(product, name string) bool {
 	}
 	return name == "directory/"+product+".pb" ||
 		name == "fallback/"+product+".pb" ||
-		name == "site/"+product+".json"
+		name == "site/"+product+".json" ||
+		name == "browse/"+product+".html"
 }
 
 // checkPermissions warns when a secret-bearing file is readable beyond its
@@ -415,7 +416,7 @@ func Skeleton(dir string) []byte {
 		UploadTokenFile: "relkit-serve.token",
 		MaxUpload:       "4GiB",
 		Cache: &CacheConfig{
-			NoCache:       []string{"index/", "fallback/", "directory/", "site/", "latest/"},
+			NoCache:       []string{"index/", "fallback/", "directory/", "site/", "latest/", "browse/"},
 			Immutable:     []string{"manifest/", "artifact/"},
 			DefaultMaxAge: &maxAge,
 		},
