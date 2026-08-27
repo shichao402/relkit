@@ -32,7 +32,7 @@ func (c *config) servePublishPreflight(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if c.uploadToken == nil {
+	if !c.uploadsEnabled() {
 		writeProtocolJSON(w, http.StatusMethodNotAllowed, publishProtocolResponse{
 			Error: "uploads_disabled", Message: "uploads are disabled on this server",
 		})

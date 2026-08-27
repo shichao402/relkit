@@ -71,13 +71,17 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 服务端刻意没有提供直接传 token 的参数。若你打算通过任何方式绕过这一点：`ps` 的输出对机器上所有用户可见，并且命令会进入 shell 历史。
 
-token 只走三条路：配置文件的 `uploadToken`（文件须 0600）、`uploadTokenFile` 指向的文件（0600）、环境变量 `RELKIT_SERVE_TOKEN`。
+**运营方 token**（全树可写）只走三条路：配置文件的 `uploadToken`（文件须 0600）、`uploadTokenFile` 指向的文件（0600）、环境变量 `RELKIT_SERVE_TOKEN`。不要把它发给某个产品的 CI。
+
+**产品 token** 写在 `uploadTokens`：每个条目一个文件 + 允许写入的 product id 列表。该 token 只能 PUT 该产品的 RUP key（`index/<p>/`、`manifest/<p>/`、`artifact/<p>/`、`latest/<p>/`，以及 `directory/<p>.pb`、`fallback/<p>.pb`、`site/<p>.json`）。拿成别的产品的 token 会 403；无效 token 仍是 401。
 
 含 token 的文件权限过宽时服务会在启动日志里打 `WARNING`。**看到这条警告要处理，不要忽略。**
 
 ### 2.4 服务目录里只能放发布树
 
 根路径 `/` 返回产品门户（每个产品一张卡片，`/-/p/<product>` 是单产品页），各子目录返回 HTML 目录列表，`/?files=1` 强制回到根目录列表。方便运维查看已发布内容，同时**任何路径都能被直接取走**。目录里若有备份、构建日志、密钥、`.git`，打开列表或猜到名字就能拿到。
+
+唯一例外是服务自己写的 `.relkit-serve-stats.json`（下载计数）：不出现在列表里，GET 返回 404，PUT 拒绝。不要再往发布目录里放别的东西。
 
 不要把发布目录设在家目录、项目工作区或已有内容的共享目录上。用一个专用目录（约定 `/srv/releases`）。
 
@@ -120,7 +124,7 @@ curl -sI https://dl.example.com/index/app/stable.json | grep -i cache-control
 - [ ] 3. init 生成配置与 token
 - [ ] 4. 装 systemd 单元并启动
 - [ ] 5. 自检五项
-- [ ] 6. 把 token 交给发布方
+- [ ] 6. 把**产品** token 交给对应发布方（不要把运营方全树 token 发给产品 CI）
 ```
 
 `deploy/install.sh` 把 1–4 步做完并跑第 5 步。**优先用它**，手工步骤仅在脚本不适用时参考（非 systemd 系统、容器内、无 root）：
@@ -151,7 +155,15 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now relkit-serve
 ```
 
-`init` 会打印一行 `export RELKIT_UPLOAD_TOKEN=...`。这是**唯一一次**能看到 token 明文的机会 —— 服务端只保存它的 sha256，事后无法反查。当场交给发布方，见 §4。
+`init` 会打印一行 `export RELKIT_UPLOAD_TOKEN=...`。这是**唯一一次**能看到该 token 明文的机会 —— 服务端只保存它的 sha256，事后无法反查。当场交给发布方，见 §4。
+
+多产品共用一台机时，再为每个产品签发隔离 token（不改已有 cache / addr）：
+
+```bash
+sudo relkit-serve init -out /etc/relkit-serve -product demoapp
+```
+
+把打印出来的值交给**该产品**仓库的 CI。运营方 token 留在 `relkit-serve.token`，只给运维。
 
 ### 第 5 步：自检五项
 
@@ -204,13 +216,15 @@ curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" $BASE/probe.txt 2>/dev/nul
 }
 ```
 
-`tokenEnv` 写的是**环境变量名**，不是 token 本身。这个文件要进版本控制。
+`tokenEnv` 写的是**环境变量名**，不是 token 本身。这个文件要进版本控制。产品仓库**不用**声明 scope：PUT 的 key 已经带本产品 id，服务端按 token 的 `products` 列表拦。
 
 ```bash
-export RELKIT_UPLOAD_TOKEN='<init 打印的那个>'
+export RELKIT_UPLOAD_TOKEN='<init -product 打印的那个，只属于本产品>'
 relkit publish 1.0.0
 relkit verify --deep
 ```
+
+多个产品可以都用变量名 `RELKIT_UPLOAD_TOKEN`，因为值在不同仓库 / CI job 里不同。同一台发布机要发多个产品时，用不同变量名（如 `RELKIT_UPLOAD_TOKEN_DEMOAPP`）并改对应 `tokenEnv`。
 
 下载与上传地址可以不同，而且这是常见情形而非特例 —— 下载走公网域名或 CDN，上传走内网：
 
@@ -229,6 +243,8 @@ relkit verify --deep
 
 ## 5. 流程 C：轮换 token
 
+运营方全树 token：
+
 ```bash
 sudo ./deploy/install.sh --binary /usr/local/bin/relkit-serve --rotate-token
 ```
@@ -241,7 +257,14 @@ sudo chown -R relkit:relkit /etc/relkit-serve
 sudo systemctl restart relkit-serve
 ```
 
-**用 `-token-only`，不要用 `-force`。** `-force` 会连配置文件一起重新生成，把手工改过的监听地址、缓存前缀等一并静默恢复成默认值 —— 而恢复了的缓存前缀唯一的症状是「发布晚了几分钟才生效」（§2.2）。
+某个产品的隔离 token：
+
+```bash
+sudo relkit-serve init -out /etc/relkit-serve -product demoapp -token-only
+sudo systemctl restart relkit-serve
+```
+
+**用 `-token-only`，不要用 `-force`。** `-force` 会连配置文件一起重新生成（运营方 `init`）或覆盖该产品 token 文件；前者会把手工改过的监听地址、缓存前缀等一并静默恢复成默认值 —— 而恢复了的缓存前缀唯一的症状是「发布晚了几分钟才生效」（§2.2）。
 
 要点：
 
@@ -269,8 +292,9 @@ Environment=RELKIT_SERVE_TOKEN=<新 token>
 |---|---|---|---|
 | `addr` | `-addr` | `:8080` | 监听地址 |
 | `dir` | `-dir` | `.` | 对外提供的目录 |
-| `uploadToken` | 无 | 无 | token 明文；文件须 0600 |
-| `uploadTokenFile` | `-token-file` | 无 | token 文件路径，相对路径按配置文件所在目录解析 |
+| `uploadToken` | 无 | 无 | 运营方 token 明文；文件须 0600；全树可写 |
+| `uploadTokenFile` | `-token-file` | 无 | 运营方 token 文件路径，相对路径按配置文件所在目录解析 |
+| `uploadTokens` | 无 | 无 | 产品隔离 token 列表：`{"file":"tokens/app.token","products":["app"]}` |
 | `maxUpload` | `-max-upload` | `4GiB` | 单次上传上限，接受 `512MiB` 这类写法 |
 | `publish.minProtocol` | 无 | `0` | 发布者最低 HTTP 协议版本；设为 `2` 会拒绝没有新版协议头的旧 relkit |
 | `cache.noCache` | `-nocache` | `["index/","site/","latest/"]` | 这些可变指针前缀按 no-cache 返回，见 §2.2 |
@@ -279,13 +303,14 @@ Environment=RELKIT_SERVE_TOKEN=<新 token>
 | `gc.enabled` | `-gc` | `true` | 是否启用孤儿 `manifest/` / `artifact/` 清理，见 §2.7 |
 | `gc.interval` | `-gc-interval` | `1h` | 定时扫盘间隔；`0` 与 `enabled=false` 一样关闭 GC |
 | `shutdownTimeout` | `-shutdown-timeout` | `30s` | 收到停止信号后留给进行中下载的时间 |
+| `statsFile` | 无 | `<dir>/.relkit-serve-stats.json` | 下载计数 JSON；默认在服务目录根下且不对外提供。放到树外时需给 systemd 加 `ReadWritePaths` |
 | `logRequests` | `-quiet` | `true` | 是否打印请求日志 |
 | `site.title` | 无 | `Releases` | 首页大标题 |
 | `site.products.<id>` | 无 | 无 | 旧部署的网页文案 fallback；新项目应在自身 `relkit.json` 维护并随发布写入 |
 
 `site` 只影响给人看的网页，协议客户端读不到。整站标题属于服务端；各产品的标题、简介和主页属于产品团队，正常来源是发布树中的 `site/<product>.json`。服务端 `site.products` 仅作旧部署迁移 fallback，同一产品的发布文档存在时以后者为准。
 
-`uploadToken` 与 `uploadTokenFile` 只能给一个，同时给会启动失败。都不给则服务只读，`PUT` 返回 405 —— 这是默认状态，也就是说默认安全。
+`uploadToken` 与 `uploadTokenFile` 只能给一个，同时给会启动失败。它们与 `uploadTokens` **可以并存**。一条凭证都没有则服务只读，`PUT` 返回 405 —— 这是默认状态，也就是说默认安全。同一明文出现在两条凭证里会启动失败。
 
 `publish.minProtocol` 只约束已鉴权的写请求，不影响 SDK 下载。设为 `2` 后，旧
 发布器因没有 `X-Relkit-Publish-Protocol` 而收到 426，并且服务端会在创建目录或
@@ -318,6 +343,10 @@ Environment=RELKIT_SERVE_TOKEN=<新 token>
 发布方的 token 与服务端不一致。服务端只存 sha256，**无法反查明文**，所以不要试图"确认服务端 token 是什么"，直接按 §5 重设。
 
 也确认发布方那侧环境变量真的传进去了 —— `relkit` 读的是 `relkit.json` 里 `tokenEnv` 指定的那个名字，不是固定的 `RELKIT_UPLOAD_TOKEN`。
+
+### `PUT` 返回 403
+
+token 是对的，但这个凭证不允许写该路径。多半是把 A 产品的 token 用在了 B 产品的发布上，或误用了产品 token 去 PUT `probe.txt` 这类非产品 key。换该产品自己的 token，或运维用运营方 token。
 
 ### 文件明明在，却 404
 

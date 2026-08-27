@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -371,6 +373,80 @@ func TestArtifactDownloadsAreCounted(t *testing.T) {
 	resp.Body.Close()
 	if got := getBody(t, srv.URL+"/"); !strings.Contains(got, "2 downloads") {
 		t.Errorf("HEAD should not change the count\n%s", got)
+	}
+}
+
+func TestDownloadCountsPersistAcrossRestart(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
+	srv := newLocalServer(t, cfg)
+	getBody(t, srv.URL+"/artifact/app/1.0.0/app.zip")
+	if err := cfg.stats.flush(); err != nil {
+		t.Fatalf("flush stats: %v", err)
+	}
+	since := cfg.stats.startedAt()
+	srv.Close()
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { root.Close() })
+	cfg2 := &config{
+		root:          root,
+		rootPath:      dir,
+		maxUpload:     1 << 20,
+		noCache:       []string{"index/"},
+		immutable:     []string{"manifest/", "artifact/"},
+		defaultMaxAge: 60,
+		stats:         newDownloadStats(defaultStatsPath(dir), dir),
+	}
+	t.Cleanup(cfg2.stats.stop)
+	srv2 := newLocalServer(t, cfg2)
+	t.Cleanup(srv2.Close)
+
+	portal := getBody(t, srv2.URL+"/")
+	mustContain(t, "persisted portal", portal, "1 downloads", "persist across restarts", since)
+	product := getBody(t, srv2.URL+"/-/p/app")
+	mustContain(t, "persisted product", product, "1 downloads", "persist across restarts")
+}
+
+func TestDownloadStatsFileIsNotPublic(t *testing.T) {
+	cfg, dir := newTestConfig(t, true)
+	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
+	srv := newLocalServer(t, cfg)
+	t.Cleanup(srv.Close)
+	getBody(t, srv.URL+"/artifact/app/1.0.0/app.zip")
+	if err := cfg.stats.flush(); err != nil {
+		t.Fatalf("flush stats: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, statsFileName)); err != nil {
+		t.Fatalf("stats file: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL + "/" + statsFileName)
+	if err != nil {
+		t.Fatalf("GET stats file: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET %s status = %d, want 404", statsFileName, resp.StatusCode)
+	}
+
+	listing := getBody(t, srv.URL+"/?files=1")
+	if strings.Contains(listing, statsFileName) {
+		t.Errorf("listing should omit the stats file\n%s", listing)
+	}
+
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/"+statsFileName, strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	put, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT stats file: %v", err)
+	}
+	put.Body.Close()
+	if put.StatusCode != http.StatusBadRequest {
+		t.Errorf("PUT %s status = %d, want 400", statsFileName, put.StatusCode)
 	}
 }
 

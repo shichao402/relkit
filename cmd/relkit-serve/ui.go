@@ -1037,7 +1037,7 @@ p.foot a{color:var(--muted)}
 </table>
 </section>
 {{end}}
-{{if .StatsSince}}<p class="note">Download counts are in-memory and start over on restart; counting since {{.StatsSince}}.</p>{{end}}
+{{if .StatsSince}}<p class="note">Download counts persist across restarts; counting since {{.StatsSince}}.</p>{{end}}
 {{template "foot" .}}{{end}}
 
 {{define "product"}}{{template "head" .}}
@@ -1078,6 +1078,7 @@ p.foot a{color:var(--muted)}
 </section>
 {{end}}
 </div>
+{{if .StatsSince}}<p class="note">Download counts persist across restarts; counting since {{.StatsSince}}.</p>{{end}}
 {{template "foot" .}}{{end}}
 
 {{define "listing"}}{{template "head" .}}

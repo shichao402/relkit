@@ -38,11 +38,12 @@ func newTestConfig(t *testing.T, withToken bool) (*config, string) {
 		noCache:       []string{"index/"},
 		immutable:     []string{"manifest/", "artifact/"},
 		defaultMaxAge: 60,
-		stats:         newDownloadStats(),
+		stats:         newDownloadStats(defaultStatsPath(dir), dir),
 	}
 	if withToken {
-		cfg.uploadToken = hashToken(testToken)
+		cfg.credentials = []credential{{hash: hashToken(testToken)}}
 	}
+	t.Cleanup(cfg.stats.stop)
 	return cfg, dir
 }
 
@@ -559,6 +560,83 @@ func TestUploadRefusesTraversal(t *testing.T) {
 		if _, err := os.Stat(outside); err == nil {
 			t.Fatalf("PUT %s escaped the served directory", target)
 		}
+	}
+}
+
+func TestUploadScopedTokenIsolatesProducts(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	cfg.credentials = []credential{
+		{hash: hashToken("app-token"), products: []string{"app"}},
+		{hash: hashToken("other-token"), products: []string{"other"}},
+		{hash: hashToken(testToken)},
+	}
+	srv := newLocalServer(t, cfg)
+	t.Cleanup(srv.Close)
+
+	put := func(token, path, body string) int {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PUT %s: %v", path, err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := put("app-token", "/index/app/stable.pb", "ok"); code != http.StatusCreated {
+		t.Errorf("own index: status = %d, want 201", code)
+	}
+	if code := put("app-token", "/directory/app.pb", "ok"); code != http.StatusCreated {
+		t.Errorf("own directory: status = %d, want 201", code)
+	}
+	if code := put("app-token", "/site/app.json", "{}"); code != http.StatusCreated {
+		t.Errorf("own site: status = %d, want 201", code)
+	}
+	if code := put("app-token", "/index/other/stable.pb", "nope"); code != http.StatusForbidden {
+		t.Errorf("other product: status = %d, want 403", code)
+	}
+	if code := put("app-token", "/index/app2/stable.pb", "nope"); code != http.StatusForbidden {
+		t.Errorf("prefix cousin: status = %d, want 403", code)
+	}
+	if code := put("app-token", "/directory/other.pb", "nope"); code != http.StatusForbidden {
+		t.Errorf("other directory: status = %d, want 403", code)
+	}
+	if code := put("app-token", "/probe.txt", "nope"); code != http.StatusForbidden {
+		t.Errorf("unscoped path: status = %d, want 403", code)
+	}
+	if code := put("other-token", "/index/app/stable.pb", "nope"); code != http.StatusForbidden {
+		t.Errorf("foreign token: status = %d, want 403", code)
+	}
+	if code := put("wrong", "/index/app/stable.pb", "nope"); code != http.StatusUnauthorized {
+		t.Errorf("bad token: status = %d, want 401", code)
+	}
+	if code := put(testToken, "/probe.txt", "ops"); code != http.StatusCreated {
+		t.Errorf("operator probe: status = %d, want 201", code)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "index", "other")); !os.IsNotExist(err) {
+		t.Error("a forbidden upload created another product's directory")
+	}
+}
+
+func TestPublishPreflightAcceptsScopedToken(t *testing.T) {
+	cfg, _ := newTestConfig(t, false)
+	cfg.credentials = []credential{{hash: hashToken("app-token"), products: []string{"app"}}}
+	srv := newLocalServer(t, cfg)
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+publishproto.PreflightPath, nil)
+	req.Header.Set("Authorization", "Bearer app-token")
+	req.Header.Set(publishproto.ProtocolHeader, strconv.Itoa(publishproto.Current))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("preflight status = %d, want 200", resp.StatusCode)
 	}
 }
 

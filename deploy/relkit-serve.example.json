@@ -2,6 +2,9 @@
   "addr": ":8080",
   "dir": "/srv/releases",
   "uploadTokenFile": "/etc/relkit-serve/relkit-serve.token",
+  "uploadTokens": [
+    {"file": "tokens/demoapp.token", "products": ["demoapp"]}
+  ],
   "maxUpload": "4GiB",
   "cache": {
     "noCache": ["index/", "fallback/", "directory/", "site/", "latest/"],

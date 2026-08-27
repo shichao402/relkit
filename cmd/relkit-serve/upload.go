@@ -18,12 +18,13 @@ import (
 // already has the old file open keeps reading it unharmed, since the rename
 // only replaces the directory entry.
 func (c *config) upload(w http.ResponseWriter, r *http.Request) {
-	if c.uploadToken == nil {
+	if !c.uploadsEnabled() {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "uploads are disabled on this server", http.StatusMethodNotAllowed)
 		return
 	}
-	if !c.authorized(r) {
+	cred := c.lookupCredential(r)
+	if cred == nil {
 		// No detail about which part was wrong, and no hint about whether the
 		// path exists.
 		w.Header().Set("WWW-Authenticate", `Bearer realm="relkit-serve"`)
@@ -41,6 +42,14 @@ func (c *config) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if name == "." || strings.HasSuffix(name, "/") {
 		http.Error(w, "cannot write to a directory path", http.StatusBadRequest)
+		return
+	}
+	if hiddenServeKey(name, c.stats) {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if !cred.allowsKey(name) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -94,14 +103,28 @@ func (c *config) upload(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "wrote %s (%d bytes)\n", name, written)
 }
 
-func (c *config) authorized(r *http.Request) bool {
+func (c *config) uploadsEnabled() bool {
+	return len(c.credentials) > 0
+}
+
+func (c *config) lookupCredential(r *http.Request) *credential {
 	header := r.Header.Get("Authorization")
 	value, found := strings.CutPrefix(header, "Bearer ")
 	if !found {
-		return false
+		return nil
 	}
 	presented := hashToken(strings.TrimSpace(value))
-	return subtle.ConstantTimeCompare(presented, c.uploadToken) == 1
+	var matched *credential
+	for i := range c.credentials {
+		if subtle.ConstantTimeCompare(presented, c.credentials[i].hash) == 1 {
+			matched = &c.credentials[i]
+		}
+	}
+	return matched
+}
+
+func (c *config) authorized(r *http.Request) bool {
+	return c.lookupCredential(r) != nil
 }
 
 func asMaxBytes(err error, target **http.MaxBytesError) bool {

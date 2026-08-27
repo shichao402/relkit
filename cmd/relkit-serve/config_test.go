@@ -172,6 +172,109 @@ func TestTokenFromConfigEmptyMeansReadOnly(t *testing.T) {
 	}
 }
 
+func TestLoadFileConfigRejectsEmptyUploadTokensProducts(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfigFile(t, dir, ConfigName,
+		`{"uploadTokens":[{"file":"tok","products":[]}]}`)
+	if _, _, err := LoadFileConfig(path); err == nil ||
+		!strings.Contains(err.Error(), "uploadTokens[0]") {
+		t.Fatalf("LoadFileConfig error = %v", err)
+	}
+}
+
+func TestCredentialsFromConfigScoped(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, "tok", "operator\n")
+	if err := os.MkdirAll(filepath.Join(dir, "tokens"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfigFile(t, dir, filepath.Join("tokens", "app.token"), "app-secret\n")
+	path := writeConfigFile(t, dir, ConfigName, `{
+	  "uploadTokenFile": "tok",
+	  "uploadTokens": [{"file": "tokens/app.token", "products": ["app"]}]
+	}`)
+
+	cfg, _, err := LoadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, _, err := cfg.CredentialsFromFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(creds) != 2 {
+		t.Fatalf("len(creds) = %d, want 2", len(creds))
+	}
+	if creds[0].products != nil {
+		t.Error("first credential should be the operator token")
+	}
+	if string(creds[0].hash) != string(hashToken("operator")) {
+		t.Error("operator token hash mismatch")
+	}
+	if len(creds[1].products) != 1 || creds[1].products[0] != "app" {
+		t.Errorf("scoped products = %v", creds[1].products)
+	}
+	if string(creds[1].hash) != string(hashToken("app-secret")) {
+		t.Error("scoped token hash mismatch")
+	}
+}
+
+func TestCredentialsRejectsDuplicateHash(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigFile(t, dir, "tok", "same\n")
+	if err := os.MkdirAll(filepath.Join(dir, "tokens"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfigFile(t, dir, filepath.Join("tokens", "app.token"), "same\n")
+	path := writeConfigFile(t, dir, ConfigName, `{
+	  "uploadTokenFile": "tok",
+	  "uploadTokens": [{"file": "tokens/app.token", "products": ["app"]}]
+	}`)
+	cfg, _, err := LoadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := cfg.CredentialsFromFileConfig(path); err == nil ||
+		!strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("CredentialsFromFileConfig error = %v", err)
+	}
+}
+
+func TestProductAllowsKey(t *testing.T) {
+	allowed := []string{
+		"index/app/stable.pb",
+		"manifest/app/1.0.0.pb",
+		"artifact/app/1.0.0/app.zip",
+		"latest/app/stable.json",
+		"directory/app.pb",
+		"fallback/app.pb",
+		"site/app.json",
+	}
+	denied := []string{
+		"index/other/stable.pb",
+		"index/app2/stable.pb",
+		"directory/other.pb",
+		"site/other.json",
+		"probe.txt",
+		"index/app",
+		"artifact/app",
+	}
+	for _, key := range allowed {
+		if !productAllowsKey("app", key) {
+			t.Errorf("app should allow %s", key)
+		}
+	}
+	for _, key := range denied {
+		if productAllowsKey("app", key) {
+			t.Errorf("app should deny %s", key)
+		}
+	}
+	operator := credential{hash: hashToken("x")}
+	if !operator.allowsKey("probe.txt") {
+		t.Error("operator should allow any key")
+	}
+}
+
 // Anyone who can read the token can publish, and publishing here means
 // replacing binaries that clients will install and run.
 func TestPermissionWarning(t *testing.T) {
@@ -419,6 +522,97 @@ func TestInitTokenOnlyLeavesConfigAlone(t *testing.T) {
 	}
 	if string(loaded) != string(hashToken(strings.TrimSpace(string(after)))) {
 		t.Error("edited config no longer resolves to the rotated token")
+	}
+}
+
+func TestInitProductMergesWithoutRevertingCache(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, []string{"-dir", "/srv/releases", "-out", dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	configPath := filepath.Join(dir, ConfigName)
+	edited := `{"addr": ":9999", "dir": "/srv/releases", ` +
+		`"uploadTokenFile": "relkit-serve.token", ` +
+		`"cache": {"noCache": ["index/"], "immutable": ["artifact/"]}}`
+	if err := os.WriteFile(configPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	if err := runInit(&buf, []string{"-out", dir, "-product", "demoapp"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "export RELKIT_UPLOAD_TOKEN=") {
+		t.Errorf("init -product should print the token once, got:\n%s", buf.String())
+	}
+
+	cfg, used, err := LoadFileConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != ":9999" {
+		t.Errorf("addr reverted to %q", cfg.Addr)
+	}
+	if cfg.Cache == nil || len(cfg.Cache.NoCache) != 1 || cfg.Cache.NoCache[0] != "index/" {
+		t.Errorf("cache.noCache reverted: %+v", cfg.Cache)
+	}
+	rel, ok := cfg.productTokenFile("demoapp")
+	if !ok || rel != "tokens/demoapp.token" {
+		t.Errorf("product token file = %q, ok=%v", rel, ok)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.TrimSpace(string(raw))
+	creds, _, err := cfg.CredentialsFromFileConfig(used)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, cred := range creds {
+		if cred.products != nil && string(cred.hash) == string(hashToken(token)) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("generated product token does not load")
+	}
+
+	before := string(raw)
+	if err := runInit(io.Discard, []string{"-out", dir, "-product", "demoapp"}); err == nil {
+		t.Fatal("re-running init -product must not silently replace a live token")
+	}
+	after, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != before {
+		t.Error("product token changed despite the refusal")
+	}
+
+	configBefore, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit(io.Discard, []string{"-out", dir, "-product", "demoapp", "-token-only"}); err != nil {
+		t.Fatal(err)
+	}
+	configAfter, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(configBefore) != string(configAfter) {
+		t.Errorf("config was rewritten:\n%s", configAfter)
+	}
+	rotated, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(rotated)) == token {
+		t.Error("-token-only should have generated a new product token")
 	}
 }
 

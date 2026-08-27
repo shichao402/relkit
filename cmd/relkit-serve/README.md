@@ -69,7 +69,8 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 | 命令 | 作用 |
 |---|---|
 | `relkit-serve` | 起服务 |
-| `relkit-serve init` | 生成配置骨架与随机 token |
+| `relkit-serve init` | 生成配置骨架与运营方 token |
+| `relkit-serve init -product <id>` | 为该产品签发隔离上传 token（合并进已有配置） |
 | `relkit-serve agent-guide` | 打印内嵌的部署运维手册 |
 | `relkit-serve -version` | 版本 |
 
@@ -82,7 +83,7 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 - 缺省按 `./relkit-serve.json`、`/etc/relkit-serve.json` 顺序查找，可用 `-config` 指定；**启动日志总会打印实际用了哪个文件**。
 - **未知字段一律报错。** 拼错键名而静默沿用默认值是最难查的一类配置故障 —— 服务照常启动、报告成功，行为却与配置文件写的不一样。
 - 优先级是**命令行 > 环境变量 > 配置文件**。环境变量在中间，是为了让容器或 systemd drop-in 能轮换 token 而不必改一个可能由配置管理系统托管的文件。
-- token 三条路：配置文件里的 `uploadToken`、`uploadTokenFile` 指向的文件、环境变量 `RELKIT_SERVE_TOKEN`。**不支持用命令行参数传 token**：那样它会出现在 `ps` 的输出里，机器上任何用户都能看到，并且会进入 shell 历史。含 token 的文件权限过宽时启动日志会打 `WARNING`。
+- 运营方 token 三条路：配置文件里的 `uploadToken`、`uploadTokenFile` 指向的文件、环境变量 `RELKIT_SERVE_TOKEN`。产品隔离 token 走 `uploadTokens`（文件 + `products` 列表）。**不支持用命令行参数传 token**：那样它会出现在 `ps` 的输出里，机器上任何用户都能看到，并且会进入 shell 历史。含 token 的文件权限过宽时启动日志会打 `WARNING`。
 
 ### 强制升级发布工具
 
@@ -129,7 +130,7 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 - **`index/` 下没有一个能解析的文档时，首页自动退回文件列表**。这保证「纯当通用静态服务用」的场景不受影响，也让一台 index 全坏的机器仍然能被翻查。
 - **下载链接挂在 channel 行上，不做单独的“推荐下载”按钮**。首页不替人选 channel：想要 stable 就点 stable 那行，想尝鲜就点 dev 那行。链接指向的产物按 `User-Agent` 猜平台，认不出来（curl、Linux 等）就整列留空 —— 递错包比不给链接更糟。
 - **固定下载地址只读发布指针**。每个 channel 发布都原子覆盖自己的 `latest/<product>/<channel>.json`，其中已列好该版本的 artifact ID、selectors 与 URL；`/-/latest/<product>/<channel>/<artifact-id>` 不扫描 index / manifest，也不会因为 dev 发布而改动 stable 的地址。URL 里写明 channel，是因为一条贴进文档的链接必须自己说清它跟的是哪条线。
-- **下载次数只在内存里**，随重启清零，页面上写明起算时间。本进程唯一可写的目录就是发布树本身，把计数文件放进去意味着热路径上多一次写、目录列表里多一个文件、发布进行中还可能被写坏。只统计「无 Range 或 Range 从 0 开始」的 GET，因此 16 线程下载算一次而不是十六次。
+- **下载次数写入服务目录根下的 `.relkit-serve-stats.json`**，重启后仍在。页面上写明起算时间。这个文件不出现在目录列表里，GET/PUT 也会被拒绝，因此它不是又一个可被取走的对象。计数本身在内存里累加，落盘是防抖之后的拷贝，热路径上不会多一次写。只统计「无 Range 或 Range 从 0 开始」的 GET，因此 16 线程下载算一次而不是十六次。需要把文件放到树外时，配置 `statsFile`（并给 systemd 加上对应的 `ReadWritePaths`）。
 
 **产品文案由产品团队维护**，写在产品仓库的 `relkit.json`；每次发布同步到 `site/<product>.json`。服务端配置只保留整站标题，以及迁移期 fallback。
 
@@ -163,7 +164,7 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 ```
 
 ```bash
-export RELKIT_UPLOAD_TOKEN='<init 打印的那个>'
+export RELKIT_UPLOAD_TOKEN='<init -product 打印的那个，只属于本产品>'
 relkit stage 1.0.0 --code 100 --add dist/app.zip os=windows,arch=x64
 relkit publish 1.0.0
 relkit verify --deep
@@ -259,4 +260,4 @@ go test ./...                              # 功能
 go test -run "^$" -bench . -benchtime 2s   # 吞吐
 ```
 
-覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、产品门户（多产品、channel 排序、坏 index 退回列表、`?files=1`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。
+覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、产品门户（多产品、channel 排序、坏 index 退回列表、`?files=1`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数、重启后仍在、计数文件不对外提供）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、产品隔离 token（本产品可写、他产品 403、前缀兄弟 403）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、`init -product` 合并配置且 `-token-only` 不改 json、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。

@@ -68,7 +68,7 @@ func (c *config) serve(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		c.upload(w, r)
 	default:
-		w.Header().Set("Allow", allowedMethods(c.uploadToken != nil))
+		w.Header().Set("Allow", allowedMethods(c.uploadsEnabled()))
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -82,7 +82,7 @@ func allowedMethods(uploads bool) string {
 
 func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	name, ok := cleanKey(r.URL.Path)
-	if !ok {
+	if !ok || hiddenServeKey(name, c.stats) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -166,21 +166,31 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 		display = "/" + name + "/"
 	}
 
+	visible := 0
+	for _, entry := range entries {
+		if !hiddenServeKey(entryKey(name, entry.Name()), c.stats) {
+			visible++
+		}
+	}
+
 	page := &listingPage{
 		pageChrome: pageChrome{
 			Title:   display,
 			Version: version,
-			Note:    plural(len(entries), "entry", "entries"),
+			Note:    plural(visible, "entry", "entries"),
 			Crumbs:  breadcrumbs(name),
 		},
 		Display: display,
-		Count:   len(entries),
+		Count:   visible,
 	}
 	if name != "." {
 		page.Parent = "../"
 	}
 
 	for _, entry := range entries {
+		if hiddenServeKey(entryKey(name, entry.Name()), c.stats) {
+			continue
+		}
 		row := listingEntry{
 			Name: entry.Name(),
 			Href: entry.Name(),
@@ -248,6 +258,13 @@ func contentType(name string) string {
 // the traversal attempt out of the logs as a 404 rather than an open error.
 //
 // The serve root itself maps to "." so that GET / can list the release tree.
+func entryKey(dir, name string) string {
+	if dir == "." {
+		return name
+	}
+	return path.Join(dir, name)
+}
+
 func cleanKey(urlPath string) (string, bool) {
 	trimmed := strings.TrimPrefix(urlPath, "/")
 	if trimmed == "" {

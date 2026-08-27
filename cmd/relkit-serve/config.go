@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"cnb.cool/shichao402/relkit/internal/model"
 )
 
 // ConfigName is looked for next to the binary and in /etc when -config is
@@ -28,12 +31,15 @@ type FileConfig struct {
 	Addr string `json:"addr"`
 	Dir  string `json:"dir"`
 
-	// Exactly one of these, or neither for a read-only server.
+	// Operator credential: exactly one of uploadToken / uploadTokenFile, or
+	// neither. Product-scoped credentials live in uploadTokens and may coexist
+	// with the operator token. No credentials at all means a read-only server.
 	//
 	// UploadToken is omitempty so that the skeleton does not show an empty
 	// slot inviting someone to paste a secret into a mode-0644 file.
-	UploadToken     string `json:"uploadToken,omitempty"`
-	UploadTokenFile string `json:"uploadTokenFile"`
+	UploadToken     string             `json:"uploadToken,omitempty"`
+	UploadTokenFile string             `json:"uploadTokenFile"`
+	UploadTokens    []UploadTokenEntry `json:"uploadTokens,omitempty"`
 
 	MaxUpload string `json:"maxUpload"`
 
@@ -42,8 +48,27 @@ type FileConfig struct {
 	Site    *SiteConfig    `json:"site,omitempty"`
 	Publish *PublishConfig `json:"publish,omitempty"`
 
+	// StatsFile is the download-counter JSON. Empty means
+	// <dir>/.relkit-serve-stats.json, which is writable under the default
+	// systemd unit. Point it outside the tree if you add another ReadWritePaths.
+	StatsFile string `json:"statsFile,omitempty"`
+
 	ShutdownTimeout string `json:"shutdownTimeout"`
 	LogRequests     *bool  `json:"logRequests"`
+}
+
+// UploadTokenEntry is a product-scoped publisher credential. File is the
+// plaintext token path (0600); Products is the allow-list of product ids.
+type UploadTokenEntry struct {
+	File     string   `json:"file"`
+	Products []string `json:"products"`
+}
+
+// credential is an in-memory upload secret. products == nil is the operator
+// token (any key). A non-nil list is scoped to those product ids.
+type credential struct {
+	hash     []byte
+	products []string
 }
 
 // SiteConfig is the operator's copy for the human-facing pages. None of it
@@ -130,7 +155,32 @@ func LoadFileConfig(explicit string) (*FileConfig, string, error) {
 	if cfg.Publish != nil && cfg.Publish.MinProtocol < 0 {
 		return nil, path, fmt.Errorf("%s: publish.minProtocol must not be negative", path)
 	}
+	for i, entry := range cfg.UploadTokens {
+		if err := entry.validate(); err != nil {
+			return nil, path, fmt.Errorf("%s: uploadTokens[%d]: %w", path, i, err)
+		}
+	}
 	return &cfg, path, nil
+}
+
+func (e UploadTokenEntry) validate() error {
+	if strings.TrimSpace(e.File) == "" {
+		return fmt.Errorf("file is required")
+	}
+	if len(e.Products) == 0 {
+		return fmt.Errorf("products must be a non-empty list")
+	}
+	seen := map[string]bool{}
+	for _, product := range e.Products {
+		if err := model.CheckIdentifier(product, "product"); err != nil {
+			return err
+		}
+		if seen[product] {
+			return fmt.Errorf("duplicate product %q", product)
+		}
+		seen[product] = true
+	}
+	return nil
 }
 
 // TokenFromFileConfig resolves the upload token declared by the config file.
@@ -140,6 +190,22 @@ func LoadFileConfig(explicit string) (*FileConfig, string, error) {
 // publish, and on this server publishing means replacing the binaries that
 // clients will install and run.
 func (c *FileConfig) TokenFromFileConfig(configPath string) ([]byte, []string, error) {
+	creds, warnings, err := c.CredentialsFromFileConfig(configPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, cred := range creds {
+		if cred.products == nil {
+			return cred.hash, warnings, nil
+		}
+	}
+	return nil, warnings, nil
+}
+
+// CredentialsFromFileConfig loads the operator token (if any) and every
+// product-scoped token. Duplicate hashes are rejected so a leaked product
+// token cannot silently inherit operator rights, or vice versa.
+func (c *FileConfig) CredentialsFromFileConfig(configPath string) ([]credential, []string, error) {
 	if c == nil {
 		return nil, nil, nil
 	}
@@ -148,30 +214,113 @@ func (c *FileConfig) TokenFromFileConfig(configPath string) ([]byte, []string, e
 			"set either uploadToken or uploadTokenFile, not both")
 	}
 
-	var warnings []string
+	var (
+		creds    []credential
+		warnings []string
+		hashes   = map[string]bool{}
+	)
+	add := func(hash []byte, products []string, source string) error {
+		key := hex.EncodeToString(hash)
+		if hashes[key] {
+			return fmt.Errorf("duplicate upload token hash from %s", source)
+		}
+		hashes[key] = true
+		creds = append(creds, credential{hash: hash, products: products})
+		return nil
+	}
 
 	if c.UploadTokenFile != "" {
-		path := c.UploadTokenFile
-		if !filepath.IsAbs(path) && configPath != "" {
-			path = filepath.Join(filepath.Dir(configPath), path)
-		}
-		raw, err := os.ReadFile(path)
+		path := resolveRelative(c.UploadTokenFile, configPath)
+		hash, extra, err := hashedTokenFromFile(path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("uploadTokenFile: %w", err)
 		}
-		token := strings.TrimSpace(string(raw))
-		if token == "" {
-			return nil, nil, fmt.Errorf("uploadTokenFile %s is empty", path)
+		warnings = append(warnings, extra...)
+		if err := add(hash, nil, path); err != nil {
+			return nil, nil, err
 		}
-		warnings = append(warnings, checkPermissions(path)...)
-		return hashToken(token), warnings, nil
+	} else if c.UploadToken != "" {
+		warnings = append(warnings, checkPermissions(configPath)...)
+		if err := add(hashToken(c.UploadToken), nil, configPath); err != nil {
+			return nil, nil, err
+		}
 	}
 
-	if c.UploadToken != "" {
-		warnings = append(warnings, checkPermissions(configPath)...)
-		return hashToken(c.UploadToken), warnings, nil
+	for i, entry := range c.UploadTokens {
+		path := resolveRelative(entry.File, configPath)
+		hash, extra, err := hashedTokenFromFile(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("uploadTokens[%d]: %w", i, err)
+		}
+		warnings = append(warnings, extra...)
+		products := append([]string(nil), entry.Products...)
+		if err := add(hash, products, path); err != nil {
+			return nil, nil, err
+		}
 	}
-	return nil, nil, nil
+	return creds, warnings, nil
+}
+
+func resolveRelative(path, configPath string) string {
+	if filepath.IsAbs(path) || configPath == "" {
+		return path
+	}
+	return filepath.Join(filepath.Dir(configPath), path)
+}
+
+func hashedTokenFromFile(path string) ([]byte, []string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return nil, nil, fmt.Errorf("%s is empty", path)
+	}
+	return hashToken(token), checkPermissions(path), nil
+}
+
+func withOperatorToken(creds []credential, hash []byte) ([]credential, error) {
+	key := hex.EncodeToString(hash)
+	out := []credential{{hash: hash}}
+	for _, cred := range creds {
+		if cred.products == nil {
+			continue
+		}
+		if hex.EncodeToString(cred.hash) == key {
+			return nil, fmt.Errorf("operator token matches a product-scoped token")
+		}
+		out = append(out, cred)
+	}
+	return out, nil
+}
+
+func (c credential) allowsKey(name string) bool {
+	if c.products == nil {
+		return true
+	}
+	for _, product := range c.products {
+		if productAllowsKey(product, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func productAllowsKey(product, name string) bool {
+	for _, prefix := range []string{
+		"index/" + product + "/",
+		"manifest/" + product + "/",
+		"artifact/" + product + "/",
+		"latest/" + product + "/",
+	} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return name == "directory/"+product+".pb" ||
+		name == "fallback/"+product+".pb" ||
+		name == "site/"+product+".json"
 }
 
 // checkPermissions warns when a secret-bearing file is readable beyond its
@@ -280,4 +429,49 @@ func Skeleton(dir string) []byte {
 	}
 	out, _ := json.MarshalIndent(cfg, "", "  ")
 	return append(out, '\n')
+}
+
+func writeFileConfig(path string, cfg *FileConfig) error {
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+func productTokenRelPath(product string) string {
+	return "tokens/" + product + ".token"
+}
+
+func (c *FileConfig) upsertProductToken(product, relFile string) {
+	for i, entry := range c.UploadTokens {
+		if len(entry.Products) == 1 && entry.Products[0] == product {
+			c.UploadTokens[i].File = relFile
+			return
+		}
+	}
+	c.UploadTokens = append(c.UploadTokens, UploadTokenEntry{
+		File:     relFile,
+		Products: []string{product},
+	})
+}
+
+func (c *FileConfig) productTokenFile(product string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	found := ""
+	n := 0
+	for _, entry := range c.UploadTokens {
+		for _, id := range entry.Products {
+			if id == product {
+				found = entry.File
+				n++
+			}
+		}
+	}
+	if n != 1 || found == "" {
+		return "", false
+	}
+	return found, true
 }

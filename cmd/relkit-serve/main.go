@@ -39,6 +39,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"cnb.cool/shichao402/relkit/internal/model"
 )
 
 const tokenEnv = "RELKIT_SERVE_TOKEN"
@@ -58,7 +60,7 @@ var agentGuide string
 type config struct {
 	root               *os.Root
 	rootPath           string
-	uploadToken        []byte
+	credentials        []credential
 	maxUpload          int64
 	noCache            []string
 	immutable          []string
@@ -121,7 +123,7 @@ func runServer() {
 	}
 
 	var warnings []string
-	uploadToken, tokenWarnings, err := fileCfg.TokenFromFileConfig(usedPath)
+	credentials, tokenWarnings, err := fileCfg.CredentialsFromFileConfig(usedPath)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -181,10 +183,17 @@ func runServer() {
 		if err != nil {
 			log.Fatalf("upload token: %v", err)
 		}
-		uploadToken = token
+		credentials, err = withOperatorToken(credentials, token)
+		if err != nil {
+			log.Fatalf("upload token: %v", err)
+		}
 		warnings = append(warnings, checkPermissions(*tokenFile)...)
 	} else if env := strings.TrimSpace(os.Getenv(tokenEnv)); env != "" {
-		uploadToken = hashToken(env)
+		var err error
+		credentials, err = withOperatorToken(credentials, hashToken(env))
+		if err != nil {
+			log.Fatalf("upload token: %v", err)
+		}
 	}
 
 	maxUploadBytes, err := ParseSize(*maxUpload)
@@ -202,14 +211,14 @@ func runServer() {
 	cfg := &config{
 		root:          root,
 		rootPath:      root.Name(),
-		uploadToken:   uploadToken,
+		credentials:   credentials,
 		maxUpload:     maxUploadBytes,
 		noCache:       splitPrefixes(*noCache),
 		immutable:     splitPrefixes(*immutable),
 		defaultMaxAge: *defaultMaxAge,
 		logRequests:   !*quiet,
 		gc:            newGCState(gcOn, *gcInterval, defaultGCDebounce),
-		stats:         newDownloadStats(),
+		stats:         newDownloadStats(resolveStatsPath(root.Name(), statsFileFrom(fileCfg)), root.Name()),
 	}
 	if fileCfg != nil {
 		cfg.site = fileCfg.Site
@@ -217,6 +226,7 @@ func runServer() {
 			cfg.minPublishProtocol = fileCfg.Publish.MinProtocol
 		}
 	}
+	defer cfg.stats.stop()
 
 	srv := &http.Server{
 		Addr:    *addr,
@@ -247,7 +257,7 @@ func runServer() {
 		log.Printf("config: none (flags and defaults only)")
 	}
 	log.Printf("serving %s on http://%s", cfg.rootPath, listener.Addr())
-	if cfg.uploadToken != nil {
+	if cfg.uploadsEnabled() {
 		log.Printf("PUT uploads enabled (max %s)", humanBytes(cfg.maxUpload))
 	} else {
 		log.Printf("read-only: no token supplied, PUT returns 405")
@@ -256,6 +266,9 @@ func runServer() {
 		log.Printf("gc enabled (interval %s)", *gcInterval)
 	} else {
 		log.Printf("gc disabled")
+	}
+	if cfg.stats != nil && cfg.stats.path != "" {
+		log.Printf("download stats: %s (since %s)", cfg.stats.path, cfg.stats.startedAt())
 	}
 	for _, warning := range warnings {
 		log.Printf("WARNING: %s", warning)
@@ -297,11 +310,16 @@ func runInit(out io.Writer, args []string) error {
 	target := fs.String("out", ".", "where to write the config and token")
 	force := fs.Bool("force", false, "overwrite existing files")
 	tokenOnly := fs.Bool("token-only", false, "generate a new token and leave the config alone")
+	product := fs.String("product", "", "add or rotate a product-scoped upload token")
 	fs.Parse(args)
 
 	outDir := *target
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
+	}
+
+	if *product != "" {
+		return runInitProduct(out, outDir, *dir, *product, *force, *tokenOnly)
 	}
 
 	configPath := filepath.Join(outDir, ConfigName)
@@ -354,6 +372,100 @@ func runInit(out io.Writer, args []string) error {
 	fmt.Fprintf(out, "Then: relkit-serve -config %s\n", configPath)
 	fmt.Fprintf(out, "Deployment steps and troubleshooting: relkit-serve agent-guide\n")
 	return nil
+}
+
+func runInitProduct(out io.Writer, outDir, serveDir, product string, force, tokenOnly bool) error {
+	if err := model.CheckIdentifier(product, "product"); err != nil {
+		return err
+	}
+
+	configPath := filepath.Join(outDir, ConfigName)
+	relFile := productTokenRelPath(product)
+	tokenPath := filepath.Join(outDir, filepath.FromSlash(relFile))
+
+	if tokenOnly {
+		cfg, _, err := LoadFileConfig(configPath)
+		if err != nil {
+			return err
+		}
+		rel, ok := cfg.productTokenFile(product)
+		if !ok {
+			return fmt.Errorf("%s is not listed in uploadTokens; omit -token-only to add it", product)
+		}
+		path := resolveRelative(rel, configPath)
+		token, err := writeTokenFile(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "token  %s (mode 0600, replaced)\n", path)
+		fmt.Fprintf(out, "\nRestart the service to load it. This product's publisher needs "+
+			"the new value first:\n")
+		fmt.Fprintf(out, "  export RELKIT_UPLOAD_TOKEN='%s'\n", token)
+		return nil
+	}
+
+	if _, err := os.Stat(tokenPath); err == nil && !force {
+		return fmt.Errorf("%s already exists; pass -force to overwrite "+
+			"(this invalidates the current token) or -token-only to rotate", tokenPath)
+	}
+
+	token, err := writeTokenFile(tokenPath)
+	if err != nil {
+		return err
+	}
+
+	createdOperator := ""
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if err := os.WriteFile(configPath, Skeleton(serveDir), 0o644); err != nil {
+			return err
+		}
+		operatorPath := filepath.Join(outDir, "relkit-serve.token")
+		if _, err := os.Stat(operatorPath); os.IsNotExist(err) {
+			op, err := writeTokenFile(operatorPath)
+			if err != nil {
+				return err
+			}
+			createdOperator = op
+		}
+	} else if err != nil {
+		return err
+	}
+
+	cfg, _, err := LoadFileConfig(configPath)
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return fmt.Errorf("config %s is empty", configPath)
+	}
+	cfg.upsertProductToken(product, relFile)
+	if err := writeFileConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "config %s\n", configPath)
+	fmt.Fprintf(out, "token  %s (mode 0600, product %s)\n", tokenPath, product)
+	fmt.Fprintf(out, "\nThis product's publisher needs this token in its environment:\n")
+	fmt.Fprintf(out, "  export RELKIT_UPLOAD_TOKEN='%s'\n", token)
+	if createdOperator != "" {
+		fmt.Fprintf(out, "\nAn operator token was also written (full-tree PUT):\n")
+		fmt.Fprintf(out, "  export RELKIT_SERVE_TOKEN='%s'\n", createdOperator)
+	}
+	return nil
+}
+
+func writeTokenFile(path string) (string, error) {
+	token, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return token, nil
 }
 
 func generateToken() (string, error) {
