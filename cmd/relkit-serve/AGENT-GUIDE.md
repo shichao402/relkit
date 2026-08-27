@@ -10,6 +10,8 @@ relkit-serve agent-guide
 
 因此在一台刚装好的机器上，不需要联网也不需要仓库就能读到它，且读到的一定是与当前运行的这个构建配套的版本。
 
+`skills/relkit-serve-admin/SKILL.md`（远程增删产品上传 token）只做能力声明并指回本文，不复制内容 —— 任何操作细节的修改都只改这里。
+
 ---
 
 ## 0. 先确认二进制可用
@@ -76,6 +78,12 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 **产品 token** 写在 `uploadTokens`：每个条目一个文件 + 允许写入的 product id 列表。该 token 只能 PUT 该产品的 RUP key（`index/<p>/`、`manifest/<p>/`、`artifact/<p>/`、`latest/<p>/`，以及 `directory/<p>.pb`、`fallback/<p>.pb`、`site/<p>.json`）。拿成别的产品的 token 会 403；无效 token 仍是 401。
 
 含 token 的文件权限过宽时服务会在启动日志里打 `WARNING`。**看到这条警告要处理，不要忽略。**
+
+### 2.3.1 管理凭据与上传凭据是两回事
+
+上传 token（运营方的和产品的）只能做一件事：`PUT` 发布树。**它们都不是管理口令** —— 服务端没有任何 HTTP 接口能用来签发、列举或吊销 token，这是有意的：给下载监听挂一个能发写权限的 Bearer，攻击面和开一个管理后台没有区别。
+
+因此增删产品一律是「SSH 上机 + 本机 `relkit-serve init`」，凭据是 SSH 身份，与上传 token 完全分离。谁有 SSH 就能管这台机；把运营方 token 交给谁，只是给了他往全树写的权限，不包含也不需要包含管理能力。
 
 ### 2.4 服务目录里只能放发布树
 
@@ -163,7 +171,21 @@ sudo systemctl enable --now relkit-serve
 sudo relkit-serve init -out /etc/relkit-serve -product demoapp
 ```
 
-把打印出来的值交给**该产品**仓库的 CI。运营方 token 留在 `relkit-serve.token`，只给运维。
+把打印出来的值交给**该产品**仓库：写进该 Git 项目的 `.secrets/project/`（Bitwarden folder = `.dec/config.yaml` 的 `project_name`），不要为此新建 Dec bundle。运营方 token 留在 `relkit-serve.token`，只给运维。
+
+同族产品（共用一个发布方 / 同一套 CI 秘密）不必再签一张。配置里一条 `uploadTokens` 可以挂多个 product id，运行时仍按路径隔离：拿这张 token 写别的产品的树还是 403。挂上去：
+
+```bash
+sudo relkit-serve init -out /etc/relkit-serve -product siblingapp -share-with demoapp
+```
+
+这不会生成新明文（服务端只有 hash，也反查不出来），发布方继续用 `demoapp` 已经拿到的那份 `RELKIT_UPLOAD_TOKEN`。泄漏的代价是族里每个 id 都能写；不是同发布方的产品不要挂。
+
+随时可以查这台机现在放行了哪些产品（只打 id 与文件路径，**不打明文**，服务端也无法反查明文）：
+
+```bash
+sudo relkit-serve init -out /etc/relkit-serve -list-products
+```
 
 ### 第 5 步：自检五项
 
@@ -241,7 +263,7 @@ relkit verify --deep
 
 ---
 
-## 5. 流程 C：轮换 token
+## 5. 流程 C：轮换与吊销 token
 
 运营方全树 token：
 
@@ -279,6 +301,37 @@ sudo systemctl restart relkit-serve
 [Service]
 Environment=RELKIT_SERVE_TOKEN=<新 token>
 ```
+
+### 吊销某个产品
+
+产品下线、或它的 token 泄漏且不打算再给它发布权限时：
+
+```bash
+sudo relkit-serve init -out /etc/relkit-serve -product demoapp -remove
+sudo systemctl restart relkit-serve
+```
+
+它把该条目从 `uploadTokens` 摘掉并删掉对应 token 文件，不碰运营方 token，也不碰 `addr` / `cache` 等手工改过的字段。若该条目还列着别的产品，只摘 id、保留文件（其他产品仍在用它）。
+
+**重启才生效。** 在此之前进程用的还是启动时读到的那份凭证，旧 token 照样能写 —— 泄漏止血时这一步不能省。已经发出去的产物不会被撤回，吊销只阻止后续发布。
+
+### 增删产品只走 SSH
+
+不要试图找一个「管理 API」，服务端没有，见 §2.3.1。远程管理的形态就是上机跑本地 `init`：
+
+```bash
+ssh <host> sudo relkit-serve init -out /etc/relkit-serve -list-products
+ssh <host> sudo relkit-serve init -out /etc/relkit-serve -product newapp
+ssh <host> sudo relkit-serve init -out /etc/relkit-serve -product sibling -share-with newapp
+ssh <host> sudo systemctl restart relkit-serve
+```
+
+要点：
+
+- **不要用 `sed` / 手写 JSON 去改 `uploadTokens`。** 那样写出来的条目不会被校验，最常见的后果是配置指向一个不存在的 token 文件，而服务下次重启时直接起不来（`uploadTokens[N]: no such file`），一台机上所有产品一起发不出去。
+- `-product` 打印的明文是**唯一一次**能看到它的机会。当场存进凭据管理系统并交给该产品，**不要**把它贴进工单、聊天记录或提交信息。`-share-with` 不打印明文。
+- `sudo init -product` 之后把 `/etc/relkit-serve` 收归服务用户（`chown -R relkit:relkit`），否则新 token 文件可能是 root 的 0600，重启后进程读不了、整台机起不来。
+- `-out` 必须指向真正生效的那个配置目录，照抄启动日志里的 `config:` 那行；指错了会在别处新建一份配置，而服务读的还是老的。
 
 ---
 
@@ -333,6 +386,7 @@ Environment=RELKIT_SERVE_TOKEN=<新 token>
 | `cannot serve ...: no such file` | `dir` 不存在，先建目录 |
 | `cannot listen on ...: address already in use` | 端口被占，`ss -ltnp \| grep 8080` |
 | `uploadTokenFile: permission denied` | 服务用户读不到 token 文件，检查 owner |
+| `uploadTokens[N]: no such file` | 条目指向的 token 文件没了（手改过配置，或删文件时没摘条目）：用 `init -product <id>` 重签，或 `-product <id> -remove` 摘掉 |
 
 ### `PUT` 返回 405
 
@@ -380,6 +434,8 @@ curl -sI $BASE/index/<product>/<channel>.json | grep -iE 'cache-control|last-mod
 
 - 声称执行了 `relkit-serve` 命令而实际上二进制不可用。
 - 用命令行参数或任何进版本控制的文件传 token。
+- 把运营方上传 token 当成远程管理口令（它只能 `PUT`，管理走 SSH，见 §2.3.1）。
+- 用 `sed` 或手写 JSON 改 `uploadTokens`；用 `init -product` / `-remove`。
 - 清空 `cache.noCache` 里的 `index/`，或清空 `cache.immutable` 里的 `artifact/`。
 - 以 root 运行服务进程。
 - 把发布目录设在含有其他内容的目录上。

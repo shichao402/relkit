@@ -1,3 +1,11 @@
+// Command relkit-agent receives staged trees from CI and publishes them
+// (signing keys and COS credentials stay on the host).
+//
+//	relkit-agent [flags]                         run the server
+//	relkit-agent init -list-products             list products in the config
+//	relkit-agent init -product <id> [-root path] add a product (shared token)
+//	relkit-agent init -product <id> -remove      drop a product from the map
+//	relkit-agent -version
 package main
 
 import (
@@ -20,6 +28,14 @@ func main() {
 }
 
 func run(argv []string) int {
+	if len(argv) > 0 && argv[0] == "init" {
+		if err := runInit(os.Stdout, argv[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
 	fs := flag.NewFlagSet("relkit-agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	configPath := fs.String("config", "relkit-agent.json", "agent config path")

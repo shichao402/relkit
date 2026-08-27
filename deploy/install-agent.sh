@@ -30,4 +30,6 @@ systemctl daemon-reload
 systemctl enable --now relkit-agent
 systemctl --no-pager status relkit-agent || true
 echo "next: put product relkit.json under $PRODUCT_ROOT and set EnvironmentFile=/etc/relkit-agent/env (RELKIT_PRIVATE_KEY, COS_SECRET_ID, COS_SECRET_KEY)"
+echo "add more products with: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id>"
+echo "list: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -list-products"
 echo "note: if nginx already owns :80/:443, reverse-proxy publish.<domain> there instead of Caddy"

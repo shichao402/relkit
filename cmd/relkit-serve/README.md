@@ -71,6 +71,9 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 | `relkit-serve` | 起服务 |
 | `relkit-serve init` | 生成配置骨架与运营方 token |
 | `relkit-serve init -product <id>` | 为该产品签发隔离上传 token（合并进已有配置） |
+| `relkit-serve init -product <id> -share-with <id>` | 把新产品挂到已有 token 上（不签发新秘密） |
+| `relkit-serve init -list-products` | 列出已放行的产品与 token 文件（不打明文） |
+| `relkit-serve init -product <id> -remove` | 吊销该产品的上传 token（重启后生效） |
 | `relkit-serve agent-guide` | 打印内嵌的部署运维手册 |
 | `relkit-serve -version` | 版本 |
 
@@ -260,4 +263,4 @@ go test ./...                              # 功能
 go test -run "^$" -bench . -benchtime 2s   # 吞吐
 ```
 
-覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、产品门户（多产品、channel 排序、坏 index 退回列表、`?files=1`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数、重启后仍在、计数文件不对外提供）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、产品隔离 token（本产品可写、他产品 403、前缀兄弟 403）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、`init -product` 合并配置且 `-token-only` 不改 json、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。
+覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、产品门户（多产品、channel 排序、坏 index 退回列表、`?files=1`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数、重启后仍在、计数文件不对外提供）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、产品隔离 token（本产品可写、他产品 403、前缀兄弟 403）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、`init -product` 合并配置且 `-token-only` 不改 json、`-product -share-with` 挂到已有 token 且不打印明文、`-list-products` 不打明文且不新建目录、`-remove` 摘条目删文件而运营方 token 与手改字段不受影响（共用文件时只摘 id）、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。

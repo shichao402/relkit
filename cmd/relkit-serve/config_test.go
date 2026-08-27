@@ -616,6 +616,275 @@ func TestInitProductMergesWithoutRevertingCache(t *testing.T) {
 	}
 }
 
+// Listing is meant to answer "is this product still allowed", so it must be
+// runnable in front of anyone. A listing that printed the secrets it inventories
+// would have to be treated as a secret itself.
+func TestInitListProductsHidesPlaintext(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, []string{"-dir", "/srv/releases", "-out", dir}); err != nil {
+		t.Fatal(err)
+	}
+	for _, product := range []string{"demoapp", "other"} {
+		if err := runInit(io.Discard, []string{"-out", dir, "-product", product}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var buf strings.Builder
+	if err := runInit(&buf, []string{"-out", dir, "-list-products"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"demoapp", "other", "tokens/demoapp.token", "relkit-serve.token"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("listing is missing %q:\n%s", want, out)
+		}
+	}
+	for _, name := range []string{"relkit-serve.token", "tokens/demoapp.token", "tokens/other.token"} {
+		raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token := strings.TrimSpace(string(raw)); strings.Contains(out, token) {
+			t.Fatalf("listing leaked the plaintext of %s", name)
+		}
+	}
+}
+
+func TestInitListProductsDoesNotCreateAnything(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "absent")
+	if err := runInit(io.Discard, []string{"-out", dir, "-list-products"}); err == nil {
+		t.Fatal("listing a directory without a config should fail")
+	}
+	// A typo in -out must not be answered with "no products configured".
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("listing created %s", dir)
+	}
+}
+
+func TestInitRemoveProductKeepsEverythingElse(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, []string{"-dir", "/srv/releases", "-out", dir}); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, ConfigName)
+	edited := `{"addr": ":9999", "dir": "/srv/releases", ` +
+		`"uploadTokenFile": "relkit-serve.token", ` +
+		`"cache": {"noCache": ["index/"], "immutable": ["artifact/"]}}`
+	if err := os.WriteFile(configPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, product := range []string{"demoapp", "other"} {
+		if err := runInit(io.Discard, []string{"-out", dir, "-product", product}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	operatorBefore, err := os.ReadFile(filepath.Join(dir, "relkit-serve.token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	if err := runInit(&buf, []string{"-out", dir, "-product", "demoapp", "-remove"}); err != nil {
+		t.Fatal(err)
+	}
+	// Revoking takes effect on restart; a report that omits this reads as if
+	// the old token were already dead.
+	if !strings.Contains(buf.String(), "restart") {
+		t.Errorf("removal should say a restart is needed, got:\n%s", buf.String())
+	}
+
+	cfg, used, err := LoadFileConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.productTokenFile("demoapp"); ok {
+		t.Error("demoapp is still listed in uploadTokens")
+	}
+	if rel, ok := cfg.productTokenFile("other"); !ok || rel != "tokens/other.token" {
+		t.Errorf("other lost its entry: %q ok=%v", rel, ok)
+	}
+	if cfg.UploadTokenFile != "relkit-serve.token" {
+		t.Errorf("operator token entry changed to %q", cfg.UploadTokenFile)
+	}
+	if cfg.Addr != ":9999" {
+		t.Errorf("addr reverted to %q", cfg.Addr)
+	}
+	if cfg.Cache == nil || len(cfg.Cache.NoCache) != 1 || cfg.Cache.NoCache[0] != "index/" {
+		t.Errorf("cache.noCache reverted: %+v", cfg.Cache)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "tokens", "demoapp.token")); !os.IsNotExist(err) {
+		t.Error("demoapp token file survived removal")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tokens", "other.token")); err != nil {
+		t.Errorf("other token file was collateral damage: %v", err)
+	}
+	operatorAfter, err := os.ReadFile(filepath.Join(dir, "relkit-serve.token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(operatorAfter) != string(operatorBefore) {
+		t.Error("operator token was rotated by a product removal")
+	}
+
+	// The whole point: the config still loads, with one credential fewer.
+	creds, _, err := cfg.CredentialsFromFileConfig(used)
+	if err != nil {
+		t.Fatalf("config no longer loads after removal: %v", err)
+	}
+	operators, scoped := 0, 0
+	for _, cred := range creds {
+		if cred.products == nil {
+			operators++
+			continue
+		}
+		scoped++
+		if cred.allowsKey("index/demoapp/stable.pb") {
+			t.Error("a credential still writes demoapp")
+		}
+	}
+	if operators != 1 || scoped != 1 {
+		t.Errorf("got %d operator and %d scoped credentials, want 1 and 1", operators, scoped)
+	}
+
+	if err := runInit(io.Discard, []string{"-out", dir, "-product", "demoapp", "-remove"}); err == nil {
+		t.Fatal("removing an unlisted product should fail loudly")
+	}
+}
+
+// One file may serve several products. Revoking one of them must not lock out
+// the others by deleting the file they share.
+func TestInitRemoveProductKeepsSharedTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, []string{"-dir", "/srv/releases", "-out", dir}); err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(dir, "tokens", "team.token")
+	if _, err := writeTokenFile(shared); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, ConfigName)
+	body := `{"dir": "/srv/releases", "uploadTokenFile": "relkit-serve.token", ` +
+		`"uploadTokens": [{"file": "tokens/team.token", "products": ["demoapp", "other"]}]}`
+	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	if err := runInit(&buf, []string{"-out", dir, "-product", "demoapp", "-remove"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "shared") {
+		t.Errorf("removal should explain why the file stayed, got:\n%s", buf.String())
+	}
+	if _, err := os.Stat(shared); err != nil {
+		t.Errorf("shared token file was deleted: %v", err)
+	}
+
+	cfg, _, err := LoadFileConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.UploadTokens) != 1 {
+		t.Fatalf("uploadTokens = %+v", cfg.UploadTokens)
+	}
+	if got := cfg.UploadTokens[0].Products; len(got) != 1 || got[0] != "other" {
+		t.Errorf("products = %v, want [other]", got)
+	}
+}
+
+func TestInitShareProductReusesTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, []string{"-dir", "/srv/releases", "-out", dir}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit(io.Discard, []string{"-out", dir, "-product", "suite-a"}); err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(dir, "tokens", "suite-a.token")
+	before, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	if err := runInit(&buf, []string{"-out", dir, "-product", "suite-b", "-share-with", "suite-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "export RELKIT_UPLOAD_TOKEN=") {
+		t.Fatalf("sharing must not print a new token:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "shared") {
+		t.Errorf("expected a shared-token explanation, got:\n%s", buf.String())
+	}
+	after, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("sharing must not rotate the existing token file")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tokens", "suite-b.token")); !os.IsNotExist(err) {
+		t.Errorf("sharing should not create a second token file: %v", err)
+	}
+
+	cfg, _, err := LoadFileConfig(filepath.Join(dir, ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.UploadTokens) != 1 {
+		t.Fatalf("uploadTokens = %+v", cfg.UploadTokens)
+	}
+	got := cfg.UploadTokens[0].Products
+	if len(got) != 2 || got[0] != "suite-a" || got[1] != "suite-b" {
+		t.Errorf("products = %v, want [suite-a suite-b]", got)
+	}
+
+	if err := runInit(io.Discard, []string{"-out", dir, "-product", "suite-b", "-share-with", "suite-a"}); err == nil {
+		t.Fatal("sharing an already listed product should fail")
+	}
+	if err := runInit(io.Discard, []string{"-out", dir, "-product", "suite-c", "-share-with", "missing"}); err == nil {
+		t.Fatal("sharing with an unknown product should fail")
+	}
+}
+
+func TestInitRemoveRejectsBadFlagCombinations(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, []string{"-dir", "/srv/releases", "-out", dir}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit(io.Discard, []string{"-out", dir, "-product", "demoapp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := [][]string{
+		{"-out", dir, "-remove"},
+		{"-out", dir, "-product", "demoapp", "-remove", "-force"},
+		{"-out", dir, "-product", "demoapp", "-remove", "-token-only"},
+		{"-out", dir, "-list-products", "-product", "demoapp"},
+		{"-out", dir, "-product", "../escape", "-remove"},
+		{"-out", dir, "-product", "demoapp", "-remove", "-share-with", "other"},
+		{"-out", dir, "-share-with", "demoapp"},
+		{"-out", dir, "-product", "other", "-share-with", "demoapp", "-token-only"},
+		{"-out", dir, "-list-products", "-share-with", "demoapp"},
+	}
+	for _, args := range cases {
+		if err := runInit(io.Discard, args); err == nil {
+			t.Errorf("init %v should have failed", args)
+		}
+	}
+	// None of the refusals may have half-applied.
+	cfg, _, err := LoadFileConfig(filepath.Join(dir, ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.productTokenFile("demoapp"); !ok {
+		t.Error("a rejected command still removed demoapp")
+	}
+}
+
 func TestGeneratedTokensDiffer(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 64; i++ {

@@ -456,6 +456,71 @@ func (c *FileConfig) upsertProductToken(product, relFile string) {
 	})
 }
 
+// shareProductToken adds product to the uploadTokens entry that already lists
+// with. It does not create or rotate a token file.
+func (c *FileConfig) shareProductToken(product, with string) (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("config is empty")
+	}
+	if _, listed := c.productTokenFile(product); listed {
+		return "", fmt.Errorf("%s is already listed in uploadTokens", product)
+	}
+	rel, ok := c.productTokenFile(with)
+	if !ok {
+		return "", fmt.Errorf("%s is not listed in uploadTokens", with)
+	}
+	for i, entry := range c.UploadTokens {
+		if entry.File != rel {
+			continue
+		}
+		c.UploadTokens[i].Products = append(append([]string(nil), entry.Products...), product)
+		return rel, nil
+	}
+	return "", fmt.Errorf("%s is not listed in uploadTokens", with)
+}
+
+// removeProductToken drops product from uploadTokens and reports the token
+// file that is now unreferenced, which is empty when the entry listed other
+// products too: revoking one product must not lock out the others sharing that
+// file.
+func (c *FileConfig) removeProductToken(product string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	var (
+		kept   []UploadTokenEntry
+		orphan string
+		found  bool
+	)
+	for _, entry := range c.UploadTokens {
+		var products []string
+		hit := false
+		for _, id := range entry.Products {
+			if id == product {
+				hit = true
+				continue
+			}
+			products = append(products, id)
+		}
+		if !hit {
+			kept = append(kept, entry)
+			continue
+		}
+		found = true
+		if len(products) == 0 {
+			orphan = entry.File
+			continue
+		}
+		entry.Products = products
+		kept = append(kept, entry)
+	}
+	if !found {
+		return "", false
+	}
+	c.UploadTokens = kept
+	return orphan, true
+}
+
 func (c *FileConfig) productTokenFile(product string) (string, bool) {
 	if c == nil {
 		return "", false

@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,13 +26,13 @@ type ProductConfig struct {
 }
 
 type FileConfig struct {
-	Addr            string                    `json:"addr"`
-	UploadToken     string                    `json:"uploadToken,omitempty"`
-	UploadTokenFile string                    `json:"uploadTokenFile,omitempty"`
-	MaxUpload       string                    `json:"maxUpload,omitempty"`
-	MaxFiles        int                       `json:"maxFiles,omitempty"`
-	StateDir        string                    `json:"stateDir,omitempty"`
-	Products        map[string]ProductConfig  `json:"products"`
+	Addr            string                   `json:"addr"`
+	UploadToken     string                   `json:"uploadToken,omitempty"`
+	UploadTokenFile string                   `json:"uploadTokenFile,omitempty"`
+	MaxUpload       string                   `json:"maxUpload,omitempty"`
+	MaxFiles        int                      `json:"maxFiles,omitempty"`
+	StateDir        string                   `json:"stateDir,omitempty"`
+	Products        map[string]ProductConfig `json:"products"`
 }
 
 type Config struct {
@@ -44,12 +46,8 @@ type Config struct {
 }
 
 func LoadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	raw, err := loadFileConfig(path)
 	if err != nil {
-		return nil, err
-	}
-	var raw FileConfig
-	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
 	if len(raw.Products) == 0 {
@@ -76,7 +74,7 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.StateDir == "" {
 		cfg.StateDir = filepath.Join(filepath.Dir(path), "relkit-agent-state")
 	}
-	token, err := loadToken(raw)
+	token, err := loadToken(*raw)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +93,26 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Products[name] = p
 	}
 	return cfg, nil
+}
+
+func loadFileConfig(path string) (*FileConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw FileConfig
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return &raw, nil
+}
+
+func writeFileConfig(path string, cfg *FileConfig) error {
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o644)
 }
 
 func loadToken(raw FileConfig) (string, error) {
@@ -199,13 +217,11 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuth(w, r) {
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/v1/staged/")
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	product, versionRaw, ok := parseStagedRoute(r.URL.Path)
+	if !ok {
 		http.Error(w, "expected /v1/staged/{product}/{version}", http.StatusBadRequest)
 		return
 	}
-	product, versionRaw := parts[0], parts[1]
 	version, ok := cleanVersion(versionRaw)
 	if !ok {
 		http.Error(w, "invalid version", http.StatusBadRequest)
@@ -247,11 +263,13 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := extractTarGz(tmpPath, dest, s.cfg.MaxFiles); err != nil {
 		_ = os.RemoveAll(dest)
+		log.Printf("staged extract %s/%s: %v", product, version, err)
 		http.Error(w, "extract: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if _, err := stage.LoadStaged(pc.Root, version); err != nil {
 		_ = os.RemoveAll(dest)
+		log.Printf("staged tree %s/%s: %v", product, version, err)
 		http.Error(w, "invalid staged tree: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -265,15 +283,30 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// parseStagedRoute accepts /v1/staged/{product}/{version}, including a
+// doubled slash when RELKIT_PUBLISH_URL was configured with a trailing slash.
+func parseStagedRoute(urlPath string) (product, version string, ok bool) {
+	cleaned := path.Clean("/" + strings.TrimSpace(urlPath))
+	rest := strings.TrimPrefix(cleaned, "/v1/staged/")
+	if rest == cleaned {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 type publishRequest struct {
-	Product       string   `json:"product"`
-	Version       string   `json:"version"`
-	To            []string `json:"to"`
-	DryRun        bool     `json:"dryRun"`
-	AllowBackfill bool     `json:"allowBackfill"`
-	AllowPartial  bool     `json:"allowPartial"`
-	IdempotencyKey string  `json:"idempotencyKey"`
-	StagedSHA256  string   `json:"stagedSha256"`
+	Product        string   `json:"product"`
+	Version        string   `json:"version"`
+	To             []string `json:"to"`
+	DryRun         bool     `json:"dryRun"`
+	AllowBackfill  bool     `json:"allowBackfill"`
+	AllowPartial   bool     `json:"allowPartial"`
+	IdempotencyKey string   `json:"idempotencyKey"`
+	StagedSHA256   string   `json:"stagedSha256"`
 }
 
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
