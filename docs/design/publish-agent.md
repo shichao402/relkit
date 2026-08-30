@@ -45,6 +45,7 @@ Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请
 - `relkit-agent.example.json`
 - `relkit-agent.intranet.example.json`（WOA：agent 写本地目录）
 - `relkit-intranet-product.example.json`（产品 `relkit.json` 的 `local` 后端）
+- `nginx-intranet.example.conf`（内网 `update.devcloud.woa.com`：`/v1/` → agent `:8787`，GET → serve `:8080`）
 - `relkit-agent.service`
 - `Caddyfile.relkit-agent.example`（`publish.firoyang.com` → `127.0.0.1:8787`）
 - `install-agent.sh`

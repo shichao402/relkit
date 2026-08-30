@@ -285,6 +285,14 @@ relkit min-supported 120
     }
   },
 
+  "site": {
+    "title": "myapp",
+    "makers": {
+      "projectId": "makers-xxxxxxxx",
+      "tokenEnv": "EDGEONE_PAGES_API_TOKEN"
+    }
+  },
+
   "publishTo": ["github", "cos"]
 }
 ```

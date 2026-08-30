@@ -23,7 +23,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 
 | 进程 | listen | 切面 |
 |---|---|---|
-| nginx / Caddy | `0.0.0.0:443` | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
+| nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
 | relkit-agent | `127.0.0.1:8787` | 不对外；`PUT /v1/staged` · `POST /v1/publish` |
 | relkit-serve | `127.0.0.1:8080` | 仅「磁盘 + HTTP GET」这条，由同一 `:443` 转入 |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / BrowseSink 节点 |
@@ -106,3 +106,11 @@ flowchart TB
 - `site.makers` 已配，且本轮存在 `HostsBrowse()==false` 的 target → `MakersSink`。`--to local` 因此不会打 Makers。
 - 本轮需要外部人页（有非 HostsBrowse 的后端）却没有配任何 site sink → 警告：协议可提交，人页不更新。
 - 以后加 Cloudflare / GitHub Pages：新 sink 实现 + `relkit.json` 配置，不要再写 `Type()=="s3-compatible"`。
+
+## 6. 现网落地（2026-08-30）
+
+外网 CVM（`publish.firoyang.com:443` → `127.0.0.1:8787`）已按上表运行。内网 WOA 同一切面，现网先 `:80`：
+
+- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余 GET → serve `127.0.0.1:8080`
+- 配置样例：`deploy/nginx-intranet.example.conf`
+- 有证书后再加 `listen 443 ssl`，流程不变
