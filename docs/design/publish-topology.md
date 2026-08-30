@@ -16,7 +16,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 ## 1. 决议
 
 - 控制面只有一个 **publish 节点**：nginx/Caddy（`:443` 切面）+ 本机 `relkit-agent`（`127.0.0.1:8787`）。反代是 HTTPS / 证书 / 入口日志的外壳，不是独立架构角色，也不是安全隔离层。
-- CI 多端先 `relkit stage` 收成一棵树，对 agent **一次** `PUT /v1/staged`（整包 tar.gz），再 **一次** `POST /v1/publish`。逐个 PUT 发生在 `publish.Run` 对 Backend 写各端 artifact；**写 index 指针才是真发布**。
+- CI 多端先 `relkit stage` 收成一棵树，对 agent **一次** `PUT /v1/staged`（整包 tar.gz），再 **一次** `POST /v1/publish`。逐个 PUT 发生在 `publish.Run` 对 Backend 写各端 artifact；**写 index 指针才是真发布**。双 Job 并行时，mac 先把 zip 放到 `PUT /v1/drop`，Windows 收齐后再 stage；drop 不是发布。
 - 协议对象走 **Backend adapter**（COS / 磁盘+HTTP GET / CNB raw / GitHub raw）。
 - **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。落地走 **BrowseSink**（外网 Makers、内网数据面 `browse/`、以后其它 site）。不要用 `Backend.Type()` 猜人页，也不要用 serve 现算一页当对外目录。
 - **relkit-serve 现算的门户**（今 GET `/` 那套主题页、`/-/p/`、`?files=1`）是打到自托管箱上的操作面：容量就是这一台机，以后长成 relkit 后台面板。它不是对外目录，内外网对外都不要再把人指到这里。
@@ -27,7 +27,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 | 进程 | listen | 切面 |
 |---|---|---|
 | nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
-| relkit-agent | `127.0.0.1:8787` | 不对外；`PUT /v1/staged` · `POST /v1/publish` |
+| relkit-agent | `127.0.0.1:8787` | 不对外；`PUT/GET /v1/drop`（双 Job 交 zip）· `PUT /v1/staged` · `POST /v1/publish` |
 | relkit-serve | `127.0.0.1:8080` | 内网数据面：协议对象 GET + 原样返回 `browse/`；操作面板在 `/-/`（现算，以后后台） |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / BrowseSink 节点 |
 

@@ -142,6 +142,7 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 	srv := NewServer(cfg)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/-/health", srv.handleHealth)
+	mux.HandleFunc("/v1/drop/", srv.handleDrop)
 	mux.HandleFunc("/v1/staged/", srv.handleStaged)
 	mux.HandleFunc("/v1/publish", srv.handlePublish)
 	ts := httptest.NewServer(mux)
@@ -171,6 +172,78 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("publish status=%d body=%s", resp2.StatusCode, body2)
+	}
+}
+
+func TestAgentDropPutGetHead(t *testing.T) {
+	root := t.TempDir()
+	productRoot := filepath.Join(root, "product")
+	if err := os.MkdirAll(productRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentCfgPath := filepath.Join(root, "agent.json")
+	agentDoc := map[string]any{
+		"uploadToken": "test-token",
+		"stateDir":    filepath.Join(root, "state"),
+		"products": map[string]any{
+			"demo": map[string]any{"root": productRoot},
+		},
+	}
+	agentBytes, _ := json.MarshalIndent(agentDoc, "", "  ")
+	if err := os.WriteFile(agentCfgPath, agentBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(agentCfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/drop/", srv.handleDrop)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	payload := []byte("macos-zip-bytes")
+	url := ts.URL + "/v1/drop/demo/0.2.0+105/SvnAutoMerge_macos_0.2.0+105.zip"
+	req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer test-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("drop put status=%d body=%s", resp.StatusCode, body)
+	}
+
+	head, err := http.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head.Header.Set("Authorization", "Bearer test-token")
+	respH, err := http.DefaultClient.Do(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respH.Body.Close()
+	if respH.StatusCode != http.StatusOK {
+		t.Fatalf("drop head status=%d", respH.StatusCode)
+	}
+
+	get, _ := http.NewRequest(http.MethodGet, url, nil)
+	get.Header.Set("Authorization", "Bearer test-token")
+	respG, err := http.DefaultClient.Do(get)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(respG.Body)
+	respG.Body.Close()
+	if respG.StatusCode != http.StatusOK {
+		t.Fatalf("drop get status=%d", respG.StatusCode)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("drop get body=%q", got)
 	}
 }
 

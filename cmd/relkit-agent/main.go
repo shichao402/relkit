@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -64,6 +64,7 @@ func run(argv []string) int {
 	srv := NewServer(cfg)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/-/health", srv.handleHealth)
+	mux.HandleFunc("/v1/drop/", srv.handleDrop)
 	mux.HandleFunc("/v1/staged/", srv.handleStaged)
 	mux.HandleFunc("/v1/publish", srv.handlePublish)
 

@@ -4,7 +4,7 @@
 title: Publish Agent
 category: design
 created: 2026-08-12
-updated: 2026-08-27
+updated: 2026-08-31
 status: approved
 related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent
 ---
@@ -27,6 +27,8 @@ CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-
 ## 3. HTTP 表面
 
 - `GET /-/health`
+- `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换口：一端先把 zip 放下，另一端再 HEAD/GET 取走。Bearer。不是发布。
+- GET / HEAD `/v1/drop/{product}/{version}/{filename}` — 同上，鉴权后才能读未发布包
 - `PUT /v1/staged/{product}/{version}` — body = staged 目录的 `tar.gz`，Bearer 鉴权
 - `POST /v1/publish` — JSON：`product` / `version` / 可选 `to` / `dryRun` / `stagedSha256` / `idempotencyKey`
 
