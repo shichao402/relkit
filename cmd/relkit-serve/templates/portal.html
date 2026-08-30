@@ -1,0 +1,25 @@
+{{define "portal"}}{{template "head" .}}
+<header class="site">
+<h1>{{.Heading}}</h1>
+<p class="sub">{{.Sub}}</p>
+</header>
+{{range .Products}}
+<section class="card">
+<div class="cardhead"><h2><a href="{{.Href}}">{{.Display}}</a></h2>{{if .Homepage}}<a class="note" href="{{.Homepage}}">homepage</a>{{end}}<span class="push"></span>{{if .Downloads}}<span class="chip">{{.Downloads}} downloads</span>{{end}}{{if .Updated}}<span class="chip">updated {{.Updated}}</span>{{end}}</div>
+{{if .Description}}<p class="desc">{{.Description}}</p>{{end}}
+<table>
+<thead><tr><th>Channel</th><th>Version</th><th class="num">Code</th><th class="num">Released</th><th class="num">Download</th></tr></thead>
+<tbody>
+{{range .Channels}}<tr>
+<td>{{.Name}}</td>
+<td class="mono">{{if .Err}}<span class="warn">{{.Err}}</span>{{else}}{{.Version}}{{if .Yanked}} <span class="chip">yanked</span>{{end}}{{end}}</td>
+<td class="num">{{if .Code}}{{.Code}}{{end}}</td>
+<td class="num">{{.Released}}</td>
+<td class="num">{{if .DownloadHref}}<a href="{{.DownloadHref}}" title="{{.DownloadName}} · {{.DownloadSize}}">download</a>{{else}}-{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+</section>
+{{end}}
+{{if .StatsSince}}<p class="note">Download counts persist across restarts; counting since {{.StatsSince}}.</p>{{end}}
+{{template "foot" .}}{{end}}

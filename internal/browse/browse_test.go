@@ -1,6 +1,8 @@
 package browse
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -65,5 +67,26 @@ func TestWriteDumpRoundTrip(t *testing.T) {
 	got := ReadDumpCatalog(dir)
 	if got == nil || got.Products[0].ID != "app" {
 		t.Fatalf("dump catalog = %+v", got)
+	}
+}
+
+func TestWriteSampleDump(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteSampleDump(dir); err != nil {
+		t.Fatal(err)
+	}
+	index, err := os.ReadFile(filepath.Join(dir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), "SVN Auto Merge") {
+		t.Fatalf("sample index missing title\n%s", index)
+	}
+	product, err := os.ReadFile(filepath.Join(dir, "svn-auto-merge.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(product), "Download") {
+		t.Fatalf("sample product missing download\n%s", product)
 	}
 }

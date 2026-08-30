@@ -93,6 +93,12 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	// through symlinks, which is the part a manual prefix check gets wrong.
 	file, err := c.root.Open(name)
 	if err != nil {
+		// Dump files live under browse/. GET / serves that index without
+		// changing the URL, so relative links like svn-auto-merge.html resolve
+		// at the site root. Fall back once for a single-segment *.html.
+		if isRootBrowseHTML(name) && c.serveExistingFile(w, r, "browse/"+name) {
+			return
+		}
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -142,6 +148,13 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	// responses. Passing the *os.File rather than a wrapper is what lets the
 	// copy reach sendfile(2) on Linux.
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func isRootBrowseHTML(name string) bool {
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+		return false
+	}
+	return strings.HasSuffix(name, ".html")
 }
 
 func (c *config) serveExistingFile(w http.ResponseWriter, r *http.Request, name string) bool {

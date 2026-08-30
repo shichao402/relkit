@@ -128,6 +128,10 @@ func TestWrittenBrowseIndexIsServedAtRoot(t *testing.T) {
 	if !strings.Contains(product, "static product page") {
 		t.Fatalf("GET /browse/app.html should serve the dump\n%s", product)
 	}
+	rooted := getBody(t, srv.URL+"/app.html")
+	if !strings.Contains(rooted, "static product page") {
+		t.Fatalf("GET /app.html should fall back to browse/app.html\n%s", rooted)
+	}
 	live := getBody(t, srv.URL+"/-/p/app")
 	if strings.Contains(live, "static product page") {
 		t.Fatalf("GET /-/p/app is the operator page, not the dump\n%s", live)

@@ -1,0 +1,11 @@
+{{define "product"}}{{template "head" .}}
+{{range .Product.Channels}}
+<section class="release">
+<h2>{{.Name}}</h2>
+<p class="sub">{{.Version}}{{if .Code}} · build {{.Code}}{{end}}{{if .PublishedAt}} · {{sliceDate .PublishedAt}}{{end}}</p>
+{{range .Artifacts}}
+<div class="download"><div><div class="platform">{{platform .Selectors}}</div><div class="mono">{{.Filename}}</div><div class="sub">{{bytes .Size}}</div></div>{{with firstURL .}}<a class="btn" href="{{.}}">Download</a>{{end}}</div>
+{{end}}
+</section>
+{{end}}
+{{template "foot" .}}{{end}}

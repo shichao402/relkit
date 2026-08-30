@@ -12,6 +12,11 @@ __pycache__/
 scripts/temp/*
 !scripts/temp/.gitkeep
 
+# local HTML preview output (`go run ./internal/browse/preview`)
+preview-out/
+internal/browse/preview/out/
+**/templates/out/
+
 
 # Local secrets (Dec / Bitwarden landing path; do not commit)
 /relkit.secrets.json

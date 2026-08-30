@@ -1,0 +1,20 @@
+{{define "index"}}{{template "head" .}}
+{{range .Index.Products}}
+<section class="card">
+<div class="cardhead"><h2><a href="{{.ID}}.html">{{if .Title}}{{.Title}}{{else}}{{.ID}}{{end}}</a></h2>{{if .Homepage}}<a href="{{.Homepage}}">homepage</a>{{end}}</div>
+{{if .Description}}<p class="desc">{{.Description}}</p>{{end}}
+<table>
+<thead><tr><th>Channel</th><th>Version</th><th class="num">Code</th><th class="num">Released</th><th class="num">Download</th></tr></thead>
+<tbody>
+{{range .Channels}}<tr>
+<td>{{.Name}}</td>
+<td class="mono">{{.Version}}</td>
+<td class="num">{{if .Code}}{{.Code}}{{end}}</td>
+<td class="num">{{sliceDate .PublishedAt}}</td>
+<td class="num">{{with chanURL .}}<a href="{{.}}">download</a>{{else}}-{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+</section>
+{{end}}
+{{template "foot" .}}{{end}}
