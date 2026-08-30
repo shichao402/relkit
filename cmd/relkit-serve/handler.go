@@ -55,6 +55,8 @@ func (c *config) handler() http.Handler {
 		}
 		c.serveLatest(w, r)
 	})
+	mux.HandleFunc(adminPath, c.serveAdmin)
+	mux.HandleFunc(adminFilesPath, c.serveAdminFiles)
 
 	mux.HandleFunc("/", c.serve)
 
@@ -103,24 +105,24 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	}
 	if info.IsDir() {
 		// Directory browsing is for operators checking what is on the box.
-		// Protocol clients still fetch only the signed index; neither the
-		// listing nor the portal is a trust boundary.
+		// Protocol clients still fetch only the signed index.
 		if name != "." && !strings.HasSuffix(r.URL.Path, "/") {
 			http.Redirect(w, r, r.URL.Path+"/", http.StatusMovedPermanently)
 			return
 		}
-		// One box distributes several products, so the root is a product
-		// portal rather than the raw key space. ?files=1 is the way back to
-		// the listing, and a tree with no readable index falls back to it on
-		// its own -- that is the plain-static-host case.
-		if name == "." && !r.URL.Query().Has("files") {
+		if name == "." {
+			if r.URL.Query().Has("files") {
+				http.Redirect(w, r, adminFilesPath, http.StatusMovedPermanently)
+				return
+			}
 			if c.serveExistingFile(w, r, "browse/index.html") {
 				return
 			}
-			if products := c.scanProducts(guessPlatform(r.UserAgent())); len(products) > 0 {
-				c.servePortal(w, r, products)
-				return
-			}
+			c.serveCatalogStub(w, r)
+			return
+		}
+		if name == "browse" && c.serveExistingFile(w, r, "browse/index.html") {
+			return
 		}
 		c.listDir(w, r, file, name)
 		return
@@ -158,6 +160,26 @@ func (c *config) serveExistingFile(w http.ResponseWriter, r *http.Request, name 
 	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 	return true
+}
+
+const catalogStubHTML = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Releases</title>
+<style>body{margin:0;font:16px/1.5 system-ui,sans-serif;padding:2rem 1rem;color:#1c1917;background:#f6f5f1}.wrap{max-width:40rem;margin:0 auto}.sub{color:#57534e}</style>
+</head><body><div class="wrap">
+<h1>Releases</h1>
+<p class="sub">No published catalog yet. Protocol clients do not read this page.</p>
+<p class="sub"><a href="/-/admin">Operator panel</a></p>
+</div></body></html>
+`
+
+func (c *config) serveCatalogStub(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Write([]byte(catalogStubHTML))
 }
 
 // listDir renders one directory: name, size, mtime, nothing else.
@@ -221,6 +243,9 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 		if row.Dir {
 			row.Name += "/"
 			row.Href += "/"
+		}
+		if name == "." {
+			row.Href = "/" + row.Href
 		}
 		if info, err := entry.Info(); err == nil {
 			if !row.Dir {

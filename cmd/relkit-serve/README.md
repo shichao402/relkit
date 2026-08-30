@@ -9,7 +9,7 @@
 做这些事：
 
 1. **对外提供下载**，正确支持 Range 请求，因此客户端可以多线程并发下载。
-2. **若磁盘上已有 `browse/index.html`**，根路径原样返回这页（发布时写好的索引）；没有时才现场生成一页给人看。`?files=1` 仍是原始 key 树。
+2. **对外目录是发布写好的 `browse/` 静态页。** GET `/` 原样返回 `browse/index.html`；没有 dump 就一页说明，不再现场扫盘画门户。操作面板在 `/-/admin`（现算产品卡、`/-/p/`、`/-/admin/files`）。
 3. **可选地接受带鉴权的 PUT 上传**（遗留）。迁到本机 agent 之后应关掉 token，让 PUT 返回 405。
 4. **按 index 引用清理孤儿**，删掉已不被任何 channel 的 index 引用的旧 `manifest/` / `artifact/`。
 
@@ -123,18 +123,20 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 
 | 路径 | 内容 |
 |---|---|
-| `/` | **产品门户**：一台机器上的每个产品一张卡片，每个 channel 一行（当前版本、code、发布日期，以及本平台的下载链接） |
-| `/-/p/<product>` | 单产品下载页：每个 channel 一张卡片，默认只显示最新版、平台包和固定下载入口；sequence / index / manifest / SHA / 版本链收进 `Technical details` |
+| `/` | 对外目录：有 `browse/index.html` 就原样返回；否则一页说明。不是操作面板 |
+| `/browse/` | 同一份 dump（`index.html`、`<product>.html`、`catalog.json`） |
+| `/-/admin` | 操作面板：现算产品卡。以后长成 relkit 后台；不是给人书签的目录 |
+| `/-/p/<product>` | 操作面板里的单产品页（现算，含下载次数与技术细节） |
 | `/-/latest/<product>/<channel>/<artifact-id>` | 长期有效的下载地址；读取发布时写好的 `latest/<product>/<channel>.json` 后 302 到具体产物 |
-| `/<dir>/` | 原来的目录列表：名字、大小、修改时间 |
-| `/?files=1` | 强制回到根目录的文件列表 |
+| `/<dir>/` | 目录列表：名字、大小、修改时间 |
+| `/-/admin/files` | 发布树根目录列表（旧书签 `/?files=1` 会 301 过来） |
 
 几点设计取舍：
 
-- **首页是门户而不是目录**，因为一台 serve 通常带多个产品。裸列出 `index/`、`manifest/`、`artifact/` 等于把协议内部结构当成首页，人得先懂 RUP 才能看懂自己要下哪个包。首页因此**完全不出现协议 key**：`.pb` 链接只在产品页（运维已经在下钻了），整棵树走页脚的 `all files`。
+- **对外目录是 browse dump，操作面板在 `/-/admin`。** 一台 serve 通常带多个产品，但给人看的首页必须是发布写好的静态页（和公网 Makers 同一份）。现算门户、文件树给运维，走 `/-/admin`。`.pb` 链接只在操作面板的产品页。
 - **产品与版本从 index 现读**，不额外维护状态文件：`index/<product>/<channel>.pb` 是发布之后唯一必然为真的东西。页面按请求解析它们（都是极小的 protobuf），因此发布完刷新即见，不需要缓存失效逻辑。
-- **`index/` 下没有一个能解析的文档时，首页自动退回文件列表**。这保证「纯当通用静态服务用」的场景不受影响，也让一台 index 全坏的机器仍然能被翻查。
-- **下载链接挂在 channel 行上，不做单独的“推荐下载”按钮**。首页不替人选 channel：想要 stable 就点 stable 那行，想尝鲜就点 dev 那行。链接指向的产物按 `User-Agent` 猜平台，认不出来（curl、Linux 等）就整列留空 —— 递错包比不给链接更糟。
+- **`index/` 下没有一个能解析的文档时，`/-/admin` 退回文件列表**。这保证「纯当通用静态服务用」的场景不受影响，也让一台 index 全坏的机器仍然能被翻查。
+- **下载链接挂在 channel 行上，不做单独的“推荐下载”按钮**。面板不替人选 channel：想要 stable 就点 stable 那行，想尝鲜就点 dev 那行。链接指向的产物按 `User-Agent` 猜平台，认不出来（curl、Linux 等）就整列留空 —— 递错包比不给链接更糟。
 - **固定下载地址只读发布指针**。每个 channel 发布都原子覆盖自己的 `latest/<product>/<channel>.json`，其中已列好该版本的 artifact ID、selectors 与 URL；`/-/latest/<product>/<channel>/<artifact-id>` 不扫描 index / manifest，也不会因为 dev 发布而改动 stable 的地址。URL 里写明 channel，是因为一条贴进文档的链接必须自己说清它跟的是哪条线。
 - **下载次数写入服务目录根下的 `.relkit-serve-stats.json`**，重启后仍在。页面上写明起算时间。这个文件不出现在目录列表里，GET/PUT 也会被拒绝，因此它不是又一个可被取走的对象。计数本身在内存里累加，落盘是防抖之后的拷贝，热路径上不会多一次写。只统计「无 Range 或 Range 从 0 开始」的 GET，因此 16 线程下载算一次而不是十六次。需要把文件放到树外时，配置 `statsFile`（并给 systemd 加上对应的 `ReadWritePaths`）。
 
@@ -255,7 +257,7 @@ aria2c -x16 -s16 -d /tmp http://dl.internal:8080/artifact/app/1.0.0/app.zip
 
 **路径限制。** 所有文件操作走 `os.Root`，它把操作限制在服务目录内，**包括经由符号链接的逃逸** —— 这正是手写前缀检查通常漏掉的一类。请求路径在此之前还会被单独拒绝一次，这样遍历尝试在日志里表现为 404 而不是一个打开失败。
 
-**首页与目录列表对运维开放。** `GET /` 返回产品门户，各子目录返回 HTML 索引，方便在浏览器里查看已发布内容。协议客户端仍只信任签名过的 index；这两个页面都不是信任边界。因此发布目录里仍然不要放别的东西：列表会把它们暴露出来，且任何路径都能被按名取走。
+**对外目录是静态 dump；操作面板对运维开放。** `GET /` 返回 `browse/index.html`（没有则短说明）。现算门户在 `/-/admin`，各子目录返回 HTML 索引。协议客户端仍只信任签名过的 index；这些页面都不是信任边界。因此发布目录里仍然不要放别的东西：列表会把它们暴露出来，且任何路径都能被按名取走。
 
 ---
 
@@ -266,4 +268,4 @@ go test ./...                              # 功能
 go test -run "^$" -bench . -benchtime 2s   # 吞吐
 ```
 
-覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、产品门户（多产品、channel 排序、坏 index 退回列表、`?files=1`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数、重启后仍在、计数文件不对外提供）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、产品隔离 token（本产品可写、他产品 403、前缀兄弟 403）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、`init -product` 合并配置且 `-token-only` 不改 json、`-product -share-with` 挂到已有 token 且不打印明文、`-list-products` 不打明文且不新建目录、`-remove` 摘条目删文件而运营方 token 与手改字段不受影响（共用文件时只摘 id）、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。
+覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、操作面板（多产品、channel 排序、坏 index 退回列表、`/-/admin/files`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数、重启后仍在、计数文件不对外提供）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、产品隔离 token（本产品可写、他产品 403、前缀兄弟 403）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、`init -product` 合并配置且 `-token-only` 不改 json、`-product -share-with` 挂到已有 token 且不打印明文、`-list-products` 不打明文且不新建目录、`-remove` 摘条目删文件而运营方 token 与手改字段不受影响（共用文件时只摘 id）、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。

@@ -338,7 +338,7 @@ func TestDirectoryListing(t *testing.T) {
 	// stays a file listing. That is also the plain-static-host case.
 	writeFile(t, dir, "index/app/stable.pb", []byte("x"))
 
-	resp, err := http.Get(srv.URL + "/")
+	resp, err := http.Get(srv.URL + "/-/admin/files")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
@@ -350,8 +350,8 @@ func TestDirectoryListing(t *testing.T) {
 	html := string(body)
 	for _, want := range []string{
 		`<th>Name</th><th class="num">Size</th><th class="num">Modified</th>`,
-		`href="artifact/"`,
-		`href="index/"`,
+		`href="/artifact/"`,
+		`href="/index/"`,
 		"artifact/",
 		"index/",
 	} {

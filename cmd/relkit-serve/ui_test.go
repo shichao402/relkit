@@ -53,15 +53,14 @@ func mustContain(t *testing.T, what, body string, wants ...string) {
 	}
 }
 
-// The box carries several products, so the root has to be a portal over all of
-// them rather than a view of one.
+// The operator panel lists every product this box distributes.
 func TestRootPortalListsEveryProduct(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeRelease(t, dir, "svn-auto-merge", "stable", "1.4.2", 142)
 	writeRelease(t, dir, "svn-auto-merge", "dev", "1.5.0", 150)
 	writeRelease(t, dir, "otherapp", "stable", "0.9.0", 90)
 
-	body := getBody(t, srv.URL+"/")
+	body := getBody(t, srv.URL+"/-/admin")
 	mustContain(t, "portal", body,
 		"svn-auto-merge",
 		"otherapp",
@@ -71,16 +70,20 @@ func TestRootPortalListsEveryProduct(t *testing.T) {
 		"1.5.0",
 		"2 products",
 	)
-	// Raw protocol keys belong on the product page, not on the front door.
 	if strings.Contains(body, `href="/index/`) {
 		t.Errorf("portal should not link into the key space\n%s", body)
 	}
 
-	// stable is what most visitors came for, so it sorts above dev.
 	stable := strings.Index(body, "<td>stable</td>")
 	dev := strings.Index(body, "<td>dev</td>")
 	if stable < 0 || dev < 0 || stable > dev {
 		t.Errorf("stable should precede dev (stable=%d dev=%d)\n%s", stable, dev, body)
+	}
+
+	root := getBody(t, srv.URL+"/")
+	mustContain(t, "catalog stub", root, "No published catalog yet", `href="/-/admin"`)
+	if strings.Contains(root, "2 products") {
+		t.Errorf("GET / must not render the operator portal\n%s", root)
 	}
 }
 
@@ -88,8 +91,8 @@ func TestPortalFallsBackToListingWithoutReadableIndex(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeFile(t, dir, "public/notes.txt", []byte("hello"))
 
-	body := getBody(t, srv.URL+"/")
-	mustContain(t, "listing", body, `href="public/"`, "entries")
+	body := getBody(t, srv.URL+"/-/admin")
+	mustContain(t, "listing", body, `href="/public/"`, "entries")
 	if strings.Contains(body, productPathPrefix) {
 		t.Errorf("expected a plain listing, got the portal\n%s", body)
 	}
@@ -100,10 +103,10 @@ func TestFilesQueryForcesListing(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 
-	body := getBody(t, srv.URL+"/?files=1")
-	mustContain(t, "forced listing", body, `href="index/"`, `href="manifest/"`, `href="artifact/"`)
+	body := getBody(t, srv.URL+"/-/admin/files")
+	mustContain(t, "forced listing", body, `href="/index/"`, `href="/manifest/"`, `href="/artifact/"`)
 	if strings.Contains(body, productPathPrefix) {
-		t.Errorf("?files=1 should render the listing, not the portal\n%s", body)
+		t.Errorf("/-/admin/files should render the listing, not the portal\n%s", body)
 	}
 }
 
@@ -117,13 +120,22 @@ func TestWrittenBrowseIndexIsServedAtRoot(t *testing.T) {
 	if !strings.Contains(root, "static catalog app-from-disk") {
 		t.Fatalf("GET / should serve browse/index.html\n%s", root)
 	}
-	product := getBody(t, srv.URL+"/-/p/app")
-	if !strings.Contains(product, "static product page") {
-		t.Fatalf("GET /-/p/app should serve browse/app.html\n%s", product)
+	browse := getBody(t, srv.URL+"/browse/")
+	if !strings.Contains(browse, "static catalog app-from-disk") {
+		t.Fatalf("GET /browse/ should serve browse/index.html\n%s", browse)
 	}
-	listing := getBody(t, srv.URL+"/?files=1")
-	if !strings.Contains(listing, `href="index/"`) {
-		t.Fatalf("?files=1 should still list the tree\n%s", listing)
+	product := getBody(t, srv.URL+"/browse/app.html")
+	if !strings.Contains(product, "static product page") {
+		t.Fatalf("GET /browse/app.html should serve the dump\n%s", product)
+	}
+	live := getBody(t, srv.URL+"/-/p/app")
+	if strings.Contains(live, "static product page") {
+		t.Fatalf("GET /-/p/app is the operator page, not the dump\n%s", live)
+	}
+	mustContain(t, "operator product", live, `class="release-card"`)
+	listing := getBody(t, srv.URL+"/-/admin/files")
+	if !strings.Contains(listing, `href="/index/"`) {
+		t.Fatalf("/-/admin/files should still list the tree\n%s", listing)
 	}
 }
 
@@ -147,7 +159,7 @@ func TestProductPageShowsArtifactsOfLatestVersion(t *testing.T) {
 		"Sequence",
 	)
 	// The page links back to where the visitor came from.
-	mustContain(t, "product page", body, `href="/"`)
+	mustContain(t, "product page", body, `href="/-/admin"`)
 }
 
 func TestProductPageUnknownProductIs404(t *testing.T) {
@@ -170,7 +182,7 @@ func TestPortalHeadRequestSendsNoBody(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 
-	for _, path := range []string{"/", "/-/p/app"} {
+	for _, path := range []string{"/", "/-/admin", "/-/p/app"} {
 		req, _ := http.NewRequest(http.MethodHead, srv.URL+path, nil)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -196,7 +208,7 @@ func TestPortalIsNotCached(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 
-	for _, path := range []string{"/", "/-/p/app", "/?files=1"} {
+	for _, path := range []string{"/", "/-/admin", "/-/p/app", "/-/admin/files"} {
 		resp, err := http.Get(srv.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -280,7 +292,7 @@ func TestEachChannelLinksItsOwnLatestBuild(t *testing.T) {
 	writePlatformRelease(t, dir, "app", "stable", "1.0.0", 100)
 	writePlatformRelease(t, dir, "app", "beta", "1.1.0", 110)
 
-	windows := getWithAgent(t, srv.URL+"/",
+	windows := getWithAgent(t, srv.URL+"/-/admin",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36")
 	mustContain(t, "windows portal", windows,
 		`href="/-/latest/app/stable/windows"`,
@@ -291,12 +303,12 @@ func TestEachChannelLinksItsOwnLatestBuild(t *testing.T) {
 		t.Errorf("a Windows visitor should not be offered the macOS build\n%s", windows)
 	}
 
-	mac := getWithAgent(t, srv.URL+"/",
+	mac := getWithAgent(t, srv.URL+"/-/admin",
 		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15")
 	mustContain(t, "mac portal", mac, `href="/-/latest/app/stable/macos"`)
 
 	// An unrecognized client is offered nothing rather than a wrong guess.
-	robot := getWithAgent(t, srv.URL+"/", "curl/8.4.0")
+	robot := getWithAgent(t, srv.URL+"/-/admin", "curl/8.4.0")
 	if strings.Contains(robot, "/-/latest/app/stable/") {
 		t.Errorf("unknown platform should get no recommendation\n%s", robot)
 	}
@@ -381,7 +393,7 @@ func TestArtifactDownloadsAreCounted(t *testing.T) {
 		t.Errorf("expected 2 counted downloads (plain + range from zero)\n%s", body)
 	}
 
-	portal := getBody(t, srv.URL+"/")
+	portal := getBody(t, srv.URL+"/-/admin")
 	mustContain(t, "portal", portal, "2 downloads")
 
 	// HEAD is a metadata probe, not a download.
@@ -391,7 +403,7 @@ func TestArtifactDownloadsAreCounted(t *testing.T) {
 		t.Fatalf("HEAD artifact: %v", err)
 	}
 	resp.Body.Close()
-	if got := getBody(t, srv.URL+"/"); !strings.Contains(got, "2 downloads") {
+	if got := getBody(t, srv.URL+"/-/admin"); !strings.Contains(got, "2 downloads") {
 		t.Errorf("HEAD should not change the count\n%s", got)
 	}
 }
@@ -425,7 +437,7 @@ func TestDownloadCountsPersistAcrossRestart(t *testing.T) {
 	srv2 := newLocalServer(t, cfg2)
 	t.Cleanup(srv2.Close)
 
-	portal := getBody(t, srv2.URL+"/")
+	portal := getBody(t, srv2.URL+"/-/admin")
 	mustContain(t, "persisted portal", portal, "1 downloads", "persist across restarts", since)
 	product := getBody(t, srv2.URL+"/-/p/app")
 	mustContain(t, "persisted product", product, "1 downloads", "persist across restarts")
@@ -453,7 +465,7 @@ func TestDownloadStatsFileIsNotPublic(t *testing.T) {
 		t.Errorf("GET %s status = %d, want 404", statsFileName, resp.StatusCode)
 	}
 
-	listing := getBody(t, srv.URL+"/?files=1")
+	listing := getBody(t, srv.URL+"/-/admin/files")
 	if strings.Contains(listing, statsFileName) {
 		t.Errorf("listing should omit the stats file\n%s", listing)
 	}
@@ -486,7 +498,7 @@ func TestSiteConfigSuppliesTitlesAndBlurbs(t *testing.T) {
 	t.Cleanup(srv.Close)
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 
-	portal := getBody(t, srv.URL+"/")
+	portal := getBody(t, srv.URL+"/-/admin")
 	mustContain(t, "portal", portal,
 		"OSGame updates",
 		"Demo App",
@@ -502,7 +514,7 @@ func TestPagesOfferSystemLightAndDarkThemes(t *testing.T) {
 	srv, dir := newTestServer(t, false)
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 
-	for _, page := range []string{getBody(t, srv.URL+"/"), getBody(t, srv.URL+"/-/p/app")} {
+	for _, page := range []string{getBody(t, srv.URL+"/-/admin"), getBody(t, srv.URL+"/-/p/app")} {
 		mustContain(t, "theme control", page,
 			`<html lang="en" data-theme="system">`,
 			`id="theme-select"`,
@@ -539,7 +551,7 @@ func TestPublishedSiteCopyOverridesServerFallback(t *testing.T) {
 	}
 	writeFile(t, dir, webmeta.SiteKey("app"), raw)
 
-	body := getBody(t, srv.URL+"/")
+	body := getBody(t, srv.URL+"/-/admin")
 	mustContain(t, "portal", body, "Team-owned title", "Published by the product team.")
 	if strings.Contains(body, "Old server copy") {
 		t.Errorf("server fallback won over published site document\n%s", body)

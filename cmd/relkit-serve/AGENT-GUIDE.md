@@ -89,7 +89,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 ### 2.4 服务目录里只能放发布树
 
-根路径 `/` 返回产品门户（每个产品一张卡片，`/-/p/<product>` 是单产品页），各子目录返回 HTML 目录列表，`/?files=1` 强制回到根目录列表。方便运维查看已发布内容，同时**任何路径都能被直接取走**。目录里若有备份、构建日志、密钥、`.git`，打开列表或猜到名字就能拿到。
+根路径 `/` 返回对外目录（`browse/index.html`，没有则短说明）。`/-/admin` 是操作面板（每个产品一张卡片，`/-/p/<product>` 是单产品页），各子目录返回 HTML 目录列表，`/-/admin/files` 是根目录列表。方便运维查看已发布内容，同时**任何路径都能被直接取走**。目录里若有备份、构建日志、密钥、`.git`，打开列表或猜到名字就能拿到。
 
 唯一例外是服务自己写的 `.relkit-serve-stats.json`（下载计数）：不出现在列表里，GET 返回 404，PUT 拒绝。不要再往发布目录里放别的东西。
 
@@ -210,10 +210,11 @@ curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" --data-binary 'x' $BASE/probe
 curl -s -o /dev/null -w '%{http_code}\n' -r 0-0 $BASE/probe.txt
 # 期望 206。得到 200 说明 Range 没生效，客户端会退化成单线程
 
-# 5) 根目录可浏览
+# 5) 根路径是对外目录；操作面板在 /-/admin
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/
-# 期望 200。有可解析的 index 时正文是产品门户，否则是文件列表；
-# $BASE/?files=1 任何时候都给文件列表
+curl -s -o /dev/null -w '%{http_code}\n' $BASE/-/admin
+# 期望都是 200。有 browse/index.html 时 / 是静态目录页，否则是说明；
+# $BASE/-/admin 是现算门户，$BASE/-/admin/files 是文件列表
 
 curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" $BASE/probe.txt 2>/dev/null || \
   sudo rm -f /srv/releases/probe.txt   # 服务不支持 DELETE，探针文件手工清掉

@@ -1,14 +1,12 @@
 package main
 
-// The human-facing pages. Protocol clients never read any of this: they fetch
-// the signed index and follow absolute URLs. These pages exist so that a person
-// who opens the server in a browser lands on "which products does this box
-// distribute" instead of the raw RUP key space, which reads like the inside of
-// a repository.
+// Operator pages live under /-/ so they never shadow a published file. Protocol
+// clients never read any of this: they fetch the signed index.
 //
-// One box carries many products, so the root page is a product portal and the
-// file tree is a drill-down. When nothing under index/ parses, the server is
-// being used as a plain static host and the listing is all there is to show.
+// The public catalog is the static browse dump (GET /). These pages are the
+// self-hosted panel: live portal, product cards, file tree. That surface is for
+// operators on this box and can grow into an admin UI; it is not the catalog
+// people bookmark.
 
 import (
 	"bytes"
@@ -33,6 +31,8 @@ import (
 const (
 	productPathPrefix = "/-/p/"
 	latestPathPrefix  = "/-/latest/"
+	adminPath         = "/-/admin"
+	adminFilesPath    = "/-/admin/files"
 )
 
 const (
@@ -498,6 +498,39 @@ func (c *config) servePortal(w http.ResponseWriter, r *http.Request, products []
 	c.renderPage(w, r, "portal", page)
 }
 
+func (c *config) serveAdmin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	products := c.scanProducts(guessPlatform(r.UserAgent()))
+	if len(products) > 0 {
+		c.servePortal(w, r, products)
+		return
+	}
+	c.serveRootListing(w, r)
+}
+
+func (c *config) serveAdminFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	c.serveRootListing(w, r)
+}
+
+func (c *config) serveRootListing(w http.ResponseWriter, r *http.Request) {
+	file, err := c.root.Open(".")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+	c.listDir(w, r, file, ".")
+}
+
 func (c *config) serveProduct(w http.ResponseWriter, r *http.Request) {
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, productPathPrefix), "/")
 	if rest == "" || strings.Contains(rest, "/") {
@@ -507,10 +540,6 @@ func (c *config) serveProduct(w http.ResponseWriter, r *http.Request) {
 	product, err := url.PathUnescape(rest)
 	if err != nil || product != path.Clean(product) || strings.HasPrefix(product, ".") {
 		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-
-	if c.serveExistingFile(w, r, "browse/"+product+".html") {
 		return
 	}
 
@@ -530,7 +559,7 @@ func (c *config) serveProduct(w http.ResponseWriter, r *http.Request) {
 		Title:   page.Name + " · releases",
 		Version: version,
 		Note:    plural(len(page.Channels), "channel", "channels"),
-		Crumbs:  []crumb{{Label: "Releases", Href: "/"}, {Label: page.Name}},
+		Crumbs:  []crumb{{Label: "Releases", Href: adminPath}, {Label: page.Name}},
 	}
 	page.Sub = r.Host
 	page.StatsSince = c.stats.startedAt()
@@ -901,12 +930,12 @@ func plural(n int, one, many string) string {
 }
 
 func breadcrumbs(name string) []crumb {
-	crumbs := []crumb{{Label: "Releases", Href: "/"}}
+	crumbs := []crumb{{Label: "Releases", Href: adminPath}}
 	if name == "." {
 		crumbs = append(crumbs, crumb{Label: "files"})
 		return crumbs
 	}
-	crumbs = append(crumbs, crumb{Label: "files", Href: "/?files=1"})
+	crumbs = append(crumbs, crumb{Label: "files", Href: adminFilesPath})
 	segments := strings.Split(name, "/")
 	href := ""
 	for i, segment := range segments {
@@ -1013,7 +1042,7 @@ p.foot a{color:var(--muted)}
 <div class="topline">{{if .Crumbs}}<nav class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sep">/</span>{{end}}{{if $c.Href}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{else}}<span>{{$c.Label}}</span>{{end}}{{end}}</nav>{{else}}<span></span>{{end}}<label class="theme"><span>Theme</span><select id="theme-select" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
 {{end}}
 
-{{define "foot"}}<p class="foot">relkit-serve {{.Version}}{{if .Note}} · {{.Note}}{{end}} · <a href="/?files=1">all files</a></p>
+{{define "foot"}}<p class="foot">relkit-serve {{.Version}}{{if .Note}} · {{.Note}}{{end}} · <a href="/-/admin/files">all files</a></p>
 <script>(function(){var s=document.getElementById("theme-select");if(!s)return;var t=document.documentElement.dataset.theme||"system";s.value=t;s.addEventListener("change",function(){var v=s.value;document.documentElement.dataset.theme=v;try{if(v==="system")localStorage.removeItem("relkit-theme");else localStorage.setItem("relkit-theme",v)}catch(e){}})})()</script>
 </div></body></html>
 {{end}}
