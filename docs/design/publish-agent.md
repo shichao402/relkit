@@ -6,7 +6,7 @@ category: design
 created: 2026-08-12
 updated: 2026-08-27
 status: approved
-related: docs/design/update-ingress-cos.md, CLI.md, cmd/relkit-agent
+related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent
 ---
 
 ## 1. 决议
@@ -83,9 +83,12 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 
 ## 8. 给人看的索引页
 
-`publish.Run` 会写出 `browse/<product>.html`、合并后的 `browse/index.html` 与 `browse/catalog.json`：
+`publish.Run` 会写出 `browse/<product>.html`、合并后的 `browse/index.html` 与 `browse/catalog.json`（产品树 dump 在 `.relkit/browse/`）。协议客户端不读这些页。
 
-- **内网 `local` / 遗留 `http-put`**：写入数据面，GET 即可打开。serve 若发现 `browse/index.html`，根路径不再现场拼页。
-- **公网 `s3-compatible`**：不把 HTML 写入 COS。同一份文件落在产品树 `.relkit/browse/`，再推到 EdgeOne Makers（`sites/updates-index/`）。
+| | 公网 | 内网 |
+|---|---|---|
+| 托管 | EdgeOne Makers（契约在本仓库 `sites/updates-index/`，**不要把 dump 拷进该目录当发版步骤**） | 数据面 `browse/` |
+| 怎么上去 | 产品 `relkit.json` 配 `site.makers`；publish 写出 dump 后直接 Upload | `local` / 遗留 `http-put` 由 publish 直接写；即使配了 makers 也跳过 |
+| 动态 | 现在没有 `edge-functions/`，就是静态站。以后要函数只加在该子目录，内网不跟 |
 
-协议客户端不读这些页。页上不把 `.pb` 当导航，也不加载外链字体或图。
+COS 不放 HTML。不要为此打开静态网站源站。页上不把 `.pb` 当导航，也不加载外链字体或图。

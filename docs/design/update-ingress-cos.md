@@ -6,7 +6,7 @@ category: design
 created: 2026-08-11
 updated: 2026-08-27
 status: approved
-related: ADR 0005, docs/design/bootstrap-directory.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
+related: ADR 0005, docs/design/bootstrap-directory.md, docs/design/publish-topology.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
 ---
 
 ## 1. 决议
@@ -315,7 +315,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 
 **不要**为了赶时间先用默认桶域名发一版：`entryUrls` 一旦随二进制发出去就几乎不可变，那样等于把厂商、地域、桶名焊进所有老客户端，之后只能按 §8 双写迁移收场。
 
-给人看的索引页没有编译进客户端，换托管或换域名只影响书签，**不影响**已装客户端的更新链。COS 只放协议对象：根路径 `GET /` 403 是 REST 源站拒 ListBucket，不要为此打开「静态网站源站」。索引站用腾讯云 **EdgeOne Makers**（Git 部署静态站，与 EdgeOne 个人版 CDN 套餐不是同一产品）。生成物见仓库 `sites/updates-index/` 与发布时写出的 `.relkit/browse/`。
+给人看的索引页没有编译进客户端，换托管或换域名只影响书签，**不影响**已装客户端的更新链。COS 只放协议对象：根路径 `GET /` 403 是 REST 源站拒 ListBucket，不要为此打开「静态网站源站」。公网索引站是 EdgeOne Makers（契约目录 `sites/updates-index/`，当前纯静态、无 `edge-functions/`）；`relkit publish` 在公网 COS 目标上若配了 `site.makers`，会把产品 `.relkit/browse/` dump 直接 Upload。内网用同一份 dump 写在数据面 `browse/`，不经过 Makers。
 
 ### 10.1 证书（已完成，含续期义务）
 
@@ -335,7 +335,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 2. 证书续期自动化（见 §10.1）。
 3. 需要边缘加速时再挂 CDN 加速域名（届时 CNAME 改指 `*.cdn.dnsv1.com`，证书托管随之迁到 CDN）。
 4. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
-5. 把 `.relkit/browse/` 推到 EdgeOne Makers（`sites/updates-index/`）。
+5. 公网：产品 `relkit.json` 配 `site.makers` 后，`relkit publish` 会把 `.relkit/browse/` 部署到 Makers（项目 `relkit-updates-index`）。内网 publish 已写 `browse/`，不必再部署 Makers。
 
 凭据：`COS_SECRET_ID` / `COS_SECRET_KEY` 只进发布机环境（或 mise 私密配置），**禁止**写入仓库。
 
@@ -346,7 +346,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 1. **DNS**：`raw` CNAME 到与 `updates` 相同的 COS 主机（`relkit-updates-1251882798.cos.ap-guangzhou.myqcloud.com`）。**已完成。**
 2. **COS 自定义源站域名**绑定 `raw.firoyang.com`，并部署 HTTPS 证书（与 `updates` 同一套续期流程，§10.1）。**已完成**；匿名 GET 已通。
 3. 新发版 `baseUrl` / 新客户端 `entryUrls` 走 `https://raw.firoyang.com/rup/...`。
-4. 把发布写出的 `browse/*.html` 推到 EdgeOne Makers（见 `sites/updates-index/README.md`）。
+4. 公网 publish（配了 `site.makers`）把 dump 部署到 Makers。内网跳过这步。**不要**把 HTML 拷进 relkit 仓库的 `sites/updates-index/` 当发版步骤。
 5. 旧客户端都升到认 `raw.` 之后，再把 `updates` CNAME 改到 EdgeOne Makers。在此之前不要动 `updates`，否则已装 Dec 会找不到 directory。
 
 ## 11. 交叉引用

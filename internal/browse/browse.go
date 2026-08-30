@@ -1,5 +1,11 @@
 // Package browse builds the unsigned HTML people open in a browser.
 // Protocol clients never read these files.
+//
+// Public hosting is EdgeOne Makers: relkit publish deploys .relkit/browse
+// when site.makers is set. sites/updates-index/ is the Makers contract
+// (placeholder, optional future edge-functions/), not a per-release copy
+// target. Intranet local/http-put backends write the same files to the
+// data-plane browse/ prefix and skip Makers.
 package browse
 
 import (

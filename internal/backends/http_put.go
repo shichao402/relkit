@@ -74,6 +74,10 @@ func (b *httpPutBackend) Writable() bool {
 	return true
 }
 
+func (b *httpPutBackend) HostsBrowse() bool {
+	return true
+}
+
 func (b *httpPutBackend) PutArtifact(localPath string, key string) ([]string, error) {
 	token, err := b.token()
 	if err != nil {

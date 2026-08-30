@@ -156,8 +156,13 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 			printer("  " + webmeta.SiteKey(cfg.Product) + "  <- site copy")
 		}
 		printer("  " + webmeta.LatestKey(cfg.Product, channel) + "  <- fixed latest links")
-		printer("  " + browse.ProductKey(cfg.Product) + "  <- human index (dump + local/http-put)")
-		printer("  " + browse.IndexKey() + "  <- human catalog page (dump + local)")
+		printer("  " + browse.ProductKey(cfg.Product) + "  <- human index dump")
+		printer("  " + browse.IndexKey() + "  <- human catalog page")
+		printer("  " + browse.CatalogKey() + "  <- human catalog json")
+		for _, sink := range OpenBrowseSinks(cfg, openedBackends) {
+			printer("  " + sink.Name() + "  <- BrowseSink")
+		}
+		warnMissingSiteSink(cfg, openedBackends, printer)
 		return nil, nil
 	}
 
@@ -253,7 +258,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 	failures = append(failures, webFailures...)
 	if len(failures) > 0 && !allowPartial {
-		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest/browse pointer is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
+		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest/browse pointer or Makers index is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
 	}
 
 	printer("")
@@ -329,6 +334,22 @@ func writeWebPointers(
 		data  []byte
 	}{"latest", webmeta.LatestKey(cfg.Product, staged.Channel), data})
 
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	printer("writing web pointers...")
+	var failures []string
+	for _, backend := range targets {
+		for _, document := range documents {
+			if _, err := backend.PutPointer(document.data, document.key); err != nil {
+				failures = append(failures, fmt.Sprintf("%s %s: %v", backend.Name(), document.label, err))
+				printer(fmt.Sprintf("  %-12s %s FAILED: %v", backend.Name(), document.key, err))
+				continue
+			}
+			printer(fmt.Sprintf("  %-12s %s", backend.Name(), document.key))
+		}
+	}
+
 	var siteDoc *webmeta.Site
 	if hasSiteCopy(cfg) {
 		siteDoc = &webmeta.Site{
@@ -352,81 +373,39 @@ func writeWebPointers(
 	if err != nil {
 		return nil, err
 	}
-	if err := browse.WriteDump(cfg.Root, map[string][]byte{
+	dump := map[string][]byte{
 		browse.IndexKey():              indexHTML,
 		browse.ProductKey(cfg.Product): productHTML,
 		browse.CatalogKey():            catalogJSON,
-	}); err != nil {
+	}
+	if err := browse.WriteDump(cfg.Root, dump); err != nil {
 		return nil, err
 	}
 
-	if len(documents) == 0 || len(targets) == 0 {
-		return nil, nil
+	sinks := OpenBrowseSinks(cfg, targets)
+	if len(sinks) > 0 {
+		printer("deploying human index...")
 	}
-	printer("writing web pointers...")
-	var failures []string
-	for _, backend := range targets {
-		toWrite := documents
-		if holdsHumanIndex(backend) {
-			toWrite = append(append([]struct {
-				label string
-				key   string
-				data  []byte
-			}{}, documents...), struct {
-				label string
-				key   string
-				data  []byte
-			}{"browse-product", browse.ProductKey(cfg.Product), productHTML})
-			if backend.Type() == "local" {
-				toWrite = append(toWrite, struct {
-					label string
-					key   string
-					data  []byte
-				}{"browse-index", browse.IndexKey(), indexHTML}, struct {
-					label string
-					key   string
-					data  []byte
-				}{"browse-catalog", browse.CatalogKey(), catalogJSON})
-			}
+	for _, sink := range sinks {
+		if err := sink.Deploy(dump); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", sink.Name(), err))
+			printer(fmt.Sprintf("  %-12s FAILED: %v", sink.Name(), err))
+			continue
 		}
-		for _, document := range toWrite {
-			if _, err := backend.PutPointer(document.data, document.key); err != nil {
-				failures = append(failures, fmt.Sprintf("%s %s: %v", backend.Name(), document.label, err))
-				printer(fmt.Sprintf("  %-12s %s FAILED: %v", backend.Name(), document.key, err))
-				continue
-			}
-			printer(fmt.Sprintf("  %-12s %s", backend.Name(), document.key))
-		}
+		printer(fmt.Sprintf("  %-12s .relkit/browse", sink.Name()))
 	}
+	warnMissingSiteSink(cfg, targets, printer)
 	return failures, nil
-}
-
-func holdsHumanIndex(backend backends.Backend) bool {
-	switch backend.Type() {
-	case "local", "http-put":
-		return true
-	default:
-		return false
-	}
 }
 
 func loadBrowseCatalog(cfg *config.Config, targets []backends.Backend) *browse.Catalog {
 	if dumped := browse.ReadDumpCatalog(cfg.Root); dumped != nil {
 		return dumped
 	}
-	for _, backend := range targets {
-		if !holdsHumanIndex(backend) {
-			continue
+	for _, sink := range OpenBrowseSinks(cfg, targets) {
+		if doc := sink.LoadCatalog(); doc != nil {
+			return doc
 		}
-		raw, err := backend.Get(browse.CatalogKey())
-		if err != nil || len(raw) == 0 {
-			continue
-		}
-		doc, err := browse.UnmarshalCatalog(raw)
-		if err != nil {
-			continue
-		}
-		return doc
 	}
 	return nil
 }

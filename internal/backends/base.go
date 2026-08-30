@@ -33,6 +33,10 @@ type Backend interface {
 	Get(key string) ([]byte, error)
 	URLFor(key string) *string
 	Probe(rawURL string) (bool, *int64, string)
+	// HostsBrowse is true when this backend's GET tree can serve the human
+	// index (browse/). Protocol-only stores return false; HTML goes to a
+	// BrowseSink instead of this backend.
+	HostsBrowse() bool
 }
 
 // PublishPreflighter is optional. Backends that can negotiate writer
@@ -84,6 +88,10 @@ func (b *pathStyleBackend) URLFor(key string) *string {
 
 func (b *pathStyleBackend) Probe(rawURL string) (bool, *int64, string) {
 	return httpx.Probe(rawURL, httpx.DefaultTimeout)
+}
+
+func (b *pathStyleBackend) HostsBrowse() bool {
+	return false
 }
 
 func (b *pathStyleBackend) resolveUnder(directory string, key string) (string, error) {

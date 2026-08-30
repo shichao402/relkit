@@ -173,6 +173,8 @@ relkit publish 1.5.0 --dry-run
 
 **6. publish。** 顺序由工具保证：先校验，再上传产物与清单，**最后**写 `index` 指针。指针写入之前的任何失败都是安全的（新版本对客户端还不可见），直接重跑即可。
 
+给人看的索引：publish 会在 `.relkit/browse/` 写出 `index.html`、`<product>.html`、`catalog.json`。`HostsBrowse` 的后端（`local` / `http-put`）把同一份 dump 写到数据面 `browse/`；配了 `site.makers` 且本轮有协议专用后端（如 COS）时，再 Upload 到 Makers。`--to local` 即使配了 makers 也跳过。换站点托管加 BrowseSink 实现，不要按后端 `Type()` 猜测。见 `docs/design/publish-topology.md`。
+
 **7. verify。** 确认各后端一致、哈希吻合：
 
 ```bash
@@ -197,7 +199,7 @@ relkit verify --deep   # 逐个 artifact 发 HEAD，确认可匿名访问
 
 **1–2. 生成密钥并确认私钥安全。** `relkit keygen --key-id k1 --out keys/`。公钥文件可以提交（客户端要内嵌它），私钥文件绝不可以。确认 `.gitignore` 覆盖了私钥后再继续。
 
-**3. 填写 `relkit.json`。** 结构见 `CLI.md` §5。凭据一律只写环境变量名。
+**3. 填写 `relkit.json`。** 结构见 `CLI.md` §5。凭据一律只写环境变量名。协议对象走 `publishTo` 后端；人页走 BrowseSink（`HostsBrowse` 的数据面 `browse/`，或 `site.makers`）。拓扑见 `docs/design/publish-topology.md`。
 
 **4. 先跑通 `local` 后端。** 它把完整目录树输出到本地，整个发布流程可以完全离线验证。**在 `local` 端到端跑通之前，不要接真实后端** —— 否则一旦出问题，你无法区分是流程错了还是后端配置错了。
 

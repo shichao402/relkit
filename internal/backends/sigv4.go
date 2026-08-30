@@ -80,6 +80,17 @@ func signAWSV4(req *http.Request, payloadHash string, region string, service str
 	return nil
 }
 
+// SignS3Request signs req with AWS SigV4 for service "s3".
+// Set X-Amz-Security-Token on req before calling when using STS credentials.
+func SignS3Request(req *http.Request, payloadHash, region, accessKey, secretKey string, now time.Time) error {
+	return signAWSV4(req, payloadHash, region, "s3", accessKey, secretKey, now)
+}
+
+// SHA256Hex is the hex SHA-256 of data, for SigV4 payload hashing.
+func SHA256Hex(data []byte) string {
+	return hashSHA256Hex(data)
+}
+
 func canonicalURI(u *url.URL) string {
 	path := u.EscapedPath()
 	if path == "" {

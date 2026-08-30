@@ -42,6 +42,10 @@ func (b *localBackend) Writable() bool {
 	return true
 }
 
+func (b *localBackend) HostsBrowse() bool {
+	return true
+}
+
 func (b *localBackend) PutArtifact(localPath string, key string) ([]string, error) {
 	if err := b.copyFile(b.outputDir, key, localPath); err != nil {
 		return nil, err
