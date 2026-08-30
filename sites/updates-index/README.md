@@ -44,7 +44,9 @@ Makers 失败与 `site` / `latest` / `browse` 指针失败同类：协议 index 
 
 本目录 **没有** `edge-functions/`。Makers 就当普通静态站。不要为了目录页去开 KV。
 
-以后若要函数，在本目录加 `edge-functions/`；内网发布不受影响，只要 publish 仍写出 `browse/`。动态方案若要减部署次数，优先静态壳 + COS 上的 `catalog.json`，不要 KV。
+访问计数（未落地）：嵌 51.la，后台看报表，不把次数画在卡片上。不要用 Edge Function + KV/Blob 做 `+1`，不要自建 Redis，不要腾讯分析 / 灯塔。结论见 [`docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+
+以后若要函数，在本目录加 `edge-functions/`（无状态改写，不当计数账本）；内网发布不受影响，只要 publish 仍写出 `browse/`。动态方案若要减部署次数，优先静态壳 + COS 上的 `catalog.json`，不要 KV。
 
 ## 部署
 

@@ -90,6 +90,6 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 |---|---|---|
 | 托管 | EdgeOne Makers（契约在本仓库 `sites/updates-index/`，**不要把 dump 拷进该目录当发版步骤**） | 数据面 `browse/` |
 | 怎么上去 | 产品 `relkit.json` 配 `site.makers`；publish 写出 dump 后直接 Upload | `local` / 遗留 `http-put` 由 publish 直接写；即使配了 makers 也跳过 |
-| 动态 | 现在没有 `edge-functions/`，就是静态站。以后要函数只加在该子目录，内网不跟 |
+| 动态 | 现在没有 `edge-functions/`，就是静态站。计数走 51.la（见 `docs/ROADMAP.md`），不要 KV。以后要函数只加在该子目录，且不当账本；内网不跟 |
 
 COS 不放 HTML。不要为此打开静态网站源站。页上不把 `.pb` 当导航，也不加载外链字体或图。
