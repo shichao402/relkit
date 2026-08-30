@@ -109,8 +109,9 @@ flowchart TB
 
 ## 6. 现网落地（2026-08-30）
 
-外网 CVM（`publish.firoyang.com:443` → `127.0.0.1:8787`）已按上表运行。内网 WOA 同一切面，现网先 `:80`：
+外网 CVM（`publish.firoyang.com:443` → `127.0.0.1:8787`）已按上表运行。内网同一切面，本机 origin 先 `:80`：
 
-- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余 GET → serve `127.0.0.1:8080`
+- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余 **GET/HEAD** → serve `127.0.0.1:8080`
+- 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变
 - 配置样例：`deploy/nginx-intranet.example.conf`
-- 有证书后再加 `listen 443 ssl`，流程不变
+- 人页 `browse/` 要等一次经 agent 的 `publish.Run`（`local` → `DataPlaneBrowse`）才会出现；此前 GET `/` 仍是 serve 自带目录页
