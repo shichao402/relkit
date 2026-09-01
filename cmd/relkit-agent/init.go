@@ -202,7 +202,9 @@ func runInitMigrateProfile(out io.Writer, configPath, product string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(profilePath), 0o750); err != nil {
+	// Publish profiles contain no secret values and must be traversable by the
+	// unprivileged service user even when init runs as root.
+	if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
 		return err
 	}
 	// Profile contains endpoint and environment-variable names, never secret
