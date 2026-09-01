@@ -8,12 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 	"cnb.cool/shichao402/relkit/internal/envelope"
 	"cnb.cool/shichao402/relkit/internal/keys"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/testutil"
-	"google.golang.org/protobuf/proto"
 )
 
 type signatureKeysFixture struct {
@@ -136,19 +134,6 @@ func loadEnvelopeCasesFixture(t *testing.T, path string) envelopeFixture {
 		t.Fatal(err)
 	}
 
-	seeds := loadSigningSeeds(t, filepath.Dir(path))
-	var baseIndex *model.IndexDocument
-	for _, tc := range raw.Cases {
-		index, err := decodeLegacyPayloadIndex(tc.Envelope.Payload)
-		if err == nil {
-			baseIndex = index
-			break
-		}
-	}
-	if baseIndex == nil {
-		t.Fatal("could not decode any legacy payload from envelope fixtures")
-	}
-
 	fixture := envelopeFixture{
 		Name:          raw.Name,
 		TrustedKeys:   raw.TrustedKeys,
@@ -157,170 +142,30 @@ func loadEnvelopeCasesFixture(t *testing.T, path string) envelopeFixture {
 		Cases:         make([]envelopeCase, 0, len(raw.Cases)),
 	}
 	for _, tc := range raw.Cases {
-		index, err := decodeLegacyPayloadIndex(tc.Envelope.Payload)
+		payload, err := base64.StdEncoding.DecodeString(tc.Envelope.Payload)
 		if err != nil {
-			if tc.Name != "tampered-payload" {
-				t.Fatal(err)
-			}
-			index = proto.Clone(baseIndex).(*model.IndexDocument)
+			t.Fatalf("%s: payload: %v", tc.Name, err)
 		}
-		env, err := buildProtoEnvelopeCase(tc.Name, index, tc.Envelope, seeds)
-		if err != nil {
-			t.Fatal(err)
+		env := model.Envelope{
+			Schema:  tc.Envelope.Schema,
+			Payload: payload,
+		}
+		for _, entry := range tc.Envelope.Signatures {
+			sig, err := base64.StdEncoding.DecodeString(entry.Sig)
+			if err != nil {
+				t.Fatalf("%s: sig %s: %v", tc.Name, entry.KeyID, err)
+			}
+			env.Signatures = append(env.Signatures, &model.Signature{
+				KeyId: entry.KeyID,
+				Alg:   entry.Alg,
+				Sig:   sig,
+			})
 		}
 		fixture.Cases = append(fixture.Cases, envelopeCase{
 			Name:           tc.Name,
-			Envelope:       *env,
+			Envelope:       env,
 			ExpectAccepted: tc.ExpectAccepted,
 		})
 	}
 	return fixture
-}
-
-func loadSigningSeeds(t *testing.T, root string) map[string][]byte {
-	t.Helper()
-	var fixture signatureKeysFixture
-	loadEnvelopeFixture(t, filepath.Join(root, "keys.json"), &fixture)
-	seeds := make(map[string][]byte, len(fixture.Keys))
-	for _, entry := range fixture.Keys {
-		if entry.PrivateSeedBase64 == "" {
-			continue
-		}
-		seed, err := keys.DecodeSeed(entry.PrivateSeedBase64, entry.KeyID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		seeds[entry.KeyID] = seed
-	}
-	return seeds
-}
-
-type legacyIndexDocument struct {
-	Product      string              `json:"product"`
-	Channel      string              `json:"channel"`
-	Sequence     int64               `json:"sequence"`
-	GeneratedAt  string              `json:"generatedAt"`
-	MinSupported *int64              `json:"minSupported"`
-	ExpiresAt    string              `json:"expiresAt"`
-	Versions     []legacyVersionNode `json:"versions"`
-}
-
-type legacyVersionNode struct {
-	Version    string            `json:"version"`
-	Code       int64             `json:"code"`
-	MinFrom    int64             `json:"minFrom"`
-	ReleasedAt string            `json:"releasedAt"`
-	Yanked     bool              `json:"yanked"`
-	Notes      string            `json:"notes"`
-	NotesURL   string            `json:"notesUrl"`
-	Manifest   legacyManifestRef `json:"manifest"`
-}
-
-type legacyManifestRef struct {
-	SHA256 string   `json:"sha256"`
-	Size   int64    `json:"size"`
-	URLs   []string `json:"urls"`
-}
-
-func decodeLegacyPayloadIndex(encoded string) (*model.IndexDocument, error) {
-	data, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, err
-	}
-	var legacy legacyIndexDocument
-	if err := json.Unmarshal(data, &legacy); err != nil {
-		return nil, err
-	}
-	index := &model.IndexDocument{
-		Schema:      model.SchemaIndex,
-		Product:     legacy.Product,
-		Channel:     legacy.Channel,
-		Sequence:    legacy.Sequence,
-		GeneratedAt: legacy.GeneratedAt,
-		ExpiresAt:   legacy.ExpiresAt,
-		Versions:    make([]*model.VersionNode, 0, len(legacy.Versions)),
-	}
-	if legacy.MinSupported != nil {
-		index.MinSupported = *legacy.MinSupported
-		index.HasMinSupported = true
-	}
-	for _, version := range legacy.Versions {
-		index.Versions = append(index.Versions, &model.VersionNode{
-			Version:    version.Version,
-			Code:       version.Code,
-			MinFrom:    version.MinFrom,
-			ReleasedAt: version.ReleasedAt,
-			Yanked:     version.Yanked,
-			Notes:      version.Notes,
-			NotesUrl:   version.NotesURL,
-			Manifest: &model.ManifestRef{
-				Sha256: version.Manifest.SHA256,
-				Size:   version.Manifest.Size,
-				Urls:   append([]string(nil), version.Manifest.URLs...),
-			},
-		})
-	}
-	return index, nil
-}
-
-func buildProtoEnvelopeCase(name string, index *model.IndexDocument, raw struct {
-	Schema     string `json:"schema"`
-	Payload    string `json:"payload"`
-	Signatures []struct {
-		KeyID string `json:"keyId"`
-		Alg   string `json:"alg"`
-		Sig   string `json:"sig"`
-	} `json:"signatures"`
-}, seeds map[string][]byte) (*model.Envelope, error) {
-	payload, err := rupv2.MarshalIndex(index)
-	if err != nil {
-		return nil, err
-	}
-	env := &model.Envelope{
-		Schema:  model.SchemaEnvelope,
-		Payload: payload,
-	}
-	if name == "wrong-envelope-schema" {
-		env.Schema = "rup.envelope/3"
-	}
-	for _, entry := range raw.Signatures {
-		sigBytes, err := buildSignatureBytes(name, index, payload, entry.KeyID, entry.Alg, entry.Sig, seeds)
-		if err != nil {
-			return nil, err
-		}
-		env.Signatures = append(env.Signatures, &model.Signature{
-			KeyId: entry.KeyID,
-			Alg:   entry.Alg,
-			Sig:   sigBytes,
-		})
-	}
-	if name == "tampered-payload" && len(env.Payload) > 0 {
-		env.Payload[len(env.Payload)-1] ^= 0x01
-	}
-	return env, nil
-}
-
-func buildSignatureBytes(name string, index *model.IndexDocument, payload []byte, keyID, alg, rawSig string, seeds map[string][]byte) ([]byte, error) {
-	if alg != "ed25519" {
-		return base64.StdEncoding.DecodeString(rawSig)
-	}
-	seed := seeds[keyID]
-	if len(seed) == 0 {
-		return base64.StdEncoding.DecodeString(rawSig)
-	}
-	message := payload
-	if name == "cross-payload-replay" {
-		other := proto.Clone(index).(*model.IndexDocument)
-		other.Sequence++
-		alternate, err := rupv2.MarshalIndex(other)
-		if err != nil {
-			return nil, err
-		}
-		message = alternate
-	}
-	signature := ed25519.Sign(ed25519.NewKeyFromSeed(seed), message)
-	if name == "bad-signature" && keyID == "k1" && len(signature) > 0 {
-		signature[len(signature)-1] ^= 0x01
-	}
-	return signature, nil
 }

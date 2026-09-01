@@ -1,4 +1,4 @@
-# RUP 一致性用例（Conformance Fixtures）v1
+# RUP 一致性用例（Conformance Fixtures）v2
 
 本目录是语言无关的测试数据。任何 RUP 客户端实现（Go / Dart / Node / C#…）都**必须**跑通全部用例，任何发布侧实现都**必须**跑通 `reachability/`。
 
@@ -37,7 +37,7 @@
 2. **占位值。** 选路与可达性用例不关心 manifest 的实际内容，其 `sha256` 使用可辨识的重复数字（如 64 个 `1`），`urls` 使用 `.invalid` 域名。这些值满足 Schema 但不可解析，从而保证实现不会意外去访问网络。
 3. **节点引用。** 期望结果用 `version` 字符串引用版本节点，而不是数组下标 —— 下标会让「乱序」用例失去意义。
 4. **null 的含义。** `expectTarget: null` 表示 `selectNextTarget` 必须返回空，即「当前没有可达的更新」。
-5. **失败即不合规。** 任何一个用例不通过，该实现**禁止**声称兼容 RUP v1。
+5. **失败即不合规。** 任何一个用例不通过，该实现**禁止**声称兼容 RUP v2。
 
 ## `version-select/` 用例格式
 
@@ -108,7 +108,9 @@
 
 ## `signature/` 用例格式
 
-该目录下的签名用例由确定性 Ed25519 生成并检入仓库，**禁止**手工改 envelope 字节 —— 手改会使签名与 payload 失配。若需扩展，用相同平凡种子在实现侧重新生成并整文件替换。
+该目录下的签名用例由确定性 Ed25519 生成并检入仓库，**禁止**手工改 envelope 字节 —— 手改会使签名与 payload 失配。若需扩展，用 `keys.json` 里的平凡种子在实现侧重新生成并整文件替换。
+
+`payload` 是 **Index 的 protobuf 字节**（`rup.index/2`），`schema` 是 `rup.envelope/2`（`wrong-envelope-schema` 故意写成 `rup.envelope/1`）。签名覆盖这些 payload 字节，与线上线格式相同。runner **必须按原样使用**这些字段，禁止把 JSON 重编码后再重签。
 
 `keys.json` 不是用例，而是供 runner 使用的密钥表。它同时包含公钥与私钥种子：**这些是测试专用的平凡密钥（种子为重复的 `0x01`、`0x02` 等），禁止用于任何真实发布。** 可信 keyId 为 `k1` 与 `k2`，`kx` 与 `ky` 代表客户端不认识的签名者。
 
@@ -121,7 +123,7 @@
   "expectProduct": "conformance",
   "expectChannel": "stable",
   "cases": [
-    { "name": "valid-k1", "envelope": { "…rup.envelope/1…" }, "expectAccepted": true }
+    { "name": "valid-k1", "envelope": { "schema": "rup.envelope/2", "payload": "…base64 protobuf Index…", "signatures": ["…"] }, "expectAccepted": true }
   ]
 }
 ```

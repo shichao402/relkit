@@ -13,7 +13,6 @@
  */
 
 import assert from "node:assert/strict";
-import { createPrivateKey, sign as cryptoSign } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,13 +39,11 @@ import {
   VersionNodeSchema,
   indexSchemaId,
   manifestSchemaId,
-  envelopeSchemaId,
   parseIndex,
   type Artifact,
   type Index,
   type Manifest,
   type Selector,
-  type Signature,
   type MetaEntry,
 } from "../src/models.js";
 import { selectArtifact } from "../src/selectors.js";
@@ -88,7 +85,7 @@ const asArray = (value: unknown): unknown[] => value as unknown[];
 
 /**
  * Signed messages must not use `map<>`; encode helpers sort by key before
- * serialising, so the fixture bridge does the same.
+ * serialising, so the fixture loader does the same.
  */
 function selectorsFromFixture(raw: unknown): Selector[] {
   if (typeof raw !== "object" || raw === null) return [];
@@ -160,140 +157,22 @@ function manifestFromFixture(json: Record<string, unknown>): Manifest {
   });
 }
 
-interface FixtureKey {
-  keyId: string;
-  publicKey: Uint8Array;
-  seed: Uint8Array;
-}
-
-/** DER prefix for an Ed25519 PKCS#8 private key holding a raw 32-byte seed. */
-const ED25519_PKCS8_PREFIX = Uint8Array.from([
-  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04,
-  0x22, 0x04, 0x20,
-]);
-
-function signWithSeed(seed: Uint8Array, payload: Uint8Array): Uint8Array {
-  const der = new Uint8Array(ED25519_PKCS8_PREFIX.length + seed.length);
-  der.set(ED25519_PKCS8_PREFIX, 0);
-  der.set(seed, ED25519_PKCS8_PREFIX.length);
-  const key = createPrivateKey({
-    key: Buffer.from(der),
-    format: "der",
-    type: "pkcs8",
-  });
-  return new Uint8Array(cryptoSign(null, Buffer.from(payload), key));
-}
-
-function signature(
-  keyId: string,
-  payload: Uint8Array,
-  keys: Map<string, FixtureKey>,
-  alg = "ed25519",
-): Signature {
-  const key = keys.get(keyId);
-  assert.ok(key !== undefined, `fixture key ${keyId} missing`);
-  return create(SignatureSchema, {
-    keyId,
-    alg,
-    sig: signWithSeed(key.seed, payload),
-  });
-}
-
-/**
- * Rebuilds each envelope case from the fixture's canonical payload.
- *
- * The checked-in `payload` is base64 JSON of a v1 index and its `sig` was
- * produced over those JSON bytes, so it cannot be verified against a v2
- * protobuf payload directly. Dart's runner re-signs the re-encoded protobuf with
- * the same trivial fixture seeds, and this does the same, case for case, so both
- * implementations are asserting identical semantics.
- */
-function buildEnvelopeCase(
-  testCase: Record<string, unknown>,
-  keys: Map<string, FixtureKey>,
-  canonicalPayloadJson: Record<string, unknown>,
-): Uint8Array {
-  const name = String(testCase.name);
-  const payloadJson =
-    name === "wrong-product" || name === "wrong-channel"
-      ? (JSON.parse(
-          Buffer.from(
-            String(asRecord(testCase.envelope).payload),
-            "base64",
-          ).toString("utf8"),
-        ) as Record<string, unknown>)
-      : canonicalPayloadJson;
-
-  let payload = toBinary(IndexSchema, indexFromFixture(payloadJson));
-  let schema = envelopeSchemaId;
-  const signatures: Signature[] = [];
-
-  switch (name) {
-    case "valid-k1":
-      signatures.push(signature("k1", payload, keys));
-      break;
-    case "valid-k2":
-      signatures.push(signature("k2", payload, keys));
-      break;
-    case "unknown-key":
-      signatures.push(signature("kx", payload, keys));
-      break;
-    case "tampered-payload": {
-      signatures.push(signature("k1", payload, keys));
-      const tampered = Uint8Array.from(payload);
-      const last = tampered.length - 1;
-      tampered[last] = tampered[last]! ^ 0x01;
-      payload = tampered;
-      break;
-    }
-    case "bad-signature": {
-      const good = signature("k1", payload, keys);
-      const bad = Uint8Array.from(good.sig);
-      const last = bad.length - 1;
-      bad[last] = bad[last]! ^ 0x01;
-      signatures.push(
-        create(SignatureSchema, { keyId: good.keyId, alg: good.alg, sig: bad }),
-      );
-      break;
-    }
-    case "unsupported-alg":
-      signatures.push(signature("k1", payload, keys, "rsa-sha256"));
-      break;
-    case "cross-payload-replay": {
-      const other = indexFromFixture({
-        ...payloadJson,
-        sequence: Number(payloadJson.sequence) + 1,
-      });
-      signatures.push(
-        signature("k1", toBinary(IndexSchema, other), keys),
-      );
-      break;
-    }
-    case "rotation-untrusted-first":
-      signatures.push(signature("kx", payload, keys));
-      signatures.push(signature("k1", payload, keys));
-      break;
-    case "rotation-all-untrusted":
-      signatures.push(signature("kx", payload, keys));
-      signatures.push(signature("ky", payload, keys));
-      break;
-    case "no-signatures":
-      break;
-    case "wrong-envelope-schema":
-      schema = "rup.envelope/1";
-      signatures.push(signature("k1", payload, keys));
-      break;
-    case "wrong-product":
-    case "wrong-channel":
-      signatures.push(signature("k1", payload, keys));
-      break;
-    default:
-      throw new Error(`unhandled signature case "${name}"`);
-  }
-
+function envelopeBytesFromFixture(raw: Record<string, unknown>): Uint8Array {
+  const envelope = asRecord(raw.envelope);
   return toBinary(
     EnvelopeSchema,
-    create(EnvelopeSchema, { schema, payload, signatures }),
+    create(EnvelopeSchema, {
+      schema: String(envelope.schema),
+      payload: new Uint8Array(Buffer.from(String(envelope.payload), "base64")),
+      signatures: asArray(envelope.signatures).map((entry) => {
+        const sig = asRecord(entry);
+        return create(SignatureSchema, {
+          keyId: String(sig.keyId),
+          alg: String(sig.alg),
+          sig: new Uint8Array(Buffer.from(String(sig.sig), "base64")),
+        });
+      }),
+    }),
   );
 }
 
@@ -396,49 +275,27 @@ describe("signature (SPEC.md sections 4.1, 12.1, 12.4)", () => {
     const keysFixture = readFixture("signature/keys.json");
     const fixture = readFixture("signature/envelope.json");
 
-    const fixtureKeys = new Map<string, FixtureKey>();
-    for (const raw of asArray(keysFixture.keys)) {
-      const entry = asRecord(raw);
-      const keyId = String(entry.keyId);
-      fixtureKeys.set(keyId, {
-        keyId,
-        publicKey: new Uint8Array(
-          Buffer.from(String(entry.publicKeyBase64), "base64"),
-        ),
-        seed: new Uint8Array(
-          Buffer.from(String(entry.privateSeedBase64), "base64"),
-        ),
-      });
-    }
-
     const trustedIds = asArray(fixture.trustedKeys).map(String);
     const trusted = new TrustedKeys(
       Object.fromEntries(
-        [...fixtureKeys.values()]
-          .filter((key) => trustedIds.includes(key.keyId))
-          .map((key) => [key.keyId, key.publicKey]),
+        asArray(keysFixture.keys)
+          .map(asRecord)
+          .filter((entry) => trustedIds.includes(String(entry.keyId)))
+          .map((entry) => [
+            String(entry.keyId),
+            new Uint8Array(Buffer.from(String(entry.publicKeyBase64), "base64")),
+          ]),
       ),
     );
 
     const expectProduct = String(fixture.expectProduct);
     const expectChannel = String(fixture.expectChannel);
 
-    const validCase = asArray(fixture.cases)
-      .map(asRecord)
-      .find((entry) => entry.name === "valid-k1");
-    assert.ok(validCase !== undefined, "fixture must contain valid-k1");
-    const canonicalPayloadJson = JSON.parse(
-      Buffer.from(
-        String(asRecord(validCase.envelope).payload),
-        "base64",
-      ).toString("utf8"),
-    ) as Record<string, unknown>;
-
     for (const raw of asArray(fixture.cases)) {
       const testCase = asRecord(raw);
       casesChecked++;
       const name = String(testCase.name);
-      const bytes = buildEnvelopeCase(testCase, fixtureKeys, canonicalPayloadJson);
+      const bytes = envelopeBytesFromFixture(testCase);
 
       let accepted = false;
       const result = openEnvelope(bytes, trusted);
