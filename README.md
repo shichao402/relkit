@@ -5,6 +5,7 @@ RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管�
 | 二进制 | 路径 | 作用 |
 |---|---|---|
 | `relkit` | `cmd/relkit` | stage / 签名 / 上传 / 提交 |
+| `relkit-agent` | `cmd/relkit-agent` | CI 交 staged 树；本机持钥写入数据面 |
 | `relkit-serve` | `cmd/relkit-serve` | Range 下载 + 鉴权 PUT + 孤儿 GC |
 
 当前版本：`0.2.0`（RUP **protobuf v2** 线格式）
@@ -32,6 +33,7 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 
 ```bash
 go install cnb.cool/shichao402/relkit/cmd/relkit@latest
+go install cnb.cool/shichao402/relkit/cmd/relkit-agent@latest
 go install cnb.cool/shichao402/relkit/cmd/relkit-serve@latest
 go get cnb.cool/shichao402/relkit/sdk@latest       # Go 客户端 SDK
 go get cnb.cool/shichao402/relkit/version@latest   # 项目 VERSION.json 读写（Go）
@@ -144,6 +146,7 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 | JSON Schema（辅助） | [`schema/`](schema/) |
 | 一致性夹具 | [`conformance/`](conformance/) |
 | 发布侧手册 | `relkit agent-guide`（源：[`embed/AGENT-GUIDE.md`](embed/AGENT-GUIDE.md)） |
+| 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |
 | 服务侧手册 | `relkit-serve agent-guide` |
 
 ## 客户端 SDK

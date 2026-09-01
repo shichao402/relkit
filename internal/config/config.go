@@ -57,45 +57,45 @@ type Config struct {
 
 // DirectoryConfig mirrors the optional relkit.json "directory" object.
 type DirectoryConfig struct {
-	PublishTo []string
+	PublishTo []string `json:"publishTo,omitempty"`
 	// EntryURLs documents the App-embedded entry list (primary → backups).
 	// Not uploaded by the CLI; publish writes directory/<product>.pb to PublishTo.
-	EntryURLs []string
-	Services  []DirectoryServiceConfig
+	EntryURLs []string                 `json:"entryUrls,omitempty"`
+	Services  []DirectoryServiceConfig `json:"services,omitempty"`
 }
 
 // DirectoryServiceConfig is one UpdateDirectory.services entry template.
 type DirectoryServiceConfig struct {
-	ID          string
-	Priority    int32
-	IndexURL    string
-	FallbackURL string
-	Channel     string
+	ID          string `json:"id,omitempty"`
+	Priority    int32  `json:"priority,omitempty"`
+	IndexURL    string `json:"indexUrl,omitempty"`
+	FallbackURL string `json:"fallbackUrl,omitempty"`
+	Channel     string `json:"channel,omitempty"`
 }
 
 // ChangelogConfig mirrors the optional relkit.json "changelog" object.
 type ChangelogConfig struct {
-	File        string
-	URLTemplate string
+	File        string `json:"file,omitempty"`
+	URLTemplate string `json:"urlTemplate,omitempty"`
 }
 
 type SiteConfig struct {
-	Title       string
-	Description string
-	Homepage    string
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Homepage    string `json:"homepage,omitempty"`
 	// Makers deploys the human index to EdgeOne Pages after a public publish.
 	// Intranet local/http-put backends skip this even when it is set.
-	Makers *MakersConfig
+	Makers *MakersConfig `json:"makers,omitempty"`
 }
 
 const DefaultMakersTokenEnv = "EDGEONE_PAGES_API_TOKEN"
 
 // MakersConfig is the optional relkit.json "site.makers" object.
 type MakersConfig struct {
-	ProjectID string
-	TokenEnv  string
+	ProjectID string `json:"projectId"`
+	TokenEnv  string `json:"tokenEnv,omitempty"`
 	// Region is "china" (default) or "global".
-	Region string
+	Region string `json:"region,omitempty"`
 }
 
 func FindConfig(start string) (string, error) {

@@ -181,6 +181,10 @@ func TestInitFlagCombos(t *testing.T) {
 		{"-config", path, "-list-products", "-remove"},
 		{"-config", path, "-remove"},
 		{"-config", path, "-product", "dec", "-remove", "-root", dir},
+		{"-config", path, "-list-products", "-migrate-profile"},
+		{"-config", path, "-product", "dec", "-remove", "-migrate-profile"},
+		{"-config", path, "-product", "dec", "-migrate-profile", "-root", dir},
+		{"-config", path, "-migrate-profile"},
 		{"-config", path},
 		{"-config", path, "-product", "bad id"},
 		{"-config", path, "-product", "missing", "-remove"},
@@ -189,5 +193,104 @@ func TestInitFlagCombos(t *testing.T) {
 		if err := runInit(bytes.NewBuffer(nil), args); err == nil {
 			t.Fatalf("expected error for %v", args)
 		}
+	}
+}
+
+func TestInitMigrateProfileFromLegacy(t *testing.T) {
+	dir := t.TempDir()
+	productRoot := filepath.Join(dir, "product")
+	if err := os.MkdirAll(productRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := map[string]any{
+		"product":        "demo",
+		"defaultChannel": "stable",
+		"channels":       []any{"stable", "beta"},
+		"codeStrategy":   "explicit",
+		"retainVersions": 4,
+		"signing": map[string]any{
+			"keyId":          "k1",
+			"privateKeyPath": "private.pb",
+			"privateKeyEnv":  "DEMO_SEED",
+			"publicKeys": []any{map[string]any{
+				"keyId":           "k1",
+				"publicKeyBase64": "public-material",
+			}},
+		},
+		"backends": map[string]any{
+			"prod": map[string]any{"type": "local", "outputDir": "dist", "secretIdEnv": "COS_SECRET"},
+		},
+		"publishTo": []any{"prod"},
+		"changelog": map[string]any{
+			"file":        "docs/CHANGELOG.md",
+			"urlTemplate": "https://example.com/notes/{version}",
+		},
+		"directory": map[string]any{
+			"publishTo": []any{"prod"},
+			"entryUrls": []any{"https://updates.example/directory/demo.pb"},
+		},
+		"site": map[string]any{
+			"title": "Demo Portal",
+			"makers": map[string]any{
+				"projectId": "makers-demo",
+				"region":    "global",
+				"tokenEnv":  "MAKERS_TOKEN",
+			},
+		},
+	}
+	legacyBytes, _ := json.MarshalIndent(legacy, "", "  ")
+	if err := os.WriteFile(filepath.Join(productRoot, "relkit.json"), legacyBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path := writeAgentCfg(t, dir, FileConfig{
+		Addr:     "127.0.0.1:9",
+		StateDir: filepath.Join(dir, "state"),
+		Products: map[string]ProductConfig{"demo": {Root: productRoot}},
+	})
+
+	var buf bytes.Buffer
+	if err := runInit(&buf, []string{"-config", path, "-product", "demo", "-migrate-profile"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "profile") {
+		t.Fatalf("missing profile notice:\n%s", out)
+	}
+
+	raw, err := loadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotProfile := raw.Products["demo"].Profile
+	if gotProfile != filepath.ToSlash(filepath.Join("products", "demo.json")) {
+		t.Fatalf("agent profile path = %q", gotProfile)
+	}
+
+	profilePath := filepath.Join(dir, "products", "demo.json")
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, forbidden := range []string{
+		"publicKeys", "public-material", "defaultChannel", "channels",
+		"retainVersions", "changelog", "CHANGELOG.md", "urlTemplate",
+		"entryUrls", "projectId", "makers-demo", "Demo Portal", "title",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("profile leaked public policy field %q: %s", forbidden, text)
+		}
+	}
+	for _, required := range []string{`"product": "demo"`, `"keyId": "k1"`, `"privateKeyPath"`, `"privateKeyEnv"`, `"backends"`, `"publishTo"`, `"tokenEnv"`} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("profile lacks machine field %s: %s", required, text)
+		}
+	}
+
+	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "demo", "-migrate-profile"}); err == nil {
+		t.Fatal("repeat migrate should be refused")
+	} else if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("repeat migrate error = %v", err)
 	}
 }

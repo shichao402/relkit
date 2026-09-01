@@ -4,9 +4,9 @@
 title: Publish Agent
 category: design
 created: 2026-08-12
-updated: 2026-08-31
+updated: 2026-09-01
 status: approved
-related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent
+related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md
 ---
 
 ## 1. 决议
@@ -18,11 +18,38 @@ CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-
 
 ## 2. 信任边界
 
+发布配置拆成两份，在 agent 上合并后才调用 `publish.Run`：
+
+| 文件 | 谁写、放哪 | 装什么 | 禁止装什么 |
+|---|---|---|---|
+| `release-policy.json` | 仓库 `relkit stage` 写入 staged 树，随 tar.gz 上传 | 产品 id、通道、`codeStrategy`、公钥、directory 入口、site 文案 / Makers 项目 id | 私钥路径、后端凭据、`publishTo`、Makers `tokenEnv`、changelog 本地 `file` |
+| publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product` + `signing.keyId`（与 policy 对齐）、私钥 env/path、backends、`publishTo`、directory 发布目标、Makers `tokenEnv` | 公钥集、通道策略、entryUrls |
+| 产品根 `relkit.json` | **仅旧部署 fallback** | 过去整份配置 | 新产品不要再手工往产品根塞这一份 |
+
+`product` 与 `signing.keyId` 必须两边一致，否则拒绝发布。产品树根永远是 agent 配置里的 `products.<id>.root`，不以 JSON 文档里的路径为准。
+
 | 角色 | 持有 | 不持有 |
 |---|---|---|
-| CI runner | 源码、产物、`RELKIT_AGENT_TOKEN` | 签名私钥、COS SecretKey |
-| relkit-agent | 私钥、COS 密钥、产品 `relkit.json` | 客户端下载流量 |
-| COS / 内网磁盘 | 匿名读已发布文件 | 签名动作 |
+| CI runner | 源码、产物、`RELKIT_AGENT_TOKEN`、随 stage 生成的 portable policy | 签名私钥、COS SecretKey、publish profile |
+| relkit-agent | 私钥、COS 密钥、本机 publish profile | 客户端下载流量；不把仓库 `relkit.json` 当正式发布配置 |
+| COS / 内网磁盘 | 匿名读已发布文件 | 签名动作、控制面配置 |
+
+### 2.1 staged 树（CI 交给 agent 的内容）
+
+`.relkit/staged/<version>/` 必须自足，agent 只解包这一棵：
+
+```text
+.relkit/staged/<version>/
+  staged.pb              # 版本、code、产物清单与哈希
+  release-policy.json    # 仓库侧 portable 策略（stage 时从 relkit.json 抽出）
+  artifacts/<filename>   # 产物副本；publish 只按文件名读，不信 staged.pb 里的 source_path
+```
+
+无 `release-policy.json` 时走 §5.2 的旧产品根 `relkit.json` fallback（给尚未迁 profile 的机）。有 policy 但本机没有可读 profile 时直接失败，不会再去猜产品根上的整份配置。
+
+### 2.2 publish profile
+
+缺省路径：与 `relkit-agent.json` 同目录的 `products/<product>.json`（安装后即 `/etc/relkit-agent/products/<id>.json`）。`products.<id>.profile` 可覆盖。profile 只含端点与环境变量**名**，不含密钥明文；init 写成 `0644`，以便 root 跑 init 后 `relkit` 用户仍能读。
 
 ## 3. HTTP 表面
 
@@ -46,7 +73,7 @@ Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请
 
 - `relkit-agent.example.json`
 - `relkit-agent.intranet.example.json`（WOA：agent 写本地目录）
-- `relkit-intranet-product.example.json`（产品 `relkit.json` 的 `local` 后端）
+- `relkit-intranet-product.example.json`（内网 publish profile 的 `local` 后端骨架；也可当迁 profile 前的旧 `relkit.json` 参考）
 - `nginx-intranet.example.conf`（内网 `update.devcloud.woa.com`：`/v1/` → agent `:8787`，GET → serve `:8080`）
 - `relkit-agent.service`
 - `Caddyfile.relkit-agent.example`（`publish.firoyang.com` → `127.0.0.1:8787`）
@@ -61,10 +88,27 @@ DNS：`publish.firoyang.com` A → 发布机公网 IP。Agent 只听本机；TLS
 ```text
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -list-products
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> [-root /srv/relkit/<id>]
+relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -remove
 ```
 
-`-product` 会创建 root 目录并把 id 写进 `products`，**不**生成 `relkit.json`、私钥或新 token。列出只打 id、root 和 token **文件路径**。`-remove` 只从 map 摘掉 id，磁盘上的产品树和密钥留下。改完后 `systemctl restart relkit-agent`。
+`-product` 会创建 root 目录并把 id 写进 `products`，**不**生成 policy、profile、私钥或新 token。列出只打 id、root、默认/已登记的 profile 路径，以及 token **文件路径**。`-remove` 只从 map 摘掉 id，磁盘上的产品树、密钥和 profile 留下。改完后 `systemctl restart relkit-agent`。
+
+### 5.1 部署顺序
+
+1. `deploy/install-agent.sh`：二进制、`/etc/relkit-agent/relkit-agent.json`、token、默认产品根、`systemctl enable --now`。
+2. `EnvironmentFile=/etc/relkit-agent/env`：`RELKIT_PRIVATE_KEY`、`COS_SECRET_ID`、`COS_SECRET_KEY`（以及 Makers token 等）。密钥不进 JSON。
+3. `init -product <id>` 登记新产品（可省略，安装脚本已带 `dec` 根目录时再按需加）。
+4. 把签名私钥放到该产品 root（或只走 env）。
+5. **本机 publish profile**（二选一，必须在第一次走 `release-policy.json` 的 publish 之前完成）：
+   - 旧机：产品根已有整份 `relkit.json` 时执行 `init -product <id> -migrate-profile`。它抽出机器侧字段写到 `/etc/relkit-agent/products/<id>.json`，**留下**根上的 `relkit.json` 作 fallback，且拒绝覆盖已存在的 profile。
+   - 新机：按 `deploy/relkit-intranet-product.example.json` 或公网 `s3-compatible` 样例手写 `/etc/relkit-agent/products/<id>.json`（`product` / `signing.keyId` 与仓库 policy 对齐）。**不要**再往 `/srv/relkit/<id>/relkit.json` 塞发布凭据。
+6. `systemctl restart relkit-agent`。
+7. 之后 CI 只 `relkit stage`（写出 `release-policy.json`）再 `PUT /v1/staged` + `POST /v1/publish`。
+
+### 5.2 旧产品根 `relkit.json` fallback
+
+staged 目录**没有** `release-policy.json` 时，agent 仍加载 `<productRoot>/relkit.json` 整份配置并发布。这是给尚未升级 CLI / 尚未迁 profile 的流水线留的。新 `relkit stage` 总会带上 policy；迁完 profile 且 CI 已升级后，根上那份可以只当备份，不再作为正式发布源。
 
 ## 6. Token 轮换
 
@@ -78,7 +122,7 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 内网不必把产物发到公网 COS。控制面仍是 agent，数据面仍是 WOA 目录（现有 `https://update.devcloud.woa.com/` 的 GET 树）。
 
 1. 在箱上安装 `relkit-agent`（`deploy/install-agent.sh`），配置见 `deploy/relkit-agent.intranet.example.json`。
-2. 每个产品的 `relkit.json` 把 `publishTo` 指到 `local`，`outputDir` 为 serve / nginx 对外 GET 的根（例：`/data/relkit-serve`），`baseUrl` 为现有内网更新域名。样例：`deploy/relkit-intranet-product.example.json`。
+2. 每个产品的 **publish profile** 把 `publishTo` 指到 `local`，`outputDir` 为 serve / nginx 对外 GET 的根（例：`/data/relkit-serve`），`baseUrl` 为现有内网更新域名。样例：`deploy/relkit-intranet-product.example.json`。旧机可先把该文件当产品根 `relkit.json`，再 `-migrate-profile`。
 3. 私钥只在这台机上。CI 仍只持 agent Bearer。
 4. 对外继续匿名 GET 现有域名。`relkit-serve` 可以继续提供 Range GET；新产品不要再走 serve 的 PUT。旧产品的 `http-put` 可留到迁完。
 
@@ -91,7 +135,7 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 | | 公网 | 内网 |
 |---|---|---|
 | 托管 | EdgeOne Makers（契约在本仓库 `sites/updates-index/`，**不要把 dump 拷进该目录当发版步骤**） | 数据面 `browse/` |
-| 怎么上去 | 产品 `relkit.json` 配 `site.makers`；publish 写出 dump 后直接 Upload | `local` / 遗留 `http-put` 由 publish 直接写；即使配了 makers 也跳过 |
+| 怎么上去 | 仓库 policy 带 `site.makers.projectId`；本机 profile 带 `tokenEnv`；publish 写出 dump 后直接 Upload | `local` / 遗留 `http-put` 由 publish 直接写；即使配了 makers 也跳过 |
 | 动态 | 现在没有 `edge-functions/`，就是静态站。计数走 51.la（见 `docs/ROADMAP.md`），不要 KV。以后要函数只加在该子目录，且不当账本；内网不跟 |
 
 COS 不放 HTML。不要为此打开静态网站源站。页上不把 `.pb` 当导航，也不加载外链字体或图。

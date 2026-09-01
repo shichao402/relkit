@@ -17,6 +17,7 @@ import (
 )
 
 const stagingRoot = ".relkit/staged"
+const releasePolicyName = "release-policy.json"
 
 var reservedKeys = map[string]struct{}{
 	"id":       {},
@@ -47,6 +48,10 @@ func StagedPath(root, version string) string {
 	return filepath.Join(StagingDir(root, version), "staged.pb")
 }
 
+func ReleasePolicyPath(root, version string) string {
+	return filepath.Join(StagingDir(root, version), releasePolicyName)
+}
+
 func ArtifactsDir(root, version string) string {
 	return filepath.Join(StagingDir(root, version), "artifacts")
 }
@@ -66,6 +71,15 @@ func LoadStaged(root, version string) (*model.StagedDocument, error) {
 		return nil, err
 	}
 	return staged, nil
+}
+
+func LoadReleasePolicy(root, version string) (*config.ProductPolicy, error) {
+	path := ReleasePolicyPath(root, version)
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return nil, Error{Message: fmt.Sprintf("no staged release policy for version %q (expected %s); run 'relkit stage' first", version, path)}
+	}
+	return config.LoadProductPolicy(path)
 }
 
 func ParseKeyValues(text string) (map[string]string, error) {
@@ -248,7 +262,18 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 	if err != nil {
 		return nil, err
 	}
+	policy, err := config.ExtractProductPolicy(cfg)
+	if err != nil {
+		return nil, err
+	}
+	policyData, err := jsonio.MarshalPretty(policy)
+	if err != nil {
+		return nil, err
+	}
 	if err := jsonio.WritePath(StagedPath(cfg.Root, version), data); err != nil {
+		return nil, err
+	}
+	if err := jsonio.WritePath(ReleasePolicyPath(cfg.Root, version), policyData); err != nil {
 		return nil, err
 	}
 

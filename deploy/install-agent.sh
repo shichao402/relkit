@@ -29,7 +29,10 @@ chown -R relkit:relkit "$STATE_DIR" "$PRODUCT_ROOT"
 systemctl daemon-reload
 systemctl enable --now relkit-agent
 systemctl --no-pager status relkit-agent || true
-echo "next: put product relkit.json under $PRODUCT_ROOT and set EnvironmentFile=/etc/relkit-agent/env (RELKIT_PRIVATE_KEY, COS_SECRET_ID, COS_SECRET_KEY)"
+echo "next: set EnvironmentFile=/etc/relkit-agent/env (RELKIT_PRIVATE_KEY, COS_SECRET_ID, COS_SECRET_KEY)"
+echo "new product profile: write $CONFIG_DIR/products/<id>.json (product + signing.keyId + backends), then:"
+echo "  relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id>"
+echo "migrate old product-root relkit.json: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id> -migrate-profile"
 echo "add more products with: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id>"
 echo "list: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -list-products"
-echo "intranet: copy relkit-agent.intranet.example.json and point the product relkit.json at a local backend (see relkit-intranet-product.example.json)"
+echo "intranet: copy relkit-agent.intranet.example.json; put the local backend in the product profile (see relkit-intranet-product.example.json), or migrate-profile from a legacy relkit.json"

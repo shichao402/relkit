@@ -22,7 +22,8 @@ import (
 )
 
 type ProductConfig struct {
-	Root string `json:"root"`
+	Root    string `json:"root"`
+	Profile string `json:"profile,omitempty"`
 }
 
 type FileConfig struct {
@@ -90,6 +91,12 @@ func LoadConfig(path string) (*Config, error) {
 			root = filepath.Join(filepath.Dir(path), root)
 		}
 		p.Root = mustAbs(root)
+		if strings.TrimSpace(p.Profile) == "" {
+			p.Profile = filepath.Join(filepath.Dir(path), "products", name+".json")
+		} else if !filepath.IsAbs(p.Profile) {
+			p.Profile = filepath.Join(filepath.Dir(path), p.Profile)
+		}
+		p.Profile = mustAbs(p.Profile)
 		cfg.Products[name] = p
 	}
 	return cfg, nil
@@ -255,6 +262,13 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
 
+	mu := s.productLock(product)
+	if !mu.TryLock() {
+		http.Error(w, "publish or staged upload already in progress for this product", http.StatusConflict)
+		return
+	}
+	defer mu.Unlock()
+
 	dest := stage.StagingDir(pc.Root, version)
 	_ = os.RemoveAll(dest)
 	if err := os.MkdirAll(dest, 0o755); err != nil {
@@ -271,6 +285,28 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 		_ = os.RemoveAll(dest)
 		log.Printf("staged tree %s/%s: %v", product, version, err)
 		http.Error(w, "invalid staged tree: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, statErr := os.Stat(stage.ReleasePolicyPath(pc.Root, version)); statErr == nil {
+		policy, err := stage.LoadReleasePolicy(pc.Root, version)
+		if err != nil {
+			_ = os.RemoveAll(dest)
+			http.Error(w, "invalid release policy: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if policy.Product != product {
+			_ = os.RemoveAll(dest)
+			http.Error(w, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product), http.StatusBadRequest)
+			return
+		}
+	} else if !os.IsNotExist(statErr) {
+		_ = os.RemoveAll(dest)
+		http.Error(w, "inspect release policy: "+statErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.writeStagedSHA(product, version, sum); err != nil {
+		_ = os.RemoveAll(dest)
+		http.Error(w, "persist staged sha256: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -296,6 +332,98 @@ func parseStagedRoute(urlPath string) (product, version string, ok bool) {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
+}
+
+func (s *Server) stagedSHAPath(product, version string) string {
+	return filepath.Join(s.cfg.StateDir, "staged", product, version+".sha256")
+}
+
+func (s *Server) writeStagedSHA(product, version, sum string) error {
+	path := s.stagedSHAPath(product, version)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".sha256-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := io.WriteString(tmp, strings.ToLower(sum)+"\n"); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	_ = os.Remove(path) // Windows cannot rename over an existing file.
+	return os.Rename(tmpPath, path)
+}
+
+func (s *Server) readStagedSHA(product, version string) (string, error) {
+	data, err := os.ReadFile(s.stagedSHAPath(product, version))
+	if err != nil {
+		return "", err
+	}
+	sum := strings.TrimSpace(strings.ToLower(string(data)))
+	if !validSHA256Hex(sum) {
+		return "", fmt.Errorf("invalid stored sha256")
+	}
+	return sum, nil
+}
+
+func validSHA256Hex(sum string) bool {
+	if len(sum) != sha256.Size*2 {
+		return false
+	}
+	for i := 0; i < len(sum); i++ {
+		c := sum[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func sha256HexEqual(presented, stored string) bool {
+	a := strings.ToLower(strings.TrimSpace(presented))
+	b := strings.ToLower(strings.TrimSpace(stored))
+	if !validSHA256Hex(a) || !validSHA256Hex(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func loadProductConfig(pc ProductConfig, version string) (*config.Config, string, error) {
+	policyPath := stage.ReleasePolicyPath(pc.Root, version)
+	if _, err := os.Stat(policyPath); err == nil {
+		policy, err := config.LoadProductPolicy(policyPath)
+		if err != nil {
+			return nil, "", err
+		}
+		profile, err := config.LoadPublishProfile(pc.Profile)
+		if err != nil {
+			return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
+		}
+		cfg, err := config.MergeProductPolicy(policy, profile, pc.Root)
+		if err != nil {
+			return nil, "", err
+		}
+		return cfg, "staged release-policy.json + " + pc.Profile, nil
+	} else if !os.IsNotExist(err) {
+		return nil, "", err
+	}
+
+	legacyPath := filepath.Join(pc.Root, config.ConfigName)
+	cfg, err := config.Load(legacyPath)
+	if err != nil {
+		return nil, "", err
+	}
+	return cfg, "legacy " + legacyPath, nil
 }
 
 type publishRequest struct {
@@ -333,6 +461,17 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
 	}
+	if req.StagedSHA256 != "" {
+		stored, err := s.readStagedSHA(req.Product, version)
+		if err != nil {
+			http.Error(w, "load staged sha256: "+err.Error(), http.StatusConflict)
+			return
+		}
+		if !sha256HexEqual(req.StagedSHA256, stored) {
+			http.Error(w, "staged sha256 mismatch; re-upload", http.StatusConflict)
+			return
+		}
+	}
 
 	idemKey := req.IdempotencyKey
 	if idemKey == "" && req.StagedSHA256 != "" {
@@ -352,10 +491,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	defer mu.Unlock()
 
-	cfgPath := filepath.Join(pc.Root, config.ConfigName)
-	cfg, err := config.Load(cfgPath)
+	cfg, source, err := loadProductConfig(pc, version)
 	if err != nil {
-		http.Error(w, "load relkit.json: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "load publish config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if cfg.Product != "" && cfg.Product != req.Product {
@@ -374,6 +512,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var logs []string
+	logs = append(logs, "publish config: "+source)
 	printer := func(line string) { logs = append(logs, line) }
 	index, err := publish.Run(cfg, version, req.To, req.DryRun, req.AllowBackfill, req.AllowPartial, printer)
 	if err != nil {

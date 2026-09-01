@@ -4,7 +4,7 @@
 title: 更新入口拓扑（COS 固定入口）
 category: design
 created: 2026-08-11
-updated: 2026-08-27
+updated: 2026-09-01
 status: approved
 related: ADR 0005, docs/design/bootstrap-directory.md, docs/design/publish-topology.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
 ---
@@ -80,8 +80,8 @@ https://updates.<your-domain>/artifact/...
 flowchart TB
   subgraph ciSide [普通 CI runner 不持签名私钥 不持 COS 密钥]
     build["编译 / 打包产物"]
-    stageStep["relkit stage VERSION<br/>纯本地算 sha256 无网络"]
-    stagedDir[".relkit/staged/VERSION<br/>staged.pb + artifacts/"]
+    stageStep["relkit stage VERSION<br/>纯本地算 sha256 无网络<br/>抽出 release-policy.json"]
+    stagedDir[".relkit/staged/VERSION<br/>staged.pb<br/>release-policy.json<br/>artifacts/"]
     packStep["打包为 staged.tar.gz"]
   end
 
@@ -89,6 +89,7 @@ flowchart TB
     ingress["publish.your-domain<br/>自动 HTTPS 反代到 127.0.0.1"]
     unpackStep["解包进 productRoot/.relkit/staged/VERSION<br/>拒绝目录穿越"]
     verifyStep["VerifyStagedHashes<br/>重算哈希 不信任上传方"]
+    mergeStep["release-policy.json +<br/>/etc/relkit-agent/products/PRODUCT.json<br/>无 policy 则 fallback 产品根 relkit.json"]
     publishStep["publish.Run<br/>按 product 串行 + 幂等键<br/>私钥仅此刻进内存"]
     directoryStep["directory set<br/>directory_sequence 加一"]
   end
@@ -101,7 +102,7 @@ flowchart TB
   build --> stageStep --> stagedDir --> packStep
   packStep -->|"PUT /v1/staged 带 Bearer<br/>CI 唯一 secret"| ingress
   ingress --> unpackStep --> verifyStep
-  verifyStep -->|"POST /v1/publish"| publishStep
+  verifyStep -->|"POST /v1/publish"| mergeStep --> publishStep
   publishStep -->|"写序 artifact 再 manifest<br/>index 指针最后写 等于提交点"| cosBucket
   publishStep --> mirrorRepo
   publishStep -.->|"仅当需要改引导时"| directoryStep
@@ -111,12 +112,13 @@ flowchart TB
 
 要点：
 
-- **CI 不签名、不碰对象存储**，因此普通构建流水线不需要成为可信边界。
-- staged 目录跨机器可移植（`publish` 只读 `artifacts/<filename>`，不依赖 `staged.pb` 里的 `source_path`）。
+- **CI 不签名、不碰对象存储**，因此普通构建流水线不需要成为可信边界。stage 只把仓库侧 portable 策略打进 `release-policy.json`（无私钥、无后端凭据）。
+- staged 目录跨机器可移植（`publish` 只读 `artifacts/<filename>`，不依赖 `staged.pb` 里的 `source_path`）。目录固定为 `staged.pb` + `release-policy.json` + `artifacts/`。
+- 发布机用 **本机 publish profile**（`/etc/relkit-agent/products/<product>.json`）与 staged policy 合并；旧部署在缺少 policy 时仍可读产品根 `relkit.json`。
 - `publish.Run` **不幂等**：同版本重发会让 `sequence` 继续 +1，所以发布入口必须自带幂等键与串行化。
 - 发布机 **不必**出现在客户端 `entryUrls` 里；它只是控制面。
 
-发布控制面是 `cmd/relkit-agent`（`PUT /v1/staged`、`POST /v1/publish`）。CI 只交 staged 包；私钥与 COS 密钥留在发布机。内网也可以跑同一二进制，把 `publishTo` 指到 `local`（写 WOA 磁盘）而不是 COS。
+发布控制面是 `cmd/relkit-agent`（`PUT /v1/staged`、`POST /v1/publish`）。CI 只交 staged 包；私钥与 COS 密钥留在发布机，写在 profile / 环境变量里，不进 staged 树。内网也可以跑同一二进制，把 profile 的 `publishTo` 指到 `local`（写 WOA 磁盘）而不是 COS。
 
 ### 4.2 下载流程（引导 → 选路 → 校验）
 
@@ -155,8 +157,8 @@ flowchart TB
 
 ### 4.3 谁持有什么
 
-- **CI**：源码、产物、agent token。没有私钥，没有 COS 密钥。
-- **发布机**：签名私钥、COS 密钥、各备援后端凭据。不对外提供下载。
+- **CI**：源码、产物、agent token。没有私钥，没有 COS 密钥。staged 里只有 portable `release-policy.json`。
+- **发布机**：签名私钥、COS 密钥、各备援后端凭据、`/etc/relkit-agent/products/<product>.json`。不对外提供下载。
 - **COS（+ 备援）**：只有签名过的静态对象与匿名读权限。写权限只属于发布机。
 - **客户端**：公钥、`entryUrls`、`product` / `channel`。只读，不持任何凭据。
 
@@ -290,7 +292,7 @@ manifest / artifact **发布后不可变**。若某历史版本的 manifest 当�
 | 桶策略 | 匿名 `GetObject` / `HeadObject` / `OptionsObject`（仅读；写仍需密钥） |
 | HTTPS 证书 | TrustAsia C1 DV Free，证书 ID `ZwMfmDwc`，有效期至 **2026-11-10**（三个月，需按期续期） |
 
-`relkit.json` 后端样例：
+`relkit.json` 仓库侧仍描述产品策略；真正写桶的字段（`s3-compatible` 等）落在发布机 profile。后端样例（profile 的 `backends` 条目，旧 fallback 也可写在产品根 `relkit.json`）：
 
 ```json
 {
@@ -335,7 +337,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 2. 证书续期自动化（见 §10.1）。
 3. 需要边缘加速时再挂 CDN 加速域名（届时 CNAME 改指 `*.cdn.dnsv1.com`，证书托管随之迁到 CDN）。
 4. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
-5. 公网：产品 `relkit.json` 配 `site.makers` 后，`relkit publish` 会把 `.relkit/browse/` 部署到 Makers（项目 `relkit-updates-index`）。内网 publish 已写 `browse/`，不必再部署 Makers。
+5. 公网：仓库 `relkit.json` 的 `site.makers` 随 stage 进入 `release-policy.json`，本机 profile 提供 `tokenEnv`；`relkit publish` 会把 `.relkit/browse/` 部署到 Makers（项目 `relkit-updates-index`）。内网 publish 已写 `browse/`，不必再部署 Makers。
 
 凭据：`COS_SECRET_ID` / `COS_SECRET_KEY` 只进发布机环境（或 mise 私密配置），**禁止**写入仓库。
 

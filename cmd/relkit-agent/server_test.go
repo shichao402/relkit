@@ -79,6 +79,18 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 	if _, err := stage.Run(relkitCfg, "1.0.0", code, 0, []stage.AddSpec{{Path: art, PairsText: "id=app,kind=binary"}}, "stable", "", "", "", false, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
+	profile, err := config.ExtractPublishProfile(relkitCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profilePath := filepath.Join(root, "products", "demo.json")
+	profileBytes, _ := json.MarshalIndent(profile, "", "  ")
+	if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(profilePath, profileBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -128,7 +140,7 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 		"uploadToken": "test-token",
 		"stateDir":    stateDir,
 		"products": map[string]any{
-			"demo": map[string]any{"root": productRoot},
+			"demo": map[string]any{"root": productRoot, "profile": profilePath},
 		},
 	}
 	agentBytes, _ := json.MarshalIndent(agentDoc, "", "  ")
@@ -291,4 +303,374 @@ func TestExtractAllowsDotSlashRoot(t *testing.T) {
 	if string(got) != "ok" {
 		t.Fatalf("got %q", got)
 	}
+}
+
+type agentFixture struct {
+	productRoot string
+	profilePath string
+	legacyPath  string
+	ts          *httptest.Server
+	token       string
+	tarball     []byte
+}
+
+func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
+	t.Helper()
+	if opts.product == "" {
+		opts.product = "demo"
+	}
+	if opts.version == "" {
+		opts.version = "1.0.0"
+	}
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	productRoot := filepath.Join(root, "product")
+	if err := os.MkdirAll(productRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	seed, err := keys.GenerateSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	privDoc := keys.PrivateKeyDocument("k1", seed)
+	privBytes, _ := rupv2.MarshalPrivateKey(&privDoc)
+	privPath := filepath.Join(productRoot, "private.pb")
+	if err := os.WriteFile(privPath, privBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgDoc := map[string]any{
+		"product":        opts.product,
+		"defaultChannel": "stable",
+		"channels":       []any{"stable"},
+		"codeStrategy":   "explicit",
+		"signing": map[string]any{
+			"keyId":          "k1",
+			"privateKeyPath": "private.pb",
+			"publicKeys": []any{map[string]any{
+				"keyId": "k1",
+				"key":   base64.StdEncoding.EncodeToString(pub),
+			}},
+		},
+		"backends": map[string]any{
+			"local": map[string]any{
+				"type":      "local",
+				"outputDir": "dist",
+				"baseUrl":   "https://example.invalid/rup/",
+			},
+		},
+		"publishTo": []any{"local"},
+		"changelog": map[string]any{
+			"file":        "CHANGELOG.md",
+			"urlTemplate": "https://example.invalid/notes/{version}",
+		},
+	}
+	cfgBytes, _ := json.MarshalIndent(cfgDoc, "", "  ")
+	legacyPath := filepath.Join(productRoot, config.ConfigName)
+	if err := os.WriteFile(legacyPath, cfgBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(productRoot, "CHANGELOG.md"), []byte("## "+opts.version+"\n\n- notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	relkitCfg, err := config.Load(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	art := filepath.Join(productRoot, "app.bin")
+	if err := os.WriteFile(art, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stage.Run(relkitCfg, opts.version, 1, 0, []stage.AddSpec{{Path: art, PairsText: "id=app,kind=binary"}}, "stable", "", "", "", false, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if opts.patchPolicy != nil {
+		policyPath := stage.ReleasePolicyPath(productRoot, opts.version)
+		data, err := os.ReadFile(policyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var policy map[string]any
+		if err := json.Unmarshal(data, &policy); err != nil {
+			t.Fatal(err)
+		}
+		opts.patchPolicy(policy)
+		out, err := json.MarshalIndent(policy, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(policyPath, append(out, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if opts.omitPolicy {
+		if err := os.Remove(stage.ReleasePolicyPath(productRoot, opts.version)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tarball, err := tarStaging(stage.StagingDir(productRoot, opts.version))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.RemoveAll(stage.StagingDir(productRoot, opts.version))
+
+	profilePath := filepath.Join(root, "products", opts.product+".json")
+	if !opts.omitProfile {
+		profile, err := config.ExtractPublishProfile(relkitCfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if opts.patchProfile != nil {
+			opts.patchProfile(profile)
+		}
+		profileBytes, _ := json.MarshalIndent(profile, "", "  ")
+		if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(profilePath, profileBytes, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	productCfg := map[string]any{"root": productRoot}
+	if !opts.omitProfile {
+		productCfg["profile"] = profilePath
+	}
+	agentCfgPath := filepath.Join(root, "agent.json")
+	agentDoc := map[string]any{
+		"uploadToken": "test-token",
+		"stateDir":    stateDir,
+		"products": map[string]any{
+			opts.product: productCfg,
+		},
+	}
+	agentBytes, _ := json.MarshalIndent(agentDoc, "", "  ")
+	if err := os.WriteFile(agentCfgPath, agentBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(agentCfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/-/health", srv.handleHealth)
+	mux.HandleFunc("/v1/drop/", srv.handleDrop)
+	mux.HandleFunc("/v1/staged/", srv.handleStaged)
+	mux.HandleFunc("/v1/publish", srv.handlePublish)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	return &agentFixture{
+		productRoot: productRoot,
+		profilePath: profilePath,
+		legacyPath:  legacyPath,
+		ts:          ts,
+		token:       "test-token",
+		tarball:     tarball,
+	}
+}
+
+type agentFixtureOpts struct {
+	product      string
+	version      string
+	omitPolicy   bool
+	omitProfile  bool
+	patchPolicy  func(map[string]any)
+	patchProfile func(*config.PublishProfile)
+}
+
+func tarStaging(stagedRoot string) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	err := filepath.Walk(stagedRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(stagedRoot, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(rel)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(tw, f)
+			return err
+		}
+		return nil
+	})
+	_ = tw.Close()
+	_ = gz.Close()
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (f *agentFixture) putStaged(t *testing.T, product, version string) (int, []byte) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPut, f.ts.URL+"/v1/staged/"+product+"/"+version, bytes.NewReader(f.tarball))
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, body
+}
+
+func (f *agentFixture) publish(t *testing.T, body string) (int, []byte) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, f.ts.URL+"/v1/publish", bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, out
+}
+
+func TestAgentRejectsReleasePolicyProductMismatch(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{
+		patchPolicy: func(policy map[string]any) {
+			policy["product"] = "other"
+		},
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	if !bytes.Contains(body, []byte("does not match route product")) {
+		t.Fatalf("body=%s", body)
+	}
+}
+
+func TestAgentPublishStagedSHA256MatchAndMismatch(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	var stagedResp map[string]any
+	if err := json.Unmarshal(body, &stagedResp); err != nil {
+		t.Fatal(err)
+	}
+	sum, _ := stagedResp["sha256"].(string)
+	if sum == "" {
+		t.Fatalf("missing sha256: %s", body)
+	}
+
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true,"stagedSha256":"`+sum+`"}`)
+	if status != http.StatusOK {
+		t.Fatalf("matching sha status=%d body=%s", status, body)
+	}
+
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true,"stagedSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
+	if status != http.StatusConflict {
+		t.Fatalf("mismatch status=%d body=%s", status, body)
+	}
+	if !bytes.Contains(body, []byte("staged sha256 mismatch")) {
+		t.Fatalf("body=%s", body)
+	}
+
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true,"stagedSha256":"short"}`)
+	if status != http.StatusConflict {
+		t.Fatalf("short sha status=%d body=%s", status, body)
+	}
+}
+
+func TestAgentPublishRequiresProfileWhenPolicyPresent(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{omitProfile: true})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true}`)
+	if status == http.StatusOK {
+		t.Fatalf("expected missing profile error, body=%s", body)
+	}
+	if !bytes.Contains(body, []byte("profile")) {
+		t.Fatalf("body=%s", body)
+	}
+}
+
+func TestAgentPublishLegacyFallbackWithoutPolicy(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{omitPolicy: true, omitProfile: true})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	if _, err := os.Stat(stage.ReleasePolicyPath(fx.productRoot, "1.0.0")); !os.IsNotExist(err) {
+		t.Fatalf("policy should be absent: %v", err)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("legacy publish status=%d body=%s", status, body)
+	}
+	if !bytes.Contains(body, []byte("legacy")) {
+		t.Fatalf("expected legacy config source, body=%s", body)
+	}
+}
+
+func TestAgentPublishRejectsPolicyProfileConflicts(t *testing.T) {
+	t.Run("product", func(t *testing.T) {
+		fx := newAgentFixture(t, agentFixtureOpts{
+			patchProfile: func(profile *config.PublishProfile) {
+				profile.Product = "other"
+			},
+		})
+		status, body := fx.putStaged(t, "demo", "1.0.0")
+		if status != http.StatusCreated {
+			t.Fatalf("staged status=%d body=%s", status, body)
+		}
+		status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true}`)
+		if status == http.StatusOK {
+			t.Fatalf("expected product mismatch, body=%s", body)
+		}
+		if !bytes.Contains(body, []byte("product")) {
+			t.Fatalf("body=%s", body)
+		}
+	})
+	t.Run("keyId", func(t *testing.T) {
+		fx := newAgentFixture(t, agentFixtureOpts{
+			patchProfile: func(profile *config.PublishProfile) {
+				profile.Signing.KeyID = "k2"
+			},
+		})
+		status, body := fx.putStaged(t, "demo", "1.0.0")
+		if status != http.StatusCreated {
+			t.Fatalf("staged status=%d body=%s", status, body)
+		}
+		status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true}`)
+		if status == http.StatusOK {
+			t.Fatalf("expected keyId mismatch, body=%s", body)
+		}
+		if !bytes.Contains(body, []byte("keyId")) {
+			t.Fatalf("body=%s", body)
+		}
+	})
 }
