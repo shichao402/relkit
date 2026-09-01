@@ -1,223 +1,223 @@
 {
-  "name": "envelope",
-  "description": "Envelope verification per SPEC.md 4.1, plus the product and channel guards from SPEC.md 12.1 steps 1-3. Public keys are in keys.json; trusted keyIds are k1 and k2.",
-  "trustedKeys": [
-    "k1",
-    "k2"
-  ],
-  "expectProduct": "conformance",
-  "expectChannel": "stable",
   "cases": [
     {
-      "name": "valid-k1",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
+            "alg": "ed25519",
             "keyId": "k1",
-            "alg": "ed25519",
-            "sig": "EWZqbz7yQ/36mSdOkuH2te+oYsLhHWJX0TwB6VoboY8NRUy5XxHQXmuGLITAMytUELj1RHwl0Xj2C2YC5ousDw=="
-          }
-        ]
-      },
-      "expectAccepted": true
-    },
-    {
-      "name": "valid-k2",
-      "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
-        "signatures": [
-          {
-            "keyId": "k2",
-            "alg": "ed25519",
-            "sig": "GpRX+czeFYoExaMnp3Wq6Zr1HEAtByNSymRZHgh0+rtn2qLhcg3n7QSG03LD2ydYU+kMdwsEerWt2hyrD4g4Aw=="
+            "sig": "73gFriWZhXRR5xC2ksEBpj23BklsrPS8R9ZPmGm464J39JIpzD0d/VSTxU585HbflaLiTUBfXC6Py7ZHyjE4BA=="
           }
         ]
       },
       "expectAccepted": true,
+      "name": "valid-k1"
+    },
+    {
+      "envelope": {
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
+        "signatures": [
+          {
+            "alg": "ed25519",
+            "keyId": "k2",
+            "sig": "p/1BNZZcVJ6tpBXRJzfHUnXNDJ8y5RSN8Lqr7Ef91VlnWgR7gskEI2ZX23Go8vFPw8zS2vubiBm2sc0XDREyDg=="
+          }
+        ]
+      },
+      "expectAccepted": true,
+      "name": "valid-k2",
       "why": "Any trusted key is sufficient; k2 exists so rotation can be tested."
     },
     {
-      "name": "unknown-key",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "kx",
             "alg": "ed25519",
-            "sig": "RsPwPk7XXlrvYjTgf5roKh2Zgxu9T2jwS+cFShO3PJ3ieNAb+DDaEE1uG0fiXdYM1ljIOlM94CtpRHZIWWqHDA=="
+            "keyId": "kx",
+            "sig": "ptr6josJPcUZEEU5c+cnlyjPjU+xeh81oxH5U/qPrzi6niFiHqSga/bTyywA6UdfpPdH86mAcIL3ZxgIo29LDw=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "unknown-key",
       "why": "Signature is cryptographically valid but the keyId is not trusted. Rejecting an untrusted signer is the whole point of pinning keys."
     },
     {
-      "name": "tampered-payload",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV18",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29v",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "k1",
             "alg": "ed25519",
-            "sig": "EWZqbz7yQ/36mSdOkuH2te+oYsLhHWJX0TwB6VoboY8NRUy5XxHQXmuGLITAMytUELj1RHwl0Xj2C2YC5ousDw=="
+            "keyId": "k1",
+            "sig": "73gFriWZhXRR5xC2ksEBpj23BklsrPS8R9ZPmGm464J39JIpzD0d/VSTxU585HbflaLiTUBfXC6Py7ZHyjE4BA=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "tampered-payload",
       "why": "Last payload byte flipped. Signature no longer matches."
     },
     {
-      "name": "bad-signature",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "k1",
             "alg": "ed25519",
-            "sig": "EWZqbz7yQ/36mSdOkuH2te+oYsLhHWJX0TwB6VoboY8NRUy5XxHQXmuGLITAMytUELj1RHwl0Xj2C2YC5ousDg=="
+            "keyId": "k1",
+            "sig": "73gFriWZhXRR5xC2ksEBpj23BklsrPS8R9ZPmGm464J39JIpzD0d/VSTxU585HbflaLiTUBfXC6Py7ZHyjE4BQ=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "bad-signature",
       "why": "Last signature byte flipped."
     },
     {
-      "name": "unsupported-alg",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "k1",
             "alg": "rsa-sha256",
+            "keyId": "k1",
             "sig": "EWZqbz7yQ/36mSdOkuH2te+oYsLhHWJX0TwB6VoboY8NRUy5XxHQXmuGLITAMytUELj1RHwl0Xj2C2YC5ousDw=="
           }
         ]
       },
       "expectAccepted": false,
-      "why": "v1 permits only ed25519. An unknown alg must not be treated as trusted, and must not fall back to skipping verification."
+      "name": "unsupported-alg",
+      "why": "v2 permits only ed25519. An unknown alg must not be treated as trusted, and must not fall back to skipping verification."
     },
     {
-      "name": "cross-payload-replay",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "k1",
             "alg": "ed25519",
-            "sig": "hHL/dsfFqqm9ERDs03NqJ+nTtd1Zjw13JFOaxjUk58gGlJ86vnqlzbb0EtMzoDcD0iYL36SSFIPNgvGwSgmVDg=="
+            "keyId": "k1",
+            "sig": "XiHa6qhLus+k2Yu+FJxPfyqhh0zXjXkAzDOlsgOtTvOeGw2nWvFf1qeKxtPBYh4UqHbw8h+5GHo5o9zNfR9NDA=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "cross-payload-replay",
       "why": "A genuine k1 signature over a different index, pasted onto this payload. Catches implementations that verify the signature against a re-serialized object instead of the payload bytes."
     },
     {
-      "name": "rotation-untrusted-first",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "kx",
             "alg": "ed25519",
-            "sig": "RsPwPk7XXlrvYjTgf5roKh2Zgxu9T2jwS+cFShO3PJ3ieNAb+DDaEE1uG0fiXdYM1ljIOlM94CtpRHZIWWqHDA=="
+            "keyId": "kx",
+            "sig": "ptr6josJPcUZEEU5c+cnlyjPjU+xeh81oxH5U/qPrzi6niFiHqSga/bTyywA6UdfpPdH86mAcIL3ZxgIo29LDw=="
           },
           {
-            "keyId": "k1",
             "alg": "ed25519",
-            "sig": "EWZqbz7yQ/36mSdOkuH2te+oYsLhHWJX0TwB6VoboY8NRUy5XxHQXmuGLITAMytUELj1RHwl0Xj2C2YC5ousDw=="
+            "keyId": "k1",
+            "sig": "73gFriWZhXRR5xC2ksEBpj23BklsrPS8R9ZPmGm464J39JIpzD0d/VSTxU585HbflaLiTUBfXC6Py7ZHyjE4BA=="
           }
         ]
       },
       "expectAccepted": true,
+      "name": "rotation-untrusted-first",
       "why": "During rotation the publisher signs with several keys. A client that only knows k1 must still accept, so it must not stop at the first unusable signature."
     },
     {
-      "name": "rotation-all-untrusted",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "kx",
             "alg": "ed25519",
-            "sig": "RsPwPk7XXlrvYjTgf5roKh2Zgxu9T2jwS+cFShO3PJ3ieNAb+DDaEE1uG0fiXdYM1ljIOlM94CtpRHZIWWqHDA=="
+            "keyId": "kx",
+            "sig": "ptr6josJPcUZEEU5c+cnlyjPjU+xeh81oxH5U/qPrzi6niFiHqSga/bTyywA6UdfpPdH86mAcIL3ZxgIo29LDw=="
           },
           {
-            "keyId": "ky",
             "alg": "ed25519",
-            "sig": "1UUiVH3IhhAP4jHWLvOs/pM5/JkiVpYSVwk2tTHquEiYYiW00Vl5ldMfROXElG0lNcnZyyYRtlRFRroIAVhQBw=="
+            "keyId": "ky",
+            "sig": "VPBaYQ/EOAsuRBo97WQ5fDh1MslAhY5SPuN9IqodxRWs5iQAsz9mZbc6pB7ND4dcF30rQIDquXkSJi1y0UZxAg=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "rotation-all-untrusted",
       "why": "Several signatures, none from a trusted key."
     },
     {
-      "name": "no-signatures",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/2",
         "signatures": []
       },
       "expectAccepted": false,
+      "name": "no-signatures",
       "why": "An empty signature list must never be read as 'nothing to check, therefore fine'."
     },
     {
-      "name": "wrong-envelope-schema",
       "envelope": {
-        "schema": "rup.envelope/2",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJjb25mb3JtYW5jZSIsInNjaGVtYSI6InJ1cC5pbmRleC8xIiwic2VxdWVuY2UiOjQyLCJ2ZXJzaW9ucyI6W3siY29kZSI6MTUwLCJtYW5pZmVzdCI6eyJzaGEyNTYiOiIzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzIiwic2l6ZSI6MTAyNCwidXJscyI6WyJodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29uIl19LCJtaW5Gcm9tIjowLCJ2ZXJzaW9uIjoiMS41LjAifV19",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBnN0YWJsZSAqKhQyMDI2LTA3LTMwVDAwOjAwOjAwWkpvCgUxLjUuMBCWASpjCkAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzEIAIGhxodHRwczovL3guaW52YWxpZC8xLjUuMC5qc29u",
+        "schema": "rup.envelope/1",
         "signatures": [
           {
-            "keyId": "k1",
             "alg": "ed25519",
-            "sig": "EWZqbz7yQ/36mSdOkuH2te+oYsLhHWJX0TwB6VoboY8NRUy5XxHQXmuGLITAMytUELj1RHwl0Xj2C2YC5ousDw=="
+            "keyId": "k1",
+            "sig": "73gFriWZhXRR5xC2ksEBpj23BklsrPS8R9ZPmGm464J39JIpzD0d/VSTxU585HbflaLiTUBfXC6Py7ZHyjE4BA=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "wrong-envelope-schema",
       "why": "Unrecognized major version must be rejected outright, never parsed speculatively (SPEC.md 15)."
     },
     {
-      "name": "wrong-product",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoic3RhYmxlIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTMwVDAwOjAwOjAwWiIsInByb2R1Y3QiOiJzb21ldGhpbmdlbHNlIiwic2NoZW1hIjoicnVwLmluZGV4LzEiLCJzZXF1ZW5jZSI6NDIsInZlcnNpb25zIjpbeyJjb2RlIjoxNTAsIm1hbmlmZXN0Ijp7InNoYTI1NiI6IjMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMiLCJzaXplIjoxMDI0LCJ1cmxzIjpbImh0dHBzOi8veC5pbnZhbGlkLzEuNS4wLmpzb24iXX0sIm1pbkZyb20iOjAsInZlcnNpb24iOiIxLjUuMCJ9XX0=",
+        "payload": "CgtydXAuaW5kZXgvMhINc29tZXRoaW5nZWxzZRoGc3RhYmxlICoqFDIwMjYtMDctMzBUMDA6MDA6MDBaSm8KBTEuNS4wEJYBKmMKQDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMQgAgaHGh0dHBzOi8veC5pbnZhbGlkLzEuNS4wLmpzb24=",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "k1",
             "alg": "ed25519",
-            "sig": "AuNoIRL8H9Ejjwy5TkaEYkSM7eaGFYbSTf5ZeH8eQlEWkn37TZ/j++M7UUgR7UBJkqGmvZWYDQpZfTNwm73xDg=="
+            "keyId": "k1",
+            "sig": "RQKnitcTsXe7dV9jd1eAubiQXzitDvuHoVzciOKWM7e32QYomq9inNPPZUv9W+FtIX59MJnVz723gMPfQx6pCw=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "wrong-product",
       "why": "Correctly signed by the publisher, but for a different product. Prevents installing product A's update into product B."
     },
     {
-      "name": "wrong-channel",
       "envelope": {
-        "schema": "rup.envelope/1",
-        "payload": "eyJjaGFubmVsIjoiYmV0YSIsImdlbmVyYXRlZEF0IjoiMjAyNi0wNy0zMFQwMDowMDowMFoiLCJwcm9kdWN0IjoiY29uZm9ybWFuY2UiLCJzY2hlbWEiOiJydXAuaW5kZXgvMSIsInNlcXVlbmNlIjo0MiwidmVyc2lvbnMiOlt7ImNvZGUiOjE1MCwibWFuaWZlc3QiOnsic2hhMjU2IjoiMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMyIsInNpemUiOjEwMjQsInVybHMiOlsiaHR0cHM6Ly94LmludmFsaWQvMS41LjAuanNvbiJdfSwibWluRnJvbSI6MCwidmVyc2lvbiI6IjEuNS4wIn1dfQ==",
+        "payload": "CgtydXAuaW5kZXgvMhILY29uZm9ybWFuY2UaBGJldGEgKioUMjAyNi0wNy0zMFQwMDowMDowMFpKbwoFMS41LjAQlgEqYwpAMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMxCACBocaHR0cHM6Ly94LmludmFsaWQvMS41LjAuanNvbg==",
+        "schema": "rup.envelope/2",
         "signatures": [
           {
-            "keyId": "k1",
             "alg": "ed25519",
-            "sig": "i8thG73bj23guDJdsV9xcL4VbCUy5+EuXtLmwlenDQcItFPecL97VH8L8VgLMPCrtN4GHZgY8idDqO+oc+HRAw=="
+            "keyId": "k1",
+            "sig": "Pom/r5NAe1ONFzEMngybnQvsDaWmGBqkTh93l8kxi+bjF+U0n3xfAYsmYkl3nAOtP3/Gtz8A9ZNcNzBkrTgWCg=="
           }
         ]
       },
       "expectAccepted": false,
+      "name": "wrong-channel",
       "why": "Correctly signed, but a beta index served to a stable client."
     }
+  ],
+  "description": "Envelope verification per SPEC.md 4.1, plus the product and channel guards from SPEC.md 12.1 steps 1-3. Public keys are in keys.json; trusted keyIds are k1 and k2.",
+  "expectChannel": "stable",
+  "expectProduct": "conformance",
+  "name": "envelope",
+  "trustedKeys": [
+    "k1",
+    "k2"
   ]
 }

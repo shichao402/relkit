@@ -37,6 +37,16 @@ if (Test-Path (Join-Path $HostRoot "relkit.json")) { Write-Output "FOUND  relkit
 if (Test-Path (Join-Path $HostRoot "VERSION.json")) { Write-Output "FOUND  VERSION.json" } else { Write-Output "MISSING  VERSION.json" }
 if (Test-Path (Join-Path $HostRoot "go.mod")) { Write-Output "FOUND  go.mod (Go host?)" }
 if (Test-Path (Join-Path $HostRoot "pubspec.yaml")) { Write-Output "FOUND  pubspec.yaml (Dart/Flutter host?)" }
+$PkgJson = Join-Path $HostRoot "package.json"
+$IsElectron = $false
+if (Test-Path $PkgJson) {
+    if (Select-String -Path $PkgJson -Pattern '"electron"' -Quiet) { $IsElectron = $true }
+    if ($IsElectron) {
+        Write-Output "FOUND  package.json (Electron host? -> apply is host-side)"
+    } else {
+        Write-Output "FOUND  package.json (Node/TypeScript host?)"
+    }
+}
 
 $DartGuide = $null
 $Vendored = Join-Path $HostRoot "packages\rup_client\AGENT-QUICKSTART.md"
@@ -63,7 +73,13 @@ if ($DartGuide) {
 if (Test-Path (Join-Path $HostRoot "go.mod")) {
     Write-Output "3. $(Join-Path $RelkitRoot 'sdk\AGENT-QUICKSTART.md')"
 }
-if (-not (Test-Path (Join-Path $HostRoot "pubspec.yaml")) -and -not (Test-Path (Join-Path $HostRoot "go.mod"))) {
+if (Test-Path $PkgJson) {
+    Write-Output "3. $(Join-Path $RelkitRoot 'sdk\node\AGENT-QUICKSTART.md')"
+    if ($IsElectron) {
+        Write-Output "   note: rup-client has no apply; host owns install/restart"
+    }
+}
+if (-not (Test-Path (Join-Path $HostRoot "pubspec.yaml")) -and -not (Test-Path (Join-Path $HostRoot "go.mod")) -and -not (Test-Path $PkgJson)) {
     Write-Output "3. $(Join-Path $ScriptDir 'sdk-cascade.md')  # pick language manually"
 }
 Write-Output ""

@@ -15,7 +15,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:fixnum/fixnum.dart';
 import 'package:rup_client/rup_client.dart';
 import 'package:test/test.dart';
@@ -137,123 +136,20 @@ Manifest manifestFromFixture(Map<String, dynamic> json) => Manifest(
       ],
     );
 
-class FixtureKey {
-  FixtureKey({
-    required this.keyId,
-    required this.publicKey,
-    required this.seed,
-  });
-
-  final String keyId;
-  final Uint8List publicKey;
-  final Uint8List seed;
-}
-
-Future<Signature> _signFixturePayload(
-  String keyId,
-  Uint8List payload,
-  Map<String, FixtureKey> keys, {
-  String alg = 'ed25519',
-}) async {
-  final key = keys[keyId]!;
-  final keyPair = await crypto.Ed25519().newKeyPairFromSeed(key.seed);
-  final signature = await crypto.Ed25519().sign(payload, keyPair: keyPair);
-  return Signature(
-    keyId: keyId,
-    alg: alg,
-    sig: signature.bytes,
-  );
-}
-
-Future<Uint8List> buildEnvelopeCase(
-  Map<String, dynamic> testCase,
-  Map<String, FixtureKey> keys,
-  Map<String, dynamic> canonicalPayloadJson,
-) async {
-  final name = testCase['name'] as String;
-  final payloadJson = name == 'wrong-product' || name == 'wrong-channel'
-      ? json.decode(utf8.decode(base64.decode(
-          (testCase['envelope'] as Map<String, dynamic>)['payload'] as String,
-        ))) as Map<String, dynamic>
-      : canonicalPayloadJson;
-
-  Uint8List payload = Uint8List.fromList(
-    indexFromFixture(payloadJson).writeToBuffer(),
-  );
-  var schema = envelopeSchemaId;
-  final signatures = <Signature>[];
-
-  switch (name) {
-    case 'valid-k1':
-      signatures.add(await _signFixturePayload('k1', payload, keys));
-      break;
-    case 'valid-k2':
-      signatures.add(await _signFixturePayload('k2', payload, keys));
-      break;
-    case 'unknown-key':
-      signatures.add(await _signFixturePayload('kx', payload, keys));
-      break;
-    case 'tampered-payload':
-      signatures.add(await _signFixturePayload('k1', payload, keys));
-      final tampered = Uint8List.fromList(payload);
-      tampered[tampered.length - 1] ^= 0x01;
-      payload = tampered;
-      break;
-    case 'bad-signature':
-      final signature = await _signFixturePayload('k1', payload, keys);
-      final badBytes = Uint8List.fromList(signature.sig);
-      badBytes[badBytes.length - 1] ^= 0x01;
-      signatures.add(Signature(
-        keyId: signature.keyId,
-        alg: signature.alg,
-        sig: badBytes,
-      ));
-      break;
-    case 'unsupported-alg':
-      signatures.add(
-          await _signFixturePayload('k1', payload, keys, alg: 'rsa-sha256'));
-      break;
-    case 'cross-payload-replay':
-      final baseIndex = indexFromFixture(payloadJson);
-      final other = baseIndex.copyWith((index) {
-        index.sequence = Int64(baseIndex.sequence.toInt() + 1);
-      });
-      signatures.add(await _signFixturePayload(
-        'k1',
-        Uint8List.fromList(other.writeToBuffer()),
-        keys,
-      ));
-      break;
-    case 'rotation-untrusted-first':
-      signatures.add(await _signFixturePayload('kx', payload, keys));
-      signatures.add(await _signFixturePayload('k1', payload, keys));
-      break;
-    case 'rotation-all-untrusted':
-      signatures.add(await _signFixturePayload('kx', payload, keys));
-      signatures.add(await _signFixturePayload('ky', payload, keys));
-      break;
-    case 'no-signatures':
-      break;
-    case 'wrong-envelope-schema':
-      schema = 'rup.envelope/1';
-      signatures.add(await _signFixturePayload('k1', payload, keys));
-      break;
-    case 'wrong-product':
-      signatures.add(await _signFixturePayload('k1', payload, keys));
-      break;
-    case 'wrong-channel':
-      signatures.add(await _signFixturePayload('k1', payload, keys));
-      break;
-    default:
-      throw StateError('unhandled signature case "$name"');
-  }
-
-  final envelope = Envelope(
-    schema: schema,
-    payload: payload,
-    signatures: signatures,
-  );
-  return Uint8List.fromList(envelope.writeToBuffer());
+Uint8List envelopeBytesFromFixture(Map<String, dynamic> testCase) {
+  final envelope = testCase['envelope'] as Map<String, dynamic>;
+  return Uint8List.fromList(Envelope(
+    schema: envelope['schema'] as String,
+    payload: base64.decode(envelope['payload'] as String),
+    signatures: [
+      for (final raw in (envelope['signatures'] as List?) ?? const [])
+        Signature(
+          keyId: (raw as Map<String, dynamic>)['keyId'] as String,
+          alg: raw['alg'] as String,
+          sig: base64.decode(raw['sig'] as String),
+        ),
+    ],
+  ).writeToBuffer());
 }
 
 /// Counts every assertion made, so the suite cannot pass by doing nothing.
@@ -346,42 +242,22 @@ void main() {
       final keysFixture = readFixture(root, 'signature/keys.json');
       final fixture = readFixture(root, 'signature/envelope.json');
 
-      final fixtureKeys = <String, FixtureKey>{
-        for (final raw in keysFixture['keys'] as List)
-          (raw as Map<String, dynamic>)['keyId'] as String: FixtureKey(
-            keyId: raw['keyId'] as String,
-            publicKey: Uint8List.fromList(
-                base64.decode(raw['publicKeyBase64'] as String)),
-            seed: Uint8List.fromList(
-                base64.decode(raw['privateSeedBase64'] as String)),
-          ),
-      };
-
       final trustedIds = (fixture['trustedKeys'] as List).cast<String>();
       final trusted = TrustedKeys({
-        for (final entry in fixtureKeys.entries)
-          if (trustedIds.contains(entry.key)) entry.key: entry.value.publicKey,
+        for (final raw in keysFixture['keys'] as List)
+          if (trustedIds.contains((raw as Map<String, dynamic>)['keyId']))
+            raw['keyId'] as String: Uint8List.fromList(
+                base64.decode(raw['publicKeyBase64'] as String)),
       });
 
       final expectProduct = fixture['expectProduct'] as String;
       final expectChannel = fixture['expectChannel'] as String;
-      final canonicalPayloadJson = json.decode(
-        utf8.decode(base64.decode(
-          ((fixture['cases'] as List).cast<Map<String, dynamic>>().firstWhere(
-                  (entry) => entry['name'] == 'valid-k1')['envelope']
-              as Map<String, dynamic>)['payload'] as String,
-        )),
-      ) as Map<String, dynamic>;
 
       for (final raw in fixture['cases'] as List) {
         final testCase = raw as Map<String, dynamic>;
         _casesChecked++;
         final name = testCase['name'] as String;
-        final bytes = await buildEnvelopeCase(
-          testCase,
-          fixtureKeys,
-          canonicalPayloadJson,
-        );
+        final bytes = envelopeBytesFromFixture(testCase);
 
         var accepted = false;
         final result = await openEnvelope(bytes, trusted);

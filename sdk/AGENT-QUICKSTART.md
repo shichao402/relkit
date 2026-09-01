@@ -55,7 +55,7 @@ func CheckOnce(ctx context.Context) error {
 		},
 		ClientSelectors: map[string]string{
 			"os":   "windows", // 或 linux / darwin —— 必须与 stage 时 selectors 一致
-			"arch": "amd64",
+			"arch": "x64",     // SPEC §11.1：x64 / arm64 / x86 / armv7，不要写 amd64
 		},
 		StateStore: sdk.NewFileStateStore(supportDir, "<product>", "stable"),
 	}

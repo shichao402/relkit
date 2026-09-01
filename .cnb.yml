@@ -22,6 +22,15 @@ main:
           script: |
             apt-get update && apt-get install -y shellcheck
             shellcheck deploy/install.sh deploy/build-serve.sh
+    - name: node-sdk
+      docker:
+        image: node:22
+      stages:
+        - name: npm test
+          script: |
+            cd sdk/node
+            npm ci
+            npm test
   pull_request: *ci
 
 # tag_push 时 $CNB_BRANCH 为 tag 名（如 v0.2.0），不是分支名

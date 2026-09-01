@@ -19,6 +19,7 @@
 |------|-----------|----------|----------|
 | Go | `cnb.cool/shichao402/relkit/sdk` | [`../../sdk/AGENT-QUICKSTART.md`](../../sdk/AGENT-QUICKSTART.md) | `go get cnb.cool/shichao402/relkit/sdk@latest` |
 | Dart | `rup_client`（**SSOT：`sdk/dart/`**） | [`../../sdk/dart/AGENT-QUICKSTART.md`](../../sdk/dart/AGENT-QUICKSTART.md) | git `path: sdk/dart`；内网宿主可镜像，见该产品 `VENDORED.md` |
+| Node / TypeScript | `rup-client`（**SSOT：`sdk/node/`**） | [`../../sdk/node/AGENT-QUICKSTART.md`](../../sdk/node/AGENT-QUICKSTART.md) | `npm i`（本地 `file:../relkit/sdk/node` 或 git 依赖） |
 
 目录说明见 [`../../sdk/README.md`](../../sdk/README.md)。
 
@@ -46,7 +47,7 @@
 宿主负责：
 
 - 何时检查、UI、是否安装
-- Apply（换目录 / 装包 / 重启）；Go SDK 默认不带 apply，Dart 可选 `apply/`
+- Apply（换目录 / 装包 / 重启）；Go SDK 默认不带 apply，Dart 可选 `apply/`，Node 不提供 apply
 
 ## 开箱后冒烟
 
