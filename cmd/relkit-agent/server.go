@@ -400,30 +400,22 @@ func sha256HexEqual(presented, stored string) bool {
 
 func loadProductConfig(pc ProductConfig, version string) (*config.Config, string, error) {
 	policyPath := stage.ReleasePolicyPath(pc.Root, version)
-	if _, err := os.Stat(policyPath); err == nil {
-		policy, err := config.LoadProductPolicy(policyPath)
-		if err != nil {
-			return nil, "", err
-		}
-		profile, err := config.LoadPublishProfile(pc.Profile)
-		if err != nil {
-			return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
-		}
-		cfg, err := config.MergeProductPolicy(policy, profile, pc.Root)
-		if err != nil {
-			return nil, "", err
-		}
-		return cfg, "staged release-policy.json + " + pc.Profile, nil
-	} else if !os.IsNotExist(err) {
-		return nil, "", err
+	policy, err := config.LoadProductPolicy(policyPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("release-policy.json required at %s: %w", policyPath, err)
 	}
-
-	legacyPath := filepath.Join(pc.Root, config.ConfigName)
-	cfg, err := config.Load(legacyPath)
+	if strings.TrimSpace(pc.Profile) == "" {
+		return nil, "", fmt.Errorf("publish profile path is empty for product %q", policy.Product)
+	}
+	profile, err := config.LoadPublishProfile(pc.Profile)
+	if err != nil {
+		return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
+	}
+	cfg, err := config.MergeProductPolicy(policy, profile, pc.Root)
 	if err != nil {
 		return nil, "", err
 	}
-	return cfg, "legacy " + legacyPath, nil
+	return cfg, "staged release-policy.json + " + pc.Profile, nil
 }
 
 type publishRequest struct {
@@ -497,7 +489,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cfg.Product != "" && cfg.Product != req.Product {
-		http.Error(w, "product mismatch with relkit.json", http.StatusBadRequest)
+		http.Error(w, "product mismatch with publish config", http.StatusBadRequest)
 		return
 	}
 

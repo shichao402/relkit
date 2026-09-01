@@ -24,14 +24,15 @@ CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-
 |---|---|---|---|
 | `release-policy.json` | 仓库 `relkit stage` 写入 staged 树，随 tar.gz 上传 | 产品 id、通道、`codeStrategy`、公钥、directory 入口、site 文案 / Makers 项目 id | 私钥路径、后端凭据、`publishTo`、Makers `tokenEnv`、changelog 本地 `file` |
 | publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product` + `signing.keyId`（与 policy 对齐）、私钥 env/path、backends、`publishTo`、directory 发布目标、Makers `tokenEnv` | 公钥集、通道策略、entryUrls |
-| 产品根 `relkit.json` | **仅旧部署 fallback** | 过去整份配置 | 新产品不要再手工往产品根塞这一份 |
+
+产品根上的 `relkit.json` **不是** agent 发布配置。仓库里那份只给本地 / CI 的 `relkit stage` 抽 policy 用；发布机上若还留着旧副本，应迁 profile 后改名为 `relkit.json.migrated` 或删掉。
 
 `product` 与 `signing.keyId` 必须两边一致，否则拒绝发布。产品树根永远是 agent 配置里的 `products.<id>.root`，不以 JSON 文档里的路径为准。
 
 | 角色 | 持有 | 不持有 |
 |---|---|---|
 | CI runner | 源码、产物、`RELKIT_AGENT_TOKEN`、随 stage 生成的 portable policy | 签名私钥、COS SecretKey、publish profile |
-| relkit-agent | 私钥、COS 密钥、本机 publish profile | 客户端下载流量；不把仓库 `relkit.json` 当正式发布配置 |
+| relkit-agent | 私钥、COS 密钥、本机 publish profile | 客户端下载流量；不读产品根 `relkit.json` |
 | COS / 内网磁盘 | 匿名读已发布文件 | 签名动作、控制面配置 |
 
 ### 2.1 staged 树（CI 交给 agent 的内容）
@@ -41,11 +42,11 @@ CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-
 ```text
 .relkit/staged/<version>/
   staged.pb              # 版本、code、产物清单与哈希
-  release-policy.json    # 仓库侧 portable 策略（stage 时从 relkit.json 抽出）
+  release-policy.json    # 仓库侧 portable 策略（stage 时从仓库 relkit.json 抽出）
   artifacts/<filename>   # 产物副本；publish 只按文件名读，不信 staged.pb 里的 source_path
 ```
 
-无 `release-policy.json` 时走 §5.2 的旧产品根 `relkit.json` fallback（给尚未迁 profile 的机）。有 policy 但本机没有可读 profile 时直接失败，不会再去猜产品根上的整份配置。
+缺少 `release-policy.json` 或本机没有可读 profile 时直接失败，没有第三条路径。
 
 ### 2.2 publish profile
 
@@ -100,15 +101,11 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 2. `EnvironmentFile=/etc/relkit-agent/env`：`RELKIT_PRIVATE_KEY`、`COS_SECRET_ID`、`COS_SECRET_KEY`（以及 Makers token 等）。密钥不进 JSON。
 3. `init -product <id>` 登记新产品（可省略，安装脚本已带 `dec` 根目录时再按需加）。
 4. 把签名私钥放到该产品 root（或只走 env）。
-5. **本机 publish profile**（二选一，必须在第一次走 `release-policy.json` 的 publish 之前完成）：
-   - 旧机：产品根已有整份 `relkit.json` 时执行 `init -product <id> -migrate-profile`。它抽出机器侧字段写到 `/etc/relkit-agent/products/<id>.json`，**留下**根上的 `relkit.json` 作 fallback，且拒绝覆盖已存在的 profile。
-   - 新机：按 `deploy/relkit-intranet-product.example.json` 或公网 `s3-compatible` 样例手写 `/etc/relkit-agent/products/<id>.json`（`product` / `signing.keyId` 与仓库 policy 对齐）。**不要**再往 `/srv/relkit/<id>/relkit.json` 塞发布凭据。
+5. **本机 publish profile**（二选一，必须在第一次 publish 之前完成）：
+   - 旧机：产品根已有整份 `relkit.json` 时执行 `init -product <id> -migrate-profile`。它抽出机器侧字段写到 `/etc/relkit-agent/products/<id>.json`，把产品根那份改名为 `relkit.json.migrated`，且拒绝覆盖已存在的 profile。
+   - 新机：按 `deploy/relkit-intranet-product.example.json` 或公网 `s3-compatible` 样例手写 `/etc/relkit-agent/products/<id>.json`（`product` / `signing.keyId` 与仓库 policy 对齐）。**不要**往 `/srv/relkit/<id>/` 塞发布凭据。
 6. `systemctl restart relkit-agent`。
 7. 之后 CI 只 `relkit stage`（写出 `release-policy.json`）再 `PUT /v1/staged` + `POST /v1/publish`。
-
-### 5.2 旧产品根 `relkit.json` fallback
-
-staged 目录**没有** `release-policy.json` 时，agent 仍加载 `<productRoot>/relkit.json` 整份配置并发布。这是给尚未升级 CLI / 尚未迁 profile 的流水线留的。新 `relkit stage` 总会带上 policy；迁完 profile 且 CI 已升级后，根上那份可以只当备份，不再作为正式发布源。
 
 ## 6. Token 轮换
 
@@ -122,7 +119,7 @@ staged 目录**没有** `release-policy.json` 时，agent 仍加载 `<productRoo
 内网不必把产物发到公网 COS。控制面仍是 agent，数据面仍是 WOA 目录（现有 `https://update.devcloud.woa.com/` 的 GET 树）。
 
 1. 在箱上安装 `relkit-agent`（`deploy/install-agent.sh`），配置见 `deploy/relkit-agent.intranet.example.json`。
-2. 每个产品的 **publish profile** 把 `publishTo` 指到 `local`，`outputDir` 为 serve / nginx 对外 GET 的根（例：`/data/relkit-serve`），`baseUrl` 为现有内网更新域名。样例：`deploy/relkit-intranet-product.example.json`。旧机可先把该文件当产品根 `relkit.json`，再 `-migrate-profile`。
+2. 每个产品的 **publish profile** 把 `publishTo` 指到 `local`，`outputDir` 为 serve / nginx 对外 GET 的根（例：`/data/relkit-serve`），`baseUrl` 为现有内网更新域名。样例：`deploy/relkit-intranet-product.example.json`。旧机若产品根还留着整份配置，可先 `-migrate-profile`。
 3. 私钥只在这台机上。CI 仍只持 agent Bearer。
 4. 对外继续匿名 GET 现有域名。`relkit-serve` 可以继续提供 Range GET；新产品不要再走 serve 的 PUT。旧产品的 `http-put` 可留到迁完。
 

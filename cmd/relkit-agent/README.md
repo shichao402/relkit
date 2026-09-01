@@ -19,10 +19,9 @@
 
 ## 发布时读哪份配置
 
-1. 若存在 `<root>/.relkit/staged/<version>/release-policy.json`：与本机 profile 合并（`product` 与 `signing.keyId` 必须一致）。
-2. 否则 fallback `<root>/relkit.json`（旧部署）。有 policy 但没有可读 profile 时失败，不会再去拼产品根上的整份配置。
+**只认这一条路径：** staged 树里的 `release-policy.json` + 本机 `/etc/relkit-agent/products/<id>.json`（`product` 与 `signing.keyId` 必须一致）。缺任一则失败。
 
-`relkit stage` 写出的 policy 不含私钥、backends、`publishTo`。profile 不含公钥集与通道策略。
+产品根上的 `relkit.json` **不是**发布配置，agent 不会读它。`relkit stage` 写出的 policy 不含私钥、backends、`publishTo`；profile 不含公钥集与通道策略。
 
 ## 运维命令
 
@@ -35,11 +34,13 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 ```
 
 - `-product`：建 root、写入 map，**不**生成 policy / profile / 私钥 / 新 token。
-- `-migrate-profile`：从已有 `<root>/relkit.json` 抽出机器侧字段，写到 `products/<id>.json`，拒绝覆盖已存在的 profile；根上的 `relkit.json` 留下作 fallback。
+- `-migrate-profile`：一次性工具。从已有 `<root>/relkit.json` 抽出机器侧字段写到 `products/<id>.json`，拒绝覆盖已有 profile，并把产品根那份改名为 `relkit.json.migrated`（agent 永不读它）。
 - `-remove`：只从 map 摘掉 id；磁盘上的树、密钥、profile 留下。
 - 改完后 `systemctl restart relkit-agent`。
 
-新产品：先 `-product`，再手写 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要再往产品根塞一份带凭据的 `relkit.json`。
+新产品：先 `-product`，再手写 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要往产品根塞发布凭据。
+
+改 `/etc/relkit-agent/env` 后必须 `systemctl restart`。COS / agent Bearer / EdgeOne 是三套东西，换其中一个不会让另外两个通道自动好。root 跑 init 时 `products/` 必须 `0755`。
 
 ## HTTP
 

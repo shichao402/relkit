@@ -75,10 +75,14 @@ relkit verify --deep                # 对真实 HTTP 后端有意义
 
 ## A4. 接入 CI 发布（原则，不替你写流水线细节）
 
+生产推荐：CI 只 `relkit stage`，把 staged 树交给发布机上的 `relkit-agent` 持钥 `publish`。细节见 `cmd/relkit-agent/README.md`。
+
 1. CI **不写**版本号进业务逻辑；版本来自 tag / `VERSION.json`
-2. 构建产物 → `relkit stage` →（双端齐套后）`publish`
-3. 私钥只来自 CI secret；公钥已在客户端包内
-4. 发版排障与红线：改读 `relkit agent-guide`，不要复制粘贴过期命令
+2. 构建产物 → `relkit stage`（会写出 `release-policy.json`）→ 上传 staged → 发布机 `publish`
+3. **私钥、COS 密钥不进 CI、不进 staged 包。** 仓库 `relkit.json` 只给 stage 抽策略；机器侧 `publishTo` / 密钥 env 名在 `/etc/relkit-agent/products/<id>.json`
+4. **禁止**把完整 `relkit.json` scp/覆盖到 `/srv/relkit/<id>/`。agent 不读产品根那份；覆盖只会冲掉本机密钥引用
+5. 宿主仓若 vendored / sparse 钉 relkit，写**完整 SHA**。CNB `git fetch origin <短SHA>` 会失败
+6. 发版排障与红线：改读 `relkit agent-guide`，不要复制粘贴过期命令
 
 参考实现（非规范）：SvnMergeTool 的蓝盾双 Job（一端 upload-only，一端等 peer 后统一 publish）。
 
@@ -100,3 +104,6 @@ relkit verify --deep                # 对真实 HTTP 后端有意义
 | init 后不知 product | 问用户；不要自创与现网不一致的 id |
 | 只有单平台 artifact | 客户端另一平台 check 会失败；正式通道应齐套再 publish |
 | 想改已发布 index | **禁止**手工编辑；发新版本或走官方 yank（若已实现） |
+| CI 绿、SDK 已更新、网页还是旧版 | 协议面（`updates`/`raw`）和人页（`update` / Makers）不是一条通道。人页还要 profile 里 `makers.tokenEnv` 对应的变量已进 **正在跑的** agent（改 `/etc/relkit-agent/env` 后必须 restart）。缺 token 时 publish 仍可能 200，人页静默跳过 |
+| `publish` 抱怨没有 `release-policy.json` / profile | 升级 CLI 再 `stage`；发布机必须有 `/etc/relkit-agent/products/<id>.json`，且 `product`/`signing.keyId` 与仓库一致 |
+| 新产品 / 第二产品发版 | 每个产品自己的 profile 和 `keyId`。别用另一个产品刚发成功代替验收 |

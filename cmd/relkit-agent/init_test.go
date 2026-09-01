@@ -288,6 +288,17 @@ func TestInitMigrateProfileFromLegacy(t *testing.T) {
 		}
 	}
 
+	legacyPath := filepath.Join(productRoot, "relkit.json")
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("product-root relkit.json should be moved aside after migrate: %v", err)
+	}
+	if _, err := os.Stat(legacyPath + ".migrated"); err != nil {
+		t.Fatalf("expected migrated aside file: %v", err)
+	}
+	if !strings.Contains(out, ".migrated") {
+		t.Fatalf("migrate output should mention aside path:\n%s", out)
+	}
+
 	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "demo", "-migrate-profile"}); err == nil {
 		t.Fatal("repeat migrate should be refused")
 	} else if !strings.Contains(err.Error(), "already exists") {

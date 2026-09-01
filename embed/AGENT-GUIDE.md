@@ -284,6 +284,8 @@ relkit yank 1.5.0 --reason "启动崩溃"
 5. **selectors 是否匹配该客户端平台** —— artifact 声明的每个 selector 键都必须在客户端集合里相等。客户端缺少某个键就不匹配，症状是"检查到新版本但没有可下载的产物"。
 6. **是否被节流** —— 缺省成功检查后 24 小时内不再请求。手动触发检查可排除。
 7. **CDN / 对象存储缓存** —— `directory` / `index` / `fallback` 应为短缓存（或 no-cache）并附缓存击穿参数；`manifest` / `artifact` 可长缓存。刚发布后短时间内看不到，先怀疑可变前缀被缓存过久（COS 自定义域名场景见 `docs/design/update-ingress-cos.md` §5）。
+8. **流水线 200 但给人看的站没变** —— 先分清域名：`publish.*` 是 agent；`updates.*` / `raw.*` 是 RUP/COS；`update.*` 往往是 EdgeOne 人页。协议面更新只证明 COS 写成功。人页还要 `site.makers` 进 staged policy、profile 里有 `tokenEnv`、对应 token 已在 agent 进程里（改 env 必须重启）。日志里有 `human index will not be deployed` 就是这条，不是客户端坏了。
+9. **走 relkit-agent 时** —— 发布配置是 staged `release-policy.json` + `/etc/relkit-agent/products/<id>.json`。不要改、也不要覆盖 `/srv/relkit/<id>/relkit.json`。init 若用 root：`products/` 目录须 `0755`，否则服务用户读不到 profile。
 
 ---
 

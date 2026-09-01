@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	relkitconfig "cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/model"
@@ -24,7 +25,7 @@ func runInit(out io.Writer, args []string) error {
 	root := fs.String("root", "", "with -product: product tree root (default /srv/relkit/<id>)")
 	list := fs.Bool("list-products", false, "list products in the config and exit")
 	remove := fs.Bool("remove", false, "with -product: drop that product from the map")
-	migrateProfile := fs.Bool("migrate-profile", false, "with -product: extract a machine publish profile from the legacy relkit.json")
+	migrateProfile := fs.Bool("migrate-profile", false, "with -product: extract a machine publish profile from product-root relkit.json, then rename that file aside")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -174,18 +175,6 @@ func runInitMigrateProfile(out io.Writer, configPath, product string) error {
 	if !filepath.IsAbs(root) {
 		root = filepath.Join(filepath.Dir(configPath), root)
 	}
-	legacyPath := filepath.Join(root, relkitconfig.ConfigName)
-	legacy, err := relkitconfig.Load(legacyPath)
-	if err != nil {
-		return fmt.Errorf("load legacy config: %w", err)
-	}
-	if legacy.Product != product {
-		return fmt.Errorf("legacy config product %q does not match %q", legacy.Product, product)
-	}
-	profile, err := relkitconfig.ExtractPublishProfile(legacy)
-	if err != nil {
-		return err
-	}
 	profilePath := pc.Profile
 	if profilePath == "" {
 		profilePath = defaultProfilePath(configPath, product)
@@ -196,6 +185,19 @@ func runInitMigrateProfile(out io.Writer, configPath, product string) error {
 	if _, err := os.Stat(profilePath); err == nil {
 		return fmt.Errorf("publish profile already exists: %s", profilePath)
 	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	legacyPath := filepath.Join(root, relkitconfig.ConfigName)
+	legacy, err := relkitconfig.Load(legacyPath)
+	if err != nil {
+		return fmt.Errorf("load product-root config: %w", err)
+	}
+	if legacy.Product != product {
+		return fmt.Errorf("product-root config product %q does not match %q", legacy.Product, product)
+	}
+	profile, err := relkitconfig.ExtractPublishProfile(legacy)
+	if err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(profile, "", "  ")
@@ -218,11 +220,25 @@ func runInitMigrateProfile(out io.Writer, configPath, product string) error {
 		_ = os.Remove(profilePath)
 		return err
 	}
+	// Agent never reads product-root relkit.json. Rename it aside so it cannot
+	// be mistaken for a second publish source.
+	asidePath := legacyPath + ".migrated"
+	if _, err := os.Stat(asidePath); err == nil {
+		asidePath = fmt.Sprintf("%s.migrated.%d", legacyPath, time.Now().Unix())
+	} else if err != nil && !os.IsNotExist(err) {
+		_ = os.Remove(profilePath)
+		return err
+	}
+	if err := os.Rename(legacyPath, asidePath); err != nil {
+		_ = os.Remove(profilePath)
+		return fmt.Errorf("wrote profile but failed to move %s aside: %w", legacyPath, err)
+	}
 	fmt.Fprintf(out, "config  %s\n", configPath)
 	fmt.Fprintf(out, "product %s\n", product)
 	fmt.Fprintf(out, "profile %s\n", profilePath)
-	fmt.Fprintf(out, "source  %s (legacy fallback left in place)\n", legacyPath)
-	fmt.Fprintf(out, "\nRestart relkit-agent after deploying a build that supports release-policy.json.\n")
+	fmt.Fprintf(out, "source  %s -> %s\n", legacyPath, asidePath)
+	fmt.Fprintf(out, "\nPublish now requires staged release-policy.json + the profile above.\n")
+	fmt.Fprintf(out, "Restart relkit-agent after deploying a build that supports release-policy.json.\n")
 	return nil
 }
 

@@ -89,7 +89,7 @@ flowchart TB
     ingress["publish.your-domain<br/>自动 HTTPS 反代到 127.0.0.1"]
     unpackStep["解包进 productRoot/.relkit/staged/VERSION<br/>拒绝目录穿越"]
     verifyStep["VerifyStagedHashes<br/>重算哈希 不信任上传方"]
-    mergeStep["release-policy.json +<br/>/etc/relkit-agent/products/PRODUCT.json<br/>无 policy 则 fallback 产品根 relkit.json"]
+    mergeStep["release-policy.json +<br/>/etc/relkit-agent/products/PRODUCT.json"]
     publishStep["publish.Run<br/>按 product 串行 + 幂等键<br/>私钥仅此刻进内存"]
     directoryStep["directory set<br/>directory_sequence 加一"]
   end
@@ -114,7 +114,7 @@ flowchart TB
 
 - **CI 不签名、不碰对象存储**，因此普通构建流水线不需要成为可信边界。stage 只把仓库侧 portable 策略打进 `release-policy.json`（无私钥、无后端凭据）。
 - staged 目录跨机器可移植（`publish` 只读 `artifacts/<filename>`，不依赖 `staged.pb` 里的 `source_path`）。目录固定为 `staged.pb` + `release-policy.json` + `artifacts/`。
-- 发布机用 **本机 publish profile**（`/etc/relkit-agent/products/<product>.json`）与 staged policy 合并；旧部署在缺少 policy 时仍可读产品根 `relkit.json`。
+- 发布机用 **本机 publish profile**（`/etc/relkit-agent/products/<product>.json`）与 staged policy 合并；缺 policy 或 profile 直接失败。
 - `publish.Run` **不幂等**：同版本重发会让 `sequence` 继续 +1，所以发布入口必须自带幂等键与串行化。
 - 发布机 **不必**出现在客户端 `entryUrls` 里；它只是控制面。
 
@@ -292,7 +292,7 @@ manifest / artifact **发布后不可变**。若某历史版本的 manifest 当�
 | 桶策略 | 匿名 `GetObject` / `HeadObject` / `OptionsObject`（仅读；写仍需密钥） |
 | HTTPS 证书 | TrustAsia C1 DV Free，证书 ID `ZwMfmDwc`，有效期至 **2026-11-10**（三个月，需按期续期） |
 
-`relkit.json` 仓库侧仍描述产品策略；真正写桶的字段（`s3-compatible` 等）落在发布机 profile。后端样例（profile 的 `backends` 条目，旧 fallback 也可写在产品根 `relkit.json`）：
+`relkit.json` 仓库侧仍描述产品策略；真正写桶的字段（`s3-compatible` 等）落在发布机 profile。后端样例（profile 的 `backends` 条目）：
 
 ```json
 {

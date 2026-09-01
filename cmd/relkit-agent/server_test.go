@@ -618,8 +618,8 @@ func TestAgentPublishRequiresProfileWhenPolicyPresent(t *testing.T) {
 	}
 }
 
-func TestAgentPublishLegacyFallbackWithoutPolicy(t *testing.T) {
-	fx := newAgentFixture(t, agentFixtureOpts{omitPolicy: true, omitProfile: true})
+func TestAgentPublishRequiresPolicy(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{omitPolicy: true})
 	status, body := fx.putStaged(t, "demo", "1.0.0")
 	if status != http.StatusCreated {
 		t.Fatalf("staged status=%d body=%s", status, body)
@@ -627,12 +627,15 @@ func TestAgentPublishLegacyFallbackWithoutPolicy(t *testing.T) {
 	if _, err := os.Stat(stage.ReleasePolicyPath(fx.productRoot, "1.0.0")); !os.IsNotExist(err) {
 		t.Fatalf("policy should be absent: %v", err)
 	}
-	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true}`)
-	if status != http.StatusOK {
-		t.Fatalf("legacy publish status=%d body=%s", status, body)
+	if _, err := os.Stat(fx.legacyPath); err != nil {
+		t.Fatalf("leftover product-root config should still exist: %v", err)
 	}
-	if !bytes.Contains(body, []byte("legacy")) {
-		t.Fatalf("expected legacy config source, body=%s", body)
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true}`)
+	if status == http.StatusOK {
+		t.Fatalf("expected missing policy error, body=%s", body)
+	}
+	if !bytes.Contains(body, []byte("release-policy.json")) {
+		t.Fatalf("body=%s", body)
 	}
 }
 

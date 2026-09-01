@@ -466,8 +466,8 @@ CNB 鐨勫埗鍝佸簱鍙湁鐢熸€佷笓鐢ㄧ被鍨嬶紙Docker / Helm / 
 
 CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/`），发布机持钥 `publish`。二进制：`cmd/relkit-agent`。运维命令与路径见 [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)。
 
-- 发布配置：staged `release-policy.json` + `/etc/relkit-agent/products/<product>.json`；旧机无 policy 时 fallback `<productRoot>/relkit.json`
-- 迁 profile：`relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile`
+- 发布配置：staged `release-policy.json` + `/etc/relkit-agent/products/<product>.json`（缺一不可）
+- 迁 profile：`relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile`（迁完把产品根 `relkit.json` 改名为 `.migrated`）
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换 zip（Bearer；GET/HEAD 同样鉴权）
 - `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer）
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
