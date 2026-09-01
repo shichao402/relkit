@@ -87,11 +87,13 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 因此增删产品一律是「SSH 上机 + 本机 `relkit-serve init`」，凭据是 SSH 身份，与上传 token 完全分离。谁有 SSH 就能管这台机；把运营方 token 交给谁，只是给了他往全树写的权限，不包含也不需要包含管理能力。
 
+操作面板（`/-/admin`）是另一件事：它只让已经能看到这台箱的人登录看现算门户，**不能**签发上传 token。首次部署时 `init` 会打印一张一次性引导凭据（`RELKIT_ADMIN_BOOTSTRAP`），用来创建第一个运营账户，创建成功即作废。之后只靠该账户登录。忘了就 SSH 跑 `init -reset-admin`，不要把引导凭据存进 Dec 或任何长期凭据库。细节见 ADR 0006。
+
 ### 2.4 服务目录里只能放发布树
 
-根路径 `/` 返回对外目录（`browse/index.html`，没有则短说明）。`/-/admin` 是操作面板（每个产品一张卡片，`/-/p/<product>` 是单产品页），各子目录返回 HTML 目录列表，`/-/admin/files` 是根目录列表。方便运维查看已发布内容，同时**任何路径都能被直接取走**。目录里若有备份、构建日志、密钥、`.git`，打开列表或猜到名字就能拿到。
+根路径 `/` 返回对外目录（`browse/index.html`，没有则短说明）。`/-/admin` 是操作面板（每个产品一张卡片，`/-/p/<product>` 是单产品页），须登录；各子目录返回 HTML 目录列表，`/-/admin/files` 是根目录列表（同样须登录）。方便运维查看已发布内容，同时**协议对象与子目录列表仍可被直接取走**。目录里若有备份、构建日志、密钥、`.git`，打开列表或猜到名字就能拿到。
 
-唯一例外是服务自己写的 `.relkit-serve-stats.json`（下载计数）：不出现在列表里，GET 返回 404，PUT 拒绝。不要再往发布目录里放别的东西。
+唯一例外是服务自己写的 `.relkit-serve-stats.json`（下载计数）和 `.relkit-serve-admin.json`（面板账户）：不出现在列表里，GET 返回 404，PUT 拒绝。不要再往发布目录里放别的东西。
 
 不要把发布目录设在家目录、项目工作区或已有内容的共享目录上。用一个专用目录（约定 `/srv/releases`）。
 
@@ -158,6 +160,7 @@ sudo install -m 0755 relkit-serve-linux-amd64 /usr/local/bin/relkit-serve
 # 3
 sudo relkit-serve init -dir /srv/releases -out /etc/relkit-serve
 sudo chown -R relkit:relkit /etc/relkit-serve
+sudo chown relkit:relkit /srv/releases/.relkit-serve-admin.json
 
 # 4
 sudo cp deploy/relkit-serve.service /etc/systemd/system/
@@ -165,7 +168,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now relkit-serve
 ```
 
-`init` 会打印一行 `export RELKIT_UPLOAD_TOKEN=...`。这是**唯一一次**能看到该 token 明文的机会 —— 服务端只保存它的 sha256，事后无法反查。当场交给发布方，见 §4。
+`init` 会打印一行 `export RELKIT_UPLOAD_TOKEN=...` 和一行 `export RELKIT_ADMIN_BOOTSTRAP=...`。上传 token 是**唯一一次**能看到该明文的机会 —— 服务端只保存它的 sha256，事后无法反查。当场交给发布方，见 §4。引导凭据同样只出现一次，用来打开 `/-/admin` 创建第一个运营账户，账户一旦写成即作废；**不要存进 Dec**，丢了就 `init -reset-admin`。
 
 多产品共用一台机时，再为每个产品签发隔离 token（不改已有 cache / addr）：
 
@@ -173,7 +176,7 @@ sudo systemctl enable --now relkit-serve
 sudo relkit-serve init -out /etc/relkit-serve -product demoapp
 ```
 
-把打印出来的值交给**该产品**仓库：写进该 Git 项目的 `.secrets/project/`（Bitwarden folder = `.dec/config.yaml` 的 `project_name`），不要为此新建 Dec bundle。运营方 token 留在 `relkit-serve.token`，只给运维。
+把打印出来的值交给**该产品**仓库：写进该 Git 项目的 `.secrets/project/`（Bitwarden folder = `.dec/config.yaml` 的 `project_name`），不要为此新建 Dec bundle。运营方 token 留在 `relkit-serve.token`，只给运维。面板引导凭据不要进任何长期凭据库。
 
 同族产品（共用一个发布方 / 同一套 CI 秘密）不必再签一张。配置里一条 `uploadTokens` 可以挂多个 product id，运行时仍按路径隔离：拿这张 token 写别的产品的树还是 403。挂上去：
 
@@ -210,11 +213,12 @@ curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" --data-binary 'x' $BASE/probe
 curl -s -o /dev/null -w '%{http_code}\n' -r 0-0 $BASE/probe.txt
 # 期望 206。得到 200 说明 Range 没生效，客户端会退化成单线程
 
-# 5) 根路径是对外目录；操作面板在 /-/admin
+# 5) 根路径是对外目录；操作面板在 /-/admin（未登录应 302 到 setup 或 login）
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/-/admin
-# 期望都是 200。有 browse/index.html 时 / 是静态目录页，否则是说明；
-# $BASE/-/admin 是现算门户，$BASE/-/admin/files 是文件列表
+# / 期望 200。有 browse/index.html 时是静态目录页，否则是说明。
+# $BASE/-/admin 未登录期望 302（有引导凭据 → /-/admin/setup；已有账户 → /-/admin/login）。
+# 登录后 $BASE/-/admin 是现算门户，$BASE/-/admin/files 是文件列表。
 
 curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" $BASE/probe.txt 2>/dev/null || \
   sudo rm -f /srv/releases/probe.txt   # 服务不支持 DELETE，探针文件手工清掉
@@ -289,13 +293,25 @@ sudo relkit-serve init -out /etc/relkit-serve -product demoapp -token-only
 sudo systemctl restart relkit-serve
 ```
 
-**用 `-token-only`，不要用 `-force`。** `-force` 会连配置文件一起重新生成（运营方 `init`）或覆盖该产品 token 文件；前者会把手工改过的监听地址、缓存前缀等一并静默恢复成默认值 —— 而恢复了的缓存前缀唯一的症状是「发布晚了几分钟才生效」（§2.2）。
+**用 `-token-only`，不要用 `-force`。** `-force` 会连配置文件一起重新生成（运营方 `init`）或覆盖该产品 token 文件；前者会把手工改过的监听地址、缓存前缀等一并静默恢复成默认值 —— 而恢复了的缓存前缀唯一的症状是「发布晚了几分钟才生效」（§2.2）。`-token-only` 只换上传 token，**不动**面板账户与引导凭据。
 
 要点：
 
 - 旧 token 在服务重启的那一刻失效。**先把新 token 交给所有发布方再重启**，否则他们的发布会失败。
 - 失败是安全的：`relkit publish` 上传产物时就会拿到 401 而中止，此时 `index` 指针尚未移动，客户端看到的仍是上一个版本。重跑即可，不会留下半个发布。
 - 只读的下载不受影响，客户端不需要任何凭据。
+
+### 重置操作面板
+
+忘了管理员密码、或引导凭据在建账户之前就丢了：
+
+```bash
+sudo relkit-serve init -out /etc/relkit-serve -reset-admin
+sudo chown relkit:relkit /srv/releases/.relkit-serve-admin.json
+sudo systemctl restart relkit-serve
+```
+
+它作废现有运营账户和 session，打印一张新的 `RELKIT_ADMIN_BOOTSTRAP`，不碰上传 token 和 `addr` / `cache`。重启之后打开 `/-/admin` 再创建第一个账户。不要把这张引导凭据写进 Dec。
 
 不想动配置文件时，也可以用环境变量临时覆盖（优先级：命令行 > 环境变量 > 配置文件）：
 
@@ -333,7 +349,7 @@ ssh <host> sudo systemctl restart relkit-serve
 
 - **不要用 `sed` / 手写 JSON 去改 `uploadTokens`。** 那样写出来的条目不会被校验，最常见的后果是配置指向一个不存在的 token 文件，而服务下次重启时直接起不来（`uploadTokens[N]: no such file`），一台机上所有产品一起发不出去。
 - `-product` 打印的明文是**唯一一次**能看到它的机会。当场存进凭据管理系统并交给该产品，**不要**把它贴进工单、聊天记录或提交信息。`-share-with` 不打印明文。
-- `sudo init -product` 之后把 `/etc/relkit-serve` 收归服务用户（`chown -R relkit:relkit`），否则新 token 文件可能是 root 的 0600，重启后进程读不了、整台机起不来。
+- `sudo init -product` 之后把 `/etc/relkit-serve` 收归服务用户（`chown -R relkit:relkit`），否则新 token 文件可能是 root 的 0600，重启后进程读不了、整台机起不来。面板状态文件在服务目录，`chown relkit:relkit /srv/releases/.relkit-serve-admin.json`，否则第一个账户写不上。
 - `-out` 必须指向真正生效的那个配置目录，照抄启动日志里的 `config:` 那行；指错了会在别处新建一份配置，而服务读的还是老的。
 
 ---
@@ -360,6 +376,7 @@ ssh <host> sudo systemctl restart relkit-serve
 | `gc.interval` | `-gc-interval` | `1h` | 定时扫盘间隔；`0` 与 `enabled=false` 一样关闭 GC |
 | `shutdownTimeout` | `-shutdown-timeout` | `30s` | 收到停止信号后留给进行中下载的时间 |
 | `statsFile` | 无 | `<dir>/.relkit-serve-stats.json` | 下载计数 JSON；默认在服务目录根下且不对外提供。放到树外时需给 systemd 加 `ReadWritePaths` |
+| `adminStateFile` | 无 | `<dir>/.relkit-serve-admin.json` | 面板账户与引导哈希；0600；默认在服务目录以便进程能在首次建账户时作废引导凭据。放到树外时同样要加 `ReadWritePaths` |
 | `logRequests` | `-quiet` | `true` | 是否打印请求日志 |
 | `site.title` | 无 | `Releases` | 首页大标题 |
 | `site.products.<id>` | 无 | 无 | 旧部署的网页文案 fallback；新项目应在自身 `relkit.json` 维护并随发布写入 |
@@ -431,13 +448,28 @@ curl -sI $BASE/index/<product>/<channel>.json | grep -iE 'cache-control|last-mod
 
 `Cache-Control` 不是 `no-cache` → 问题在 §2.2 或 §2.6。是 `no-cache` 且 `Last-Modified` 是刚才 → 服务端已经正确了，转到 `relkit` 侧的 `AGENT-GUIDE.md` §8 继续排查。
 
+### 操作面板进不去
+
+看启动日志 `panel:` 那一行：
+
+| 日志 | 页面 | 做什么 |
+|---|---|---|
+| `waiting for first operator` | `/-/admin/setup` | 用 `init` 打印的 `RELKIT_ADMIN_BOOTSTRAP` 建第一个账户 |
+| `authenticated (N operator)` | `/-/admin/login` | 用已有用户名密码登录 |
+| `locked (run … -reset-admin)` | 「Panel locked」 | SSH `init -reset-admin`，再重启 |
+
+从**无鉴权面板**换上带鉴权的二进制时：若发布目录里还没有 `.relkit-serve-admin.json`，日志就是 `locked`，页面是「Panel locked」。数据面（`/`、协议对象、匿名目录列表）不受影响。这不是故障 —— SSH 跑 `init -reset-admin`，重启，再用打印出的引导码建第一个账户。
+
+创建账户时报错、或账户写不上：多半是 `.relkit-serve-admin.json` 的 owner 还是 root。`chown relkit:relkit` 那个文件后重试，不必重签引导凭据。
+
 ---
 
 ## 8. 禁止行为
 
 - 声称执行了 `relkit-serve` 命令而实际上二进制不可用。
 - 用命令行参数或任何进版本控制的文件传 token。
-- 把运营方上传 token 当成远程管理口令（它只能 `PUT`，管理走 SSH，见 §2.3.1）。
+- 把运营方上传 token 当成远程管理口令或面板密码（它只能 `PUT`，管理走 SSH，面板走运营账户，见 §2.3.1）。
+- 把 `RELKIT_ADMIN_BOOTSTRAP` 写进 Dec、工单、聊天或任何长期凭据库；用完即废，丢了就 `-reset-admin`。
 - 用 `sed` 或手写 JSON 改 `uploadTokens`；用 `init -product` / `-remove`。
 - 清空 `cache.noCache` 里的 `index/`，或清空 `cache.immutable` 里的 `artifact/`。
 - 以 root 运行服务进程。
@@ -458,6 +490,7 @@ curl -sI $BASE/index/<product>/<channel>.json | grep -iE 'cache-control|last-mod
 - 实际生效的配置文件路径（照抄启动日志那一行）；
 - 上传端点是开还是关；
 - GC 是开还是关（照抄启动日志）；
-- §3 自检五项的结果；
-- token 交付给了谁、通过什么渠道（**不要**在汇报里带上 token 本身）；
+- §3 自检五项的结果（`/-/admin` 未登录应是 302）；
+- token 交付给了谁、通过什么渠道（**不要**在汇报里带上 token 或引导凭据本身）；
+- 面板是仍待首次建账户，还是已经能登录（照抄启动日志 `panel:`）；
 - 若挂了反代：`Cache-Control` 透传的复验结果。

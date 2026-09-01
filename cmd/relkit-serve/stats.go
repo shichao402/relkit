@@ -79,7 +79,8 @@ func statsFileFrom(cfg *FileConfig) string {
 
 func reservedServeKey(name string) bool {
 	base := path.Base(name)
-	return base == statsFileName || strings.HasPrefix(base, statsFileName+".")
+	return base == statsFileName || strings.HasPrefix(base, statsFileName+".") ||
+		reservedAdminKey(name)
 }
 
 func hiddenServeKey(name string, s *downloadStats) bool {

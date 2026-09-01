@@ -122,7 +122,7 @@ flowchart TB
 - GET `/` 只服务 `browse/index.html`（可 302 到 `/browse/`）。没有 dump 就一页说明，**不要**再 `scanProducts` 当首页。
 - 现算门户、文件树从 `/` 和 `?files=1` 挪到 `/-/admin`。`/-/latest/` 仍是协议旁路的固定下载跳转，留给客户端/链接，不算目录页。
 - nginx 切面不变：`/v1/` → agent；其余 GET 仍进 serve。分流的是 serve 自己的路径，不是再加一台机。
-- 不在这一步做面板鉴权、也不接 Makers 密钥；那是落地配置，不是拓扑分叉。
+- 不在这一步把面板当对外目录；面板鉴权见 [ADR 0006](../adr/0006-admin-panel-bootstrap.md)。
 
 ## 6. BrowseSink 选型（实现约定）
 

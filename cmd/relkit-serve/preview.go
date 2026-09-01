@@ -34,7 +34,7 @@ func writeOperatorPreview(dir string) error {
 
 func samplePortalPage() portalPage {
 	return portalPage{
-		pageChrome: pageChrome{Title: "Releases", Version: "preview"},
+		pageChrome: pageChrome{Title: "Releases", Version: "preview", LoggedIn: true, Username: "operator"},
 		Heading:    "Releases",
 		Sub:        "Operator panel preview. Protocol clients do not read this page.",
 		StatsSince: "2026-08-01",
@@ -61,9 +61,11 @@ func samplePortalPage() portalPage {
 func sampleProductPage() productPage {
 	return productPage{
 		pageChrome: pageChrome{
-			Title:   "svn-auto-merge",
-			Version: "preview",
-			Crumbs:  []crumb{{Label: "Releases", Href: "/-/admin"}, {Label: "svn-auto-merge"}},
+			Title:    "svn-auto-merge",
+			Version:  "preview",
+			LoggedIn: true,
+			Username: "operator",
+			Crumbs:   []crumb{{Label: "Releases", Href: "/-/admin"}, {Label: "svn-auto-merge"}},
 		},
 		Name:        "SVN Auto Merge",
 		Description: "Intranet desktop merge tool.",
@@ -99,7 +101,7 @@ func sampleProductPage() productPage {
 
 func sampleListingPage() listingPage {
 	return listingPage{
-		pageChrome: pageChrome{Title: "files", Version: "preview"},
+		pageChrome: pageChrome{Title: "files", Version: "preview", LoggedIn: true, Username: "operator"},
 		Display:    "/browse/",
 		Count:      3,
 		Parent:     "/-/admin/files",

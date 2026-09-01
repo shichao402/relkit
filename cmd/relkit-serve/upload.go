@@ -44,7 +44,7 @@ func (c *config) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot write to a directory path", http.StatusBadRequest)
 		return
 	}
-	if hiddenServeKey(name, c.stats) {
+	if c.hiddenKey(name) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}

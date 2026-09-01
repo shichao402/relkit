@@ -1,0 +1,17 @@
+{{define "login"}}{{template "head" .}}
+<div class="auth">
+<header class="site">
+<h1>Sign in</h1>
+<p class="sub">Operator panel for this box.</p>
+</header>
+{{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+<form method="post" action="{{.Action}}">
+{{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
+<label for="username">Username</label>
+<input id="username" name="username" autocomplete="username" required autofocus>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit">Sign in</button>
+</form>
+</div>
+{{template "foot" .}}{{end}}

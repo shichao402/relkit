@@ -106,9 +106,25 @@ extract_token() {
 	sed -n "s/.*RELKIT_UPLOAD_TOKEN='\\(.*\\)'.*/\\1/p"
 }
 
+extract_bootstrap() {
+	sed -n "s/.*RELKIT_ADMIN_BOOTSTRAP='\\(.*\\)'.*/\\1/p"
+}
+
+chown_admin_state() {
+	for f in "$DIR/.relkit-serve-admin.json" "$CONFIG_DIR/admin.json"; do
+		if [ -f "$f" ]; then
+			chown "$USER_NAME:$USER_NAME" "$f"
+			chmod 600 "$f"
+		fi
+	done
+}
+
 NEW_TOKEN=""
+NEW_BOOTSTRAP=""
 if [ ! -f "$CONFIG" ] || [ ! -f "$TOKEN_FILE" ]; then
-	NEW_TOKEN=$("$PREFIX/relkit-serve" init -dir "$DIR" -out "$CONFIG_DIR" -force | extract_token)
+	INIT_OUT=$("$PREFIX/relkit-serve" init -dir "$DIR" -out "$CONFIG_DIR" -force)
+	NEW_TOKEN=$(printf '%s\n' "$INIT_OUT" | extract_token)
+	NEW_BOOTSTRAP=$(printf '%s\n' "$INIT_OUT" | extract_bootstrap)
 
 	# init writes addr :8080; honour --addr without needing a JSON parser here.
 	if [ "$ADDR" != ":8080" ]; then
@@ -120,7 +136,7 @@ elif [ "$ROTATE" = 1 ]; then
 	echo "rotating the token; every publisher must be given the new value"
 	# -token-only so that hand-edited settings survive. Regenerating the whole
 	# config would quietly revert them, and a reverted cache prefix shows up
-	# only as releases arriving minutes late.
+	# only as releases arriving minutes late. Panel accounts are left alone.
 	NEW_TOKEN=$("$PREFIX/relkit-serve" init -out "$CONFIG_DIR" -token-only | extract_token)
 else
 	echo "keeping existing config and token"
@@ -130,6 +146,7 @@ fi
 if [ -n "$NEW_TOKEN" ]; then
 	chown -R "$USER_NAME:$USER_NAME" "$CONFIG_DIR"
 fi
+chown_admin_state
 
 step "systemd unit"
 UNIT=/etc/systemd/system/relkit-serve.service
@@ -251,5 +268,16 @@ And in the publishing project's relkit.json:
 
 baseUrl must be the address clients will actually use: it goes into the signed
 manifest, so changing it later needs a new release.
+EOF
+fi
+
+if [ -n "$NEW_BOOTSTRAP" ]; then
+	cat <<EOF
+
+Open http://127.0.0.1:${PORT:-8080}/-/admin and create the first operator with
+this one-shot bootstrap. It is spent the moment that account exists; do not
+store it.
+
+  export RELKIT_ADMIN_BOOTSTRAP='$NEW_BOOTSTRAP'
 EOF
 fi

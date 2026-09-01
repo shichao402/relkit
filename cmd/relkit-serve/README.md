@@ -125,11 +125,11 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 |---|---|
 | `/` | 对外目录：有 `browse/index.html` 就原样返回；否则一页说明。不是操作面板 |
 | `/browse/` | 同一份 dump（`index.html`、`<product>.html`、`catalog.json`） |
-| `/-/admin` | 操作面板：现算产品卡。以后长成 relkit 后台；不是给人书签的目录 |
-| `/-/p/<product>` | 操作面板里的单产品页（现算，含下载次数与技术细节） |
+| `/-/admin` | 操作面板：现算产品卡。须登录。以后长成 relkit 后台；不是给人书签的目录 |
+| `/-/p/<product>` | 操作面板里的单产品页（现算，含下载次数与技术细节）。须登录 |
 | `/-/latest/<product>/<channel>/<artifact-id>` | 长期有效的下载地址；读取发布时写好的 `latest/<product>/<channel>.json` 后 302 到具体产物 |
-| `/<dir>/` | 目录列表：名字、大小、修改时间 |
-| `/-/admin/files` | 发布树根目录列表（旧书签 `/?files=1` 会 301 过来） |
+| `/<dir>/` | 目录列表：名字、大小、修改时间（数据面，匿名） |
+| `/-/admin/files` | 发布树根目录列表（旧书签 `/?files=1` 会 301 过来）。须登录 |
 
 几点设计取舍：
 
@@ -257,7 +257,9 @@ aria2c -x16 -s16 -d /tmp http://dl.internal:8080/artifact/app/1.0.0/app.zip
 
 **路径限制。** 所有文件操作走 `os.Root`，它把操作限制在服务目录内，**包括经由符号链接的逃逸** —— 这正是手写前缀检查通常漏掉的一类。请求路径在此之前还会被单独拒绝一次，这样遍历尝试在日志里表现为 404 而不是一个打开失败。
 
-**对外目录是静态 dump；操作面板对运维开放。** `GET /` 返回 `browse/index.html`（没有则短说明）。现算门户在 `/-/admin`，各子目录返回 HTML 索引。协议客户端仍只信任签名过的 index；这些页面都不是信任边界。因此发布目录里仍然不要放别的东西：列表会把它们暴露出来，且任何路径都能被按名取走。
+**对外目录是静态 dump；操作面板须登录。** `GET /` 返回 `browse/index.html`（没有则短说明）。现算门户在 `/-/admin`，登录后可看。各子目录仍返回 HTML 索引（数据面，匿名）。协议客户端仍只信任签名过的 index。因此发布目录里仍然不要放别的东西：列表会把它们暴露出来，且任何路径都能被按名取走。
+
+面板鉴权是实例本地的一次性引导凭据：`init` 打印 `RELKIT_ADMIN_BOOTSTRAP`，用它创建第一个运营账户后即作废。日常用户名密码登录；忘了就 SSH `init -reset-admin`。上传 token 不能登录面板，引导凭据不要进 Dec。见 [ADR 0006](../../docs/adr/0006-admin-panel-bootstrap.md)。
 
 ---
 
@@ -268,4 +270,4 @@ go test ./...                              # 功能
 go test -run "^$" -bench . -benchtime 2s   # 吞吐
 ```
 
-覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、操作面板（多产品、channel 排序、坏 index 退回列表、`/-/admin/files`、HEAD 无正文、不可缓存）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数、重启后仍在、计数文件不对外提供）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、产品隔离 token（本产品可写、他产品 403、前缀兄弟 403）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、`init -product` 合并配置且 `-token-only` 不改 json、`-product -share-with` 挂到已有 token 且不打印明文、`-list-products` 不打明文且不新建目录、`-remove` 摘条目删文件而运营方 token 与手改字段不受影响（共用文件时只摘 id）、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。
+覆盖：Range 切片正确性、16 并发下载拼回原文件、HEAD 只返回大小、缓存头按前缀分流、路径遍历被拒、目录列表、操作面板（登录后：多产品、channel 排序、坏 index 退回列表、`/-/admin/files`、HEAD 无正文、不可缓存；未登录 302；一次性引导建户后作废、`-reset-admin`、状态文件不对外提供）、产品页（channel 下载卡片、折叠技术详情、固定链接、未知产品 404）、System / Light / Dark 主题控件、各 channel 按 UA 给下载链接（含认不出时不给）、固定 latest 地址（读发布指针后 302、路径不合法即 404）、下载计数（Range 不重复计数、HEAD 不计数、重启后仍在、计数文件不对外提供）、`site` 文案覆盖、上传鉴权（缺失 / 错误 / 格式错误）、产品隔离 token（本产品可写、他产品 403、前缀兄弟 403）、发布协议 preflight 与 426 门禁、指针可覆盖、超限上传被拒且不留残留、临时文件不残留、配置文件解析与未知字段拒绝、token 三种来源与优先级、`init` 不覆盖既有 token、`init -product` 合并配置且 `-token-only` 不改 json 也不轮换面板、`-product -share-with` 挂到已有 token 且不打印明文、`-list-products` 不打明文且不新建目录、`-remove` 摘条目删文件而运营方 token 与手改字段不受影响（共用文件时只摘 id）、内嵌手册存在、孤儿 GC（单版清理 / 多 channel 并集 / 坏 index 不删 / index PUT 触发）。

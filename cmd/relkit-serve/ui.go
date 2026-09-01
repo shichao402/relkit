@@ -53,10 +53,12 @@ type crumb struct {
 // pageChrome is embedded by every page so the shared head/foot templates can
 // reach the same fields regardless of which page is rendering.
 type pageChrome struct {
-	Title   string
-	Crumbs  []crumb
-	Version string
-	Note    string
+	Title    string
+	Crumbs   []crumb
+	Version  string
+	Note     string
+	LoggedIn bool
+	Username string
 }
 
 // channelRow is the portal's one-line summary of a channel. The index object
@@ -612,6 +614,7 @@ func safeSegment(s string) bool {
 // renderPage buffers first so a template error cannot leave a half-written page
 // behind an already-sent 200.
 func (c *config) renderPage(w http.ResponseWriter, r *http.Request, name string, data any) {
+	c.stampChrome(r, data)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	if r.Method == http.MethodHead {

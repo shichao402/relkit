@@ -66,6 +66,13 @@ details.technical[open] summary{margin-bottom:.7rem}
 .history-title{font-size:.8rem;font-weight:600;margin:1rem 0 .25rem;color:var(--muted)}
 p.foot{margin:2.5rem 0 0;padding-top:.9rem;border-top:1px solid var(--line);color:var(--faint);font-size:.8rem}
 p.foot a{color:var(--muted)}
+.auth{max-width:24rem;margin:3rem auto 0}
+.auth form{display:flex;flex-direction:column;gap:.15rem}
+.auth label{font-size:.82rem;color:var(--muted);margin:.35rem 0 .2rem}
+.auth input{width:100%;padding:.5rem .65rem;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--fg);font:inherit}
+.auth button{margin-top:.9rem;padding:.5rem .9rem;border:0;border-radius:7px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.auth .err{color:var(--warn);margin:0 0 .6rem}
+.auth .hint{color:var(--muted);font-size:.88rem;margin:0 0 1rem}
 @media (max-width:640px){
 .wrap{padding:1rem .8rem 3rem}
 .theme span{display:none}
@@ -86,7 +93,7 @@ p.foot a{color:var(--muted)}
 <div class="topline">{{if .Crumbs}}<nav class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sep">/</span>{{end}}{{if $c.Href}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{else}}<span>{{$c.Label}}</span>{{end}}{{end}}</nav>{{else}}<span></span>{{end}}<label class="theme"><span>Theme</span><select id="theme-select" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
 {{end}}
 
-{{define "foot"}}<p class="foot">relkit-serve {{.Version}}{{if .Note}} · {{.Note}}{{end}} · <a href="/-/admin/files">all files</a></p>
+{{define "foot"}}<p class="foot">relkit-serve {{.Version}}{{if .Note}} · {{.Note}}{{end}}{{if .LoggedIn}} · {{.Username}} · <a href="/-/admin/logout">sign out</a> · <a href="/-/admin/files">all files</a>{{end}}</p>
 <script>(function(){var s=document.getElementById("theme-select");if(!s)return;var t=document.documentElement.dataset.theme||"system";s.value=t;s.addEventListener("change",function(){var v=s.value;document.documentElement.dataset.theme=v;try{if(v==="system")localStorage.removeItem("relkit-theme");else localStorage.setItem("relkit-theme",v)}catch(e){}})})()</script>
 </div></body></html>
 {{end}}

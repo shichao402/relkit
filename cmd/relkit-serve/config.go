@@ -53,6 +53,13 @@ type FileConfig struct {
 	// systemd unit. Point it outside the tree if you add another ReadWritePaths.
 	StatsFile string `json:"statsFile,omitempty"`
 
+	// AdminStateFile is the operator-account JSON (bootstrap hash, password
+	// hashes, session key). Empty means <dir>/.relkit-serve-admin.json, which
+	// is writable under the default systemd unit so the first-account setup
+	// can consume the bootstrap without opening /etc. Point it outside the
+	// tree if you add another ReadWritePaths.
+	AdminStateFile string `json:"adminStateFile,omitempty"`
+
 	ShutdownTimeout string `json:"shutdownTimeout"`
 	LogRequests     *bool  `json:"logRequests"`
 }
@@ -342,7 +349,7 @@ func checkPermissions(path string) []string {
 	mode := info.Mode().Perm()
 	if mode&0o077 != 0 {
 		return []string{fmt.Sprintf(
-			"%s holds an upload token but is mode %04o; "+
+			"%s holds a secret but is mode %04o; "+
 				"run: chmod 600 %s", path, mode, path)}
 	}
 	return nil
@@ -407,6 +414,10 @@ func ParseDuration(text string) (time.Duration, error) {
 // because those are the values that make a release visible immediately, and a
 // reader who does not yet know why they matter would otherwise leave them out.
 func Skeleton(dir string) []byte {
+	return skeletonBytes(dir, "")
+}
+
+func skeletonBytes(dir, adminStateFile string) []byte {
 	maxAge := 60
 	logRequests := true
 	gcEnabled := true
@@ -414,6 +425,7 @@ func Skeleton(dir string) []byte {
 		Addr:            ":8080",
 		Dir:             dir,
 		UploadTokenFile: "relkit-serve.token",
+		AdminStateFile:  adminStateFile,
 		MaxUpload:       "4GiB",
 		Cache: &CacheConfig{
 			NoCache:       []string{"index/", "fallback/", "directory/", "site/", "latest/", "browse/"},

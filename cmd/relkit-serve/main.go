@@ -15,11 +15,12 @@
 // Usage:
 //
 //	relkit-serve [flags]                  run the server
-//	relkit-serve init [dir]               write a config skeleton and a token
+//	relkit-serve init [dir]               write a config skeleton, upload token, and panel bootstrap
 //	relkit-serve init -product <id>       add or rotate a product upload token
 //	relkit-serve init -product <id> -share-with <id>  attach to an existing token
 //	relkit-serve init -list-products      list the product upload tokens
 //	relkit-serve init -product <id> -remove   revoke one product
+//	relkit-serve init -reset-admin        issue a new panel bootstrap; existing operators are wiped
 //	relkit-serve agent-guide              print the deployment guide
 //	relkit-serve -version
 package main
@@ -73,6 +74,7 @@ type config struct {
 	gc                 *gcState
 	site               *SiteConfig
 	stats              *downloadStats
+	admin              *adminAuth
 	minPublishProtocol int
 }
 
@@ -224,6 +226,16 @@ func runServer() {
 		gc:            newGCState(gcOn, *gcInterval, defaultGCDebounce),
 		stats:         newDownloadStats(resolveStatsPath(root.Name(), statsFileFrom(fileCfg)), root.Name()),
 	}
+	admin, err := openAdminAuth(resolveAdminPath(root.Name(), usedPath, adminStateFileFrom(fileCfg)), root.Name())
+	if err != nil {
+		log.Fatalf("admin: %v", err)
+	}
+	cfg.admin = admin
+	if admin.path != "" {
+		if _, err := os.Stat(admin.path); err == nil {
+			warnings = append(warnings, checkPermissions(admin.path)...)
+		}
+	}
 	if fileCfg != nil {
 		cfg.site = fileCfg.Site
 		if fileCfg.Publish != nil {
@@ -274,6 +286,7 @@ func runServer() {
 	if cfg.stats != nil && cfg.stats.path != "" {
 		log.Printf("download stats: %s (since %s)", cfg.stats.path, cfg.stats.startedAt())
 	}
+	log.Printf("panel: %s", cfg.admin.statusLog())
 	for _, warning := range warnings {
 		log.Printf("WARNING: %s", warning)
 	}
@@ -318,20 +331,25 @@ func runInit(out io.Writer, args []string) error {
 	shareWith := fs.String("share-with", "", "with -product: grant the same token as this existing product")
 	list := fs.Bool("list-products", false, "list the product-scoped upload tokens and exit")
 	remove := fs.Bool("remove", false, "with -product: revoke that product's upload token")
+	resetAdmin := fs.Bool("reset-admin", false, "issue a new panel bootstrap and wipe operator accounts")
 	fs.Parse(args)
 
 	outDir := *target
 	configPath := filepath.Join(outDir, ConfigName)
 
-	// Listing, revoking, and sharing run before MkdirAll: none of them should
-	// bring into existence the directory it was pointed at, which would turn a
-	// typo in -out into a silent "no products configured".
+	// Listing, revoking, sharing, and admin reset run before MkdirAll: none
+	// of them should bring into existence the directory it was pointed at.
 	switch {
 	case *list:
-		if *product != "" || *remove || *shareWith != "" {
+		if *product != "" || *remove || *shareWith != "" || *resetAdmin {
 			return fmt.Errorf("-list-products takes no other arguments")
 		}
 		return runInitListProducts(out, configPath)
+	case *resetAdmin:
+		if *product != "" || *remove || *shareWith != "" || *tokenOnly || *force {
+			return fmt.Errorf("-reset-admin cannot be combined with -product, -remove, -share-with, -token-only, or -force")
+		}
+		return runInitResetAdmin(out, configPath, *dir)
 	case *remove:
 		if *product == "" {
 			return fmt.Errorf("-remove needs -product <id>")
@@ -386,12 +404,6 @@ func runInit(out io.Writer, args []string) error {
 	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0o600); err != nil {
 		return err
 	}
-	if !*tokenOnly {
-		if err := os.WriteFile(configPath, Skeleton(*dir), 0o644); err != nil {
-			return err
-		}
-	}
-
 	if *tokenOnly {
 		fmt.Fprintf(out, "token  %s (mode 0600, replaced)\n", tokenPath)
 		fmt.Fprintf(out, "\nRestart the service to load it. Every publisher needs "+
@@ -400,13 +412,53 @@ func runInit(out io.Writer, args []string) error {
 		return nil
 	}
 
+	adminToken, adminPath, adminRel, err := writeNewAdminState(*dir, outDir)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(configPath, skeletonBytes(*dir, adminRel), 0o644); err != nil {
+		return err
+	}
+
 	fmt.Fprintf(out, "config %s\n", configPath)
 	fmt.Fprintf(out, "token  %s (mode 0600)\n", tokenPath)
 	fmt.Fprintf(out, "\nThe publisher needs this token in its environment:\n")
 	fmt.Fprintf(out, "  export RELKIT_UPLOAD_TOKEN='%s'\n\n", token)
-	fmt.Fprintf(out, "Serving directory is %s; create it before starting.\n", *dir)
+	printAdminBootstrap(out, adminPath, adminToken)
+	if adminRel != "" {
+		fmt.Fprintf(out, "\nNOTE: %s did not exist; admin state is next to the config.\n", *dir)
+		fmt.Fprintf(out, "      Move it into the serve directory before first start so the service can consume the bootstrap.\n")
+	}
+	fmt.Fprintf(out, "\nServing directory is %s; create it before starting.\n", *dir)
 	fmt.Fprintf(out, "Then: relkit-serve -config %s\n", configPath)
 	fmt.Fprintf(out, "Deployment steps and troubleshooting: relkit-serve agent-guide\n")
+	return nil
+}
+
+// runInitResetAdmin wipes operator accounts and issues a new bootstrap. The
+// running process keeps the old session key until it reloads, so restart after
+// handing the new bootstrap to whoever will create the next account.
+func runInitResetAdmin(out io.Writer, configPath, serveDirFlag string) error {
+	cfg, err := loadInitConfig(configPath)
+	if err != nil {
+		return err
+	}
+	serveDir := cfg.Dir
+	if serveDir == "" {
+		serveDir = serveDirFlag
+	}
+	path := resolveAdminPath(serveDir, configPath, cfg.AdminStateFile)
+	token, doc, err := mintAdminDoc()
+	if err != nil {
+		return err
+	}
+	if err := writeAdminDoc(path, doc); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "config %s\n", configPath)
+	printAdminBootstrap(out, path, token)
+	fmt.Fprintf(out, "\nExisting operator accounts and sessions are gone. Restart to load it:\n")
+	fmt.Fprintf(out, "  systemctl restart relkit-serve\n")
 	return nil
 }
 
@@ -487,10 +539,18 @@ func runInitProduct(out io.Writer, outDir, serveDir, product string, force, toke
 	}
 
 	createdOperator := ""
+	createdBootstrap := ""
+	createdAdminPath := ""
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		if err := os.WriteFile(configPath, Skeleton(serveDir), 0o644); err != nil {
+		adminToken, adminPath, adminRel, err := writeNewAdminState(serveDir, outDir)
+		if err != nil {
 			return err
 		}
+		if err := os.WriteFile(configPath, skeletonBytes(serveDir, adminRel), 0o644); err != nil {
+			return err
+		}
+		createdBootstrap = adminToken
+		createdAdminPath = adminPath
 		operatorPath := filepath.Join(outDir, "relkit-serve.token")
 		if _, err := os.Stat(operatorPath); os.IsNotExist(err) {
 			op, err := writeTokenFile(operatorPath)
@@ -522,6 +582,10 @@ func runInitProduct(out io.Writer, outDir, serveDir, product string, force, toke
 	if createdOperator != "" {
 		fmt.Fprintf(out, "\nAn operator token was also written (full-tree PUT):\n")
 		fmt.Fprintf(out, "  export RELKIT_SERVE_TOKEN='%s'\n", createdOperator)
+	}
+	if createdBootstrap != "" {
+		fmt.Fprintf(out, "\n")
+		printAdminBootstrap(out, createdAdminPath, createdBootstrap)
 	}
 	return nil
 }

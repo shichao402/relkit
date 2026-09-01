@@ -29,10 +29,7 @@ func selectors(pairs map[string]string) []*rupv2.Selector {
 
 func getBody(t *testing.T, url string) string {
 	t.Helper()
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
+	resp := testGet(t, url)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s: status = %d, want 200", url, resp.StatusCode)
@@ -171,10 +168,7 @@ func TestProductPageUnknownProductIs404(t *testing.T) {
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 
 	for _, path := range []string{"/-/p/nope", "/-/p/", "/-/p/app/extra", "/-/p/..%2f.."} {
-		resp, err := http.Get(srv.URL + path)
-		if err != nil {
-			t.Fatalf("GET %s: %v", path, err)
-		}
+		resp := testGet(t, srv.URL+path)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s: status = %d, want 404", path, resp.StatusCode)
@@ -188,6 +182,7 @@ func TestPortalHeadRequestSendsNoBody(t *testing.T) {
 
 	for _, path := range []string{"/", "/-/admin", "/-/p/app"} {
 		req, _ := http.NewRequest(http.MethodHead, srv.URL+path, nil)
+		attachTestPanelCookie(req)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("HEAD %s: %v", path, err)
@@ -213,10 +208,7 @@ func TestPortalIsNotCached(t *testing.T) {
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 
 	for _, path := range []string{"/", "/-/admin", "/-/p/app", "/-/admin/files"} {
-		resp, err := http.Get(srv.URL + path)
-		if err != nil {
-			t.Fatalf("GET %s: %v", path, err)
-		}
+		resp := testGet(t, srv.URL+path)
 		resp.Body.Close()
 		if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
 			t.Errorf("GET %s: Cache-Control = %q, want no-cache", path, got)
@@ -282,6 +274,7 @@ func getWithAgent(t *testing.T, url, agent string) string {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("User-Agent", agent)
+	attachTestPanelCookie(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
@@ -436,6 +429,7 @@ func TestDownloadCountsPersistAcrossRestart(t *testing.T) {
 		immutable:     []string{"manifest/", "artifact/"},
 		defaultMaxAge: 60,
 		stats:         newDownloadStats(defaultStatsPath(dir), dir),
+		admin:         cfg.admin,
 	}
 	t.Cleanup(cfg2.stats.stop)
 	srv2 := newLocalServer(t, cfg2)

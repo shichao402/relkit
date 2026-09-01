@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,13 +14,20 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"google.golang.org/protobuf/proto"
 )
 
-const testToken = "s3cr3t-token"
+const (
+	testToken         = "s3cr3t-token"
+	testPanelUser     = "operator"
+	testPanelPassword = "test-pass-ok"
+)
+
+var testPanelCookies sync.Map
 
 func newTestConfig(t *testing.T, withToken bool) (*config, string) {
 	t.Helper()
@@ -39,12 +47,87 @@ func newTestConfig(t *testing.T, withToken bool) (*config, string) {
 		immutable:     []string{"manifest/", "artifact/"},
 		defaultMaxAge: 60,
 		stats:         newDownloadStats(defaultStatsPath(dir), dir),
+		admin:         readyTestAdmin(t, dir),
 	}
 	if withToken {
 		cfg.credentials = []credential{{hash: hashToken(testToken)}}
 	}
 	t.Cleanup(cfg.stats.stop)
 	return cfg, dir
+}
+
+func readyTestAdmin(t *testing.T, dir string) *adminAuth {
+	t.Helper()
+	hash, err := hashPassword(testPanelPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	path := filepath.Join(dir, adminStateFileName)
+	doc := adminDoc{
+		SessionKey: base64.RawURLEncoding.EncodeToString(key),
+		Users:      []adminUser{{Username: testPanelUser, PasswordHash: hash}},
+	}
+	if err := writeAdminDoc(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := openAdminAuth(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return admin
+}
+
+func rememberPanelCookie(tb testing.TB, srv *httptest.Server, cfg *config) {
+	tb.Helper()
+	if cfg == nil || cfg.admin == nil {
+		return
+	}
+	user := cfg.admin.firstUsername()
+	if user == "" {
+		return
+	}
+	cookie, err := cfg.admin.issueCookie(user, time.Now().Add(time.Hour))
+	if err != nil {
+		tb.Fatal(err)
+	}
+	testPanelCookies.Store(srv.URL, cookie)
+	tb.Cleanup(func() { testPanelCookies.Delete(srv.URL) })
+}
+
+func attachTestPanelCookie(req *http.Request) {
+	if req.URL == nil {
+		return
+	}
+	base := req.URL.Scheme + "://" + req.URL.Host
+	if v, ok := testPanelCookies.Load(base); ok {
+		req.AddCookie(v.(*http.Cookie))
+	}
+}
+
+func testGet(t *testing.T, rawURL string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachTestPanelCookie(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+// newLocalServer is shared with the benchmarks, which use testing.B.
+func newLocalServer(tb testing.TB, cfg *config) *httptest.Server {
+	tb.Helper()
+	srv := httptest.NewServer(cfg.handler())
+	rememberPanelCookie(tb, srv, cfg)
+	return srv
 }
 
 func TestPublishProtocolIsEnforcedBeforeWrite(t *testing.T) {
@@ -142,12 +225,6 @@ func newTestServer(t *testing.T, withToken bool) (*httptest.Server, string) {
 	srv := newLocalServer(t, cfg)
 	t.Cleanup(srv.Close)
 	return srv, dir
-}
-
-// newLocalServer is shared with the benchmarks, which use testing.B.
-func newLocalServer(tb testing.TB, cfg *config) *httptest.Server {
-	tb.Helper()
-	return httptest.NewServer(cfg.handler())
 }
 
 func writeFile(t *testing.T, dir, name string, data []byte) {
@@ -338,14 +415,11 @@ func TestDirectoryListing(t *testing.T) {
 	// stays a file listing. That is also the plain-static-host case.
 	writeFile(t, dir, "index/app/stable.pb", []byte("x"))
 
-	resp, err := http.Get(srv.URL + "/-/admin/files")
-	if err != nil {
-		t.Fatalf("GET /: %v", err)
-	}
-	defer resp.Body.Close()
+	resp := testGet(t, srv.URL+"/-/admin/files")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /: status = %d, want 200", resp.StatusCode)
 	}
+	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	html := string(body)
 	for _, want := range []string{

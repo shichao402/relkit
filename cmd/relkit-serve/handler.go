@@ -39,14 +39,17 @@ func (c *config) handler() http.Handler {
 	})
 	mux.HandleFunc(publishproto.PreflightPath, c.servePublishPreflight)
 
-	mux.HandleFunc(productPathPrefix, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(adminLoginPath, c.serveAdminLogin)
+	mux.HandleFunc(adminSetupPath, c.serveAdminSetup)
+	mux.HandleFunc(adminLogoutPath, c.serveAdminLogout)
+	mux.HandleFunc(productPathPrefix, c.requirePanelAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		c.serveProduct(w, r)
-	})
+	}))
 	mux.HandleFunc(latestPathPrefix, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -55,8 +58,8 @@ func (c *config) handler() http.Handler {
 		}
 		c.serveLatest(w, r)
 	})
-	mux.HandleFunc(adminPath, c.serveAdmin)
-	mux.HandleFunc(adminFilesPath, c.serveAdminFiles)
+	mux.HandleFunc(adminPath, c.requirePanelAuth(c.serveAdmin))
+	mux.HandleFunc(adminFilesPath, c.requirePanelAuth(c.serveAdminFiles))
 
 	mux.HandleFunc("/", c.serve)
 
@@ -84,7 +87,7 @@ func allowedMethods(uploads bool) string {
 
 func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	name, ok := cleanKey(r.URL.Path)
-	if !ok || hiddenServeKey(name, c.stats) {
+	if !ok || c.hiddenKey(name) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -224,7 +227,7 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 
 	visible := 0
 	for _, entry := range entries {
-		if !hiddenServeKey(entryKey(name, entry.Name()), c.stats) {
+		if !c.hiddenKey(entryKey(name, entry.Name())) {
 			visible++
 		}
 	}
@@ -244,7 +247,7 @@ func (c *config) listDir(w http.ResponseWriter, r *http.Request, dir *os.File, n
 	}
 
 	for _, entry := range entries {
-		if hiddenServeKey(entryKey(name, entry.Name()), c.stats) {
+		if c.hiddenKey(entryKey(name, entry.Name())) {
 			continue
 		}
 		row := listingEntry{

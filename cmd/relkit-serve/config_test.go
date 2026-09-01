@@ -913,7 +913,7 @@ func TestEmbeddedGuideIsPresent(t *testing.T) {
 	if len(agentGuide) < 2000 {
 		t.Fatalf("embedded guide is only %d bytes; go:embed may have picked up a stub", len(agentGuide))
 	}
-	for _, needed := range []string{"## 0.", "## 3.", "noCache", "relkit-serve agent-guide"} {
+	for _, needed := range []string{"## 0.", "## 3.", "noCache", "relkit-serve agent-guide", "-reset-admin", "RELKIT_ADMIN_BOOTSTRAP"} {
 		if !strings.Contains(agentGuide, needed) {
 			t.Errorf("embedded guide is missing %q", needed)
 		}

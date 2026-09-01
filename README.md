@@ -12,7 +12,8 @@ RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管�
 曾用过其它语言做过原型；发布工具正式实现就是本仓库的 Go CLI。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。  
 CLI 与 serve 合并决策见 [`docs/adr/0002-one-repo-cli-and-serve.md`](docs/adr/0002-one-repo-cli-and-serve.md)。  
 Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003-protobuf-v2-wire-format.md)；结构 SSOT 在本仓 [`proto/`](proto/)。  
-项目版本 SSOT 见 [`docs/adr/0004-project-version-ssot.md`](docs/adr/0004-project-version-ssot.md)：`VERSION.json` + `relkit version …`。
+项目版本 SSOT 见 [`docs/adr/0004-project-version-ssot.md`](docs/adr/0004-project-version-ssot.md)：`VERSION.json` + `relkit version …`。  
+操作面板一次性引导凭据见 [`docs/adr/0006-admin-panel-bootstrap.md`](docs/adr/0006-admin-panel-bootstrap.md)。
 
 ## Agent 开箱（接入项目时先读）
 
