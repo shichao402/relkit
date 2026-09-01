@@ -1,0 +1,42 @@
+{
+  "name": "rup-client",
+  "version": "0.1.0",
+  "description": "Official Node/TypeScript client SDK for RUP v2 (Release & Update Protocol). See relkit SPEC.md.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "src",
+    "README.md",
+    "AGENT-QUICKSTART.md"
+  ],
+  "scripts": {
+    "generate": "buf generate ../../proto",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "conformance": "npm run build && node --test dist/test/conformance.test.js"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.14.0"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.59.0",
+    "@bufbuild/protoc-gen-es": "^2.14.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "allowScripts": {
+    "@bufbuild/buf@1.72.0": true
+  }
+}

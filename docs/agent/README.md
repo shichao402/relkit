@@ -50,11 +50,11 @@
 脚本会：
 
 1. 检查 `relkit` / `relkit-serve` 是否在 PATH
-2. 探测宿主是否已有 `relkit.json`、`VERSION.json`、Dart/Go 工程迹象
+2. 探测宿主是否已有 `relkit.json`、`VERSION.json`、Dart / Go / Node 工程迹象
 3. **打印下一步必须打开的文档路径**（工具链 + 对应语言 SDK）
 4. 不写入宿主文件（写入只由后续清单里的显式命令完成）
 
-语言 SDK 采用**级联**：当前以 Dart / Go 为主；以后每加一种语言，在 [`sdk-cascade.md`](sdk-cascade.md) 登记，并在该 SDK 目录放 `AGENT-QUICKSTART.md`，bootstrap 自动挂上。
+语言 SDK 采用**级联**：当前入口是 Go / Dart / Node；以后每加一种语言，在 [`sdk-cascade.md`](sdk-cascade.md) 登记，并在该 SDK 目录放 `AGENT-QUICKSTART.md`，bootstrap 自动挂上。
 
 ## 2. 文档地图
 
@@ -65,7 +65,8 @@
 | 之后日常 | `relkit agent-guide` | 发版 / simulate / 红线 |
 
 Go SDK 开箱：[`../../sdk/AGENT-QUICKSTART.md`](../../sdk/AGENT-QUICKSTART.md)  
-Dart SDK 开箱：[`../../sdk/dart/AGENT-QUICKSTART.md`](../../sdk/dart/AGENT-QUICKSTART.md)
+Dart SDK 开箱：[`../../sdk/dart/AGENT-QUICKSTART.md`](../../sdk/dart/AGENT-QUICKSTART.md)  
+Node SDK 开箱：[`../../sdk/node/AGENT-QUICKSTART.md`](../../sdk/node/AGENT-QUICKSTART.md)
 
 ## 3. 开箱完成标准（全部勾上才算 Done）
 

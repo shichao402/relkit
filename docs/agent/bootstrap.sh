@@ -31,6 +31,15 @@ echo "-- host signals --"
 [[ -f "$HOST_ROOT/VERSION.json" ]] && echo "FOUND  VERSION.json" || echo "MISSING  VERSION.json"
 [[ -f "$HOST_ROOT/go.mod" ]] && echo "FOUND  go.mod (Go host?)"
 [[ -f "$HOST_ROOT/pubspec.yaml" ]] && echo "FOUND  pubspec.yaml (Dart/Flutter host?)"
+IS_ELECTRON=0
+if [[ -f "$HOST_ROOT/package.json" ]]; then
+  if grep -q '"electron"' "$HOST_ROOT/package.json" 2>/dev/null; then
+    IS_ELECTRON=1
+    echo "FOUND  package.json (Electron host? -> apply is host-side)"
+  else
+    echo "FOUND  package.json (Node/TypeScript host?)"
+  fi
+fi
 
 DART_GUIDE=""
 if [[ -f "$HOST_ROOT/packages/rup_client/AGENT-QUICKSTART.md" ]]; then
@@ -61,7 +70,13 @@ fi
 if [[ -f "$HOST_ROOT/go.mod" ]]; then
   echo "3. $RELKIT_ROOT/sdk/AGENT-QUICKSTART.md"
 fi
-if [[ ! -f "$HOST_ROOT/pubspec.yaml" && ! -f "$HOST_ROOT/go.mod" ]]; then
+if [[ -f "$HOST_ROOT/package.json" ]]; then
+  echo "3. $RELKIT_ROOT/sdk/node/AGENT-QUICKSTART.md"
+  if [[ "$IS_ELECTRON" -eq 1 ]]; then
+    echo "   note: rup-client has no apply; host owns install/restart"
+  fi
+fi
+if [[ ! -f "$HOST_ROOT/pubspec.yaml" && ! -f "$HOST_ROOT/go.mod" && ! -f "$HOST_ROOT/package.json" ]]; then
   echo "3. $SCRIPT_DIR/sdk-cascade.md  # pick language manually"
 fi
 echo

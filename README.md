@@ -21,7 +21,7 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 **[`docs/agent/README.md`](docs/agent/README.md)**
 
 内含工具链清单、SDK 级联索引，以及只读探测脚本 `docs/agent/bootstrap.ps1` / `bootstrap.sh`。  
-各语言 SDK 自己的开箱文在包内：`sdk/AGENT-QUICKSTART.md`（Go）、宿主观 `rup_client/AGENT-QUICKSTART.md`（Dart）。
+各语言 SDK 自己的开箱文在包内：`sdk/AGENT-QUICKSTART.md`（Go）、`sdk/dart/AGENT-QUICKSTART.md`（Dart）、`sdk/node/AGENT-QUICKSTART.md`（Node）。
 
 日常**已接入后的发版**仍用：`relkit agent-guide` / `relkit-serve agent-guide`。
 
@@ -139,13 +139,13 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 |---|---|
 | 协议规范 | [`SPEC.md`](SPEC.md) |
 | 发布工具设计 | [`CLI.md`](CLI.md) |
-| Protobuf 结构 SSOT | [`proto/`](proto/)（改完跑 `scripts/gen-proto.ps1`） |
+| Protobuf 结构 SSOT | [`proto/`](proto/)（Go / Dart：改完跑 `scripts/gen-proto.ps1`；Node：`cd sdk/node && npm run generate`） |
 | JSON Schema（辅助） | [`schema/`](schema/) |
 | 一致性夹具 | [`conformance/`](conformance/) |
 | 发布侧手册 | `relkit agent-guide`（源：[`embed/AGENT-GUIDE.md`](embed/AGENT-GUIDE.md)） |
 | 服务侧手册 | `relkit-serve agent-guide` |
 
-## Go / Dart 客户端 SDK
+## 客户端 SDK
 
 目录约定见 [`sdk/README.md`](sdk/README.md)：
 
@@ -153,6 +153,7 @@ sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
 |--|--|
 | Go | `sdk/*.go` → `go get cnb.cool/shichao402/relkit/sdk@latest` · [`sdk/AGENT-QUICKSTART.md`](sdk/AGENT-QUICKSTART.md) |
 | Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/AGENT-QUICKSTART.md`](sdk/dart/AGENT-QUICKSTART.md) |
+| Node | `sdk/node`（package `rup-client`）· [`sdk/node/AGENT-QUICKSTART.md`](sdk/node/AGENT-QUICKSTART.md) |
 
 ```go
 import "cnb.cool/shichao402/relkit/sdk"
@@ -166,18 +167,20 @@ u := &sdk.Updater{
 result := u.Check(ctx)
 ```
 
-Dart：`rup_client`（git `path: sdk/dart`；级联见 [`docs/agent/sdk-cascade.md`](docs/agent/sdk-cascade.md)）。
+Dart：`rup_client`（git `path: sdk/dart`；级联见 [`docs/agent/sdk-cascade.md`](docs/agent/sdk-cascade.md)）。  
+Node：`rup-client`（`sdk/node`；同样走级联）。
 
 ## 开发与测试
 
 ```bash
 go test ./...
+cd sdk/node && npm test
 ```
 
 覆盖：
 
 - `chain` / `selectors` / `envelope` 的 conformance 夹具回归
 - `local` / `static-http` / `http-put` 端到端发布与校验（`.pb`）
-- `relkit-serve` 的 Range / PUT / GC / 配置加载
-- `sdk` 客户端 Check/Download
+- `relkit-serve` 的 Range / PUT / GC / 配置加载 / 操作面板鉴权
+- `sdk` 客户端 Check/Download（Go 与 Node）
 - `version` 项目 VERSION.json SSOT（get/set/bump/code）
