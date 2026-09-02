@@ -77,6 +77,7 @@ func ApplyPublish(existing *Catalog, site *webmeta.Site, latest webmeta.Latest, 
 }
 
 func productFromPublish(site *webmeta.Site, latest webmeta.Latest) Product {
+	artifacts := humanArtifacts(latest.Artifacts)
 	page := Product{
 		ID:    latest.Product,
 		Title: latest.Product,
@@ -85,7 +86,7 @@ func productFromPublish(site *webmeta.Site, latest webmeta.Latest) Product {
 			Version:     latest.Version,
 			Code:        latest.Code,
 			PublishedAt: latest.PublishedAt,
-			Artifacts:   append([]webmeta.Artifact(nil), latest.Artifacts...),
+			Artifacts:   artifacts,
 		}},
 	}
 	if site != nil {
@@ -96,6 +97,23 @@ func productFromPublish(site *webmeta.Site, latest webmeta.Latest) Product {
 		page.Homepage = site.Homepage
 	}
 	return page
+}
+
+// humanArtifacts keeps runtime-only artifacts in the signed protocol while
+// removing them from the unsigned page once a release declares user downloads.
+func humanArtifacts(all []webmeta.Artifact) []webmeta.Artifact {
+	var userFacing []webmeta.Artifact
+	for _, artifact := range all {
+		if artifact.Selectors["audience"] == "user" {
+			userFacing = append(userFacing, artifact)
+		}
+	}
+	if len(userFacing) > 0 {
+		return userFacing
+	}
+	// Old releases have no audience selector. Preserve their existing page
+	// rather than rendering an empty product.
+	return append([]webmeta.Artifact(nil), all...)
 }
 
 func mergeProduct(prev, next Product) Product {

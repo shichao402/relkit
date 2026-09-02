@@ -51,6 +51,30 @@ func TestApplyPublishMergesChannels(t *testing.T) {
 	}
 }
 
+func TestHumanPagePrefersUserFacingArtifacts(t *testing.T) {
+	catalog := ApplyPublish(nil, nil, webmeta.Latest{
+		Product: "dec", Channel: "stable", Version: "1.0.0", Code: 1,
+		Artifacts: []webmeta.Artifact{
+			{ID: "runtime", Filename: "dec-server-linux-amd64", Selectors: map[string]string{"audience": "runtime"}},
+			{ID: "console", Filename: "dec-console-linux-amd64.AppImage", Selectors: map[string]string{"audience": "user"}},
+		},
+	}, "now")
+	artifacts := catalog.Products[0].Channels[0].Artifacts
+	if len(artifacts) != 1 || artifacts[0].Filename != "dec-console-linux-amd64.AppImage" {
+		t.Fatalf("human artifacts = %+v", artifacts)
+	}
+}
+
+func TestHumanPageKeepsLegacyArtifacts(t *testing.T) {
+	catalog := ApplyPublish(nil, nil, webmeta.Latest{
+		Product: "old", Channel: "stable", Version: "1.0.0", Code: 1,
+		Artifacts: []webmeta.Artifact{{ID: "legacy", Filename: "old.bin"}},
+	}, "now")
+	if got := len(catalog.Products[0].Channels[0].Artifacts); got != 1 {
+		t.Fatalf("legacy artifact count = %d, want 1", got)
+	}
+}
+
 func TestWriteDumpRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	cat := ApplyPublish(nil, nil, webmeta.Latest{
