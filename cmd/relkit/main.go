@@ -253,7 +253,7 @@ func cmdKeygen(args []string, configPath string) error {
 		if adopted {
 			fmt.Printf("signing.keyId set to %q (it named no configured key)\n", keyID)
 		}
-		fmt.Printf("To publish from this machine, either export the private seed as the variable named by signing.privateKeyEnv, or set signing.privateKeyPath to %s.\n", filepath.Base(privatePath))
+		fmt.Printf("To publish from this machine, set signing.privateKeyPath to %s (per-product key file; do not use a shared environment variable).\n", filepath.Base(privatePath))
 	} else {
 		fmt.Printf("Add that to signing.publicKeys in %s (or re-run with --update-config), and embed it in the client.\n", config.ConfigName)
 	}

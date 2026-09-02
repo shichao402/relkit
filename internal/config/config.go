@@ -424,16 +424,6 @@ func (c *Config) LoadSigners() ([]envelope.Signer, error) {
 		return nil, Error{Message: "signing.keyId is required in order to publish"}
 	}
 
-	if envName, _ := c.Signing["privateKeyEnv"].(string); envName != "" {
-		if raw := os.Getenv(envName); raw != "" {
-			seed, err := keys.DecodeSeed(raw, "environment variable "+envName)
-			if err != nil {
-				return nil, err
-			}
-			return []envelope.Signer{{KeyID: keyID, Seed: seed}}, nil
-		}
-	}
-
 	if rawPath, ok := c.Signing["privateKeyPath"]; ok && rawPath != nil {
 		keyPath, ok := rawPath.(string)
 		if !ok {
@@ -462,11 +452,7 @@ func (c *Config) LoadSigners() ([]envelope.Signer, error) {
 		return []envelope.Signer{{KeyID: keyID, Seed: seed}}, nil
 	}
 
-	envName, _ := c.Signing["privateKeyEnv"].(string)
-	if envName == "" {
-		envName = "signing.privateKeyEnv"
-	}
-	return nil, Error{Message: fmt.Sprintf("no private key available: set %s, or point signing.privateKeyPath at a key file", envName)}
+	return nil, Error{Message: "no private key available: set signing.privateKeyPath to this product's key file"}
 }
 
 func (c *Config) TrustedPublicKeys() (map[string]ed25519.PublicKey, error) {
@@ -517,8 +503,7 @@ func Skeleton(product string) map[string]any {
 		"codeStrategy":   "version-build",
 		"signing": map[string]any{
 			"keyId":          "k1",
-			"privateKeyEnv":  "RELKIT_PRIVATE_KEY",
-			"privateKeyPath": nil,
+			"privateKeyPath": ".relkit-keys/k1.private.pb",
 			"publicKeys":     []any{},
 		},
 		"backends": map[string]any{

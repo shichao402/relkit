@@ -246,8 +246,7 @@ relkit min-supported 120
 
   "signing": {
     "keyId": "k1",
-    "privateKeyEnv": "RELKIT_PRIVATE_KEY",
-    "privateKeyPath": null,
+    "privateKeyPath": ".relkit-keys/k1.private.pb",
     "publicKeys": [
       { "keyId": "k1", "publicKeyBase64": "OKreeDPBlpB/FAYzpTZW2HPNrwI9qd+8AJNimIBk8Pk=" }
     ]
@@ -479,31 +478,34 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 
 ## 7. CI 集成
 
-鍙戝竷渚у彧闇€瑕佷袱涓幆澧冨彉閲忥細涓€涓悗绔?token锛屼竴涓閽ャ€備簩杩涘埗浠?Releases 涓嬭浇锛屾垨鍦?runner 涓?`go install`銆?
+CI **不持**签名私钥，也 **不持** COS 写密钥。Runner 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-agent`；agent 按产品 `signing.privateKeyPath` 持钥执行 `publish`。
 
 ```yaml
-- name: Install relkit
-  run: |
-    curl -fsSL -o relkit.tgz \
-      "https://cnb.cool/shichao402/relkit/-/releases/download/v0.1.0/relkit-linux-amd64"
-    # 瀹為檯璧勪骇鍚嶈瀵瑰簲 release锛沇indows 鐢?.exe
-    install -m 755 relkit-linux-amd64 /usr/local/bin/relkit
-
 - name: Stage
   run: |
     relkit stage "${VERSION}" --code "${GITHUB_RUN_NUMBER}" \
       --min-from "${MIN_FROM}" \
       --add dist/app-win-x64.zip   os=windows,arch=x64 \
       --add dist/app-mac-arm64.zip os=macos,arch=arm64
+    tar -C ".relkit/staged/${VERSION}" -czf staged.tar.gz .
 
-- name: Publish
+- name: Publish via agent
   env:
-    RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
-    RELKIT_PRIVATE_KEY: ${{ secrets.RELKIT_PRIVATE_KEY }}
-  run: relkit publish "${VERSION}"
+    RELKIT_AGENT_TOKEN: ${{ secrets.RELKIT_AGENT_TOKEN }}
+  run: |
+    SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
+    curl -fsS -X PUT \
+      -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+      --data-binary @staged.tar.gz \
+      "${RELKIT_AGENT_URL}/v1/staged/${PRODUCT}/${VERSION}"
+    curl -fsS -X POST \
+      -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "{\"product\":\"${PRODUCT}\",\"version\":\"${VERSION}\",\"stagedSha256\":\"${SHA}\"}" \
+      "${RELKIT_AGENT_URL}/v1/publish"
 ```
 
-瀵圭閽ヤ笉杩?CI 鐨勫満鏅紙渚嬪绉侀挜鍙湪绂荤嚎鏈哄櫒涓婏級锛屽彂甯冩媶鎴愪笁姝ワ細`publish --stop-before-sign` 瀵煎嚭寰呯瀛楄妭 鈫?绂荤嚎鏈哄櫒涓?`relkit sign` 鈫?`publish --resume-with-signature` 鍐欐寚閽堛€傝繖鏉¤矾寰勪紭鍏堢骇杈冧綆锛屼絾璁捐涓婅棰勭暀锛屼笉鑳借绛惧悕姝ラ涓庝笂浼犳楠ゅ己鑰﹀悎銆?
+不要在 CI 里设置 `RELKIT_PRIVATE_KEY` 或任何签名私钥环境变量。设计说明：[`docs/design/publish-agent.md`](docs/design/publish-agent.md)。
 
 ---
 

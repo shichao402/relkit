@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,6 +125,40 @@ func TestLoadSiteMakersRejectsBadRegion(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error for bad site.makers.region")
+	}
+}
+
+func TestLoadSignersIgnoresEnvironmentVariable(t *testing.T) {
+	t.Setenv("RELKIT_PRIVATE_KEY", "not-a-real-seed-but-must-be-ignored")
+	cfg := &Config{
+		Root: t.TempDir(),
+		Signing: map[string]any{
+			"keyId":         "k1",
+			"privateKeyEnv": "RELKIT_PRIVATE_KEY",
+		},
+	}
+	_, err := cfg.LoadSigners()
+	if err == nil {
+		t.Fatal("expected error when privateKeyPath is missing")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "privateKeyPath") {
+		t.Fatalf("error = %q, want mention of privateKeyPath", msg)
+	}
+	if strings.Contains(msg, "RELKIT_PRIVATE_KEY") {
+		t.Fatalf("error still points at the env var: %q", msg)
+	}
+}
+
+func TestSkeletonHasNoPrivateKeyEnv(t *testing.T) {
+	doc := Skeleton("demo")
+	signing, _ := doc["signing"].(map[string]any)
+	if _, ok := signing["privateKeyEnv"]; ok {
+		t.Fatalf("skeleton still has privateKeyEnv: %+v", signing)
+	}
+	path, _ := signing["privateKeyPath"].(string)
+	if path == "" {
+		t.Fatalf("skeleton privateKeyPath = %q", path)
 	}
 }
 

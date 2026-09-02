@@ -29,8 +29,8 @@ chown -R relkit:relkit "$STATE_DIR" "$PRODUCT_ROOT"
 systemctl daemon-reload
 systemctl enable --now relkit-agent
 systemctl --no-pager status relkit-agent || true
-echo "next: set EnvironmentFile=/etc/relkit-agent/env (RELKIT_PRIVATE_KEY, COS_SECRET_ID, COS_SECRET_KEY)"
-echo "new product profile: write $CONFIG_DIR/products/<id>.json (product + signing.keyId + backends), then:"
+echo "next: set EnvironmentFile=/etc/relkit-agent/env (COS_SECRET_ID, COS_SECRET_KEY only)"
+echo "new product profile: write $CONFIG_DIR/products/<id>.json (product + signing.keyId + signing.privateKeyPath + backends), then:"
 echo "  relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id>"
 echo "migrate old product-root relkit.json: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id> -migrate-profile"
 echo "add more products with: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id>"
