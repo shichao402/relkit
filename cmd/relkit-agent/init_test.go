@@ -21,9 +21,12 @@ func writeAgentCfg(t *testing.T, dir string, cfg FileConfig) string {
 func TestInitListProducts(t *testing.T) {
 	dir := t.TempDir()
 	path := writeAgentCfg(t, dir, FileConfig{
-		Addr:            "127.0.0.1:8787",
-		UploadTokenFile: "/etc/relkit-agent/token",
-		MaxUpload:       "8GiB",
+		Addr:      "127.0.0.1:8787",
+		MaxUpload: "8GiB",
+		UploadTokens: []UploadTokenEntry{
+			{File: "tokens/dec.token", Products: []string{"dec"}},
+			{File: "tokens/app.token", Products: []string{"app"}},
+		},
 		Products: map[string]ProductConfig{
 			"dec": {Root: "/srv/relkit/dec"},
 			"app": {Root: "/srv/relkit/app"},
@@ -35,14 +38,14 @@ func TestInitListProducts(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if strings.Contains(out, "secret") || strings.Contains(out, "RELKIT_AGENT_TOKEN=") {
+	if strings.Contains(out, "secret") || strings.Contains(out, "RELKIT_UPLOAD_TOKEN=") {
 		t.Fatalf("list printed a secret:\n%s", out)
 	}
 	if !strings.Contains(out, "config "+path) {
 		t.Fatalf("missing config path:\n%s", out)
 	}
-	if !strings.Contains(out, "/etc/relkit-agent/token") {
-		t.Fatalf("missing token file path:\n%s", out)
+	if !strings.Contains(out, "tokens/dec.token") {
+		t.Fatalf("missing product token file path:\n%s", out)
 	}
 	if !strings.Contains(out, "dec") || !strings.Contains(out, "app") {
 		t.Fatalf("missing products:\n%s", out)
@@ -62,11 +65,10 @@ func TestInitListMissingConfigDoesNotCreateDir(t *testing.T) {
 func TestInitAddAndRemoveProduct(t *testing.T) {
 	dir := t.TempDir()
 	path := writeAgentCfg(t, dir, FileConfig{
-		Addr:            "127.0.0.1:9",
-		UploadTokenFile: "/etc/relkit-agent/token",
-		MaxUpload:       "8GiB",
-		MaxFiles:        10000,
-		StateDir:        "/var/lib/relkit-agent",
+		Addr:      "127.0.0.1:9",
+		MaxUpload: "8GiB",
+		MaxFiles:  10000,
+		StateDir:  "/var/lib/relkit-agent",
 		Products: map[string]ProductConfig{
 			"dec": {Root: "/srv/relkit/dec"},
 		},
@@ -78,11 +80,11 @@ func TestInitAddAndRemoveProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if strings.Contains(out, "export RELKIT") {
-		t.Fatalf("add printed a new secret:\n%s", out)
+	if !strings.Contains(out, "export RELKIT_UPLOAD_TOKEN=") {
+		t.Fatalf("add should print the new product token:\n%s", out)
 	}
-	if !strings.Contains(out, "No new secret") {
-		t.Fatalf("missing reuse notice:\n%s", out)
+	if strings.Contains(out, "RELKIT_AGENT_TOKEN") || strings.Contains(out, "No new secret") {
+		t.Fatalf("add still talks about an instance token:\n%s", out)
 	}
 	if st, err := os.Stat(root); err != nil || !st.IsDir() {
 		t.Fatalf("root not created: %v", err)
@@ -92,13 +94,19 @@ func TestInitAddAndRemoveProduct(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if raw.Addr != "127.0.0.1:9" || raw.UploadTokenFile != "/etc/relkit-agent/token" || raw.MaxUpload != "8GiB" {
+	if raw.Addr != "127.0.0.1:9" || raw.MaxUpload != "8GiB" {
 		t.Fatalf("hand-edited fields were rewritten: %+v", raw)
+	}
+	if raw.UploadTokenFile != "" || raw.UploadToken != "" {
+		t.Fatal("instance token fields must be stripped")
+	}
+	if len(raw.UploadTokens) != 1 || raw.UploadTokens[0].Products[0] != "svn-auto-merge" {
+		t.Fatalf("product token not added: %+v", raw.UploadTokens)
 	}
 	if raw.Products["svn-auto-merge"].Root != root {
 		t.Fatalf("product not added: %+v", raw.Products)
 	}
-	if raw.Products["dec"].Root != "/srv/relkit/dec" {
+	if _, ok := raw.Products["dec"]; !ok {
 		t.Fatalf("existing product lost: %+v", raw.Products)
 	}
 
@@ -119,8 +127,8 @@ func TestInitAddAndRemoveProduct(t *testing.T) {
 	if _, err := os.Stat(root); err != nil {
 		t.Fatal("remove deleted the product root")
 	}
-	if raw.UploadTokenFile != "/etc/relkit-agent/token" {
-		t.Fatal("token file path rewritten on remove")
+	if len(raw.UploadTokens) != 0 {
+		t.Fatal("product token entry left after remove")
 	}
 }
 
@@ -180,7 +188,8 @@ func TestInitFlagCombos(t *testing.T) {
 		{"-config", path, "-list-products", "-product", "dec"},
 		{"-config", path, "-list-products", "-remove"},
 		{"-config", path, "-remove"},
-		{"-config", path, "-product", "dec", "-remove", "-root", dir},
+		{"-config", path, "-product", "dec", "-token-only", "-remove"},
+		{"-config", path, "-list-products", "-token-only"},
 		{"-config", path, "-list-products", "-migrate-profile"},
 		{"-config", path, "-product", "dec", "-remove", "-migrate-profile"},
 		{"-config", path, "-product", "dec", "-migrate-profile", "-root", dir},
@@ -303,5 +312,75 @@ func TestInitMigrateProfileFromLegacy(t *testing.T) {
 		t.Fatal("repeat migrate should be refused")
 	} else if !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("repeat migrate error = %v", err)
+	}
+}
+
+func TestLoadConfigRejectsInstanceToken(t *testing.T) {
+	dir := t.TempDir()
+	path := writeAgentCfg(t, dir, FileConfig{
+		UploadTokenFile: "/etc/relkit-agent/token",
+		Products:        map[string]ProductConfig{"dec": {Root: dir}},
+	})
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "instance-wide") {
+		t.Fatalf("want instance-wide refusal, got %v", err)
+	}
+	t.Setenv("RELKIT_AGENT_TOKEN", "leaked")
+	path2 := writeAgentCfg(t, dir, FileConfig{
+		Products: map[string]ProductConfig{"dec": {Root: dir}},
+	})
+	if _, err := LoadConfig(path2); err == nil || !strings.Contains(err.Error(), "RELKIT_AGENT_TOKEN") {
+		t.Fatalf("want env refusal, got %v", err)
+	}
+}
+
+func TestLoadConfigRejectsSharedProductToken(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "tokens", "shared.token")
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenPath, []byte("shared\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := writeAgentCfg(t, dir, FileConfig{
+		UploadTokens: []UploadTokenEntry{
+			{File: "tokens/shared.token", Products: []string{"dec", "cronkit"}},
+		},
+		Products: map[string]ProductConfig{
+			"dec":     {Root: dir},
+			"cronkit": {Root: dir},
+		},
+	})
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("want shared-token refusal, got %v", err)
+	}
+}
+
+func TestInitIssuesTokenForExistingProduct(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "dec")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := writeAgentCfg(t, dir, FileConfig{
+		UploadTokenFile: "/etc/relkit-agent/token",
+		Products:        map[string]ProductConfig{"dec": {Root: root}},
+	})
+	var buf bytes.Buffer
+	if err := runInit(&buf, []string{"-config", path, "-product", "dec"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "export RELKIT_UPLOAD_TOKEN=") {
+		t.Fatalf("missing token export:\n%s", buf.String())
+	}
+	raw, err := loadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.UploadTokenFile != "" {
+		t.Fatal("instance token file left in config")
+	}
+	if _, err := LoadConfig(path); err != nil {
+		t.Fatalf("agent should start after issuing product token: %v", err)
 	}
 }

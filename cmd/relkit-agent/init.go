@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,10 +23,11 @@ func runInit(out io.Writer, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "relkit-agent.json", "agent config path")
-	product := fs.String("product", "", "add or remove this product id")
+	product := fs.String("product", "", "add, rotate, or remove this product id")
 	root := fs.String("root", "", "with -product: product tree root (default /srv/relkit/<id>)")
 	list := fs.Bool("list-products", false, "list products in the config and exit")
 	remove := fs.Bool("remove", false, "with -product: drop that product from the map")
+	tokenOnly := fs.Bool("token-only", false, "with -product: rotate that product's upload token")
 	migrateProfile := fs.Bool("migrate-profile", false, "with -product: extract a machine publish profile from product-root relkit.json, then rename that file aside")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -34,7 +37,7 @@ func runInit(out io.Writer, args []string) error {
 	// would otherwise become a silent "no products" listing.
 	switch {
 	case *list:
-		if *product != "" || *remove || *root != "" || *migrateProfile {
+		if *product != "" || *remove || *root != "" || *migrateProfile || *tokenOnly {
 			return fmt.Errorf("-list-products takes no other arguments")
 		}
 		return runInitListProducts(out, *configPath)
@@ -48,7 +51,21 @@ func runInit(out io.Writer, args []string) error {
 		if *migrateProfile {
 			return fmt.Errorf("-remove cannot be combined with -migrate-profile")
 		}
+		if *tokenOnly {
+			return fmt.Errorf("-remove cannot be combined with -token-only")
+		}
 		return runInitRemoveProduct(out, *configPath, *product)
+	case *tokenOnly:
+		if *product == "" {
+			return fmt.Errorf("-token-only needs -product <id>")
+		}
+		if *root != "" {
+			return fmt.Errorf("-token-only cannot be combined with -root")
+		}
+		if *migrateProfile {
+			return fmt.Errorf("-token-only cannot be combined with -migrate-profile")
+		}
+		return runInitRotateProductToken(out, *configPath, *product)
 	case *migrateProfile:
 		if *product == "" {
 			return fmt.Errorf("-migrate-profile needs -product <id>")
@@ -86,13 +103,16 @@ func runInitListProducts(out io.Writer, configPath string) error {
 	}
 
 	fmt.Fprintf(out, "config %s\n", configPath)
-	switch {
-	case cfg.UploadToken != "":
-		fmt.Fprintf(out, "token   inline in config\n")
-	case cfg.UploadTokenFile != "":
-		fmt.Fprintf(out, "token   %s\n", cfg.UploadTokenFile)
-	default:
-		fmt.Fprintf(out, "token   none\n")
+	if cfg.UploadToken != "" || cfg.UploadTokenFile != "" {
+		fmt.Fprintf(out, "FORBIDDEN instance token still in json; agent will refuse to start until it is deleted\n")
+	}
+	if len(cfg.UploadTokens) == 0 {
+		fmt.Fprintf(out, "uploadTokens  none\n")
+	} else {
+		fmt.Fprintf(out, "uploadTokens\n")
+		for _, entry := range cfg.UploadTokens {
+			fmt.Fprintf(out, "  %-24s %s\n", strings.Join(entry.Products, ","), entry.File)
+		}
 	}
 	if len(cfg.Products) == 0 {
 		fmt.Fprintf(out, "products  none\n")
@@ -115,6 +135,126 @@ func runInitListProducts(out io.Writer, configPath string) error {
 	return nil
 }
 
+func productTokenRelPath(product string) string {
+	return "tokens/" + product + ".token"
+}
+
+func writeTokenFile(path string) (string, error) {
+	token, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func generateToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func (c *FileConfig) productTokenFile(product string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	for _, entry := range c.UploadTokens {
+		for _, id := range entry.Products {
+			if id == product {
+				return entry.File, true
+			}
+		}
+	}
+	return "", false
+}
+
+func (c *FileConfig) upsertProductToken(product, relFile string) {
+	for i, entry := range c.UploadTokens {
+		if len(entry.Products) == 1 && entry.Products[0] == product {
+			c.UploadTokens[i].File = relFile
+			return
+		}
+	}
+	c.UploadTokens = append(c.UploadTokens, UploadTokenEntry{
+		File:     relFile,
+		Products: []string{product},
+	})
+}
+
+func (c *FileConfig) removeProductToken(product string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	var kept []UploadTokenEntry
+	orphan := ""
+	found := false
+	for _, entry := range c.UploadTokens {
+		hit := false
+		var products []string
+		for _, id := range entry.Products {
+			if id == product {
+				hit = true
+				continue
+			}
+			products = append(products, id)
+		}
+		if !hit {
+			kept = append(kept, entry)
+			continue
+		}
+		found = true
+		if len(products) == 0 {
+			orphan = entry.File
+			continue
+		}
+		entry.Products = products
+		kept = append(kept, entry)
+	}
+	if !found {
+		return "", false
+	}
+	c.UploadTokens = kept
+	return orphan, true
+}
+
+func (c *FileConfig) stripInstanceToken() {
+	c.UploadToken = ""
+	c.UploadTokenFile = ""
+}
+
+func runInitRotateProductToken(out io.Writer, configPath, product string) error {
+	if err := model.CheckIdentifier(product, "product"); err != nil {
+		return err
+	}
+	cfg, err := loadInitConfig(configPath)
+	if err != nil {
+		return err
+	}
+	rel, ok := cfg.productTokenFile(product)
+	if !ok {
+		return fmt.Errorf("%s has no product token; run -product %s first", product, product)
+	}
+	path := rel
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(filepath.Dir(configPath), filepath.FromSlash(rel))
+	}
+	token, err := writeTokenFile(path)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "token  %s (mode 0600, replaced)\n", path)
+	fmt.Fprintf(out, "\nRestart the service to load it. This product's publisher needs the new value first:\n")
+	fmt.Fprintf(out, "  export RELKIT_UPLOAD_TOKEN='%s'\n", token)
+	return nil
+}
+
 func runInitAddProduct(out io.Writer, configPath, product, root string) error {
 	if err := model.CheckIdentifier(product, "product"); err != nil {
 		return err
@@ -131,17 +271,32 @@ func runInitAddProduct(out io.Writer, configPath, product, root string) error {
 	if cfg.Products == nil {
 		cfg.Products = map[string]ProductConfig{}
 	}
+
+	issuingOnly := false
 	if existing, ok := cfg.Products[product]; ok {
-		if existing.Root == root {
-			return fmt.Errorf("%s is already listed (root %s)", product, existing.Root)
+		if _, hasToken := cfg.productTokenFile(product); hasToken {
+			if existing.Root == root {
+				return fmt.Errorf("%s is already listed (root %s)", product, existing.Root)
+			}
+			return fmt.Errorf("%s is already listed with root %s; -remove it first to change", product, existing.Root)
 		}
-		return fmt.Errorf("%s is already listed with root %s; -remove it first to change", product, existing.Root)
+		issuingOnly = true
+		root = existing.Root
+	} else {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return err
+		}
+		cfg.Products[product] = ProductConfig{Root: root}
 	}
 
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	relFile := productTokenRelPath(product)
+	tokenPath := filepath.Join(filepath.Dir(configPath), filepath.FromSlash(relFile))
+	token, err := writeTokenFile(tokenPath)
+	if err != nil {
 		return err
 	}
-	cfg.Products[product] = ProductConfig{Root: root}
+	cfg.upsertProductToken(product, relFile)
+	cfg.stripInstanceToken()
 	if err := writeFileConfig(configPath, cfg); err != nil {
 		return err
 	}
@@ -149,11 +304,17 @@ func runInitAddProduct(out io.Writer, configPath, product, root string) error {
 	fmt.Fprintf(out, "config  %s\n", configPath)
 	fmt.Fprintf(out, "product %s\n", product)
 	fmt.Fprintf(out, "root    %s\n", root)
-	fmt.Fprintf(out, "\nNo new secret. Reuse the existing RELKIT_AGENT_TOKEN.\n")
+	fmt.Fprintf(out, "token   %s (mode 0600)\n", tokenPath)
+	if issuingOnly {
+		fmt.Fprintf(out, "stripped instance-wide uploadToken / uploadTokenFile if they were present\n")
+	}
+	fmt.Fprintf(out, "\nThis product's publisher needs this token:\n")
+	fmt.Fprintf(out, "  export RELKIT_UPLOAD_TOKEN='%s'\n", token)
 	fmt.Fprintf(out, "Put signing keys under the root, then create the machine publish profile.\n")
 	fmt.Fprintf(out, "A repository release-policy.json will arrive with each staged release.\n")
 	fmt.Fprintf(out, "If this directory was created as root, give it to the service user:\n")
 	fmt.Fprintf(out, "  chown -R relkit:relkit %s\n", root)
+	fmt.Fprintf(out, "  chown relkit:relkit %s\n", tokenPath)
 	fmt.Fprintf(out, "Restart the service to load it:\n")
 	fmt.Fprintf(out, "  systemctl restart relkit-agent\n")
 	return nil
@@ -261,12 +422,27 @@ func runInitRemoveProduct(out io.Writer, configPath, product string) error {
 	if cfg.Products == nil {
 		cfg.Products = map[string]ProductConfig{}
 	}
+	relFile, _ := cfg.removeProductToken(product)
 	if err := writeFileConfig(configPath, cfg); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(out, "config  %s\n", configPath)
 	fmt.Fprintf(out, "removed %s (product root left on disk)\n", product)
+	if relFile != "" {
+		path := relFile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(configPath), filepath.FromSlash(relFile))
+		}
+		switch err := os.Remove(path); {
+		case err == nil:
+			fmt.Fprintf(out, "token   %s deleted\n", path)
+		case os.IsNotExist(err):
+			fmt.Fprintf(out, "token   %s was already gone\n", path)
+		default:
+			return err
+		}
+	}
 	fmt.Fprintf(out, "\nRestart the service to load it:\n")
 	fmt.Fprintf(out, "  systemctl restart relkit-agent\n")
 	return nil

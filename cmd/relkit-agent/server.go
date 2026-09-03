@@ -17,9 +17,12 @@ import (
 
 	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/directory"
+	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/publish"
 	"cnb.cool/shichao402/relkit/internal/stage"
 )
+
+const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue one token per product with `relkit-agent init -product <id>` (CI env is RELKIT_UPLOAD_TOKEN)"
 
 type ProductConfig struct {
 	Root    string `json:"root"`
@@ -30,20 +33,42 @@ type FileConfig struct {
 	Addr            string                   `json:"addr"`
 	UploadToken     string                   `json:"uploadToken,omitempty"`
 	UploadTokenFile string                   `json:"uploadTokenFile,omitempty"`
+	UploadTokens    []UploadTokenEntry       `json:"uploadTokens,omitempty"`
 	MaxUpload       string                   `json:"maxUpload,omitempty"`
 	MaxFiles        int                      `json:"maxFiles,omitempty"`
 	StateDir        string                   `json:"stateDir,omitempty"`
 	Products        map[string]ProductConfig `json:"products"`
 }
 
+// UploadTokenEntry is a product-scoped publisher credential. One file, one
+// product. Sharing a file across products is refused at load time.
+type UploadTokenEntry struct {
+	File     string   `json:"file"`
+	Products []string `json:"products"`
+}
+
+type credential struct {
+	hash     []byte
+	products []string
+}
+
+func (c credential) allows(product string) bool {
+	for _, id := range c.products {
+		if id == product {
+			return true
+		}
+	}
+	return false
+}
+
 type Config struct {
-	Addr            string
-	uploadTokenHash []byte
-	MaxUpload       int64
-	MaxFiles        int
-	StateDir        string
-	Products        map[string]ProductConfig
-	ConfigPath      string
+	Addr        string
+	credentials []credential
+	MaxUpload   int64
+	MaxFiles    int
+	StateDir    string
+	Products    map[string]ProductConfig
+	ConfigPath  string
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -51,8 +76,8 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(raw.Products) == 0 {
-		return nil, fmt.Errorf("products map is required")
+	if raw.Products == nil {
+		raw.Products = map[string]ProductConfig{}
 	}
 	cfg := &Config{
 		Addr:       raw.Addr,
@@ -75,13 +100,11 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.StateDir == "" {
 		cfg.StateDir = filepath.Join(filepath.Dir(path), "relkit-agent-state")
 	}
-	token, err := loadToken(*raw)
+	creds, err := loadProductTokens(path, raw)
 	if err != nil {
 		return nil, err
 	}
-	if token != "" {
-		cfg.uploadTokenHash = hashToken(token)
-	}
+	cfg.credentials = creds
 	for name, p := range cfg.Products {
 		if strings.TrimSpace(p.Root) == "" {
 			return nil, fmt.Errorf("product %q: root is required", name)
@@ -122,24 +145,64 @@ func writeFileConfig(path string, cfg *FileConfig) error {
 	return os.WriteFile(path, append(out, '\n'), 0o644)
 }
 
-func loadToken(raw FileConfig) (string, error) {
-	if raw.UploadToken != "" && raw.UploadTokenFile != "" {
-		return "", fmt.Errorf("set only one of uploadToken / uploadTokenFile")
+func (e UploadTokenEntry) validate() error {
+	if strings.TrimSpace(e.File) == "" {
+		return fmt.Errorf("file is required")
 	}
-	if raw.UploadToken != "" {
-		return strings.TrimSpace(raw.UploadToken), nil
+	if len(e.Products) != 1 {
+		return fmt.Errorf("products must list exactly one id (got %v); do not share a token across products", e.Products)
 	}
-	if raw.UploadTokenFile != "" {
-		data, err := os.ReadFile(raw.UploadTokenFile)
-		if err != nil {
-			return "", err
+	if err := model.CheckIdentifier(e.Products[0], "product"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadProductTokens(configPath string, raw *FileConfig) ([]credential, error) {
+	if raw.UploadToken != "" || raw.UploadTokenFile != "" {
+		return nil, fmt.Errorf("%s", errInstanceToken)
+	}
+	if strings.TrimSpace(os.Getenv("RELKIT_AGENT_TOKEN")) != "" {
+		return nil, fmt.Errorf("%s", errInstanceToken)
+	}
+	var creds []credential
+	seenFile := map[string]bool{}
+	seenProduct := map[string]bool{}
+	seenHash := map[string]bool{}
+	for i, entry := range raw.UploadTokens {
+		if err := entry.validate(); err != nil {
+			return nil, fmt.Errorf("uploadTokens[%d]: %w", i, err)
 		}
-		return strings.TrimSpace(string(data)), nil
+		product := entry.Products[0]
+		if seenProduct[product] {
+			return nil, fmt.Errorf("uploadTokens[%d]: duplicate product %q", i, product)
+		}
+		seenProduct[product] = true
+		path := entry.File
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(configPath), path)
+		}
+		if seenFile[path] {
+			return nil, fmt.Errorf("uploadTokens[%d]: token file already used by another product", i)
+		}
+		seenFile[path] = true
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("uploadTokens[%d]: %w", i, err)
+		}
+		token := strings.TrimSpace(string(data))
+		if token == "" {
+			return nil, fmt.Errorf("uploadTokens[%d]: %s is empty", i, path)
+		}
+		hash := hashToken(token)
+		key := hex.EncodeToString(hash)
+		if seenHash[key] {
+			return nil, fmt.Errorf("uploadTokens[%d]: duplicate token hash (products must not share a secret)", i)
+		}
+		seenHash[key] = true
+		creds = append(creds, credential{hash: hash, products: []string{product}})
 	}
-	if env := strings.TrimSpace(os.Getenv("RELKIT_AGENT_TOKEN")); env != "" {
-		return env, nil
-	}
-	return "", nil
+	return creds, nil
 }
 
 func parseSize(text string) (int64, error) {
@@ -181,28 +244,36 @@ func (s *Server) productLock(product string) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
-func (s *Server) authorized(r *http.Request) bool {
-	if s.cfg.uploadTokenHash == nil {
-		return false
-	}
+func (s *Server) lookupCredential(r *http.Request) *credential {
 	header := r.Header.Get("Authorization")
 	value, found := strings.CutPrefix(header, "Bearer ")
 	if !found {
-		return false
+		return nil
 	}
 	presented := hashToken(strings.TrimSpace(value))
-	return subtle.ConstantTimeCompare(presented, s.cfg.uploadTokenHash) == 1
+	var matched *credential
+	for i := range s.cfg.credentials {
+		if subtle.ConstantTimeCompare(presented, s.cfg.credentials[i].hash) == 1 {
+			matched = &s.cfg.credentials[i]
+		}
+	}
+	return matched
 }
 
-func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
-	if s.cfg.uploadTokenHash == nil {
+func (s *Server) requireAuthFor(w http.ResponseWriter, r *http.Request, product string) bool {
+	if len(s.cfg.credentials) == 0 {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "uploads are disabled on this server", http.StatusMethodNotAllowed)
 		return false
 	}
-	if !s.authorized(r) {
+	cred := s.lookupCredential(r)
+	if cred == nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="relkit-agent"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	if !cred.allows(product) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -221,12 +292,12 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.requireAuth(w, r) {
-		return
-	}
 	product, versionRaw, ok := parseStagedRoute(r.URL.Path)
 	if !ok {
 		http.Error(w, "expected /v1/staged/{product}/{version}", http.StatusBadRequest)
+		return
+	}
+	if !s.requireAuthFor(w, r, product) {
 		return
 	}
 	version, ok := cleanVersion(versionRaw)
@@ -434,9 +505,6 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.requireAuth(w, r) {
-		return
-	}
 	defer r.Body.Close()
 	var req publishRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
@@ -446,6 +514,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	version, ok := cleanVersion(req.Version)
 	if !ok || req.Product == "" {
 		http.Error(w, "product and version required", http.StatusBadRequest)
+		return
+	}
+	if !s.requireAuthFor(w, r, req.Product) {
 		return
 	}
 	pc, ok := s.cfg.Products[req.Product]

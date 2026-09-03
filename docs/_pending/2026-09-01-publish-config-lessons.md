@@ -26,7 +26,7 @@ flowchart TB
         stageProc("relkit stage")
         stagedTree["staged 树<br/>.relkit/staged/&lt;ver&gt;/<br/>staged.pb<br/>release-policy.json<br/>artifacts/"]
         tarball["staged.tar.gz<br/>（内存 / 临时文件）"]
-        ciToken["RELKIT_AGENT_TOKEN<br/>CNB secret"]
+        ciToken["RELKIT_UPLOAD_TOKEN<br/>该产品 CI secret"]
         stageProc -- "3 创建" --> stagedTree
         stagedTree -- "4 打包" --> tarball
     end
@@ -35,7 +35,7 @@ flowchart TB
         direction TB
         agent("relkit-agent<br/>systemd 服务，用户 relkit")
         agentCfg["/etc/relkit-agent/relkit-agent.json<br/>监听地址 / products map / stateDir"]
-        agentToken["/etc/relkit-agent/token<br/>CI 共用 Bearer"]
+        agentToken["/etc/relkit-agent/tokens/&lt;id&gt;.token<br/>该产品 Bearer"]
         agentEnv["/etc/relkit-agent/env<br/>EnvironmentFile<br/>COS_SECRET_ID / KEY<br/>EDGEONE_PAGES_API_TOKEN<br/>RELKIT_PRIVATE_KEY"]
         profile["/etc/relkit-agent/products/&lt;id&gt;.json<br/>publish profile<br/>私钥引用 / backends / publishTo / makers.tokenEnv"]
         prodRoot["/srv/relkit/&lt;id&gt;/<br/>产品树根"]
@@ -91,7 +91,7 @@ flowchart TB
 
 要点：
 
-- **CI 机上没有任何密钥**，只有 `RELKIT_AGENT_TOKEN`。私钥与 COS 密钥从不离开发布机。
+- **CI 机上没有任何签名/COS 密钥**，只有 **该产品** 的 `RELKIT_UPLOAD_TOKEN`。私钥与 COS 密钥从不离开发布机。没有实例级 `RELKIT_AGENT_TOKEN`。
 - `merged` 只存在于 agent 内存，**不落盘**。没有第三份配置文件。
 - `relkit.json.migrated` 画成灰色：在场，但不在任何一条读取边上。
 - 客户端只连数据面，永不连 agent。
@@ -143,7 +143,7 @@ sequenceDiagram
 | `.relkit/staged/<ver>/release-policy.json` | CI → 随包搬到发布机 | `relkit stage` | 每次发版重建 | agent | publish 时 |
 | `/etc/relkit-agent/relkit-agent.json` | 发布机 | `install-agent.sh` | `init -product` | agent | 启动时 |
 | `/etc/relkit-agent/products/<id>.json` | 发布机 | `init -migrate-profile` 或手写 | 人（换 backend / keyId） | agent | publish 时 |
-| `/etc/relkit-agent/token` | 发布机 | 安装脚本 | 轮换时 | agent | 启动时 |
+| `/etc/relkit-agent/tokens/<id>.token` | 发布机 | `init -product` | `-token-only` | agent | 启动时 |
 | `/etc/relkit-agent/env` | 发布机 | 人 | 人 | systemd → agent 环境 | 启动时，**改后须 restart** |
 | `/srv/relkit/<id>/.relkit-keys/*.private.pb` | 发布机 | 人 | 极少 | `publish.Run` | 签名时 |
 | `/var/lib/relkit-agent/**` | 发布机 | agent | agent | agent | 幂等回放 |
@@ -222,9 +222,9 @@ sparse checkout 也要先 fetch heads 再 checkout，不能假设短哈希一定
 
 `-migrate-profile` 仍是一次性迁机工具：抽出 profile 后把产品根 `relkit.json` 改名为 `.migrated`。已迁过的产品（profile 已存在）不要再跑这个开关，手工挪开遗留文件。
 
-## 8. 多产品共用一台机时，profile 才是产品差异
+## 8. 多产品共用一台机时，token 也按产品拆
 
-`dec` 和 `cronkit` 可以共用 agent token，但各自一份 `products/<id>.json`、各自 `signing.keyId`、各自 `publishTo`。
+`dec` 和 `cronkit` 共用一台 agent 进程和各自的 `products/<id>.json`、`signing.keyId`、`publishTo`。上传 token **不共用**：各一张 `tokens/<id>.token`，拿 dec 的发 cronkit 是 403。
 
 cronkit 的旧产品根 json 里 `site.homepage` 是空的、也没有 makers——发它之前要先确认人页要不要跟 Dec 同一套，别假设「Dec 通了 cronkit 就通了」。
 
@@ -271,7 +271,7 @@ cronkit 的旧产品根 json 里 `site.homepage` 是空的、也没有 makers—
 ## 11. 现场约束（写进运维说明即可，不必进 SPEC）
 
 - 发布机：`cvm-gz` / `ins-78r3y0si` / `43.138.156.146`；`publish.firoyang.com` → nginx+certbot → `127.0.0.1:8787`（`:80` 已被 nginx 占用，空机才用 Caddy 样例）。
-- 产品根：`/srv/relkit/{dec,cronkit}`；profile：`/etc/relkit-agent/products/{dec,cronkit}.json`；共用一份 `/etc/relkit-agent/token`。
+- 产品根：`/srv/relkit/{dec,cronkit}`；profile：`/etc/relkit-agent/products/{dec,cronkit}.json`；token：`/etc/relkit-agent/tokens/{dec,cronkit}.token`（禁止共用 `/etc/relkit-agent/token`）。
 - 二进制验收过：`relkit-agent 0.1.3+6c78d29`；Dec `v1.13.48` 日志已是 `staged release-policy.json + .../dec.json`。
 - 本会话后半段 TAT `RunCommand` 对这台机无权限，文件是否已改名需 SSH 再核。
 - 内网第二台（WOA `local` backend）本次**没实测**，拓扑 §0.4 只是同构推断。

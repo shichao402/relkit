@@ -136,9 +136,18 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 	_ = os.RemoveAll(stagedRoot)
 
 	agentCfgPath := filepath.Join(root, "agent.json")
+	tokenPath := filepath.Join(root, "tokens", "demo.token")
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenPath, []byte("test-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	agentDoc := map[string]any{
-		"uploadToken": "test-token",
-		"stateDir":    stateDir,
+		"stateDir": stateDir,
+		"uploadTokens": []any{
+			map[string]any{"file": "tokens/demo.token", "products": []any{"demo"}},
+		},
 		"products": map[string]any{
 			"demo": map[string]any{"root": productRoot, "profile": profilePath},
 		},
@@ -194,9 +203,18 @@ func TestAgentDropPutGetHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentCfgPath := filepath.Join(root, "agent.json")
+	tokenPath := filepath.Join(root, "tokens", "demo.token")
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenPath, []byte("test-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	agentDoc := map[string]any{
-		"uploadToken": "test-token",
-		"stateDir":    filepath.Join(root, "state"),
+		"stateDir": filepath.Join(root, "state"),
+		"uploadTokens": []any{
+			map[string]any{"file": "tokens/demo.token", "products": []any{"demo"}},
+		},
 		"products": map[string]any{
 			"demo": map[string]any{"root": productRoot},
 		},
@@ -442,9 +460,21 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 		productCfg["profile"] = profilePath
 	}
 	agentCfgPath := filepath.Join(root, "agent.json")
+	tokenPath := filepath.Join(root, "tokens", opts.product+".token")
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenPath, []byte("test-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	agentDoc := map[string]any{
-		"uploadToken": "test-token",
-		"stateDir":    stateDir,
+		"stateDir": stateDir,
+		"uploadTokens": []any{
+			map[string]any{
+				"file":     filepath.ToSlash(filepath.Join("tokens", opts.product+".token")),
+				"products": []any{opts.product},
+			},
+		},
 		"products": map[string]any{
 			opts.product: productCfg,
 		},
@@ -676,4 +706,19 @@ func TestAgentPublishRejectsPolicyProfileConflicts(t *testing.T) {
 			t.Fatalf("body=%s", body)
 		}
 	})
+}
+
+func TestProductTokenCannotWriteOtherProduct(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/cronkit/1.0.0", bytes.NewReader(fx.tarball))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
 }

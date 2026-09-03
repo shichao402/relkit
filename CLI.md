@@ -491,15 +491,15 @@ CI **不持**签名私钥，也 **不持** COS 写密钥。Runner 只做 `relkit
 
 - name: Publish via agent
   env:
-    RELKIT_AGENT_TOKEN: ${{ secrets.RELKIT_AGENT_TOKEN }}
+    RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
   run: |
     SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
     curl -fsS -X PUT \
-      -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+      -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
       --data-binary @staged.tar.gz \
       "${RELKIT_AGENT_URL}/v1/staged/${PRODUCT}/${VERSION}"
     curl -fsS -X POST \
-      -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+      -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"product\":\"${PRODUCT}\",\"version\":\"${VERSION}\",\"stagedSha256\":\"${SHA}\"}" \
       "${RELKIT_AGENT_URL}/v1/publish"

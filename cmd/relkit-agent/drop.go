@@ -23,12 +23,12 @@ func (s *Server) handleDrop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.requireAuth(w, r) {
-		return
-	}
 	product, versionRaw, filename, ok := parseDropRoute(r.URL.Path)
 	if !ok {
 		http.Error(w, "expected /v1/drop/{product}/{version}/{filename}", http.StatusBadRequest)
+		return
+	}
+	if !s.requireAuthFor(w, r, product) {
 		return
 	}
 	version, ok := cleanVersion(versionRaw)

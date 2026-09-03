@@ -3,7 +3,7 @@
 //
 //	relkit-agent [flags]                         run the server
 //	relkit-agent init -list-products             list products in the config
-//	relkit-agent init -product <id> [-root path] add a product (shared token)
+//	relkit-agent init -product <id> [-root path] add a product and mint its upload token
 //	relkit-agent init -product <id> -remove      drop a product from the map
 //	relkit-agent -version
 package main
@@ -69,8 +69,10 @@ func run(argv []string) int {
 	mux.HandleFunc("/v1/publish", srv.handlePublish)
 
 	log.Printf("relkit-agent %s listening on %s", version, cfg.Addr)
-	if cfg.uploadTokenHash == nil {
-		log.Printf("WARNING: no upload token configured; write endpoints return 405")
+	if len(cfg.credentials) == 0 {
+		log.Printf("WARNING: no product upload tokens configured; write endpoints return 405")
+	} else {
+		log.Printf("product upload tokens: %d", len(cfg.credentials))
 	}
 	server := &http.Server{
 		Addr:              cfg.Addr,

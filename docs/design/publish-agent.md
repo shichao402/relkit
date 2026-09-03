@@ -31,7 +31,7 @@ CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-
 
 | 角色 | 持有 | 不持有 |
 |---|---|---|
-| CI runner | 源码、产物、`RELKIT_AGENT_TOKEN`、随 stage 生成的 portable policy | 签名私钥、COS SecretKey、publish profile |
+| CI runner | 源码、产物、**该产品**的 `RELKIT_UPLOAD_TOKEN`、随 stage 生成的 portable policy | 签名私钥、COS SecretKey、publish profile、别的产品的 token |
 | relkit-agent | 私钥、COS 密钥、本机 publish profile | 客户端下载流量；不读产品根 `relkit.json` |
 | COS / 内网磁盘 | 匿名读已发布文件 | 签名动作、控制面配置 |
 
@@ -84,22 +84,23 @@ DNS：`publish.firoyang.com` A → 发布机公网 IP。Agent 只听本机；TLS
 
 实装说明（2026-08）：发布机上已有 nginx 占用 `:80`，因此 HTTPS 用 **nginx + certbot** 反代 `127.0.0.1:8787`，而不是再起 Caddy。若主机是空机，仍可用 `deploy/Caddyfile.relkit-agent.example`。
 
-产品清单走本机 CLI，不要手改 JSON。Agent 只有一个 `uploadTokenFile`：map 里每个产品共用这一把 CI token（同族分享是默认行为，不会签发新产品秘密）。
+产品清单走本机 CLI，不要手改 `uploadTokens`。每个产品一张 token 文件：`tokens/<id>.token`，CI 环境变量名固定为 `RELKIT_UPLOAD_TOKEN`（值因仓库而异）。**禁止**实例级 `uploadTokenFile` / `RELKIT_AGENT_TOKEN`：配置或环境里出现即拒绝启动。一条 token 也不得挂多个 product id。
 
 ```text
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -list-products
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> [-root /srv/relkit/<id>]
+relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -remove
 ```
 
-`-product` 会创建 root 目录并把 id 写进 `products`，**不**生成 policy、profile、私钥或新 token。列出只打 id、root、默认/已登记的 profile 路径，以及 token **文件路径**。`-remove` 只从 map 摘掉 id，磁盘上的产品树、密钥和 profile 留下。改完后 `systemctl restart relkit-agent`。
+`-product` 会创建 root（若尚未登记）、把 id 写进 `products`，并 **签发该产品 token**（只打印一次明文）。已在 map 里但还没有产品 token 时，同样签发并删掉 json 里的实例级字段。列出只打 id、root、profile 路径和 token **文件路径**。`-remove` 从 map 摘掉 id 并删除其 token 文件，磁盘上的产品树、密钥和 profile 留下。改完后先把新 `RELKIT_UPLOAD_TOKEN` 交给该产品 CI，再 `systemctl restart relkit-agent`。
 
 ### 5.1 部署顺序
 
-1. `deploy/install-agent.sh`：二进制、`/etc/relkit-agent/relkit-agent.json`、token、默认产品根、`systemctl enable --now`。
+1. `deploy/install-agent.sh`：二进制、`/etc/relkit-agent/relkit-agent.json`、默认产品根、`systemctl enable --now`。**不**写实例级 token 文件。
 2. `EnvironmentFile=/etc/relkit-agent/env`：`RELKIT_PRIVATE_KEY`、`COS_SECRET_ID`、`COS_SECRET_KEY`（以及 Makers token 等）。密钥不进 JSON。
-3. `init -product <id>` 登记新产品（可省略，安装脚本已带 `dec` 根目录时再按需加）。
+3. `init -product <id>` 登记新产品并签发 **该产品** 的 `RELKIT_UPLOAD_TOKEN`。
 4. 把签名私钥放到该产品 root（或只走 env）。
 5. **本机 publish profile**（二选一，必须在第一次 publish 之前完成）：
    - 旧机：产品根已有整份 `relkit.json` 时执行 `init -product <id> -migrate-profile`。它抽出机器侧字段写到 `/etc/relkit-agent/products/<id>.json`，把产品根那份改名为 `relkit.json.migrated`，且拒绝覆盖已存在的 profile。
@@ -109,10 +110,12 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 
 ## 6. Token 轮换
 
-1. 在发布机生成新 token 写入 `uploadTokenFile`  
-2. 滚动重启 agent  
-3. 更新 CI secret `RELKIT_AGENT_TOKEN`  
-4. 旧 token 立即失效（无宽限期；需要宽限时跑双 token 需另实现）
+1. `relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only`
+2. 把打印的 `RELKIT_UPLOAD_TOKEN` 写进 **该产品** 的 CI secret
+3. `systemctl restart relkit-agent`
+4. 旧 token 立即失效（无宽限期）
+
+不要轮换「整台机一把」。没有这种东西。
 
 ## 7. 内网：WOA 上同样跑 agent
 
@@ -120,10 +123,10 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 
 1. 在箱上安装 `relkit-agent`（`deploy/install-agent.sh`），配置见 `deploy/relkit-agent.intranet.example.json`。
 2. 每个产品的 **publish profile** 把 `publishTo` 指到 `local`，`outputDir` 为 serve / nginx 对外 GET 的根（例：`/data/relkit-serve`），`baseUrl` 为现有内网更新域名。样例：`deploy/relkit-intranet-product.example.json`。旧机若产品根还留着整份配置，可先 `-migrate-profile`。
-3. 私钥只在这台机上。CI 仍只持 agent Bearer。
+3. 私钥只在这台机上。CI 只持 **该产品** 的 `RELKIT_UPLOAD_TOKEN`。
 4. 对外继续匿名 GET 现有域名。`relkit-serve` 可以继续提供 Range GET；新产品不要再走 serve 的 PUT。旧产品的 `http-put` 可留到迁完。
 
-给 agent 的 token 按产品拆，或与 serve 的 `uploadTokens` 对齐到迁完为止。不要把某产品的 token 发给无关仓库。
+Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某产品的 token 发给无关仓库。不要用实例级 Bearer 当「同机共享」。
 
 ## 8. 给人看的索引页
 

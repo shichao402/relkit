@@ -8,12 +8,14 @@
 
 | 路径 | 作用 |
 |---|---|
-| `/etc/relkit-agent/relkit-agent.json` | 监听地址、token 文件、`products` map |
-| `/etc/relkit-agent/token` | CI 共用的 Bearer（`uploadTokenFile`） |
+| `/etc/relkit-agent/relkit-agent.json` | 监听地址、`uploadTokens`、`products` map |
+| `/etc/relkit-agent/tokens/<id>.token` | **该产品**的上传 Bearer（0600）。CI 环境变量名是 `RELKIT_UPLOAD_TOKEN` |
 | `/etc/relkit-agent/env` | `RELKIT_PRIVATE_KEY`、`COS_SECRET_ID`、`COS_SECRET_KEY` 等（systemd `EnvironmentFile`） |
 | `/etc/relkit-agent/products/<id>.json` | 本机 **publish profile**（缺省；可用 `products.<id>.profile` 覆盖） |
 | `/srv/relkit/<id>/` | 产品树根：私钥文件、`.relkit/staged/<version>/` |
 | `/var/lib/relkit-agent` | 幂等回放等状态 |
+
+**没有**实例级 `/etc/relkit-agent/token`，也 **没有** `RELKIT_AGENT_TOKEN`。配置里出现 `uploadToken` / `uploadTokenFile`、或进程环境里出现 `RELKIT_AGENT_TOKEN`，agent **拒绝启动**。一条 token 文件不得挂多个 product id（启动失败）。
 
 `products.<id>.root` 永远是产品根；不以 JSON 文档里的路径为准。
 
@@ -29,18 +31,20 @@
 relkit-agent -config /etc/relkit-agent/relkit-agent.json
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -list-products
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> [-root /srv/relkit/<id>]
+relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -remove
 ```
 
-- `-product`：建 root、写入 map，**不**生成 policy / profile / 私钥 / 新 token。
-- `-migrate-profile`：一次性工具。从已有 `<root>/relkit.json` 抽出机器侧字段写到 `products/<id>.json`，拒绝覆盖已有 profile，并把产品根那份改名为 `relkit.json.migrated`（agent 永不读它）。
-- `-remove`：只从 map 摘掉 id；磁盘上的树、密钥、profile 留下。
-- 改完后 `systemctl restart relkit-agent`。
+- `-product`：建 root（若尚未登记）、写入 map、**签发该产品 token**（打印一次 `RELKIT_UPLOAD_TOKEN`）。已登记但还没有产品 token 时只签发、并删掉 json 里的实例级字段。
+- `-token-only`：轮换该产品 token，不改 root / profile。
+- `-migrate-profile`：一次性工具。从已有 `<root>/relkit.json` 抽出机器侧字段写到 `products/<id>.json`，拒绝覆盖已有 profile，并把产品根那份改名为 `relkit.json.migrated`。
+- `-remove`：从 map 摘掉 id，并删除其 token 文件；磁盘上的树、密钥、profile 留下。
+- 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
 新产品：先 `-product`，再手写 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要往产品根塞发布凭据。
 
-改 `/etc/relkit-agent/env` 后必须 `systemctl restart`。COS / agent Bearer / EdgeOne 是三套东西，换其中一个不会让另外两个通道自动好。root 跑 init 时 `products/` 必须 `0755`。
+改 `/etc/relkit-agent/env` 后必须 `systemctl restart`。COS / 产品上传 token / EdgeOne 是三套东西。root 跑 init 时 `products/` 必须 `0755`，`tokens/` 给服务用户可读（文件 0600、目录让 relkit 能读）。
 
 ## HTTP
 
@@ -49,4 +53,4 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 - `PUT /v1/staged/{product}/{version}`
 - `POST /v1/publish`
 
-无 token 时写端点 405。安装：`deploy/install-agent.sh`。
+无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`deploy/install-agent.sh`。
