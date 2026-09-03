@@ -74,18 +74,26 @@ func run(argv []string) int {
 	} else {
 		log.Printf("product upload tokens: %d", len(cfg.credentials))
 	}
-	server := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           logRequests(mux),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Minute,
-		WriteTimeout:      30 * time.Minute,
-	}
+	server := newHTTPServer(cfg, logRequests(mux))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("serve: %v", err)
 		return 1
 	}
 	return 0
+}
+
+// newHTTPServer deliberately leaves ReadTimeout and WriteTimeout unset. A
+// staged upload is bounded by maxUpload (GiB scale), and publish signs and
+// pushes those bytes to the backend before it answers, so any fixed deadline
+// eventually cuts off a legitimate release from a slow link. The real bounds
+// are ReadHeaderTimeout plus the MaxBytesReader in each handler.
+func newHTTPServer(cfg *Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 }
 
 func logRequests(next http.Handler) http.Handler {
