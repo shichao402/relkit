@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -206,25 +207,44 @@ func loadProductTokens(configPath string, raw *FileConfig) ([]credential, error)
 }
 
 func parseSize(text string) (int64, error) {
-	text = strings.TrimSpace(text)
-	multipliers := map[string]int64{
-		"b": 1, "kb": 1000, "mb": 1000 * 1000, "gb": 1000 * 1000 * 1000,
-		"kib": 1024, "mib": 1024 * 1024, "gib": 1024 * 1024 * 1024,
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return 0, fmt.Errorf("empty size")
 	}
-	lower := strings.ToLower(text)
-	for suffix, mul := range multipliers {
-		if strings.HasSuffix(lower, suffix) {
-			num := strings.TrimSpace(text[:len(text)-len(suffix)])
-			var n int64
-			if _, err := fmt.Sscan(num, &n); err != nil {
-				return 0, err
-			}
-			return n * mul, nil
+	// Longest suffix first. A map range over {"b","gib"} would match "8GiB"
+	// as 8 bytes whenever "b" came first.
+	units := []struct {
+		suffix string
+		factor int64
+	}{
+		{"tib", 1 << 40},
+		{"gib", 1 << 30},
+		{"mib", 1 << 20},
+		{"kib", 1 << 10},
+		{"tb", 1000 * 1000 * 1000 * 1000},
+		{"gb", 1000 * 1000 * 1000},
+		{"mb", 1000 * 1000},
+		{"kb", 1000},
+		{"g", 1 << 30},
+		{"m", 1 << 20},
+		{"k", 1 << 10},
+		{"b", 1},
+	}
+	lower := strings.ToLower(trimmed)
+	for _, unit := range units {
+		if !strings.HasSuffix(lower, unit.suffix) {
+			continue
 		}
+		number := strings.TrimSpace(lower[:len(lower)-len(unit.suffix)])
+		n, err := strconv.ParseInt(number, 10, 64)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid size %q", text)
+		}
+		return n * unit.factor, nil
 	}
-	var n int64
-	if _, err := fmt.Sscan(text, &n); err != nil {
-		return 0, err
+	n, err := strconv.ParseInt(lower, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid size %q", text)
 	}
 	return n, nil
 }

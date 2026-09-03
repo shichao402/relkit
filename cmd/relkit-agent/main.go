@@ -68,7 +68,7 @@ func run(argv []string) int {
 	mux.HandleFunc("/v1/staged/", srv.handleStaged)
 	mux.HandleFunc("/v1/publish", srv.handlePublish)
 
-	log.Printf("relkit-agent %s listening on %s", version, cfg.Addr)
+	log.Printf("relkit-agent %s listening on %s (maxUpload %d)", version, cfg.Addr, cfg.MaxUpload)
 	if len(cfg.credentials) == 0 {
 		log.Printf("WARNING: no product upload tokens configured; write endpoints return 405")
 	} else {
