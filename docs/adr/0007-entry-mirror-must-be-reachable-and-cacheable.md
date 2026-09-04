@@ -38,10 +38,10 @@ ADR 0005 定下 `entryUrls` 一主两备：自有域名 COS（主）→ CNB raw 
 | 写 | `publish.Run` 写一次 | 各写一遍 |
 | 读 | 可选多个 GET 主机名（同桶别名，**不算**第二 backend） | `entryUrls` 各指各家 `baseUrl` |
 
-验证期（可拆除）：主 `relkit-updates-1251882798` / `ap-guangzhou` / `raw.firoyang.com`；备成都桶 / `ap-chengdu` / `raw2.firoyang.com`。拆除须单独指令：先从 `publishTo`/`entryUrls` 去掉再发版，再解 DNS/证书/删桶。
+验证期曾用成都桶 / `ap-chengdu` / `raw2.firoyang.com` 作第二 backend。2026-09-04 已按单独指令拆除（先从 `publishTo`/`entryUrls` 去掉，再解 DNS/证书续期/清空对象；桶由发布机凭据删除）。
 
 ## 后果
 
-- 第二桶有存储与证书续期成本。directory 很小，成本主要在运维。
+- 第二桶有存储与证书续期成本，所以验证期后端必须能按单独指令拆除。
 - 账号级故障仍不正交。
 - 已装客户端若只有一条 `entryUrls`，远程补不进第二条，只能自然升级或走内嵌保底后手动安装。

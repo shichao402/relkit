@@ -134,7 +134,7 @@ flowchart TB
 - **CI 不签名、不持长期后端写密钥。** 只认凭据文档里的 `putUrl`（COS 时里面是 STS；`local` 时是 agent）。长期 `COS_SECRET_*` 仍只在发布机。
 - **字节只跨「CI → 数据面」一次。** 凭据文档只给一个目的地（该产品的 primary ingest）。CI **不按后端数量循环上传**；其余 `artifactTo` 后端的副本由 agent `Materialize`。
 - `cas/` inbox **只存在于 ingest 后端**，别的后端只有 `artifact/...`。`publish.Run` 只调用 Head / Promote / Materialize / PutArtifact，**禁止**按 `Type()` 写第二条发布路径。细节 [`publish-agent.md`](publish-agent.md) §2.3。
-- **第二 backend 必须是另一只桶。** 同桶的 `raw` / `raw2` 只是 GET 别名，禁止写成两条 `s3-compatible`。验证期：广州 `raw.firoyang.com` + 成都 `raw2.firoyang.com` 两个 backend。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
+- **第二 backend 必须是另一只桶。** 同桶的多个自定义域名只是 GET 别名，禁止写成两条 `s3-compatible`。成都桶（`raw2.firoyang.com`）是验证期第二 backend，已按单独指令拆除。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
 - agent 对 CAS **不重算 sha256**，只 HEAD 比 size。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
 - **写 index 指针才是真发布。** ingest 上 Head 不到且本地无整包副本时**整轮失败**，不写任何指针。
 - `publish.Run` **不幂等**；发布入口必须幂等键与串行化。
@@ -369,18 +369,9 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 4. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
 5. 公网：仓库 `relkit.json` 的 `site.makers` 随 stage 进入 `release-policy.json`，本机 profile 提供 `tokenEnv`；`relkit publish` 会把 `.relkit/browse/` 部署到 Makers（项目 `relkit-updates-index`）。内网 publish 已写 `browse/`，不必再部署 Makers。
 
-### 10.4 验证用第二 backend（成都桶）
+### 10.4 验证用第二 backend（成都桶）——已拆除
 
-同桶再挂二级域名**不是**第二 backend。验证期第二 backend 是另一只桶：
-
-| | 广州 | 成都（验证，拆除需另行指示） |
-|---|---|---|
-| 桶 | `relkit-updates-1251882798` | `relkit-updates-cd-1251882798` |
-| 地域 | `ap-guangzhou` | `ap-chengdu` |
-| 自定义域名 | `raw.firoyang.com` | `raw2.firoyang.com` |
-| 前缀 | `rup/` | `rup/` |
-
-证书与广州正交：`ApplyCertificate` 域名 `raw2.firoyang.com`，`DeployCertificateInstance` 的 InstanceId 为 `ap-chengdu|relkit-updates-cd-1251882798|raw2.firoyang.com`。仓库 `relkit.json` 与发布机 `/etc/relkit-agent/products/dec.json` 的 `publishTo` 都必须含 `cos` 与 `cos2`。DeployRecord `Status: 1` 之后边缘仍可能短暂握到 COS 默认证书，探针以客户端信任链为准。
+同桶再挂二级域名**不是**第二 backend。验证期第二 backend 曾是成都桶 `relkit-updates-cd-1251882798` / `raw2.firoyang.com`。2026-09-04 按单独指令拆除：仓库与发布机 profile 去掉 `cos2`，证书续期 `targets` 去掉 `raw2`，对象清空后由发布机凭据 `DeleteBucket`（MCP 禁止该 API）。已装 1.13.55 客户端内嵌的 `raw2` entryUrl 会失败，主入口 `raw.` 不受影响。免费证书 `aXOYfCx6` 未自动续期，可在 SSL 控制台删除。
 
 发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令：profile、systemd 单元、`relkit-agent onboard check` 都在目标机本地执行。
 
@@ -394,9 +385,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 2. **COS 自定义源站域名**绑定 `raw.firoyang.com`，并部署 HTTPS 证书（与 `updates` 同一套续期流程，§10.1）。**已完成**；匿名 GET 已通。
 3. 新发版 `baseUrl` / 新客户端 `entryUrls` 走 `https://raw.firoyang.com/rup/...`。
 
-   **改 `baseUrl` 会让 `verify` 对所有历史版本报错。** 已发布的 index / manifest 里 `urls[]` 是当时的 `baseUrl`（`updates.`）写死的，而 `verify` 要求每个条目都列出当前 backend 的 URL（`internal/verify` 的 `checkDeclaredURL` 用 `backend.URLFor(key)` 严格比对）。切到 `raw.` 后，dev 通道 13 个历史版本立刻产出 245 条 `does not list this backend's URL`。这些 URL 在双挂期仍可下载，**客户端不受影响**，红的只是 verify。别为了让 verify 变绿去重发历史版本或回滚 `baseUrl`；按 §8 双写迁移的节奏，等历史版本被 `retainVersions` 淘汰即可。判断发布是否健康看新发版本那几条。
-
-   **新加 backend 同理，且多一类报错。** `cos2`（成都）是从 `1.13.55` 才开始双写的，历史版本的对象只在广州桶里，所以 `verify --deep` 除了 declared-url 还会对每个历史版本报 `manifest missing on cos2`。dev 通道当前 271 条错误全部落在 `1.13.54` 及更早，`1.13.55` 零错误——**这就是双写健康的判据**。不要为了清空 `verify` 去回填历史对象：`entryUrls` 里 `raw2` 只是备份入口，客户端选不到成都缺的那些老版本时会回落广州，而回填要重签一遍历史 manifest（`urls[]` 里没有 `raw2`，光拷对象仍然报 declared-url）。
+   **改 `baseUrl` 会让 `verify` 对所有历史版本报错。** 已发布的 index / manifest 里 `urls[]` 是当时的 `baseUrl`（`updates.`）写死的，而 `verify` 要求每个条目都列出当前 backend 的 URL（`internal/verify` 的 `checkDeclaredURL` 用 `backend.URLFor(key)` 严格比对）。切到 `raw.` 后，dev 通道历史版本会产出 `does not list this backend's URL`。这些 URL 在双挂期仍可下载，**客户端不受影响**，红的只是 verify。别为了让 verify 变绿去重发历史版本或回滚 `baseUrl`；按 §8 双写迁移的节奏，等历史版本被 `retainVersions` 淘汰即可。判断发布是否健康看新发版本那几条。
 4. 公网 publish（配了 `site.makers`）把 dump 部署到 Makers。内网跳过这步。**不要**把 HTML 拷进 relkit 仓库的 `sites/updates-index/` 当发版步骤。
 5. 旧客户端都升到认 `raw.` 之后，再把 `updates` CNAME 改到 EdgeOne Makers。在此之前不要动 `updates`，否则已装 Dec 会找不到 directory。
 

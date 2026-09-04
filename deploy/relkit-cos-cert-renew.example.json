@@ -5,11 +5,6 @@
       "domain": "raw.firoyang.com",
       "region": "ap-guangzhou",
       "bucket": "relkit-updates-1251882798"
-    },
-    {
-      "domain": "raw2.firoyang.com",
-      "region": "ap-chengdu",
-      "bucket": "relkit-updates-cd-1251882798"
     }
   ]
 }
