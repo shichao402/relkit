@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -380,7 +380,7 @@ func (c *runner) putPartOnce(ctx context.Context, id string, part int, start, le
 }
 
 func (c *runner) stagedURL() string {
-	return strings.TrimRight(c.base, "/") + "/staged/" + path.Join(c.opts.Product, c.opts.Version)
+	return strings.TrimRight(c.base, "/") + "/staged/" + url.PathEscape(c.opts.Product) + "/" + url.PathEscape(c.opts.Version)
 }
 
 func pendingParts(session *Session) []int {
