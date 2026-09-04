@@ -395,6 +395,8 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 3. 新发版 `baseUrl` / 新客户端 `entryUrls` 走 `https://raw.firoyang.com/rup/...`。
 
    **改 `baseUrl` 会让 `verify` 对所有历史版本报错。** 已发布的 index / manifest 里 `urls[]` 是当时的 `baseUrl`（`updates.`）写死的，而 `verify` 要求每个条目都列出当前 backend 的 URL（`internal/verify` 的 `checkDeclaredURL` 用 `backend.URLFor(key)` 严格比对）。切到 `raw.` 后，dev 通道 13 个历史版本立刻产出 245 条 `does not list this backend's URL`。这些 URL 在双挂期仍可下载，**客户端不受影响**，红的只是 verify。别为了让 verify 变绿去重发历史版本或回滚 `baseUrl`；按 §8 双写迁移的节奏，等历史版本被 `retainVersions` 淘汰即可。判断发布是否健康看新发版本那几条。
+
+   **新加 backend 同理，且多一类报错。** `cos2`（成都）是从 `1.13.55` 才开始双写的，历史版本的对象只在广州桶里，所以 `verify --deep` 除了 declared-url 还会对每个历史版本报 `manifest missing on cos2`。dev 通道当前 271 条错误全部落在 `1.13.54` 及更早，`1.13.55` 零错误——**这就是双写健康的判据**。不要为了清空 `verify` 去回填历史对象：`entryUrls` 里 `raw2` 只是备份入口，客户端选不到成都缺的那些老版本时会回落广州，而回填要重签一遍历史 manifest（`urls[]` 里没有 `raw2`，光拷对象仍然报 declared-url）。
 4. 公网 publish（配了 `site.makers`）把 dump 部署到 Makers。内网跳过这步。**不要**把 HTML 拷进 relkit 仓库的 `sites/updates-index/` 当发版步骤。
 5. 旧客户端都升到认 `raw.` 之后，再把 `updates` CNAME 改到 EdgeOne Makers。在此之前不要动 `updates`，否则已装 Dec 会找不到 directory。
 

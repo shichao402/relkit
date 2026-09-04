@@ -37,6 +37,8 @@
 
 产品根上的 `relkit.json` **不是**发布配置，agent 不会读它。`relkit stage` 写出的 policy 不含私钥、backends、`publishTo`；profile 不含公钥集与通道策略。
 
+`onboard check` 的 `agent.directory-match` 校验签名用的公钥也走同一条路径——取**最新** staged 版本的 `release-policy.json` 里的 `signing.publicKeys`。profile 按设计没有公钥集，产品根那份 `relkit.json` 又已被 `-migrate-profile` 改名，两者都不可当兜底：拿仓库里一份与线上发布无关的文件去判定 directory 可信，比报错更危险。所以这台机上**必须**至少留一个 staged 版本，`retainVersions` 清空 staged 会让这项检查失去依据。
+
 ## 运维命令
 
 ```text
