@@ -385,3 +385,29 @@ func TestInitIssuesTokenForExistingProduct(t *testing.T) {
 		t.Fatalf("agent should start after issuing product token: %v", err)
 	}
 }
+
+func TestInitListDoesNotPrintTokenFileContents(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "tokens", "dec.token")
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := "super-secret-upload-token-value"
+	if err := os.WriteFile(tokenPath, []byte(secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := writeAgentCfg(t, dir, FileConfig{
+		Addr: "127.0.0.1:9",
+		UploadTokens: []UploadTokenEntry{
+			{File: "tokens/dec.token", Products: []string{"dec"}},
+		},
+		Products: map[string]ProductConfig{"dec": {Root: dir}},
+	})
+	var buf bytes.Buffer
+	if err := runInit(&buf, []string{"-config", path, "-list-products"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), secret) {
+		t.Fatalf("list leaked token file contents:\n%s", buf.String())
+	}
+}

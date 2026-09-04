@@ -35,6 +35,13 @@ func run(argv []string) int {
 		}
 		return 0
 	}
+	if len(argv) > 0 && argv[0] == "onboard" {
+		if err := runAgentOnboard(os.Stdout, argv[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 
 	fs := flag.NewFlagSet("relkit-agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

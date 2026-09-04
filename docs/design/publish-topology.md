@@ -4,7 +4,7 @@
 title: 发布拓扑（控制面一条路，数据面 / 人页为 adapter）
 category: design
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-09-04
 status: approved
 related: docs/design/publish-agent.md, docs/design/update-ingress-cos.md, CLI.md, sites/updates-index/README.md
 supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 仍保留，之后再合并。
@@ -16,8 +16,9 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 ## 1. 决议
 
 - 控制面只有一个 **publish 节点**：nginx/Caddy（`:443` 切面）+ 本机 `relkit-agent`（`127.0.0.1:8787`）。反代是 HTTPS / 证书 / 入口日志的外壳，不是独立架构角色，也不是安全隔离层。
-- CI 多端先 `relkit stage` 收成一棵树，对 agent **一次** `PUT /v1/staged`（整包 tar.gz），再 **一次** `POST /v1/publish`。逐个 PUT 发生在 `publish.Run` 对 Backend 写各端 artifact；**写 index 指针才是真发布**。双 Job 并行时，mac 先把 zip 放到 `PUT /v1/drop`，Windows 收齐后再 stage；drop 不是发布。
-- 协议对象走 **Backend adapter**（COS / 磁盘+HTTP GET / CNB raw / GitHub raw）。
+- CI 多端先 `relkit stage`。然后对 agent **同一套** CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 各 `cas/{sha256}` → 交 pb/policy → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**：CI 只喂该产品的 **primary ingest**，其余后端的副本由 agent 在数据面之间 `Materialize`。**写 index 指针才是真发布**。现网代码仍可 `PUT /v1/staged` 整包 tar。双 Job 并行时 mac 先 `PUT /v1/drop`，Windows 收齐后再 stage；drop 不是发布。
+- **`artifactTo` 与 `pointerTo` 分开。** 几百 MiB 的 `artifact/` 只发给能当数据面的后端（COS、`local`），默认就 ingest 一家；几 KB 的签名 pb 才扇给 `entryUrls` 备桶。用一个 `publishTo` 把产物也镜像进 git 仓，等于每次发版往历史灌一份删不掉的大文件。承载 `entryUrls` 的备援须过 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 三条准入（目标网络可达、`Cache-Control` 我方可配、失效域与主正交）；CNB / GitHub raw 不合格，当前形态是异地域第二个 COS 桶 + 独立自有二级域名。
+- 协议对象走 **Backend adapter**。CAS 的 `cas/{sha256}` inbox **只存在于 ingest 后端**；其余后端只有 `artifact/...`。**切面不因 type 分叉**：CI、`publish.Run`、客户端看到的接口对所有后端相同。STS / hardlink / git push / 字节从哪儿来都是实现细节，禁止 `if backend.Type()=="s3-compatible"` 出现在 publish 或 CI 脚本里。
 - **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。落地走 **BrowseSink**（外网 Makers、内网数据面 `browse/`、以后其它 site）。不要用 `Backend.Type()` 猜人页，也不要用 serve 现算一页当对外目录。
 - **relkit-serve 现算的门户**（今 GET `/` 那套主题页、`/-/p/`、`?files=1`）是打到自托管箱上的操作面：容量就是这一台机，以后长成 relkit 后台面板。它不是对外目录，内外网对外都不要再把人指到这里。
 - 环境差只在节点旁注明现网用法，不要为内外网发明第二种发布流程。人页皮肤也不分叉：dump 一份，托管地方按 sink 选。
@@ -27,7 +28,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 | 进程 | listen | 切面 |
 |---|---|---|
 | nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
-| relkit-agent | `127.0.0.1:8787` | 不对外；`PUT/GET /v1/drop`（双 Job 交 zip）· `PUT /v1/staged` · `POST /v1/publish` |
+| relkit-agent | `127.0.0.1:8787` | 不对外；drop · staged 元数据 · CAS 凭据 / 代理 PUT · `POST /v1/publish` |
 | relkit-serve | `127.0.0.1:8080` | 内网数据面：协议对象 GET + 原样返回 `browse/`；操作面板在 `/-/`（现算，以后后台） |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / BrowseSink 节点 |
 
@@ -40,32 +41,33 @@ flowchart TB
   win["CI 构建 win"] --> stage
   mac["CI 构建 mac"] --> stage
   apk["CI 构建其他端"] --> stage
+  stage["relkit stage<br/>多端收成一棵树 本地算 sha256"]
 
-  stage["relkit stage<br/>多端收成一棵树"] --> pack["staged.tar.gz"]
-  pack --> ngx["nginx 或 Caddy 0.0.0.0:443<br/>外网 publish.firoyang.com:443<br/>内网最终 update.devcloud.woa.com:443"]
-  ngx --> putStaged["agent 127.0.0.1:8787<br/>PUT /v1/staged 一次"]
-  putStaged --> postPub["POST /v1/publish 一次"]
+  stage --> tok["POST /v1/cas/credentials<br/>只返回 ingest 一个目的地"]
+  tok --> casPut["CI PUT cas/SHA256<br/>每个 blob 恰好一次"]
+  stage --> stagedMeta["PUT /v1/staged<br/>pb + policy 几 KB<br/>已有 URL 的产物在此申报"]
+
+  casPut ==> ingestCas[("ingest 的 cas/<br/>COS 或 local")]
+  stagedMeta --> ngx["nginx 或 Caddy :443"]
+  ngx --> postPub["agent POST /v1/publish"]
   postPub --> run["publish.Run"]
 
-  run --> arts{"adapter: Backend.PutArtifact<br/>每端 × 每后端 逐个 PUT"}
-  arts --> a1["win-x64.zip"]
-  arts --> a2["mac-arm64.zip"]
-  arts --> a3["其他端"]
-  a1 --> backends
-  a2 --> backends
-  a3 --> backends
+  run --> promote["Head 比 size 不重算 sha256<br/>Promote cas → artifact"]
+  promote -.-> ingestCas
+  promote --> artIngest[("ingest 的 artifact/")]
+  run --> mat["Materialize<br/>agent 取字节再交给该后端"]
+  mat --> artOther[("其余 artifactTo 后端<br/>默认为空")]
 
-  backends{"adapter: Backend"} --> cos["s3-compatible COS<br/>现网外网主数据面"]
-  backends --> httpLocal["local + HTTP GET<br/>现网内网"]
-  backends --> cnb["static-http CNB raw"]
-  backends --> gh["static-http GitHub raw"]
+  artIngest --> man["PutImmutable manifest"]
+  artOther --> man
+  stagedMeta -.->|"产物已在 GitHub Release<br/>URL 直接当取货点"| man
 
-  cos --> man["PutImmutable manifest"]
-  httpLocal --> man
-  cnb --> man
-  gh --> man
+  man --> ptrFan{"写入 pointerTo 全部后端<br/>只有几 KB 签名 pb"}
+  ptrFan --> pIngest[("ingest 上的主入口<br/>COS 自有域名")]
+  ptrFan --> pMirror[("entryUrls 备桶<br/>异地域 COS + 独立自有二级域名<br/>同字节 ADR 0007")]
 
-  man --> idx["PutPointer index = 真发布"]
+  pIngest --> idx["PutPointer index = 真发布"]
+  pMirror --> idx
   idx --> meta["site.json / latest.json"]
   meta --> dump[".relkit/browse dump 三份"]
 
@@ -87,14 +89,14 @@ dump 三份：`index.html`（总目录）、`<product>.html`（单产品页）�
 ```mermaid
 flowchart TB
   sdk["客户端 SDK 不连 8787"] --> get{"GET 数据面"}
-  get --> cosGet["COS raw.firoyang.com:443"]
+  get --> cosGet["COS raw.firoyang.com:443<br/>主"]
+  get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
   get --> woaGet["update.devcloud.woa.com<br/>→ serve 127.0.0.1:8080 读盘"]
-  get --> cnbGet["CNB raw"]
-  get --> ghGet["GitHub raw"]
+  get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
   cosGet --> verify["验签 · sequence · sha256"]
+  cosBackup --> verify
   woaGet --> verify
-  cnbGet --> verify
-  ghGet --> verify
+  relGet --> verify
 
   human["人用浏览器 · 对外目录"] --> site{"同一份 browse dump"}
   site --> makersGet["Makers<br/>现网外网"]

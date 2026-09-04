@@ -4,9 +4,9 @@
 title: 更新入口拓扑（COS 固定入口）
 category: design
 created: 2026-08-11
-updated: 2026-09-01
+updated: 2026-09-04
 status: approved
-related: ADR 0005, docs/design/bootstrap-directory.md, docs/design/publish-topology.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
+related: ADR 0005, ADR 0007, docs/design/bootstrap-directory.md, docs/design/publish-topology.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
 ---
 
 ## 1. 决议
@@ -74,51 +74,73 @@ https://updates.<your-domain>/artifact/...
 
 发布与下载是两条独立链路，唯一交汇点是 **COS 上的静态对象**。发布侧没有任何常驻服务需要被客户端访问；客户端也永远不连发布机。
 
-### 4.1 发布流程（构建 → 签名 → 写对象）
+### 4.1 发布流程（构建 → CAS → 签名 → 提交）
+
+目标：发布机只做控制面（发窄权限临时凭据、签名、Copy、写指针）。产物字节不进 CVM。  
+**现网代码仍是** `PUT /v1/staged` 整包 tar（含 `artifacts/`）再由 agent `PutArtifact`；切 CAS 之前那条路径继续可用。
 
 ```mermaid
 flowchart TB
-  subgraph ciSide [普通 CI runner 不持签名私钥 不持 COS 密钥]
+  subgraph ciSide [CI 不持私钥 不持长期 COS 密钥]
     build["编译 / 打包产物"]
-    stageStep["relkit stage VERSION<br/>纯本地算 sha256 无网络<br/>抽出 release-policy.json"]
-    stagedDir[".relkit/staged/VERSION<br/>staged.pb<br/>release-policy.json<br/>artifacts/"]
-    packStep["打包为 staged.tar.gz"]
+    stageStep["relkit stage VERSION<br/>本地算 sha256 无网络<br/>抽出 release-policy.json"]
+    hasUrl{"该产物已有可 GET URL?"}
+    declare["不进凭据文档<br/>URL 随 staged 申报"]
+    askTok["POST /v1/cas/credentials<br/>请求带 sha256 / size / 已有 URL"]
+    putCas["PUT cas/SHA256 到 ingest<br/>每个 blob 恰好一次"]
+    putMeta["PUT /v1/staged<br/>staged.pb + policy 几 KB"]
   end
 
-  subgraph agentSide [发布机 CVM 持签名私钥与后端凭据]
-    ingress["publish.your-domain<br/>自动 HTTPS 反代到 127.0.0.1"]
-    unpackStep["解包进 productRoot/.relkit/staged/VERSION<br/>拒绝目录穿越"]
-    verifyStep["VerifyStagedHashes<br/>重算哈希 不信任上传方"]
-    mergeStep["release-policy.json +<br/>/etc/relkit-agent/products/PRODUCT.json"]
-    publishStep["publish.Run<br/>按 product 串行 + 幂等键<br/>私钥仅此刻进内存"]
+  subgraph agentSide [发布机 控制面 大字节不驻留]
+    ingress["publish.your-domain → 127.0.0.1:8787"]
+    tokSvc["签发凭据文档<br/>目的地只有 ingest 一个<br/>COS 填 STS；local 填本机 PUT"]
+    headCas["Head cas 比 size<br/>不重算 sha256"]
+    mergeStep["release-policy.json +<br/>本机 products/PRODUCT.json"]
+    publishStep["publish.Run<br/>不按 Type 分支"]
     directoryStep["directory set<br/>directory_sequence 加一"]
   end
 
-  subgraph dataPlane [数据面 只读静态对象]
-    cosBucket[("COS 主数据面<br/>s3-compatible SigV4")]
-    mirrorRepo[("CNB / GitHub raw<br/>static-http 备援")]
+  subgraph dataPlane [数据面 本产品 ingest = COS]
+    casObj[("rup/cas/SHA256<br/>生命周期 Days=1")]
+    artObj[("rup/artifact/...")]
+    docs[("manifest / index / directory<br/>主：COS 自有域名")]
   end
 
-  build --> stageStep --> stagedDir --> packStep
-  packStep -->|"PUT /v1/staged 带 Bearer<br/>CI 唯一 secret"| ingress
-  ingress --> unpackStep --> verifyStep
-  verifyStep -->|"POST /v1/publish"| mergeStep --> publishStep
-  publishStep -->|"写序 artifact 再 manifest<br/>index 指针最后写 等于提交点"| cosBucket
-  publishStep --> mirrorRepo
+  artOther[("其余 artifactTo 后端的副本<br/>默认为空")]
+  mirrorDir[("entryUrls 备<br/>第二个 COS 桶 异地域<br/>独立自有二级域名<br/>同一份 directory.pb 字节")]
+
+  build --> stageStep --> hasUrl
+  hasUrl -->|"没有"| askTok
+  hasUrl -->|"有 例如 GitHub Release"| declare
+  askTok -->|"Bearer 该产品 token"| tokSvc
+  tokSvc --> putCas
+  putCas ==> casObj
+  declare --> putMeta
+  stageStep --> putMeta --> mergeStep
+  putMeta -->|"POST /v1/publish"| headCas
+  headCas -.-> casObj
+  headCas --> publishStep
+  publishStep -->|"Promote 同桶 CopyObject"| artObj
+  publishStep -.->|"Materialize 仅当 artifactTo 还有别家"| artOther
+  publishStep --> docs
   publishStep -.->|"仅当需要改引导时"| directoryStep
-  directoryStep -->|"同一签名字节写所有 entry 镜像"| cosBucket
-  directoryStep --> mirrorRepo
+  directoryStep --> docs
+  docs -.->|"同字节双写 主不可达客户端才去 GET"| mirrorDir
+  directoryStep --> mirrorDir
 ```
 
 要点：
 
-- **CI 不签名、不碰对象存储**，因此普通构建流水线不需要成为可信边界。stage 只把仓库侧 portable 策略打进 `release-policy.json`（无私钥、无后端凭据）。
-- staged 目录跨机器可移植（`publish` 只读 `artifacts/<filename>`，不依赖 `staged.pb` 里的 `source_path`）。目录固定为 `staged.pb` + `release-policy.json` + `artifacts/`。
-- 发布机用 **本机 publish profile**（`/etc/relkit-agent/products/<product>.json`）与 staged policy 合并；缺 policy 或 profile 直接失败。
-- `publish.Run` **不幂等**：同版本重发会让 `sequence` 继续 +1，所以发布入口必须自带幂等键与串行化。
-- 发布机 **不必**出现在客户端 `entryUrls` 里；它只是控制面。
+- **CI 不签名、不持长期后端写密钥。** 只认凭据文档里的 `putUrl`（COS 时里面是 STS；`local` 时是 agent）。长期 `COS_SECRET_*` 仍只在发布机。
+- **字节只跨「CI → 数据面」一次。** 凭据文档只给一个目的地（该产品的 primary ingest）。CI **不按后端数量循环上传**；其余 `artifactTo` 后端的副本由 agent `Materialize`。
+- `cas/` inbox **只存在于 ingest 后端**，别的后端只有 `artifact/...`。`publish.Run` 只调用 Head / Promote / Materialize / PutArtifact，**禁止**按 `Type()` 写第二条发布路径。细节 [`publish-agent.md`](publish-agent.md) §2.3。
+- **第二 backend 必须是另一只桶。** 同桶的 `raw` / `raw2` 只是 GET 别名，禁止写成两条 `s3-compatible`。验证期：广州 `raw.firoyang.com` + 成都 `raw2.firoyang.com` 两个 backend。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
+- agent 对 CAS **不重算 sha256**，只 HEAD 比 size。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
+- **写 index 指针才是真发布。** ingest 上 Head 不到且本地无整包副本时**整轮失败**，不写任何指针。
+- `publish.Run` **不幂等**；发布入口必须幂等键与串行化。
+- 发布机 **不必**出现在客户端 `entryUrls` 里。目的是健壮，不是跨境加速。
 
-发布控制面是 `cmd/relkit-agent`（`PUT /v1/staged`、`POST /v1/publish`）。CI 只交 staged 包；私钥与 COS 密钥留在发布机，写在 profile / 环境变量里，不进 staged 树。内网也可以跑同一二进制，把 profile 的 `publishTo` 指到 `local`（写 WOA 磁盘）而不是 COS。
+现网仍可整包 `PUT /v1/staged`。
 
 ### 4.2 下载流程（引导 → 选路 → 校验）
 
@@ -127,9 +149,9 @@ flowchart TB
   client["客户端<br/>内嵌 entryUrls + 公钥集 + product / channel<br/>几乎不改"]
 
   subgraph entries [entryUrls 镜像 directory 同字节]
-    entryCos[("COS 自有域名 主入口")]
-    entryCnb[("CNB raw 备援")]
-    entryGithub[("GitHub raw 备援")]
+    entryCos[("COS 广州 自有域名<br/>主入口")]
+    entryBackup[("第二个 COS 桶 异地域<br/>独立自有二级域名<br/>备援 ADR 0007")]
+    entryTodo[["现网只有主一条<br/>备 entry 尚未落地"]]
   end
 
   directoryDoc["directory/PRODUCT.pb<br/>验签 → 校验 product → directory_sequence 防回滚<br/>services 按 channel 过滤 priority 升序 再按学习序重排"]
@@ -140,11 +162,9 @@ flowchart TB
   applyStep["apply 宿主或 SDK 自替换"]
 
   client -->|"串行 GET 逐个验签"| entryCos
-  client -.->|"仅当前一个失败或 sequence 回滚"| entryCnb
-  client -.-> entryGithub
+  client -.->|"仅当前一个失败或 sequence 回滚"| entryBackup
   entryCos --> directoryDoc
-  entryCnb --> directoryDoc
-  entryGithub --> directoryDoc
+  entryBackup --> directoryDoc
   directoryDoc --> indexDoc --> manifestDoc --> artifactFile
   artifactFile -->|"协议止于此"| verifiedFile --> applyStep
 ```
@@ -157,10 +177,10 @@ flowchart TB
 
 ### 4.3 谁持有什么
 
-- **CI**：源码、产物、agent token。没有私钥，没有 COS 密钥。staged 里只有 portable `release-policy.json`。
-- **发布机**：签名私钥、COS 密钥、各备援后端凭据、`/etc/relkit-agent/products/<product>.json`。不对外提供下载。
-- **COS（+ 备援）**：只有签名过的静态对象与匿名读权限。写权限只属于发布机。
-- **客户端**：公钥、`entryUrls`、`product` / `channel`。只读，不持任何凭据。
+- **CI**：源码、产物、该产品 Bearer。没有私钥，没有长期后端写密钥。只认凭据文档的**那一个** `putUrl`，不知道本轮有几个后端。staged 只有 portable `release-policy.json`。
+- **发布机**：签名私钥、长期后端凭据（填凭据文档、Promote、Materialize、写指针）、`/etc/relkit-agent/products/<product>.json`。不对外提供下载，大产物也不在盘上驻留。
+- **数据面**：`cas/` 是 **ingest 后端专有**的 inbox（不必匿名读，`Days=1` 清）。正式对象 `artifact` / `index` / `directory` 匿名 GET。长期写权限只属于发布机。
+- **客户端**：公钥、`entryUrls`、`product` / `channel`。只读。按签名文档验 size / sha256。看不见 `cas/`。
 
 ### 4.4 边界表（进不了 COS / 能进 COS）
 
@@ -199,13 +219,23 @@ flowchart TB
 客户端读 directory / index / fallback 时应带缓存击穿参数或 `Cache-Control: no-cache`（SPEC §3.1 / §12）。  
 配置错误的典型现场：**发布成功但客户端几分钟内看不到更新**——先查 CDN/COS 是否把可变前缀缓存长了。
 
-## 6. 客户端内嵌合约（与 ADR 0005 一致）
+## 6. 客户端内嵌合约（ADR 0005 + ADR 0007）
 
 长期内嵌：
 
 - `entryUrls`：有序，主 → 备；**主 URL 指向自有域名上的 directory 对象**
-- 建议备援仍为 CNB raw、GitHub raw 上**同一字节**的 directory 副本（主不可达才试）
+- 备援为**第二个 COS 桶（异地域）+ 独立自有二级域名**上**同一字节**的 directory 副本（主不可达才试）
 - 公钥集、`product`、`channel`
+
+备援准入三条全部满足才可写进客户端（[ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)）：
+
+1. **目标用户所在网络可达**。`raw.githubusercontent.com` 在大陆不可达或被污染，主入口在广州时二者失效域不正交——主能用时它多余，主不能用时它也拿不到，等于没有备援。
+2. **`Cache-Control` 我方可配。** `directory/` 是可变指针，按 §5 要短缓存或 no-cache；git 托管的 raw 端点缓存由平台定、客户端也无法令其 revalidate，正好命中 §5 那个「发布成功但客户端几分钟内看不到更新」的现场。
+3. **失效域与主正交。** 不共用同一个桶、同一地域、同一张证书。
+
+因此 **CNB raw / GitHub raw 不再作 `entryUrls` 备援**；它们仍可当只读校验镜像或人工排查入口，但不写进客户端常量。
+
+**现网缺口：** `Dec/relkit.json` 的 `entryUrls` 只有主一条，`directory.publishTo` 只有 `["cos"]`，即一主零备。已装客户端补不回来，只能靠自然升级消化；落地步骤见 ADR 0007「需要落地的事项」。
 
 不要内嵌会随机房迁移而变的单一 `indexUrl` 作为唯一入口（兼容旧宿主除外，见 SPEC §16.4）。
 
@@ -213,9 +243,9 @@ flowchart TB
 
 | 目标 | 后端 type | 状态 / 备注 |
 |---|---|---|
-| COS 自定义域名整树托管，CLI 直接写桶 | `s3-compatible` | **已实现**；字段见 CLI.md（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`，可选 `region` / `forcePathStyle` / `timeoutSeconds`） |
-| CNB / GitHub 仓库直链托管 directory 或整树 | `static-http` + `stageDir` | **已实现** |
-| 自建磁盘上的发布树（内网 agent 写盘，或离线演练） | `local` | **已实现**；内网主路径 |
+| COS 自定义域名整树托管，CLI 直接写桶 | `s3-compatible` | **已实现**；字段见 CLI.md（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`，可选 `region` / `forcePathStyle` / `timeoutSeconds`）。公网产品的 **primary ingest** |
+| CNB / GitHub 仓库上的 `entryUrls` 备援 | `static-http` + `stageDir`（**写 = git push**，GET = raw） | 落盘已实现；commit/push 仍欠，见 publish-agent §2.3。不要当成只读 HTTP，也**不可**作 ingest；默认只进 `pointerTo` |
+| 自建磁盘上的发布树（内网 agent 写盘，或离线演练） | `local` | **已实现**；内网主路径与内网产品的 **primary ingest** |
 | 遗留：经 serve 鉴权 PUT | `http-put` | **已实现**；新产品改走 agent；旧产品可暂留直到迁完 |
 
 正式发布优先配置 `s3-compatible`。**禁止**手工打乱「产物 → manifest → 指针最后写」顺序冒充正式发布（见 AGENT-GUIDE）。
@@ -228,8 +258,8 @@ flowchart TB
 ### 8.1 阶段 A — 双写，不关旧源
 
 1. 增加目标后端（例：CNB `static-http`，`baseUrl` 为可匿名 GET 的 `/-/raw/...` 前缀，`stageDir` 指向仓库内发布树）。  
-2. `publishTo` 同时包含 `cos` 与 `cnb`（名称随意）。  
-3. 再发至少一版：同一 artifact / manifest / index 字节落到两边；新文档 `urls[]` 含两侧取货点。  
+2. `pointerTo` 同时包含 `cos` 与 `cnb`（名称随意）。只有确实要迁 **artifact 整树**时才把 `cnb` 也加进 `artifactTo`，且先定 LFS / 体积上限；只做 `entryUrls` 备援不需要这一步。  
+3. 再发至少一版：manifest / index 字节落到两边；`artifactTo` 覆盖到的一侧才有 artifact 副本，新文档 `urls[]` 含所有**实际存在**的取货点。  
 4. `relkit verify`（必要时 `--deep`）两侧都通过。
 
 ### 8.2 阶段 B — 改引导，仍保留旧源 URL
@@ -240,7 +270,7 @@ flowchart TB
 
 ### 8.3 阶段 C — 新发布停止写旧源
 
-1. `publishTo` 去掉旧后端。  
+1. `artifactTo` / `pointerTo` 去掉旧后端（旧后端若是 ingest，先把 `ingest` 改指新后端）。  
 2. 新节点的 `urls[]` 可以只含新源。  
 3. 旧桶 / 旧路径上的对象**先保留**。
 
@@ -261,7 +291,7 @@ manifest / artifact **发布后不可变**。若某历史版本的 manifest 当�
 
 ### 8.6 directory 入口本身也曾只在单源
 
-若 `entryUrls` 主入口只绑在即将退役的宿主上，关源前必须已有备援 entry 且其上 directory 字节最新；否则会连引导一起丢。这正是 ADR 0005「一主两备」的原因。推荐主 URL 始终落在**自有域名 COS**，备援落 CNB / GitHub，即使整树 artifact 已迁走，directory 小文件仍建议留在主域名上（或主域名继续托管整树）。
+若 `entryUrls` 主入口只绑在即将退役的宿主上，关源前必须已有备援 entry 且其上 directory 字节最新；否则会连引导一起丢。这正是 ADR 0005「一主多备」的原因。推荐主 URL 始终落在**自有域名 COS**，备援按 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 落在异地域第二个 COS 桶上；即使整树 artifact 已迁走，directory 小文件仍建议留在主域名上（或主域名继续托管整树）。**注意现网是一主零备**，在补上备 entry 之前不要退役主入口。
 
 ## 9. 文档与实现边界
 
@@ -334,10 +364,25 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 ### 10.2 剩余待办
 
 1. 按 §5 为 `directory/` / `index/` / `fallback/` 设短缓存，`manifest/` / `artifact/` 设长缓存。
-2. 证书续期自动化（见 §10.1）。
+2. 证书续期自动化：独立程序 `relkit-cos-cert-renew` + systemd timer（与 agent 同机不同进程），配置 `targets[]`。
 3. 需要边缘加速时再挂 CDN 加速域名（届时 CNAME 改指 `*.cdn.dnsv1.com`，证书托管随之迁到 CDN）。
 4. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
 5. 公网：仓库 `relkit.json` 的 `site.makers` 随 stage 进入 `release-policy.json`，本机 profile 提供 `tokenEnv`；`relkit publish` 会把 `.relkit/browse/` 部署到 Makers（项目 `relkit-updates-index`）。内网 publish 已写 `browse/`，不必再部署 Makers。
+
+### 10.4 验证用第二 backend（成都桶）
+
+同桶再挂二级域名**不是**第二 backend。验证期第二 backend 是另一只桶：
+
+| | 广州 | 成都（验证，拆除需另行指示） |
+|---|---|---|
+| 桶 | `relkit-updates-1251882798` | `relkit-updates-cd-1251882798` |
+| 地域 | `ap-guangzhou` | `ap-chengdu` |
+| 自定义域名 | `raw.firoyang.com` | `raw2.firoyang.com` |
+| 前缀 | `rup/` | `rup/` |
+
+证书与广州正交：`ApplyCertificate` 域名 `raw2.firoyang.com`，`DeployCertificateInstance` 的 InstanceId 为 `ap-chengdu|relkit-updates-cd-1251882798|raw2.firoyang.com`。仓库 `relkit.json` 与发布机 `/etc/relkit-agent/products/dec.json` 的 `publishTo` 都必须含 `cos` 与 `cos2`。DeployRecord `Status: 1` 之后边缘仍可能短暂握到 COS 默认证书，探针以客户端信任链为准。
+
+发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令：profile、systemd 单元、`relkit-agent onboard check` 都在目标机本地执行。
 
 凭据：`COS_SECRET_ID` / `COS_SECRET_KEY` 只进发布机环境（或 mise 私密配置），**禁止**写入仓库。
 
@@ -348,6 +393,8 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 1. **DNS**：`raw` CNAME 到与 `updates` 相同的 COS 主机（`relkit-updates-1251882798.cos.ap-guangzhou.myqcloud.com`）。**已完成。**
 2. **COS 自定义源站域名**绑定 `raw.firoyang.com`，并部署 HTTPS 证书（与 `updates` 同一套续期流程，§10.1）。**已完成**；匿名 GET 已通。
 3. 新发版 `baseUrl` / 新客户端 `entryUrls` 走 `https://raw.firoyang.com/rup/...`。
+
+   **改 `baseUrl` 会让 `verify` 对所有历史版本报错。** 已发布的 index / manifest 里 `urls[]` 是当时的 `baseUrl`（`updates.`）写死的，而 `verify` 要求每个条目都列出当前 backend 的 URL（`internal/verify` 的 `checkDeclaredURL` 用 `backend.URLFor(key)` 严格比对）。切到 `raw.` 后，dev 通道 13 个历史版本立刻产出 245 条 `does not list this backend's URL`。这些 URL 在双挂期仍可下载，**客户端不受影响**，红的只是 verify。别为了让 verify 变绿去重发历史版本或回滚 `baseUrl`；按 §8 双写迁移的节奏，等历史版本被 `retainVersions` 淘汰即可。判断发布是否健康看新发版本那几条。
 4. 公网 publish（配了 `site.makers`）把 dump 部署到 Makers。内网跳过这步。**不要**把 HTML 拷进 relkit 仓库的 `sites/updates-index/` 当发版步骤。
 5. 旧客户端都升到认 `raw.` 之后，再把 `updates` CNAME 改到 EdgeOne Makers。在此之前不要动 `updates`，否则已装 Dec 会找不到 directory。
 
@@ -355,7 +402,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 
 - 协议：[`SPEC.md`](../../SPEC.md) §1.1、§3、§5.3、§13、§16
 - Directory 设计：[`bootstrap-directory.md`](bootstrap-directory.md)
-- 决策记录：[`../adr/0005-signed-bootstrap-directory.md`](../adr/0005-signed-bootstrap-directory.md)
+- 决策记录：[`../adr/0005-signed-bootstrap-directory.md`](../adr/0005-signed-bootstrap-directory.md)、[`../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md`](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)
 - 工具接口与后端表：[`CLI.md`](../../CLI.md) §6
 - 操作手册：[`embed/AGENT-GUIDE.md`](../../embed/AGENT-GUIDE.md)
 - 给人看的索引站：[`sites/updates-index/README.md`](../../sites/updates-index/README.md)

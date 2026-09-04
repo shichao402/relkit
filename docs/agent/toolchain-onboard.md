@@ -93,6 +93,7 @@ relkit verify --deep                # 对真实 HTTP 后端有意义
 - [ ] `.gitignore` 忽略私钥与本地 stage 垃圾
 - [ ] 至少一次成功 `publish`（或 dry-run + 用户确认后端稍后配）
 - [ ] 已记下 index URL 形态：`…/index/<product>/<channel>.pb`
+- [ ] `relkit.json` 含 `recovery`（至少两个官方手动入口）且已 `relkit onboard run repo.recovery-embed` 与 `repo.client-contract`
 
 然后去做 [`sdk-cascade.md`](sdk-cascade.md)。
 

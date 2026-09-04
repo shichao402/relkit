@@ -96,6 +96,8 @@ func run(argv []string) (code int) {
 		err = cmdAgentGuide(rest)
 	case "backends":
 		err = cmdBackends(rest)
+	case "onboard":
+		err = cmdOnboard(rest, configPath)
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
@@ -1005,5 +1007,6 @@ Commands:
   directory
   agent-guide
   backends
+  onboard
 `)
 }

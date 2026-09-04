@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily COS custom-domain certificate check
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

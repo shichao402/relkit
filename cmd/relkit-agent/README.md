@@ -46,7 +46,12 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> [-ro
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile
 relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -remove
+relkit-agent onboard check -config /etc/relkit-agent/relkit-agent.json -product <id> [-json]
 ```
+
+证书续期与 agent 同机、不同进程：安装 `deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。
+
+改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
 - `-product`：建 root（若尚未登记）、写入 map、**签发该产品 token**（打印一次 `RELKIT_UPLOAD_TOKEN`）。已登记但还没有产品 token 时只签发、并删掉 json 里的实例级字段。
 - `-token-only`：轮换该产品 token，不改 root / profile。

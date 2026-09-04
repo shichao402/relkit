@@ -83,5 +83,12 @@ if (-not (Test-Path (Join-Path $HostRoot "pubspec.yaml")) -and -not (Test-Path (
     Write-Output "3. $(Join-Path $ScriptDir 'sdk-cascade.md')  # pick language manually"
 }
 Write-Output ""
+if (Test-Cmd "relkit") {
+    Write-Output "-- relkit onboard next --"
+    Push-Location $HostRoot
+    try { relkit onboard next --host $HostRoot } catch {}
+    Pop-Location
+    Write-Output ""
+}
 Write-Output "Done criteria: $(Join-Path $ScriptDir 'README.md') §3"
-Write-Output "This script did not modify any files."
+Write-Output "This script did not modify any files. Use relkit onboard check as the authoritative checklist."

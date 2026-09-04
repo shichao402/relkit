@@ -30,10 +30,13 @@
 
 ```text
 1. 读完本文 §0–§2
-2. 跑 docs/agent/bootstrap（见下）—— 它只做探测与指路，不偷偷改仓库
-3. 按打印出的路径打开下一份文档并逐项打勾
-4. 开箱完成标准（§3）全部满足后，才允许声称「已接入」
+2. 在宿主根运行 `relkit onboard check --json`（机器清单；结论每次重算）
+3. 按 next/run/ack 把失败项做完；`repo.recovery-embed` 用 `relkit onboard run repo.recovery-embed`
+4. 发布机另跑 `relkit-agent onboard check -product <id> -json`
+5. §3 全部 passed 后才允许声称「已接入」
 ```
+
+旧的 `docs/agent/bootstrap.sh` 仍可只读探测；权威清单是 `relkit onboard`。
 
 ### 跑级联探测脚本
 
@@ -76,7 +79,9 @@ Node SDK 开箱：[`../../sdk/node/AGENT-QUICKSTART.md`](../../sdk/node/AGENT-QU
 - [ ] 宿主根有 `VERSION.json`（`schema: rup.version/1`）且 `relkit version get` 成功
 - [ ] 宿主根有 `relkit.json`，`product` / `channel` / 后端配置齐全
 - [ ] 公钥策略已定：客户端将**编译内嵌**公钥；私钥只在本机/CI 密钥库
-- [ ] 至少做过一次 dry-run 或 `local`/`http-put` 试发布，并理解 `verify`
+- [ ] `relkit.json` 含 `recovery.message` 与至少两个官方手动入口；已 `relkit onboard run repo.recovery-embed`
+- [ ] 宿主能在远程 check 失败时展示内嵌 `RecoveryHelp`（不经网络）
+- [ ] 每个 `s3-compatible` backend 使用不同 bucket（同桶多域名不是多个 backend）
 
 SDK 侧（按语言）：
 

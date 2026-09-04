@@ -284,3 +284,50 @@ func signedHeadersFromAuth(auth string) string {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestDualS3BackendsSamePointerBytes(t *testing.T) {
+	accessKey := "AKIATEST"
+	secretKey := "secret-test-key"
+	t.Setenv("COS_SECRET_ID", accessKey)
+	t.Setenv("COS_SECRET_KEY", secretKey)
+
+	s1 := httptest.NewServer(newFakeS3(t, t.TempDir(), accessKey, secretKey, "us-east-1"))
+	defer s1.Close()
+	s2 := httptest.NewServer(newFakeS3(t, t.TempDir(), accessKey, secretKey, "us-west-1"))
+	defer s2.Close()
+
+	a, err := newS3CompatibleBackend("cos", map[string]any{
+		"type": "s3-compatible", "endpoint": s1.URL, "bucket": "one", "prefix": "rup/",
+		"baseUrl": s1.URL + "/one/rup/", "accessKeyEnv": "COS_SECRET_ID", "secretKeyEnv": "COS_SECRET_KEY",
+		"region": "us-east-1", "forcePathStyle": true,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := newS3CompatibleBackend("cos2", map[string]any{
+		"type": "s3-compatible", "endpoint": s2.URL, "bucket": "two", "prefix": "rup/",
+		"baseUrl": s2.URL + "/two/rup/", "accessKeyEnv": "COS_SECRET_ID", "secretKeyEnv": "COS_SECRET_KEY",
+		"region": "us-west-1", "forcePathStyle": true,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("directory-pb-bytes")
+	if _, err := a.PutPointer(payload, "directory/demo.pb"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.PutPointer(payload, "directory/demo.pb"); err != nil {
+		t.Fatal(err)
+	}
+	ga, err := a.Get("directory/demo.pb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gb, err := b.Get("directory/demo.pb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ga, gb) || !bytes.Equal(ga, payload) {
+		t.Fatalf("mismatch %q %q", ga, gb)
+	}
+}

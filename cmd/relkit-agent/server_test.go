@@ -705,6 +705,25 @@ func TestAgentPublishRejectsPolicyProfileConflicts(t *testing.T) {
 	})
 }
 
+func TestHealthJSONOmitsUploadToken(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	resp, err := http.Get(fx.ts.URL + "/-/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte(fx.token)) || bytes.Contains(body, []byte("test-token")) {
+		t.Fatalf("health leaked token: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"ok":true`)) && !bytes.Contains(body, []byte(`"ok": true`)) {
+		t.Fatalf("health body=%s", body)
+	}
+}
+
 func TestProductTokenCannotWriteOtherProduct(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{})
 	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/cronkit/1.0.0", bytes.NewReader(fx.tarball))

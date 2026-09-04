@@ -80,5 +80,10 @@ if [[ ! -f "$HOST_ROOT/pubspec.yaml" && ! -f "$HOST_ROOT/go.mod" && ! -f "$HOST_
   echo "3. $SCRIPT_DIR/sdk-cascade.md  # pick language manually"
 fi
 echo
+if have relkit; then
+  echo "-- relkit onboard next --"
+  (cd "$HOST_ROOT" && relkit onboard next --host "$HOST_ROOT" || true)
+  echo
+fi
 echo "Done criteria: $SCRIPT_DIR/README.md §3"
-echo "This script did not modify any files."
+echo "This script did not modify any files. Use relkit onboard check as the authoritative checklist."

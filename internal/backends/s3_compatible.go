@@ -275,14 +275,30 @@ func (b *s3CompatibleBackend) objectURL(objectKey string) (string, error) {
 	return endpointURL.String(), nil
 }
 
+const (
+	missingAccessKeyPhrase = "needs the access key in the environment variable"
+	missingSecretKeyPhrase = "needs the secret key in the environment variable"
+)
+
+// IsMissingCredentialMessage reports whether a message came from a backend
+// whose credential env vars are unset. Callers that aggregate errors into
+// strings (verify collapses findings into []string) use this to tell "this
+// machine holds no publish credentials" apart from "the published tree is
+// wrong". Long-lived backend write keys live only on the publish host, so the
+// former is the expected state on a developer machine.
+func IsMissingCredentialMessage(message string) bool {
+	return strings.Contains(message, missingAccessKeyPhrase) ||
+		strings.Contains(message, missingSecretKeyPhrase)
+}
+
 func (b *s3CompatibleBackend) credentials() (string, string, error) {
 	accessKey := os.Getenv(b.accessKeyEnv)
 	if accessKey == "" {
-		return "", "", Error{Message: fmt.Sprintf("backend %q needs the access key in the environment variable %s, which is unset or empty", b.Name(), b.accessKeyEnv)}
+		return "", "", Error{Message: fmt.Sprintf("backend %q %s %s, which is unset or empty", b.Name(), missingAccessKeyPhrase, b.accessKeyEnv)}
 	}
 	secretKey := os.Getenv(b.secretKeyEnv)
 	if secretKey == "" {
-		return "", "", Error{Message: fmt.Sprintf("backend %q needs the secret key in the environment variable %s, which is unset or empty", b.Name(), b.secretKeyEnv)}
+		return "", "", Error{Message: fmt.Sprintf("backend %q %s %s, which is unset or empty", b.Name(), missingSecretKeyPhrase, b.secretKeyEnv)}
 	}
 	return accessKey, secretKey, nil
 }

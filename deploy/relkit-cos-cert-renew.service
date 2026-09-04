@@ -1,0 +1,9 @@
+[Unit]
+Description=Probe and renew Tencent SSL certs for COS custom domains
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/relkit-cos-cert/env
+ExecStart=/usr/local/bin/relkit-cos-cert-renew -config /etc/relkit-cos-cert/renew.json

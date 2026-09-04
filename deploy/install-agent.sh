@@ -34,4 +34,6 @@ echo "  # prints export RELKIT_UPLOAD_TOKEN=... once; put that in the product CI
 echo "migrate old product-root relkit.json: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id> -migrate-profile"
 echo "rotate: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <id> -token-only"
 echo "list: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -list-products"
+echo "onboard: relkit-agent onboard check -config $CONFIG_DIR/relkit-agent.json -product <id> -json"
+echo "COS cert timer (separate process): install deploy/relkit-cos-cert-renew.service and .timer"
 echo "intranet: copy relkit-agent.intranet.example.json; put the local backend in the product profile"
