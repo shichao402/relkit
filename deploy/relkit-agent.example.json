@@ -2,6 +2,11 @@
   "addr": "127.0.0.1:8787",
   "maxUpload": "8GiB",
   "maxFiles": 10000,
+  "partSize": "8MiB",
+  "minPartSize": "1MiB",
+  "maxPartSize": "64MiB",
+  "maxPartConcurrency": 16,
+  "uploadTTL": "24h",
   "stateDir": "/var/lib/relkit-agent",
   "uploadTokens": [],
   "products": {}

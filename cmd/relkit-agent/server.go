@@ -12,12 +12,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/directory"
+	"cnb.cool/shichao402/relkit/internal/humansize"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/publish"
 	"cnb.cool/shichao402/relkit/internal/stage"
@@ -31,14 +32,20 @@ type ProductConfig struct {
 }
 
 type FileConfig struct {
-	Addr            string                   `json:"addr"`
-	UploadToken     string                   `json:"uploadToken,omitempty"`
-	UploadTokenFile string                   `json:"uploadTokenFile,omitempty"`
-	UploadTokens    []UploadTokenEntry       `json:"uploadTokens,omitempty"`
-	MaxUpload       string                   `json:"maxUpload,omitempty"`
-	MaxFiles        int                      `json:"maxFiles,omitempty"`
-	StateDir        string                   `json:"stateDir,omitempty"`
-	Products        map[string]ProductConfig `json:"products"`
+	Addr               string                   `json:"addr"`
+	UploadToken        string                   `json:"uploadToken,omitempty"`
+	UploadTokenFile    string                   `json:"uploadTokenFile,omitempty"`
+	UploadTokens       []UploadTokenEntry       `json:"uploadTokens,omitempty"`
+	MaxUpload          string                   `json:"maxUpload,omitempty"`
+	MaxFiles           int                      `json:"maxFiles,omitempty"`
+	PartSize           string                   `json:"partSize,omitempty"`
+	MinPartSize        string                   `json:"minPartSize,omitempty"`
+	MaxPartSize        string                   `json:"maxPartSize,omitempty"`
+	MaxParts           int                      `json:"maxParts,omitempty"`
+	MaxPartConcurrency int                      `json:"maxPartConcurrency,omitempty"`
+	UploadTTL          string                   `json:"uploadTTL,omitempty"`
+	StateDir           string                   `json:"stateDir,omitempty"`
+	Products           map[string]ProductConfig `json:"products"`
 }
 
 // UploadTokenEntry is a product-scoped publisher credential. One file, one
@@ -63,13 +70,19 @@ func (c credential) allows(product string) bool {
 }
 
 type Config struct {
-	Addr        string
-	credentials []credential
-	MaxUpload   int64
-	MaxFiles    int
-	StateDir    string
-	Products    map[string]ProductConfig
-	ConfigPath  string
+	Addr               string
+	credentials        []credential
+	MaxUpload          int64
+	MaxFiles           int
+	PartSize           int64
+	MinPartSize        int64
+	MaxPartSize        int64
+	MaxParts           int
+	MaxPartConcurrency int
+	UploadTTL          time.Duration
+	StateDir           string
+	Products           map[string]ProductConfig
+	ConfigPath         string
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -81,15 +94,27 @@ func LoadConfig(path string) (*Config, error) {
 		raw.Products = map[string]ProductConfig{}
 	}
 	cfg := &Config{
-		Addr:       raw.Addr,
-		MaxUpload:  4 << 30,
-		MaxFiles:   10_000,
-		StateDir:   raw.StateDir,
-		Products:   raw.Products,
-		ConfigPath: path,
+		Addr:               raw.Addr,
+		MaxUpload:          4 << 30,
+		MaxFiles:           10_000,
+		PartSize:           8 << 20,
+		MinPartSize:        1 << 20,
+		MaxPartSize:        64 << 20,
+		MaxParts:           10_000,
+		MaxPartConcurrency: 16,
+		UploadTTL:          24 * time.Hour,
+		StateDir:           raw.StateDir,
+		Products:           raw.Products,
+		ConfigPath:         path,
 	}
 	if raw.MaxFiles > 0 {
 		cfg.MaxFiles = raw.MaxFiles
+	}
+	if raw.MaxParts > 0 {
+		cfg.MaxParts = raw.MaxParts
+	}
+	if raw.MaxPartConcurrency > 0 {
+		cfg.MaxPartConcurrency = raw.MaxPartConcurrency
 	}
 	if raw.MaxUpload != "" {
 		n, err := parseSize(raw.MaxUpload)
@@ -97,6 +122,37 @@ func LoadConfig(path string) (*Config, error) {
 			return nil, err
 		}
 		cfg.MaxUpload = n
+	}
+	if raw.PartSize != "" {
+		n, err := parseSize(raw.PartSize)
+		if err != nil {
+			return nil, fmt.Errorf("partSize: %w", err)
+		}
+		cfg.PartSize = n
+	}
+	if raw.MinPartSize != "" {
+		n, err := parseSize(raw.MinPartSize)
+		if err != nil {
+			return nil, fmt.Errorf("minPartSize: %w", err)
+		}
+		cfg.MinPartSize = n
+	}
+	if raw.MaxPartSize != "" {
+		n, err := parseSize(raw.MaxPartSize)
+		if err != nil {
+			return nil, fmt.Errorf("maxPartSize: %w", err)
+		}
+		cfg.MaxPartSize = n
+	}
+	if raw.UploadTTL != "" {
+		d, err := time.ParseDuration(raw.UploadTTL)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("uploadTTL: invalid duration %q", raw.UploadTTL)
+		}
+		cfg.UploadTTL = d
+	}
+	if cfg.MinPartSize < 1 || cfg.MaxPartSize < cfg.MinPartSize || cfg.PartSize < cfg.MinPartSize || cfg.PartSize > cfg.MaxPartSize {
+		return nil, fmt.Errorf("part sizes must satisfy 1 <= minPartSize <= partSize <= maxPartSize")
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = filepath.Join(filepath.Dir(path), "relkit-agent-state")
@@ -207,56 +263,27 @@ func loadProductTokens(configPath string, raw *FileConfig) ([]credential, error)
 }
 
 func parseSize(text string) (int64, error) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return 0, fmt.Errorf("empty size")
-	}
-	// Longest suffix first. A map range over {"b","gib"} would match "8GiB"
-	// as 8 bytes whenever "b" came first.
-	units := []struct {
-		suffix string
-		factor int64
-	}{
-		{"tib", 1 << 40},
-		{"gib", 1 << 30},
-		{"mib", 1 << 20},
-		{"kib", 1 << 10},
-		{"tb", 1000 * 1000 * 1000 * 1000},
-		{"gb", 1000 * 1000 * 1000},
-		{"mb", 1000 * 1000},
-		{"kb", 1000},
-		{"g", 1 << 30},
-		{"m", 1 << 20},
-		{"k", 1 << 10},
-		{"b", 1},
-	}
-	lower := strings.ToLower(trimmed)
-	for _, unit := range units {
-		if !strings.HasSuffix(lower, unit.suffix) {
-			continue
-		}
-		number := strings.TrimSpace(lower[:len(lower)-len(unit.suffix)])
-		n, err := strconv.ParseInt(number, 10, 64)
-		if err != nil || n < 0 {
-			return 0, fmt.Errorf("invalid size %q", text)
-		}
-		return n * unit.factor, nil
-	}
-	n, err := strconv.ParseInt(lower, 10, 64)
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("invalid size %q", text)
-	}
-	return n, nil
+	return humansize.Parse(text)
 }
 
 type Server struct {
-	cfg    *Config
-	locks  sync.Map // product -> *sync.Mutex
-	idemMu sync.Mutex
+	cfg     *Config
+	locks   sync.Map // product -> *sync.Mutex
+	idemMu  sync.Mutex
+	uploads sync.Map // upload id -> *liveUpload
 }
 
 func NewServer(cfg *Config) *Server {
 	return &Server{cfg: cfg}
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/-/health", s.handleHealth)
+	mux.HandleFunc("/v1/drop/", s.handleDrop)
+	mux.HandleFunc("/v1/staged/", s.handleStaged)
+	mux.HandleFunc("/v1/publish", s.handlePublish)
+	return mux
 }
 
 func (s *Server) productLock(product string) *sync.Mutex {
@@ -308,11 +335,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	product, versionRaw, ok := parseStagedRoute(r.URL.Path)
+	product, versionRaw, rest, ok := parseStagedPath(r.URL.Path)
 	if !ok {
 		http.Error(w, "expected /v1/staged/{product}/{version}", http.StatusBadRequest)
 		return
@@ -325,12 +348,22 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid version", http.StatusBadRequest)
 		return
 	}
-	pc, ok := s.cfg.Products[product]
-	if !ok {
+	if _, ok := s.cfg.Products[product]; !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
 	}
+	if len(rest) == 0 {
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.putStagedWhole(w, r, product, version)
+		return
+	}
+	s.handleStagedUpload(w, r, product, version, rest)
+}
 
+func (s *Server) putStagedWhole(w http.ResponseWriter, r *http.Request, product, version string) {
 	body := http.MaxBytesReader(w, r.Body, s.cfg.MaxUpload)
 	tmp, err := os.CreateTemp("", "relkit-staged-*.tar.gz")
 	if err != nil {
@@ -352,55 +385,11 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
-
-	mu := s.productLock(product)
-	if !mu.TryLock() {
-		http.Error(w, "publish or staged upload already in progress for this product", http.StatusConflict)
+	dest, err := s.installStagedArchive(product, version, tmpPath, sum)
+	if err != nil {
+		writeStagedErr(w, err)
 		return
 	}
-	defer mu.Unlock()
-
-	dest := stage.StagingDir(pc.Root, version)
-	_ = os.RemoveAll(dest)
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		http.Error(w, "mkdir staged", http.StatusInternalServerError)
-		return
-	}
-	if err := extractTarGz(tmpPath, dest, s.cfg.MaxFiles); err != nil {
-		_ = os.RemoveAll(dest)
-		log.Printf("staged extract %s/%s: %v", product, version, err)
-		http.Error(w, "extract: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if _, err := stage.LoadStaged(pc.Root, version); err != nil {
-		_ = os.RemoveAll(dest)
-		log.Printf("staged tree %s/%s: %v", product, version, err)
-		http.Error(w, "invalid staged tree: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if _, statErr := os.Stat(stage.ReleasePolicyPath(pc.Root, version)); statErr == nil {
-		policy, err := stage.LoadReleasePolicy(pc.Root, version)
-		if err != nil {
-			_ = os.RemoveAll(dest)
-			http.Error(w, "invalid release policy: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if policy.Product != product {
-			_ = os.RemoveAll(dest)
-			http.Error(w, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product), http.StatusBadRequest)
-			return
-		}
-	} else if !os.IsNotExist(statErr) {
-		_ = os.RemoveAll(dest)
-		http.Error(w, "inspect release policy: "+statErr.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := s.writeStagedSHA(product, version, sum); err != nil {
-		_ = os.RemoveAll(dest)
-		http.Error(w, "persist staged sha256: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"product": product,
 		"version": version,
@@ -410,19 +399,87 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// parseStagedRoute accepts /v1/staged/{product}/{version}, including a
+type stagedHTTPError struct {
+	status int
+	msg    string
+}
+
+func (e *stagedHTTPError) Error() string { return e.msg }
+
+func writeStagedErr(w http.ResponseWriter, err error) {
+	if se, ok := err.(*stagedHTTPError); ok {
+		http.Error(w, se.msg, se.status)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
+func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (string, error) {
+	pc := s.cfg.Products[product]
+	mu := s.productLock(product)
+	if !mu.TryLock() {
+		return "", &stagedHTTPError{http.StatusConflict, "publish or staged upload already in progress for this product"}
+	}
+	defer mu.Unlock()
+
+	dest := stage.StagingDir(pc.Root, version)
+	_ = os.RemoveAll(dest)
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return "", &stagedHTTPError{http.StatusInternalServerError, "mkdir staged"}
+	}
+	if err := extractTarGz(tmpPath, dest, s.cfg.MaxFiles); err != nil {
+		_ = os.RemoveAll(dest)
+		log.Printf("staged extract %s/%s: %v", product, version, err)
+		return "", &stagedHTTPError{http.StatusBadRequest, "extract: " + err.Error()}
+	}
+	if _, err := stage.LoadStaged(pc.Root, version); err != nil {
+		_ = os.RemoveAll(dest)
+		log.Printf("staged tree %s/%s: %v", product, version, err)
+		return "", &stagedHTTPError{http.StatusBadRequest, "invalid staged tree: " + err.Error()}
+	}
+	if _, statErr := os.Stat(stage.ReleasePolicyPath(pc.Root, version)); statErr == nil {
+		policy, err := stage.LoadReleasePolicy(pc.Root, version)
+		if err != nil {
+			_ = os.RemoveAll(dest)
+			return "", &stagedHTTPError{http.StatusBadRequest, "invalid release policy: " + err.Error()}
+		}
+		if policy.Product != product {
+			_ = os.RemoveAll(dest)
+			return "", &stagedHTTPError{http.StatusBadRequest, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product)}
+		}
+	} else if !os.IsNotExist(statErr) {
+		_ = os.RemoveAll(dest)
+		return "", &stagedHTTPError{http.StatusBadRequest, "inspect release policy: " + statErr.Error()}
+	}
+	if err := s.writeStagedSHA(product, version, sum); err != nil {
+		_ = os.RemoveAll(dest)
+		return "", &stagedHTTPError{http.StatusInternalServerError, "persist staged sha256: " + err.Error()}
+	}
+	return dest, nil
+}
+
+// parseStagedPath accepts /v1/staged/{product}/{version}[/...], including a
 // doubled slash when RELKIT_PUBLISH_URL was configured with a trailing slash.
-func parseStagedRoute(urlPath string) (product, version string, ok bool) {
+func parseStagedPath(urlPath string) (product, version string, rest []string, ok bool) {
 	cleaned := path.Clean("/" + strings.TrimSpace(urlPath))
-	rest := strings.TrimPrefix(cleaned, "/v1/staged/")
-	if rest == cleaned {
-		return "", "", false
+	restPath := strings.TrimPrefix(cleaned, "/v1/staged/")
+	if restPath == cleaned {
+		return "", "", nil, false
 	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
+	parts := strings.Split(strings.Trim(restPath, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", nil, false
 	}
-	return parts[0], parts[1], true
+	if len(parts) == 2 {
+		return parts[0], parts[1], nil, true
+	}
+	return parts[0], parts[1], parts[2:], true
+}
+
+// parseStagedRoute accepts /v1/staged/{product}/{version} with no extra segments.
+func parseStagedRoute(urlPath string) (product, version string, ok bool) {
+	p, v, rest, ok := parseStagedPath(urlPath)
+	return p, v, ok && len(rest) == 0
 }
 
 func (s *Server) stagedSHAPath(product, version string) string {

@@ -19,6 +19,18 @@
 
 `products.<id>.root` 永远是产品根；不以 JSON 文档里的路径为准。
 
+分片上传可调字段（均可省略，默认 8MiB / 1MiB–64MiB / 16 路 / 24h）：
+
+| 字段 | 作用 |
+|---|---|
+| `partSize` | 客户端未指定时的默认片大小 |
+| `minPartSize` / `maxPartSize` | 夹取客户端请求的片大小 |
+| `maxParts` | 单次上传最多片数 |
+| `maxPartConcurrency` | 同一 upload id 同时进行的 part PUT 上限，超出返回 429 |
+| `uploadTTL` | 未完成会话过期（Go duration，如 `24h`） |
+
+客户端用 `relkit staged-put`，片大小与并发另由 `--part-size` / `--concurrency` 或环境变量 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY` 决定，不能超过 agent 上限。
+
 ## 发布时读哪份配置
 
 **只认这一条路径：** staged 树里的 `release-policy.json` + 本机 `/etc/relkit-agent/products/<id>.json`（`product` 与 `signing.keyId` 必须一致）。缺任一则失败。
@@ -51,6 +63,10 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 - `GET /-/health`
 - `PUT /v1/drop/{product}/{version}/{filename}`（及鉴权 GET/HEAD）
 - `PUT /v1/staged/{product}/{version}`
+- `POST /v1/staged/{product}/{version}/uploads`（分片会话；`partSize` 可在 JSON 里请求，受配置夹取）
+- `PUT /v1/staged/{product}/{version}/uploads/{id}/parts/{n}`
+- `GET` / `DELETE` `/v1/staged/{product}/{version}/uploads/{id}`
+- `POST /v1/staged/{product}/{version}/uploads/{id}/complete`
 - `POST /v1/publish`
 
 无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`deploy/install-agent.sh`。

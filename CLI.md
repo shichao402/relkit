@@ -468,7 +468,8 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - 发布配置：staged `release-policy.json` + `/etc/relkit-agent/products/<product>.json`（缺一不可）
 - 迁 profile：`relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile`（迁完把产品根 `relkit.json` 改名为 `.migrated`）
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换 zip（Bearer；GET/HEAD 同样鉴权）
-- `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer）
+- `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer；整包兼容路径）
+- `relkit staged-put FILE --product ID --version VER --url URL` — 分片并发上传（`--part-size` / `--concurrency`，或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
 - `GET /-/health`
 
@@ -494,10 +495,10 @@ CI **不持**签名私钥，也 **不持** COS 写密钥。Runner 只做 `relkit
     RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
   run: |
     SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
-    curl -fsS -X PUT \
-      -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
-      --data-binary @staged.tar.gz \
-      "${RELKIT_AGENT_URL}/v1/staged/${PRODUCT}/${VERSION}"
+    relkit staged-put staged.tar.gz \
+      --product "${PRODUCT}" \
+      --version "${VERSION}" \
+      --url "${RELKIT_AGENT_URL}"
     curl -fsS -X POST \
       -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
       -H "Content-Type: application/json" \

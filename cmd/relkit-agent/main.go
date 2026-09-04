@@ -62,19 +62,13 @@ func run(argv []string) int {
 	}
 
 	srv := NewServer(cfg)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/-/health", srv.handleHealth)
-	mux.HandleFunc("/v1/drop/", srv.handleDrop)
-	mux.HandleFunc("/v1/staged/", srv.handleStaged)
-	mux.HandleFunc("/v1/publish", srv.handlePublish)
-
-	log.Printf("relkit-agent %s listening on %s (maxUpload %d)", version, cfg.Addr, cfg.MaxUpload)
+	log.Printf("relkit-agent %s listening on %s (maxUpload %d partSize %d maxPartConcurrency %d)", version, cfg.Addr, cfg.MaxUpload, cfg.PartSize, cfg.MaxPartConcurrency)
 	if len(cfg.credentials) == 0 {
 		log.Printf("WARNING: no product upload tokens configured; write endpoints return 405")
 	} else {
 		log.Printf("product upload tokens: %d", len(cfg.credentials))
 	}
-	server := newHTTPServer(cfg, logRequests(mux))
+	server := newHTTPServer(cfg, logRequests(srv.Handler()))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("serve: %v", err)
 		return 1

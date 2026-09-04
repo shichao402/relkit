@@ -161,12 +161,7 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := NewServer(cfg)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/-/health", srv.handleHealth)
-	mux.HandleFunc("/v1/drop/", srv.handleDrop)
-	mux.HandleFunc("/v1/staged/", srv.handleStaged)
-	mux.HandleFunc("/v1/publish", srv.handlePublish)
-	ts := httptest.NewServer(mux)
+	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/staged/demo/1.0.0", bytes.NewReader(buf.Bytes()))
@@ -487,13 +482,14 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if opts.tinyParts {
+		cfg.MinPartSize = 1
+		cfg.PartSize = 32
+		cfg.MaxPartSize = 256
+		cfg.MaxPartConcurrency = 4
+	}
 	srv := NewServer(cfg)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/-/health", srv.handleHealth)
-	mux.HandleFunc("/v1/drop/", srv.handleDrop)
-	mux.HandleFunc("/v1/staged/", srv.handleStaged)
-	mux.HandleFunc("/v1/publish", srv.handlePublish)
-	ts := httptest.NewServer(mux)
+	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
 	return &agentFixture{
@@ -513,6 +509,7 @@ type agentFixtureOpts struct {
 	omitProfile  bool
 	patchPolicy  func(map[string]any)
 	patchProfile func(*config.PublishProfile)
+	tinyParts    bool
 }
 
 func tarStaging(stagedRoot string) ([]byte, error) {

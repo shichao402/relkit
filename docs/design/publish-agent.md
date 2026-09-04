@@ -57,8 +57,14 @@ CI 只做 `relkit stage`，把 staged 树打包后交给发布机上的 `relkit-
 - `GET /-/health`
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换口：一端先把 zip 放下，另一端再 HEAD/GET 取走。Bearer。不是发布。
 - GET / HEAD `/v1/drop/{product}/{version}/{filename}` — 同上，鉴权后才能读未发布包
-- `PUT /v1/staged/{product}/{version}` — body = staged 目录的 `tar.gz`，Bearer 鉴权
+- `PUT /v1/staged/{product}/{version}` — 整包 `tar.gz`（兼容小文件 / 内网）
+- `POST /v1/staged/{product}/{version}/uploads` — 创建分片会话。JSON：`bytes`、`sha256`、可选 `partSize`
+- `PUT /v1/staged/{product}/{version}/uploads/{id}/parts/{n}` — 一片；可选 `X-Relkit-Part-SHA256`
+- `GET` / `DELETE` `/v1/staged/{product}/{version}/uploads/{id}` — 查询已收片 / 放弃
+- `POST /v1/staged/{product}/{version}/uploads/{id}/complete` — 拼装、校验整包 sha256、解包（与整包 PUT 同一落地路径）
 - `POST /v1/publish` — JSON：`product` / `version` / 可选 `to` / `dryRun` / `stagedSha256` / `idempotencyKey`
+
+CI 默认走 `relkit staged-put`：多连接并发 PUT 各片。片大小与并发由客户端 `--part-size` / `--concurrency`（或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）决定，agent 配置夹取上限。同一 `bytes+sha256` 的未完成会话可续传。
 
 无 token 时写端点返回 405。Token 加载时 SHA-256，比较用 constant-time。
 

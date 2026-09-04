@@ -168,6 +168,7 @@ func TestParseStagedRoute(t *testing.T) {
 		{"/v1/staged/dec/1.13.38", "dec", "1.13.38", true},
 		{"//v1/staged/dec/1.13.38", "dec", "1.13.38", true},
 		{"/v1/staged/dec/1.13.38/", "dec", "1.13.38", true},
+		{"/v1/staged/dec/1.13.38/uploads", "dec", "1.13.38", false},
 		{"/v1/staged/dec", "", "", false},
 		{"/v1/publish", "", "", false},
 	}
