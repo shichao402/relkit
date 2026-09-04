@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -164,9 +165,13 @@ func detectAgent(kind string, opts EvalOptions, res *ItemResult) bool {
 			return true
 		}
 		for _, u := range urls {
-			if _, err := httpGet(opts, strings.TrimRight(u, "/")+"/directory/"+product+".pb"); err != nil {
+			probed := strings.TrimRight(u, "/") + "/directory/" + product + ".pb"
+			if _, err := httpGet(opts, probed); err != nil {
 				res.Status = StatusFailed
-				res.Evidence = u + ": " + err.Error()
+				// Report the URL actually fetched. Naming only the baseUrl sends
+				// the reader to check the bucket prefix, which has no object of
+				// its own and always 404s.
+				res.Evidence = probed + ": " + err.Error()
 				res.Remediation = "confirm anonymous GET and custom-domain certificate"
 				return true
 			}
@@ -343,9 +348,19 @@ func loadAgentProfile(cfg agentFileConfig, dir, product string) (*agentProfile, 
 	return out, nil
 }
 
+// s3BaseURLs returns the serving base URLs of the s3-compatible backends,
+// ordered by backend name. Map iteration order would otherwise decide which
+// backend a failure is attributed to, and a checklist that reports a different
+// backend on each run for one unchanged fault is not worth reading.
 func s3BaseURLs(backends map[string]map[string]any) []string {
+	names := make([]string, 0, len(backends))
+	for name := range backends {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var urls []string
-	for _, b := range backends {
+	for _, name := range names {
+		b := backends[name]
 		if typ, _ := b["type"].(string); typ != "s3-compatible" {
 			continue
 		}
