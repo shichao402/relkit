@@ -941,7 +941,13 @@ func stripGlobalFlags(args []string) (string, bool, []string, error) {
 		arg := args[i]
 		switch {
 		case arg == "--version":
-			showVersion = true
+			// Only `relkit --version` is global. `relkit staged-put --version 1.2.3`
+			// is the product version for that subcommand.
+			if len(remaining) == 0 {
+				showVersion = true
+			} else {
+				remaining = append(remaining, arg)
+			}
 		case arg == "--config":
 			i++
 			if i >= len(args) {
