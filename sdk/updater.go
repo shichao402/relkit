@@ -36,6 +36,9 @@ type Updater struct {
 	// Deprecated: prefer StateStore. Still honored when StateStore is nil.
 	LastSeenFallbackSequence *int64
 
+	// Recovery is compile-time last-resort copy. Shown when remote check fails.
+	Recovery *RecoveryHelp
+
 	state *UpdateState
 }
 
@@ -60,12 +63,25 @@ type FallbackRequired struct {
 	MaxCode   int64
 }
 
+// RecoveryHelp is host-embedded copy for total network failure. It is not a
+// signed remote document and must not claim a new version was found.
+type RecoveryHelp struct {
+	Message string
+	Links   []RecoveryLink
+}
+
+type RecoveryLink struct {
+	Label string
+	URL   string
+}
+
 // CheckResult is the outcome of Check.
 type CheckResult struct {
 	UpToDate         bool
 	CurrentIsYanked  bool
 	Available        *UpdateAvailable
 	Fallback         *FallbackRequired
+	Recovery         *RecoveryHelp
 	Throttled        bool
 	NextAllowedAt    time.Time
 	Sequence         int64
@@ -191,6 +207,7 @@ func (u *Updater) CheckForce(ctx context.Context, force bool) CheckResult {
 		u.saveState()
 		return CheckResult{
 			Fallback: fb,
+			Recovery: u.Recovery,
 			Attempts: normal.Attempts,
 			Sequence: fb.Sequence,
 		}
@@ -200,6 +217,7 @@ func (u *Updater) CheckForce(ctx context.Context, force bool) CheckResult {
 		return normal
 	case normal.Err != nil:
 		st.LastResult = "failure"
+		normal.Recovery = u.Recovery
 		u.saveState()
 		return normal
 	default:

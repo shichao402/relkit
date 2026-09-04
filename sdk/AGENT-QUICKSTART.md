@@ -58,6 +58,13 @@ func CheckOnce(ctx context.Context) error {
 			"arch": "x64",     // SPEC §11.1：x64 / arm64 / x86 / armv7，不要写 amd64
 		},
 		StateStore: sdk.NewFileStateStore(supportDir, "<product>", "stable"),
+		Recovery: &sdk.RecoveryHelp{
+			Message: "Automatic updates are unavailable. Install from an official page.",
+			Links: []sdk.RecoveryLink{
+				{Label: "GitHub Releases", URL: "https://github.com/example/app/releases"},
+				{Label: "CNB Releases", URL: "https://cnb.cool/example/app/-/releases"},
+			},
+		},
 	}
 
 	res := u.CheckForce(ctx, true)
@@ -91,6 +98,7 @@ func CheckOnce(ctx context.Context) error {
 | `IndexURLs` | 无 directory 时的直连兜底 |
 | `TrustedKeys` | `keygen` 公钥；**编译进二进制**，禁止运行时下载 |
 | `ClientSelectors` | 与 `relkit stage --add … os=…,arch=…` 一致 |
+| `Recovery` | `relkit.json` `recovery`；编译期内嵌，远程全失败时展示 |
 
 ## G4. 能力边界（避免重复造轮）
 
@@ -106,6 +114,7 @@ func CheckOnce(ctx context.Context) error {
 - [ ] `Download` 后文件 hash 与 manifest 一致
 - [ ] README/内部文档写明公钥轮换：先双钥并存发一版，再删旧钥
 - [ ] Apply 策略有书面说明（`sdk/apply` 或宿主自定义）
+- [ ] 远程 check 失败时 `result.Recovery` 仍能给出内嵌文案与官方链接
 
 ## G6. 排障
 

@@ -25,6 +25,7 @@ type ProductPolicy struct {
 	Changelog      ProductChangelogPolicy  `json:"changelog,omitempty"`
 	Site           ProductSitePolicy       `json:"site,omitempty"`
 	Directory      *ProductDirectoryPolicy `json:"directory,omitempty"`
+	Recovery       *ProductRecoveryPolicy  `json:"recovery,omitempty"`
 }
 
 // ProductChangelogPolicy is the portable changelog subset needed at publish
@@ -61,6 +62,11 @@ type ProductMakersPolicy struct {
 type ProductDirectoryPolicy struct {
 	EntryURLs []string                 `json:"entryUrls,omitempty"`
 	Services  []DirectoryServiceConfig `json:"services,omitempty"`
+}
+
+type ProductRecoveryPolicy struct {
+	Message string         `json:"message"`
+	Links   []RecoveryLink `json:"links"`
 }
 
 // PublishProfile is the machine-owned publishing part of relkit
@@ -162,6 +168,12 @@ func ExtractProductPolicy(cfg *Config) (*ProductPolicy, error) {
 		policy.Directory = &ProductDirectoryPolicy{
 			EntryURLs: append([]string(nil), cfg.Directory.EntryURLs...),
 			Services:  append([]DirectoryServiceConfig(nil), cfg.Directory.Services...),
+		}
+	}
+	if cfg.Recovery != nil {
+		policy.Recovery = &ProductRecoveryPolicy{
+			Message: cfg.Recovery.Message,
+			Links:   append([]RecoveryLink(nil), cfg.Recovery.Links...),
 		}
 	}
 	if err := validateProductPolicy(policy); err != nil {
@@ -279,6 +291,12 @@ func MergeProductPolicy(policy *ProductPolicy, profile *PublishProfile, productR
 			cfg.Site.Makers.TokenEnv = DefaultMakersTokenEnv
 		}
 	}
+	if policy.Recovery != nil {
+		cfg.Recovery = &RecoveryConfig{
+			Message: policy.Recovery.Message,
+			Links:   append([]RecoveryLink(nil), policy.Recovery.Links...),
+		}
+	}
 	raw, err := mergedRaw(cfg)
 	if err != nil {
 		return nil, err
@@ -337,6 +355,14 @@ func validateProductPolicy(policy *ProductPolicy) error {
 		case "", "china", "global":
 		default:
 			return Error{Message: `site.makers.region must be "china" or "global"`}
+		}
+	}
+	if policy.Recovery != nil {
+		if strings.TrimSpace(policy.Recovery.Message) == "" {
+			return Error{Message: "recovery.message is required"}
+		}
+		if len(policy.Recovery.Links) < 2 {
+			return Error{Message: "recovery.links needs at least two official manual-install URLs"}
 		}
 	}
 	if _, err := json.Marshal(policy); err != nil {
@@ -440,6 +466,9 @@ func mergedRaw(cfg *Config) (map[string]any, error) {
 	}
 	if cfg.Directory != nil {
 		doc["directory"] = cfg.Directory
+	}
+	if cfg.Recovery != nil {
+		doc["recovery"] = cfg.Recovery
 	}
 	if cfg.Site.Title != "" || cfg.Site.Description != "" || cfg.Site.Homepage != "" || cfg.Site.Makers != nil {
 		doc["site"] = cfg.Site

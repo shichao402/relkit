@@ -95,12 +95,19 @@ export interface UpdateAvailable {
 export interface CheckFailed {
   kind: "check-failed";
   reason: string;
-  /**
-   * One line per source tried, in order. This is the only artefact that
-   * distinguishes "the server is down" from "the server is fine and rejected
-   * us", which are diagnosed in completely different places.
-   */
   attempts: string[];
+  /** Compile-time last-resort copy. Not a signed remote document. */
+  recovery?: RecoveryHelp;
+}
+
+export interface RecoveryHelp {
+  message: string;
+  links: RecoveryLink[];
+}
+
+export interface RecoveryLink {
+  label: string;
+  url: string;
 }
 
 /** Skipped because not enough time has passed (SPEC.md section 12.2). */
@@ -157,6 +164,8 @@ export interface RupUpdaterOptions {
   fetcher?: Fetcher;
   policy?: Partial<UpdatePolicy>;
   log?: (message: string) => void;
+  /** Host-embedded last-resort copy shown when every remote check fails. */
+  recovery?: RecoveryHelp;
 }
 
 type SourceOutcome<T> = { ok: true; value: T } | { ok: false; why: string };
@@ -180,6 +189,7 @@ export class RupUpdater {
   readonly fetcher: Fetcher;
   readonly policy: UpdatePolicy;
   private readonly log?: (message: string) => void;
+  readonly recovery?: RecoveryHelp;
 
   /** Last directory adopted during check / checkFallback in this process. */
   private lastDirectory: UpdateDirectory | null = null;
@@ -196,6 +206,7 @@ export class RupUpdater {
     this.fallbackUrls = [...(options.fallbackUrls ?? [])];
     this.fetcher = options.fetcher ?? new HttpFetcher();
     this.policy = resolvePolicy(options.policy);
+    this.recovery = options.recovery;
     if (options.log) this.log = options.log;
 
     if (this.indexUrls.length === 0 && this.entryUrls.length === 0) {
@@ -221,6 +232,9 @@ export class RupUpdater {
     if (normal.kind === "update-available") return normal;
     const fallback = await this.checkFallback();
     if (fallback !== null) return fallback;
+    if (normal.kind === "check-failed" && this.recovery) {
+      return { ...normal, recovery: this.recovery };
+    }
     return normal;
   }
 

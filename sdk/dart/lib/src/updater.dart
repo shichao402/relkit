@@ -82,19 +82,31 @@ class UpdateAvailable extends UpdateCheckResult {
 }
 
 /// No source could be used. Every URL failed, or every one that answered was
-/// rejected.
+/// rejected. [recovery] is compile-time copy, never fetched.
 class CheckFailed extends UpdateCheckResult {
-  const CheckFailed(this.reason, this.attempts);
+  const CheckFailed(this.reason, this.attempts, {this.recovery});
 
   final String reason;
-
-  /// One line per source tried, in order. This is the only artefact that
-  /// distinguishes "the server is down" from "the server is fine and rejected
-  /// us", which are diagnosed in completely different places.
   final List<String> attempts;
+  final RecoveryHelp? recovery;
 
   @override
   String toString() => 'CheckFailed: $reason\n  ${attempts.join('\n  ')}';
+}
+
+/// Host-embedded last-resort copy. Not a signed remote document.
+class RecoveryHelp {
+  const RecoveryHelp({required this.message, this.links = const <RecoveryLink>[]});
+
+  final String message;
+  final List<RecoveryLink> links;
+}
+
+class RecoveryLink {
+  const RecoveryLink({required this.label, required this.url});
+
+  final String label;
+  final String url;
 }
 
 /// Skipped because not enough time has passed (SPEC.md section 12.2).
@@ -141,6 +153,7 @@ class RupUpdater {
     Fetcher? fetcher,
     this.policy = const UpdatePolicy(),
     this.log,
+    this.recovery,
   })  : indexUrls = List.unmodifiable(indexUrls ?? const <Uri>[]),
         entryUrls = List.unmodifiable(entryUrls ?? const <Uri>[]),
         fallbackUrls = List.unmodifiable(fallbackUrls ?? const <Uri>[]),
@@ -183,6 +196,7 @@ class RupUpdater {
   final Fetcher fetcher;
   final UpdatePolicy policy;
   final void Function(String message)? log;
+  final RecoveryHelp? recovery;
 
   /// Last directory adopted during [check] / [checkFallback] in this process.
   UpdateDirectory? _lastDirectory;
@@ -191,12 +205,16 @@ class RupUpdater {
   ///
   /// Pass [force] for a user-initiated check, which ignores throttling.
   /// When [fallbackUrls] is set, also evaluates the fallback document and
-  /// merges: [UpdateAvailable] > [FallbackRequired] > [UpToDate] / [CheckFailed].
+  /// merges: [UpdateAvailable] > [FallbackRequired] > [UpToDate] / [CheckFailed]
+  /// (with compile-time [recovery] attached on total remote failure).
   Future<UpdateCheckResult> check({bool force = false}) async {
     final normal = await _checkIndex(force: force);
     final fallback = await checkFallback();
     if (normal is UpdateAvailable) return normal;
     if (fallback != null) return fallback;
+    if (normal is CheckFailed && recovery != null) {
+      return CheckFailed(normal.reason, normal.attempts, recovery: recovery);
+    }
     return normal;
   }
 

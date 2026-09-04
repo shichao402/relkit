@@ -81,6 +81,8 @@ export {
   type CheckFailed,
   type CheckThrottled,
   type FallbackRequired,
+  type RecoveryHelp,
+  type RecoveryLink,
   type RupUpdaterOptions,
   type UpdateAvailable,
   type UpdateCheckResult,

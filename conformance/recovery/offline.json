@@ -1,0 +1,17 @@
+{
+  "name": "offline-recovery",
+  "description": "When every remote check fails, the host must surface compile-time RecoveryHelp. It must not invent UpdateAvailable or download anything.",
+  "expect": {
+    "available": false,
+    "fallback": false,
+    "recoveryRequired": true,
+    "doNotDownload": true,
+    "recovery": {
+      "message": "Automatic updates are unavailable. Install a release from an official page.",
+      "links": [
+        {"label": "GitHub Releases", "url": "https://github.com/example/app/releases"},
+        {"label": "CNB Releases", "url": "https://cnb.cool/example/app/-/releases"}
+      ]
+    }
+  }
+}

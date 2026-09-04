@@ -53,6 +53,9 @@ type Config struct {
 	// Site is optional copy for the human-facing release portal. Publish writes
 	// it to site/<product>.json; protocol clients never read it.
 	Site SiteConfig
+	// Recovery is compile-time last-resort copy shown when every remote
+	// update path fails. Protocol clients never fetch it over the network.
+	Recovery *RecoveryConfig
 }
 
 // DirectoryConfig mirrors the optional relkit.json "directory" object.
@@ -89,6 +92,19 @@ type SiteConfig struct {
 }
 
 const DefaultMakersTokenEnv = "EDGEONE_PAGES_API_TOKEN"
+
+// RecoveryConfig is the optional relkit.json "recovery" object. Onboarding
+// treats it as required for a complete host embed.
+type RecoveryConfig struct {
+	Message string         `json:"message"`
+	Links   []RecoveryLink `json:"links"`
+}
+
+// RecoveryLink is one official manual-install URL shown on the embedded page.
+type RecoveryLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
 
 // MakersConfig is the optional relkit.json "site.makers" object.
 type MakersConfig struct {
@@ -382,6 +398,51 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	if value, ok := raw["recovery"]; ok {
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil, Error{Message: "recovery must be an object"}
+		}
+		rec := &RecoveryConfig{}
+		var err error
+		if rec.Message, err = optionalString(obj, "message", "recovery.message"); err != nil {
+			return nil, err
+		}
+		if rec.Message == "" {
+			return nil, Error{Message: "recovery.message is required"}
+		}
+		if linksRaw, exists := obj["links"]; exists {
+			list, ok := linksRaw.([]any)
+			if !ok {
+				return nil, Error{Message: "recovery.links must be an array"}
+			}
+			for i, rawLink := range list {
+				linkObj, ok := rawLink.(map[string]any)
+				if !ok {
+					return nil, Error{Message: fmt.Sprintf("recovery.links[%d] must be an object", i)}
+				}
+				link := RecoveryLink{}
+				if link.Label, err = optionalString(linkObj, "label", fmt.Sprintf("recovery.links[%d].label", i)); err != nil {
+					return nil, err
+				}
+				if link.URL, err = optionalString(linkObj, "url", fmt.Sprintf("recovery.links[%d].url", i)); err != nil {
+					return nil, err
+				}
+				if link.Label == "" || link.URL == "" {
+					return nil, Error{Message: fmt.Sprintf("recovery.links[%d] needs label and url", i)}
+				}
+				if !strings.HasPrefix(link.URL, "http://") && !strings.HasPrefix(link.URL, "https://") {
+					return nil, Error{Message: fmt.Sprintf("recovery.links[%d].url must be an absolute http(s) URL", i)}
+				}
+				rec.Links = append(rec.Links, link)
+			}
+		}
+		if len(rec.Links) < 2 {
+			return nil, Error{Message: "recovery.links needs at least two official manual-install URLs"}
+		}
+		cfg.Recovery = rec
+	}
+
 	return cfg, nil
 }
 
@@ -514,6 +575,18 @@ func Skeleton(product string) map[string]any {
 			},
 		},
 		"publishTo": []string{"local"},
+		"recovery": map[string]any{
+			"message": "Automatic updates are unavailable. Install a release from an official page.",
+			"links": []any{
+				map[string]any{"label": "GitHub Releases", "url": "https://github.com/example/app/releases"},
+				map[string]any{"label": "CNB Releases", "url": "https://cnb.cool/example/app/-/releases"},
+			},
+		},
+		"directory": map[string]any{
+			"entryUrls": []any{
+				"https://raw.example.invalid/rup/directory/" + product + ".pb",
+			},
+		},
 		"site": map[string]any{
 			"title":       product,
 			"description": "",

@@ -16,6 +16,7 @@
 | `reachability/` | 发布前的可达性校验（发布侧，非客户端） | SPEC.md §10 |
 | `selector/` | artifact 匹配与多匹配仲裁 | SPEC.md §11 |
 | `signature/` | 信封验签、密钥轮换、防降级 | SPEC.md §4.1、§12.1、§12.4 |
+| `recovery/` | 全网失败时宿主必须给出编译期内嵌 `RecoveryHelp` | ADR 0007 |
 
 ## 怎么跑
 

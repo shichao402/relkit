@@ -1,6 +1,6 @@
 # ADR 0005: 签名的更新服务目录（bootstrap directory）
 
-- Status: Accepted
+- Status: Accepted（决策 2 的备援选型已被 [ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md) 取代）
 - Date: 2026-08-09
 
 ## 背景
@@ -11,7 +11,8 @@
 ## 决策
 
 1. 引入 **bootstrap directory**（更新服务目录）作为对外稳定入口协议面。
-2. 客户端内嵌 `entryUrls`（一主两备，串行）：**自有域名绑定 COS（主）** → CNB raw 备 → GitHub raw 备。单台 CVM 上的 HTTP 服务不作默认主入口。
+2. 客户端内嵌 `entryUrls`（一主多备，串行）：**自有域名绑定 COS（主）**。单台 CVM 上的 HTTP 服务不作默认主入口。  
+   ~~备援为 CNB raw → GitHub raw。~~ **备援选型见 [ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md)**：git 托管的 raw 端点国内不可达且缓存不可配，已改为第二个 COS 桶（异地域）+ 独立自有二级域名。
 3. 目录文档与 RUP index / fallback **共用同一把（组）ed25519 发布钥**签名；签名一次，字节相同后分别上传三处。
 4. 目录内列出的各 `indexUrl` **必须**指向**字节完全相同**的已签名 index（与 SPEC「多镜像同一份字节」一致）；区域机房差异只通过 index/manifest/artifact 的 `urls[]` 镜像，**禁止**为各区域签发内容不同的 index。
 5. SDK **禁止**为选源单独发起探测/测速下载；仅根据真实更新流程中的成功/失败与吞吐记录，决定下一次尝试顺序。

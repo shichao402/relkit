@@ -20,12 +20,14 @@ import { checkArtifactFilename } from "../src/filename.js";
 import { ArtifactSchema } from "../src/models.js";
 import {
   FileUpdateStateStore,
+  MemoryUpdateStateStore,
   UpdateState,
   defaultUpdatePolicy,
   resolvePolicy,
   shouldCheck,
 } from "../src/state.js";
 import { rankUrlStrings } from "../src/preference.js";
+import { RupUpdater } from "../src/updater.js";
 
 describe("filename safety (SPEC.md section 14.4)", () => {
   test("accepts an ordinary artifact filename", () => {
@@ -298,6 +300,45 @@ describe("resumable .part sizing on Windows", () => {
       assert.equal((await stat(partial)).size, 4096);
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("recovery help", () => {
+  test("attaches compile-time recovery when every remote source fails", async () => {
+    const fetcher = {
+      async getBytes(_url: URL, _timeoutMs: number) {
+        throw new Error("offline");
+      },
+      async probe() {
+        return { acceptsRanges: false };
+      },
+      async download() {
+        throw new Error("offline");
+      },
+      async downloadRange() {
+        throw new Error("offline");
+      },
+      close() {},
+    } as Fetcher;
+    const updater = new RupUpdater({
+      product: "demo",
+      channel: "stable",
+      currentCode: 1,
+      trustedKeys: { k1: new Uint8Array(32) },
+      clientSelectors: { os: "linux", arch: "x64" },
+      stateStore: new MemoryUpdateStateStore(),
+      entryUrls: ["https://127.0.0.1:1/directory.pb"],
+      fetcher,
+      recovery: {
+        message: "install manually",
+        links: [{ label: "GitHub", url: "https://github.com/example/app/releases" }],
+      },
+    });
+    const result = await updater.check({ force: true });
+    assert.equal(result.kind, "check-failed");
+    if (result.kind === "check-failed") {
+      assert.equal(result.recovery?.message, "install manually");
     }
   });
 });
