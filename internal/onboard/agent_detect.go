@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +20,7 @@ import (
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/envelope"
+	"cnb.cool/shichao402/relkit/internal/stage"
 )
 
 type agentFileConfig struct {
@@ -480,6 +480,13 @@ func verifyDirectoryEnvelope(body []byte, cfg agentFileConfig, dir, product stri
 	return nil
 }
 
+// loadAgentTrustedKeys resolves the directory verification keys from the
+// newest staged release-policy.json.
+//
+// It deliberately does not fall back to <product-root>/relkit.json: the agent
+// never reads that file as publish configuration (init -migrate-profile even
+// renames it aside), so trusting it here would validate the directory against
+// a document that has no bearing on what was published.
 func loadAgentTrustedKeys(cfg agentFileConfig, dir, product string) (map[string]ed25519.PublicKey, error) {
 	entry, ok := cfg.Products[product]
 	if !ok {
@@ -492,39 +499,26 @@ func loadAgentTrustedKeys(cfg agentFileConfig, dir, product string) (map[string]
 	if !filepath.IsAbs(root) {
 		root = filepath.Join(dir, root)
 	}
-	loaded, err := config.Load(filepath.Join(root, config.ConfigName))
-	if err == nil {
-		return loaded.TrustedPublicKeys()
-	}
-	profile, err := loadAgentProfile(cfg, dir, product)
+	versions, err := stage.StagedVersions(root)
 	if err != nil {
-		return nil, fmt.Errorf("no relkit.json at product root and %w", err)
+		return nil, fmt.Errorf("no staged release under %s: %w", root, err)
 	}
-	return publicKeysFromBackendDoc(profile.raw)
-}
-
-func publicKeysFromBackendDoc(doc map[string]any) (map[string]ed25519.PublicKey, error) {
-	signing, _ := doc["signing"].(map[string]any)
-	rawKeys, _ := signing["publicKeys"].([]any)
-	if len(rawKeys) == 0 {
-		return nil, fmt.Errorf("no signing.publicKeys")
-	}
-	out := map[string]ed25519.PublicKey{}
-	for _, item := range rawKeys {
-		obj, _ := item.(map[string]any)
-		id, _ := obj["keyId"].(string)
-		b64, _ := obj["publicKeyBase64"].(string)
-		if b64 == "" {
-			b64, _ = obj["key"].(string)
-		}
-		raw, err := base64.StdEncoding.DecodeString(b64)
-		if err != nil || id == "" || len(raw) != ed25519.PublicKeySize {
+	var lastErr error
+	for _, version := range versions {
+		policy, err := config.LoadProductPolicy(stage.ReleasePolicyPath(root, version))
+		if err != nil {
+			lastErr = err
 			continue
 		}
-		out[id] = ed25519.PublicKey(raw)
+		trusted, err := policy.TrustedPublicKeys()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return trusted, nil
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no usable public keys")
+	if lastErr != nil {
+		return nil, lastErr
 	}
-	return out, nil
+	return nil, fmt.Errorf("no staged release-policy.json under %s", root)
 }

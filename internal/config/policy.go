@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"cnb.cool/shichao402/relkit/internal/jsonio"
+	"cnb.cool/shichao402/relkit/internal/keys"
 	"cnb.cool/shichao402/relkit/internal/model"
 )
 
@@ -96,6 +98,32 @@ type PublishSiteProfile struct {
 
 type PublishMakersProfile struct {
 	TokenEnv string `json:"tokenEnv,omitempty"`
+}
+
+// TrustedPublicKeys returns the verification keys clients embed. On a publish
+// host this policy is the only source for them: a PublishProfile deliberately
+// carries no public key set, and the product root's relkit.json is not a
+// publish input, so it must not be consulted as a fallback.
+func (p *ProductPolicy) TrustedPublicKeys() (map[string]ed25519.PublicKey, error) {
+	if len(p.Signing.PublicKeys) == 0 {
+		return nil, Error{Message: "signing.publicKeys is empty in the release policy"}
+	}
+	trusted := make(map[string]ed25519.PublicKey, len(p.Signing.PublicKeys))
+	for _, entry := range p.Signing.PublicKeys {
+		if entry.KeyID == "" {
+			return nil, Error{Message: "every signing.publicKeys entry needs a keyId"}
+		}
+		encoded := entry.PublicKeyBase64
+		if encoded == "" {
+			encoded = entry.Key
+		}
+		publicKey, err := keys.DecodePublicKey(encoded, fmt.Sprintf("signing.publicKeys[%s]", entry.KeyID))
+		if err != nil {
+			return nil, err
+		}
+		trusted[entry.KeyID] = publicKey
+	}
+	return trusted, nil
 }
 
 func LoadProductPolicy(path string) (*ProductPolicy, error) {

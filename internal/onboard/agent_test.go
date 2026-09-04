@@ -64,14 +64,18 @@ func TestAgentChecklistRemoteMatch(t *testing.T) {
 		},
 		"directory": {"entryUrls":["`+s1.URL+`/rup/directory/demo.pb","`+s2.URL+`/rup/directory/demo.pb"]}
 	}`), 0o644)
-	relkit := `{
+	// The agent resolves trusted keys from the staged release policy, not from
+	// <product-root>/relkit.json, which it never reads as publish input.
+	staged := filepath.Join(dir, ".relkit", "staged", "1.0.0")
+	if err := os.MkdirAll(staged, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{
 		"product":"demo","defaultChannel":"stable","channels":["stable"],"codeStrategy":"explicit",
-		"signing":{"keyId":"k1","privateKeyPath":"k.pb","publicKeys":[{"keyId":"k1","publicKeyBase64":"` + base64.StdEncoding.EncodeToString(pub) + `"}]},
-		"backends":{"local":{"type":"local","outputDir":"dist","baseUrl":"https://example.invalid/rup/"}},
-		"publishTo":["local"],
+		"signing":{"keyId":"k1","publicKeys":[{"keyId":"k1","publicKeyBase64":"` + base64.StdEncoding.EncodeToString(pub) + `"}]},
 		"recovery":{"message":"x","links":[{"label":"a","url":"https://example.com/a"},{"label":"b","url":"https://example.com/b"}]}
 	}`
-	if err := os.WriteFile(filepath.Join(dir, "relkit.json"), []byte(relkit), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(staged, "release-policy.json"), []byte(policy), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

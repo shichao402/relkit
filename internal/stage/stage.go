@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 	"cnb.cool/shichao402/relkit/internal/changelog"
@@ -50,6 +51,38 @@ func StagedPath(root, version string) string {
 
 func ReleasePolicyPath(root, version string) string {
 	return filepath.Join(StagingDir(root, version), releasePolicyName)
+}
+
+// StagedVersions lists versions that have a staging directory under root, most
+// recently written first. Callers that need repository-owned policy on a
+// publish host read it from the newest staged release, since each release
+// carries its own release-policy.json.
+func StagedVersions(root string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(root, stagingRoot))
+	if err != nil {
+		return nil, err
+	}
+	type staged struct {
+		name     string
+		modified time.Time
+	}
+	found := make([]staged, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		found = append(found, staged{name: entry.Name(), modified: info.ModTime()})
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].modified.After(found[j].modified) })
+	names := make([]string, 0, len(found))
+	for _, item := range found {
+		names = append(names, item.name)
+	}
+	return names, nil
 }
 
 func ArtifactsDir(root, version string) string {
