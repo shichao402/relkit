@@ -33,6 +33,7 @@ type casUploadDocument struct {
 	Size    int64             `json:"size"`
 	PutURL  string            `json:"putUrl"`
 	Headers map[string]string `json:"headers,omitempty"`
+	Sign    *backends.CASSign `json:"sign,omitempty"`
 }
 
 type casCredentialResponse struct {
@@ -103,6 +104,7 @@ func (s *Server) handleCASCredentials(w http.ResponseWriter, r *http.Request) {
 			Size:    blob.Size,
 			PutURL:  upload.PutURL,
 			Headers: upload.Headers,
+			Sign:    upload.Sign,
 		})
 		if upload.ExpiresAt.Before(response.ExpiresAt) {
 			response.ExpiresAt = upload.ExpiresAt

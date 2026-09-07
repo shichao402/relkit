@@ -131,7 +131,7 @@ flowchart TB
 
 要点：
 
-- **CI 不签名、不持长期后端写密钥。** 只认凭据文档里的 `putUrl`（COS 时是 SigV4 预签名 PUT；`local` 时是 agent）。长期 `COS_SECRET_*` 仍只在发布机。不接腾讯云 STS SDK；响应形状固定，以后换 STS 不必改 CI。COS query 预签名的 HashedPayload 必须是 `UNSIGNED-PAYLOAD`（与 `X-Amz-Content-Sha256` 同字面量）；用对象 sha256 当 payload hash 会 `SignatureDoesNotMatch`。
+- **CI 不签名私钥、不持长期后端写密钥。** 只认凭据文档里的 `putUrl`（及可选 `sign`）。COS 上 agent 用长期 `COS_SECRET_*` 调 GetFederationToken，CI 用返回的临时钥做 Header SigV4 PUT；`local` 时 PUT agent。泛 S3 仍可 query 预签名。不接官方 STS SDK。COS query 预签名若启用，HashedPayload 必须是 `UNSIGNED-PAYLOAD`。
 - **字节只跨「CI → 数据面」一次。** 凭据文档只给一个目的地（该产品的 primary ingest）。CI **不按后端数量循环上传**；其余 `artifactTo` 后端的副本由 agent `Materialize`。
 - `cas/` inbox **只存在于 ingest 后端**，别的后端只有 `artifact/...`。`publish.Run` 只调用 Head / Promote / Materialize / PutArtifact，**禁止**按 `Type()` 写第二条发布路径。细节 [`publish-agent.md`](publish-agent.md) §2.3。
 - **第二 backend 必须是另一只桶。** 同桶的多个自定义域名只是 GET 别名，禁止写成两条 `s3-compatible`。成都桶（`raw2.firoyang.com`）是验证期第二 backend，已按单独指令拆除。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
@@ -332,8 +332,9 @@ manifest / artifact **发布后不可变**。若某历史版本的 manifest 当�
   "region": "ap-guangzhou",
   "prefix": "rup/",
   "baseUrl": "https://raw.firoyang.com/rup/",
-  "accessKeyEnv": "COS_SECRET_ID",
-  "secretKeyEnv": "COS_SECRET_KEY"
+      "accessKeyEnv": "COS_SECRET_ID",
+      "secretKeyEnv": "COS_SECRET_KEY",
+      "casCredentials": "sts"
 }
 ```
 

@@ -275,7 +275,8 @@ relkit min-supported 120
       "prefix": "rup/",
       "baseUrl": "https://dl.example.com/rup/",
       "accessKeyEnv": "COS_SECRET_ID",
-      "secretKeyEnv": "COS_SECRET_KEY"
+      "secretKeyEnv": "COS_SECRET_KEY",
+      "casCredentials": "sts"
     },
     "local": {
       "type": "local",
@@ -442,7 +443,8 @@ CNB 鐨勫埗鍝佸簱鍙湁鐢熸€佷笓鐢ㄧ被鍨嬶紙Docker / Helm / 
   "prefix": "rup/",
   "baseUrl": "https://updates.firoyang.com/rup/",
   "accessKeyEnv": "COS_SECRET_ID",
-  "secretKeyEnv": "COS_SECRET_KEY"
+  "secretKeyEnv": "COS_SECRET_KEY",
+  "casCredentials": "sts"
 }
 ```
 
@@ -455,6 +457,8 @@ CNB 鐨勫埗鍝佸簱鍙湁鐢熸€佷笓鐢ㄧ被鍨嬶紙Docker / Helm / 
 | `prefix` | 否 | 对象 key 前缀，自动补末尾 `/` |
 | `region` | 否 | 签名区域；COS 可从 `endpoint` 推导（如 `ap-guangzhou`） |
 | `forcePathStyle` | 否 | 强制 path-style；自定义/本地 endpoint 默认开启，COS/AWS 默认 virtual-hosted |
+| `casCredentials` | 否 | `sts` 或 `presign`。腾讯云 COS endpoint 默认 `sts`（GetFederationToken + Header SigV4）；泛 S3 默认 `presign` |
+| `appId` | 否 | COS 应用 ID；默认从桶名 `*-<appid>` 推断。`sts` 时必有 |
 | `timeoutSeconds` | 否 | 上传超时，默认 600 |
 
 拓扑与缓存约定见 [`docs/design/update-ingress-cos.md`](docs/design/update-ingress-cos.md)。
@@ -470,7 +474,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换 zip（Bearer；GET/HEAD 同样鉴权）
 - `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer；整包兼容路径）
 - `relkit staged-put FILE --product ID --version VER --url URL` — 分片并发上传（`--part-size` / `--concurrency`，或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）
-- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 PUT URL；S3/COS 是 SigV4 预签名 URL，local 是 agent 代理 URL
+- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 PUT URL；COS 默认 STS（未签名 `putUrl` + 可选 `sign`），泛 S3 为 query 预签名，local 是 agent 代理 URL
 - `relkit cas-put --version VER [--product ID] [--url URL]` — 上传缺失 CAS blob，然后自动上传只含 `staged.pb` + `release-policy.json` 的瘦 staged tar
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
 - `GET /-/health`

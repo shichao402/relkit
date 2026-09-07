@@ -95,7 +95,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 
 `pointerTo` 未声明时等于 `artifactTo`。两个列表都必须 `Writable()`。
 
-**落地状态（2026-09-07）：** agent 侧 `PutArtifactCAS`（Head + Promote + cas GC）、`POST /v1/cas/credentials`、local 代理 PUT、s3-compatible 预签名 PUT、`relkit cas-put`、瘦 staged tar 与 **`Materialize` 已落地**。**`artifactTo` / `pointerTo` 与已有外部 URL 申报仍未实现。** 现网 profile 仍只有 `publishTo`；credentials 取其中第一个 `Ingest`，CI 仍只 PUT 这一家。`publish.Run` 对 ingest 走 Head + Promote；对其余可写后端从 ingest `Get(cas/{sha256})`（或本地 staged 文件）再 `PutArtifact`，**不**在第二家写 `cas/`。落地其余部分时：
+**落地状态（2026-09-07）：** agent 侧 `PutArtifactCAS`、`POST /v1/cas/credentials`、local 代理 PUT、s3-compatible **GetFederationToken + Header SigV4**（COS 默认）与 query 预签名（泛 S3 / `casCredentials=presign`）、`relkit cas-put`、瘦 staged tar 与 **Materialize 已落地**。**`artifactTo` / `pointerTo` 与已有外部 URL 申报仍未实现。** 现网 profile 仍只有 `publishTo`。AssumeRole 未接。
 
 - `artifactTo` / `pointerTo` 默认都由 `publishTo` 迁移而来（未声明即全等），保持旧 profile 可用。
 - 已有的 `directory.publishTo` 是 `pointerTo` 的雏形，**并进 `pointerTo`**，不要再加第三个目标列表。
@@ -113,7 +113,7 @@ agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不
 
 agent 按 **ingest 后端**（不是整个 `artifactTo`）填内容：
 
-- `s3-compatible`：`putUrl` 指向桶内 `cas/{sha256}` 的 **SigV4 预签名 PUT**（agent 用发布机已有的长期 `COS_SECRET_*` 签名，TTL 约 1h）。腾讯云 COS 的 query 预签名验签时 **HashedPayload 固定为 `UNSIGNED-PAYLOAD`**，因此必须把 `X-Amz-Content-Sha256` 也签成该字面量；CI `headers` 原样带回。不要把对象 sha256 写进预签名 payload hash，COS 会 `SignatureDoesNotMatch`。正文完整性靠 `cas/{sha256}` key、Head 比 size、以及客户端按签名 manifest 验收。响应形状固定，以后若换成 STS 临时钥，CI 不必改。本切片**不**接腾讯云 AssumeRole。
+- `s3-compatible`：ingest 后端内部选运输。腾讯云 COS 默认 `casCredentials=sts`：agent 用长期 `COS_SECRET_*` 调 **GetFederationToken**（内联 Policy 仅 `PutObject` 该 `cas/{sha256}`，TTL 约 1h，**不**用官方 STS SDK、**不**建 CAM 角色），凭据文档给未签名 `putUrl` + 可选 `sign`（临时钥 + `UNSIGNED-PAYLOAD`）。`relkit cas-put` 走 Header SigV4 PUT。泛 S3 / MinIO 以及 `casCredentials=presign` 仍是 query 预签名，HashedPayload 必须是 `UNSIGNED-PAYLOAD`。正文完整性靠 `cas/{sha256}` key、Head 比 size、客户端按签名 manifest 验收。CI 不按 Type 分支。
 - `local`：`putUrl` 是相对本 agent 基址的 `PUT /v1/cas/{product}/{sha256}`；Bearer 放在 `headers.Authorization`，避免信任请求侧伪造的 forwarded host/proto。CI 仍只认同一份文档。
 
 响应里**永远只有一个上传目的地**。禁止给 CI 两套脚本（「COS 用 aws cli / 内网用 curl agent」），也禁止让 CI 按后端数量循环上传。`relkit cas-put` 只认这份文档。
@@ -185,7 +185,7 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 - `GET` / `DELETE` `/v1/staged/{product}/{version}/uploads/{id}` — 查询已收片 / 放弃
 - `POST /v1/staged/{product}/{version}/uploads/{id}/complete` — 拼装、校验整包 sha256、解包（与整包 PUT 同一落地路径）
 - `POST /v1/publish` — JSON：`product` / `version` / 可选 `to` / `dryRun` / `stagedSha256` / `idempotencyKey`
-- `POST /v1/cas/credentials` — 统一上传说明（每个仍需上传的 blob 一个 `putUrl` / 可选 headers / 过期），目的地只有 **ingest 后端**一个。ingest 是 `s3-compatible` 时 agent 填 SigV4 预签名 PUT；是 `local` 时填本机 `PUT /v1/cas/...`。CI 不分支、不按后端数量循环。
+- `POST /v1/cas/credentials` — 统一上传说明（每个仍需上传的 blob 一个 `putUrl` / 可选 headers / 可选 `sign` / 过期），目的地只有 **ingest 后端**一个。COS ingest 默认 STS 临时钥 + 未签名 PUT URL；泛 S3 仍预签名；`local` 填本机 `PUT /v1/cas/...`。CI 只认这份文档，不按 Type 分支。
 - `PUT /v1/cas/{product}/{sha256}?size=N` — 仅 local ingest 的代理上传口；Bearer 与产品绑定，服务端同时校验长度与 sha256。
 
 CI 默认走 `relkit staged-put`：多连接并发 PUT 各片。片大小与并发由客户端 `--part-size` / `--concurrency`（或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）决定，agent 配置夹取上限。同一 `bytes+sha256` 的未完成会话可续传。

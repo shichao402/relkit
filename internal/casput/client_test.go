@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/backends"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/stage"
 )
@@ -134,6 +135,45 @@ func TestUploadAllDoesNotFollowRedirect(t *testing.T) {
 	}
 	if targetHits != 0 {
 		t.Fatalf("redirect target hits=%d", targetHits)
+	}
+}
+
+func TestUploadOneAppliesCASSign(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "blob")
+	payload := []byte("hello")
+	if err := os.WriteFile(source, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	signed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" || r.Header.Get("X-Amz-Security-Token") != "session-token" {
+			t.Errorf("auth=%q token=%q", r.Header.Get("Authorization"), r.Header.Get("X-Amz-Security-Token"))
+		}
+		if r.Header.Get("X-Amz-Content-Sha256") != backends.UnsignedPayload {
+			t.Errorf("sha256=%q", r.Header.Get("X-Amz-Content-Sha256"))
+		}
+		signed = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	digest := model.Sha256Bytes(payload)
+	err := uploadOne(context.Background(), server.Client(), source, upload{
+		SHA256: digest, Size: int64(len(payload)), PutURL: server.URL + "/cas/" + digest,
+		Headers: map[string]string{"Content-Type": "application/octet-stream"},
+		Sign: &backends.CASSign{
+			Algorithm:    "AWS4-HMAC-SHA256",
+			Region:       "ap-guangzhou",
+			AccessKey:    "AKIATMP",
+			SecretKey:    "tmp-secret",
+			SessionToken: "session-token",
+			PayloadHash:  backends.UnsignedPayload,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !signed {
+		t.Fatal("PUT was not received")
 	}
 }
 

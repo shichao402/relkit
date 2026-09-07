@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"cnb.cool/shichao402/relkit/internal/backends"
 	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/stage"
 	"cnb.cool/shichao402/relkit/internal/stagedput"
@@ -54,6 +55,7 @@ type upload struct {
 	Size    int64             `json:"size"`
 	PutURL  string            `json:"putUrl"`
 	Headers map[string]string `json:"headers,omitempty"`
+	Sign    *backends.CASSign `json:"sign,omitempty"`
 }
 
 type credentialResponse struct {
@@ -263,6 +265,9 @@ func uploadOne(ctx context.Context, client *http.Client, source string, item upl
 	req.ContentLength = item.Size
 	for key, value := range item.Headers {
 		req.Header.Set(key, value)
+	}
+	if err := backends.ApplyCASSign(req, item.Sign, time.Now()); err != nil {
+		return err
 	}
 	resp, err := client.Do(req)
 	if err != nil {

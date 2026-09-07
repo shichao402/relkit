@@ -9,11 +9,23 @@ import (
 	"cnb.cool/shichao402/relkit/internal/model"
 )
 
+// CASSign is optional SigV4 material so CI can PUT an unsigned object URL
+// with header authentication (STS). Query-presigned URLs leave this nil.
+type CASSign struct {
+	Algorithm    string `json:"algorithm"`
+	Region       string `json:"region"`
+	AccessKey    string `json:"accessKey"`
+	SecretKey    string `json:"secretKey"`
+	SessionToken string `json:"sessionToken,omitempty"`
+	PayloadHash  string `json:"payloadHash"`
+}
+
 // CASUpload describes one temporary direct-upload destination. Callers only
 // execute the returned HTTP PUT; backend-specific signing stays here.
 type CASUpload struct {
 	PutURL    string
 	Headers   map[string]string
+	Sign      *CASSign
 	ExpiresAt time.Time
 }
 

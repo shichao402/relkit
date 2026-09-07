@@ -26,8 +26,11 @@ type s3CompatibleBackend struct {
 	accessKeyEnv   string
 	secretKeyEnv   string
 	region         string
+	appID          string
+	casCredentials string
 	forcePathStyle bool
 	timeout        time.Duration
+	federate       func(secretID, secretKey, name, policy string, duration time.Duration) (*federationCredentials, error)
 }
 
 func newS3CompatibleBackend(name string, cfg map[string]any, root string) (Backend, error) {
@@ -81,6 +84,28 @@ func newS3CompatibleBackend(name string, cfg map[string]any, root string) (Backe
 		forcePathStyle = true
 	}
 
+	casCredentials := strings.ToLower(strings.TrimSpace(optionalString(cfg, "casCredentials")))
+	if casCredentials == "" {
+		if isTencentCOS(endpoint) {
+			casCredentials = "sts"
+		} else {
+			casCredentials = "presign"
+		}
+	}
+	if casCredentials != "sts" && casCredentials != "presign" {
+		return nil, Error{Message: fmt.Sprintf("backend %q casCredentials must be \"sts\" or \"presign\", got %q", name, casCredentials)}
+	}
+	if casCredentials == "sts" && !isTencentCOS(endpoint) {
+		return nil, Error{Message: fmt.Sprintf("backend %q casCredentials=sts requires a Tencent COS endpoint", name)}
+	}
+	appID := optionalString(cfg, "appId")
+	if appID == "" {
+		appID = appIDFromBucket(bucket)
+	}
+	if casCredentials == "sts" && appID == "" {
+		return nil, Error{Message: fmt.Sprintf("backend %q casCredentials=sts needs appId (or a bucket name ending in -<appid>)", name)}
+	}
+
 	return &s3CompatibleBackend{
 		pathStyleBackend: base,
 		endpoint:         endpoint,
@@ -89,8 +114,13 @@ func newS3CompatibleBackend(name string, cfg map[string]any, root string) (Backe
 		accessKeyEnv:     accessKeyEnv,
 		secretKeyEnv:     secretKeyEnv,
 		region:           region,
+		appID:            appID,
+		casCredentials:   casCredentials,
 		forcePathStyle:   forcePathStyle,
 		timeout:          optionalDurationSeconds(cfg, "timeoutSeconds", 600*time.Second),
+		federate: func(secretID, secretKey, name, policy string, duration time.Duration) (*federationCredentials, error) {
+			return getFederationToken(nil, secretID, secretKey, name, policy, duration)
+		},
 	}, nil
 }
 
@@ -107,6 +137,17 @@ func (b *s3CompatibleBackend) Writable() bool {
 }
 
 func (b *s3CompatibleBackend) AuthorizeCASUpload(uploadReq CASUploadRequest) (*CASUpload, error) {
+	digest := path.Base(uploadReq.Key)
+	if len(digest) != sha256.Size*2 {
+		return nil, fmt.Errorf("CAS key %q does not end in a sha256", uploadReq.Key)
+	}
+	if b.casCredentials == "sts" {
+		return b.authorizeCASUploadSTS(uploadReq)
+	}
+	return b.authorizeCASUploadPresign(uploadReq)
+}
+
+func (b *s3CompatibleBackend) authorizeCASUploadPresign(uploadReq CASUploadRequest) (*CASUpload, error) {
 	accessKey, secretKey, err := b.credentials()
 	if err != nil {
 		return nil, err
@@ -115,14 +156,7 @@ func (b *s3CompatibleBackend) AuthorizeCASUpload(uploadReq CASUploadRequest) (*C
 	if err != nil {
 		return nil, err
 	}
-	digest := path.Base(uploadReq.Key)
-	if len(digest) != sha256.Size*2 {
-		return nil, fmt.Errorf("CAS key %q does not end in a sha256", uploadReq.Key)
-	}
 	// COS query-string auth always verifies HashedPayload as UNSIGNED-PAYLOAD.
-	// Signing the object sha256 into X-Amz-Content-Sha256 makes COS return
-	// SignatureDoesNotMatch (Dec dev/v1.13.58). Integrity is the cas/{sha256}
-	// key plus later size/hash checks, not SigV4 payload hashing.
 	req.Header.Set("Content-Type", contentTypeFor(uploadReq.Key))
 	req.Header.Set("X-Amz-Content-Sha256", unsignedPayload)
 	now := time.Now().UTC()
@@ -136,6 +170,42 @@ func (b *s3CompatibleBackend) AuthorizeCASUpload(uploadReq CASUploadRequest) (*C
 			"X-Amz-Content-Sha256": unsignedPayload,
 		},
 		ExpiresAt: now.Add(uploadReq.TTL),
+	}, nil
+}
+
+func (b *s3CompatibleBackend) authorizeCASUploadSTS(uploadReq CASUploadRequest) (*CASUpload, error) {
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return nil, err
+	}
+	objectKey := b.objectKey(uploadReq.Key)
+	putURL, err := b.objectURL(objectKey)
+	if err != nil {
+		return nil, err
+	}
+	ttl := uploadReq.TTL
+	if ttl < time.Second {
+		ttl = time.Hour
+	}
+	creds, err := b.federate(accessKey, secretKey, "relkit-cas", cosPutObjectPolicy(b.region, b.appID, b.bucket, objectKey), ttl)
+	if err != nil {
+		return nil, err
+	}
+	return &CASUpload{
+		PutURL: putURL,
+		Headers: map[string]string{
+			"Content-Type":         contentTypeFor(uploadReq.Key),
+			"X-Amz-Security-Token": creds.Token,
+		},
+		Sign: &CASSign{
+			Algorithm:    sigv4Algorithm,
+			Region:       b.region,
+			AccessKey:    creds.SecretID,
+			SecretKey:    creds.SecretKey,
+			SessionToken: creds.Token,
+			PayloadHash:  unsignedPayload,
+		},
+		ExpiresAt: creds.Expiration,
 	}, nil
 }
 
@@ -484,6 +554,14 @@ func regionFromEndpoint(endpoint string) string {
 		return match[1]
 	}
 	return ""
+}
+
+func isTencentCOS(endpoint string) bool {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	return cosRegionFromHost.MatchString(parsed.Hostname())
 }
 
 func isVirtualHostFriendly(endpoint string) bool {
