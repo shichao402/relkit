@@ -21,7 +21,7 @@
 
 ## 已落地（发布机）
 
-- `relkit-agent` 升级为 `0.1.2+8a0b312`
+- `relkit-agent` 已升级为 `0.1.2+3e31869`（CAS credentials、瘦 staged、Materialize）
 - `-migrate-profile`：`/etc/relkit-agent/products/svn-auto-merge.json`（`local` → `/data/relkit-serve`，`https://update.devcloud.woa.com/`）
 - 产品根 `relkit.json` → `relkit.json.migrated`
 - 为 staged `0.2.0+112` 补上 `release-policy.json`
