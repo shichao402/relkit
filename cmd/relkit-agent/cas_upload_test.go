@@ -101,25 +101,22 @@ func TestCASCredentialsRejectsProfileWithoutIngest(t *testing.T) {
 	}
 }
 
-func TestCASCredentialsRejectsMultiplePublishTargetsUntilMaterialize(t *testing.T) {
+func TestCASCredentialsAllowsMultiplePublishTargets(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{
 		patchProfile: func(profile *config.PublishProfile) {
 			profile.Backends["mirror"] = map[string]any{
-				"type": "static-http", "baseUrl": "https://example.invalid/mirror/", "stageDir": "mirror",
+				"type": "local", "baseUrl": "https://mirror.invalid/rup/", "outputDir": "mirror-dist",
 			}
 			profile.PublishTo = []string{"local", "mirror"}
 		},
 	})
-	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(`{"product":"demo","blobs":[{"sha256":"`+strings.Repeat("a", 64)+`","size":1}]}`))
-	req.Header.Set("Authorization", "Bearer "+fx.token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	digest := strings.Repeat("a", 64)
+	doc := requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":1}]}`)
+	if len(doc.Uploads) != 1 {
+		t.Fatalf("uploads=%v", doc.Uploads)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("exactly one publishTo")) {
-		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	if !strings.Contains(doc.Uploads[0].PutURL, "/v1/cas/demo/") {
+		t.Fatalf("putUrl=%s", doc.Uploads[0].PutURL)
 	}
 }
 
@@ -165,6 +162,67 @@ func TestThinStagedPublishesFromCASWithoutLocalArtifact(t *testing.T) {
 	}
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("artifact=%q", got)
+	}
+}
+
+func TestThinStagedMaterializesSecondBackend(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{
+		patchProfile: func(profile *config.PublishProfile) {
+			profile.Backends["mirror"] = map[string]any{
+				"type":      "local",
+				"baseUrl":   "https://mirror.invalid/rup/",
+				"outputDir": "mirror-dist",
+			}
+			profile.PublishTo = []string{"local", "mirror"}
+		},
+	})
+	payload := []byte("hello")
+	digest := model.Sha256Bytes(payload)
+	doc := requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":5}]}`)
+	put, _ := http.NewRequest(http.MethodPut, fx.ts.URL+doc.Uploads[0].PutURL, bytes.NewReader(payload))
+	for key, value := range doc.Uploads[0].Headers {
+		put.Header.Set(key, value)
+	}
+	resp, err := http.DefaultClient.Do(put)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("CAS PUT status=%d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/demo/1.0.0", bytes.NewReader(stripArtifactsFromTar(t, fx.tarball)))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("thin staged status=%d body=%s", resp.StatusCode, body)
+	}
+
+	status, body := fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	if !bytes.Contains(body, []byte("materialized from local")) {
+		t.Fatalf("publish log=%s", body)
+	}
+	for _, dir := range []string{"dist", "mirror-dist"} {
+		got, err := os.ReadFile(filepath.Join(fx.productRoot, dir, "artifact", "demo", "1.0.0", "app.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, payload) {
+			t.Fatalf("%s artifact=%q", dir, got)
+		}
+	}
+	casKey, _ := model.CasKey(digest)
+	if _, err := os.Stat(filepath.Join(fx.productRoot, "mirror-dist", filepath.FromSlash(casKey))); !os.IsNotExist(err) {
+		t.Fatalf("mirror should not store cas/: %v", err)
 	}
 }
 

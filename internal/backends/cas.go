@@ -45,6 +45,73 @@ type Deleter interface {
 	Delete(key string) error
 }
 
+// PrimaryIngest returns the first backend that implements Ingest. CI credentials
+// and cas/ live only there; remaining backends receive copies via Materialize.
+func PrimaryIngest(all []Backend) (Backend, Ingest, bool) {
+	for _, backend := range all {
+		if ingest, ok := backend.(Ingest); ok {
+			return backend, ingest, true
+		}
+	}
+	return nil, nil, false
+}
+
+// Materialize copies one artifact onto dest. Bytes come from a local staged
+// file when present, otherwise from source.Get(cas/{sha256}).
+func Materialize(source Backend, dest Backend, artifactKey, sha256 string, size int64, localPath string) ([]string, error) {
+	path, cleanup, err := materializeSourceFile(source, sha256, size, localPath)
+	if err != nil {
+		return nil, fmt.Errorf("materialize %s onto %s: %w", artifactKey, dest.Name(), err)
+	}
+	defer cleanup()
+	return dest.PutArtifact(path, artifactKey)
+}
+
+func materializeSourceFile(source Backend, sha256 string, size int64, localPath string) (string, func(), error) {
+	if localPath != "" {
+		info, err := os.Stat(localPath)
+		if err == nil && !info.IsDir() {
+			if info.Size() != size {
+				return "", nil, fmt.Errorf("local %s is %d bytes, want %d", localPath, info.Size(), size)
+			}
+			return localPath, func() {}, nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return "", nil, err
+		}
+	}
+	casKey, err := model.CasKey(sha256)
+	if err != nil {
+		return "", nil, err
+	}
+	data, err := source.Get(casKey)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(data) == 0 {
+		return "", nil, fmt.Errorf("cas %s missing on %s", casKey, source.Name())
+	}
+	if int64(len(data)) != size {
+		return "", nil, fmt.Errorf("cas %s is %d bytes, want %d", casKey, len(data), size)
+	}
+	tmp, err := os.CreateTemp("", "relkit-materialize-*")
+	if err != nil {
+		return "", nil, err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return "", nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return tmpPath, cleanup, nil
+}
+
 // PutArtifactCAS writes localPath into cas/{sha256} if missing, then Promotes
 // that blob to artifactKey. When cas already has the same size, the local file
 // is not uploaded again.

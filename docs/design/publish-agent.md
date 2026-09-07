@@ -95,11 +95,11 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 
 `pointerTo` 未声明时等于 `artifactTo`。两个列表都必须 `Writable()`。
 
-**落地状态（2026-09-07）：** agent 侧 `PutArtifactCAS`（Head + Promote + cas GC）、`POST /v1/cas/credentials`、local 代理 PUT、s3-compatible 预签名 PUT、`relkit cas-put` 与瘦 staged tar 已落地。**`artifactTo` / `pointerTo`、已有外部 URL 申报与 `Materialize` 仍未实现。** 现网 profile 仍只有 `publishTo`；credentials 暂要求它恰好包含一个 `Ingest`。`publish.Run` 对实现了 `Ingest` 的后端（`local`、`s3-compatible`）走 `PutArtifactCAS`：Head `cas/{sha256}` 比 size → 命中则 Promote，未命中且本地有文件则 PUT cas 再 Promote。其余后端仍 `PutArtifact`。落地其余部分时：
+**落地状态（2026-09-07）：** agent 侧 `PutArtifactCAS`（Head + Promote + cas GC）、`POST /v1/cas/credentials`、local 代理 PUT、s3-compatible 预签名 PUT、`relkit cas-put`、瘦 staged tar 与 **`Materialize` 已落地**。**`artifactTo` / `pointerTo` 与已有外部 URL 申报仍未实现。** 现网 profile 仍只有 `publishTo`；credentials 取其中第一个 `Ingest`，CI 仍只 PUT 这一家。`publish.Run` 对 ingest 走 Head + Promote；对其余可写后端从 ingest `Get(cas/{sha256})`（或本地 staged 文件）再 `PutArtifact`，**不**在第二家写 `cas/`。落地其余部分时：
 
 - `artifactTo` / `pointerTo` 默认都由 `publishTo` 迁移而来（未声明即全等），保持旧 profile 可用。
 - 已有的 `directory.publishTo` 是 `pointerTo` 的雏形，**并进 `pointerTo`**，不要再加第三个目标列表。
-- 在 `Materialize` 落地之前，`artifactTo` 只允许有一个后端（即 ingest）；配多个应拒绝，而不是悄悄退回 CI 扇出。
+- `publishTo` 可以有多家：CI 仍只喂 ingest；其余副本由 agent `Materialize`。`artifactTo` 字段落地后再把产物列表从 `publishTo` 里拆出来。
 
 #### git 后端不是只读 static-http
 
@@ -109,7 +109,7 @@ agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不
 
 #### 凭据文档（CI 唯一入口）
 
-`POST /v1/cas/credentials` 的请求带每个 blob 的 sha256 / size / 预留的已有 URL；响应 **形状固定**，字段不随 type 改名：每个**仍需上传**的 blob 一个 `putUrl`、过期时间、可选 `headers`。当前已实现 ingest 上 `Head(cas/{sha256})` 命中且 size 一致时不返回 upload；`urls` 字段暂不触发跳过，等 staged 能持久化这些取货 URL 与 `Materialize` 后再启用，避免凭据层跳过但 publish 无处取货。CI 只做 HTTP PUT，一个 blob 最多一次。
+`POST /v1/cas/credentials` 的请求带每个 blob 的 sha256 / size / 预留的已有 URL；响应 **形状固定**，字段不随 type 改名：每个**仍需上传**的 blob 一个 `putUrl`、过期时间、可选 `headers`。当前已实现 ingest 上 `Head(cas/{sha256})` 命中且 size 一致时不返回 upload；`urls` 字段暂不触发跳过，等 staged 能持久化这些取货 URL 后再启用，避免凭据层跳过但 publish 无处取货。CI 只做 HTTP PUT，一个 blob 最多一次。
 
 agent 按 **ingest 后端**（不是整个 `artifactTo`）填内容：
 
@@ -118,7 +118,7 @@ agent 按 **ingest 后端**（不是整个 `artifactTo`）填内容：
 
 响应里**永远只有一个上传目的地**。禁止给 CI 两套脚本（「COS 用 aws cli / 内网用 curl agent」），也禁止让 CI 按后端数量循环上传。`relkit cas-put` 只认这份文档。
 
-`Materialize` 落地前，credentials 要求 profile **恰好一个 `publishTo`**；多后端产品继续走整包 staged-put，不能让瘦树在第二后端退回打开不存在的本地 artifact。
+credentials **不**要求 `publishTo` 只有一家。响应里仍然永远只有 ingest 一个 `putUrl`。其余后端的副本在 `POST /v1/publish` 时由 agent `Materialize`。
 
 #### Promote 与 Materialize
 
@@ -236,7 +236,7 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
    - 旧机：产品根已有整份 `relkit.json` 时执行 `init -product <id> -migrate-profile`。它抽出机器侧字段写到 `/etc/relkit-agent/products/<id>.json`，把产品根那份改名为 `relkit.json.migrated`，且拒绝覆盖已存在的 profile。
    - 新机：按 `deploy/relkit-intranet-product.example.json` 或公网 `s3-compatible` 样例手写 `/etc/relkit-agent/products/<id>.json`（`product` / `signing.keyId` 与仓库 policy 对齐）。**不要**往 `/srv/relkit/<id>/` 塞发布凭据。
 6. `systemctl restart relkit-agent`。
-7. CI 可改走：`relkit stage` → `relkit cas-put --version <ver>`（内部请求 credentials、按唯一 putUrl 上传缺失 blob、再上传无 `artifacts/` 的瘦 tar）→ `POST /v1/publish`。整包 `staged-put` 仍是兼容路径；`Materialize` 仍未落地。
+7. CI 可改走：`relkit stage` → `relkit cas-put --version <ver>`（内部请求 credentials、按唯一 putUrl 上传缺失 blob、再上传无 `artifacts/` 的瘦 tar）→ `POST /v1/publish`（ingest Promote，其余后端 Materialize）。整包 `staged-put` 仍是兼容路径。
 
 ## 6. Token 轮换
 

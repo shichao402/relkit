@@ -77,7 +77,7 @@ https://updates.<your-domain>/artifact/...
 ### 4.1 发布流程（构建 → CAS → 签名 → 提交）
 
 目标：发布机只做控制面（发预签名上传凭据、签名、Copy、写指针）。产物字节不进 CVM。  
-`POST /v1/cas/credentials`、S3 SigV4 预签名 PUT、`relkit cas-put` 与瘦 staged tar 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` 扇出 / `Materialize` 仍是目标态。
+`POST /v1/cas/credentials`、S3 SigV4 预签名 PUT、`relkit cas-put`、瘦 staged tar 与 `Materialize` 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` / `pointerTo` 字段拆分仍是目标态。
 
 ```mermaid
 flowchart TB

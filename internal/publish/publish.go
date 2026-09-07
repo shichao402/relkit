@@ -175,19 +175,52 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	for _, artifact := range staged.Artifacts {
 		urlsByArtifact[artifact.Id] = []string{}
 	}
-	for _, backend := range openedBackends {
-		for _, artifact := range staged.Artifacts {
-			key := model.ArtifactKey(cfg.Product, version, artifact.Filename)
-			localPath := filepath.Join(directory, artifact.Filename)
-			urls, skipped, err := backends.PutArtifactCAS(backend, localPath, key, artifact.Sha256, artifact.Size)
+	source, _, hasIngest := backends.PrimaryIngest(openedBackends)
+	var replicaFailures []string
+	putOne := func(backend backends.Backend, artifact *model.StagedArtifact) error {
+		key := model.ArtifactKey(cfg.Product, version, artifact.Filename)
+		localPath := filepath.Join(directory, artifact.Filename)
+		if hasIngest && backend.Name() != source.Name() {
+			urls, err := backends.Materialize(source, backend, key, artifact.Sha256, artifact.Size, localPath)
 			if err != nil {
-				return nil, err
+				msg := fmt.Sprintf("%s: %v", backend.Name(), err)
+				if !allowPartial {
+					return Error{Message: msg}
+				}
+				replicaFailures = append(replicaFailures, msg)
+				printer(fmt.Sprintf("  %-12s FAILED: %v", backend.Name(), err))
+				return nil
 			}
 			urlsByArtifact[artifact.Id] = append(urlsByArtifact[artifact.Id], urls...)
-			if skipped {
-				printer(fmt.Sprintf("  %-12s %s  (cas hit, skipped upload)", backend.Name(), key))
-			} else {
-				printer(fmt.Sprintf("  %-12s %s", backend.Name(), key))
+			printer(fmt.Sprintf("  %-12s %s  (materialized from %s)", backend.Name(), key, source.Name()))
+			return nil
+		}
+		urls, skipped, err := backends.PutArtifactCAS(backend, localPath, key, artifact.Sha256, artifact.Size)
+		if err != nil {
+			return err
+		}
+		urlsByArtifact[artifact.Id] = append(urlsByArtifact[artifact.Id], urls...)
+		if skipped {
+			printer(fmt.Sprintf("  %-12s %s  (cas hit, skipped upload)", backend.Name(), key))
+		} else {
+			printer(fmt.Sprintf("  %-12s %s", backend.Name(), key))
+		}
+		return nil
+	}
+	if hasIngest {
+		for _, artifact := range staged.Artifacts {
+			if err := putOne(source, artifact); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, backend := range openedBackends {
+		if hasIngest && backend.Name() == source.Name() {
+			continue
+		}
+		for _, artifact := range staged.Artifacts {
+			if err := putOne(backend, artifact); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -265,6 +298,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 		return nil, err
 	}
 	failures = append(failures, webFailures...)
+	failures = append(failures, replicaFailures...)
 	if len(failures) > 0 && !allowPartial {
 		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest/browse pointer or Makers index is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
 	}

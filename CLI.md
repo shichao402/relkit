@@ -483,7 +483,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 
 CI **不持**签名私钥，也 **不持**长期 COS 写密钥。Runner 可在 `relkit stage` 后用 `relkit cas-put` 直传缺失 blob；原有整包 staged-put 路径继续兼容。
 
-已落地切面：产物直传该产品第一个 ingest 的 `cas/`，凭据文档只给一个目的地；agent 签发 **SigV4 预签名 PUT**（不接 STS SDK）、Promote、签名。尚未落地的是 Materialize，以及 profile 从 `publishTo` 拆成 `artifactTo` / `pointerTo`。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3。
+已落地切面：产物直传该产品第一个 ingest 的 `cas/`，凭据文档只给一个目的地；agent 签发 **SigV4 预签名 PUT**（不接 STS SDK）、Promote、Materialize、签名。尚未落地的是 profile 从 `publishTo` 拆成 `artifactTo` / `pointerTo`。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3。
 
 ```yaml
 - name: Stage

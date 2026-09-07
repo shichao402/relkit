@@ -90,6 +90,52 @@ func TestPutArtifactCASReportsThinStagedMiss(t *testing.T) {
 	}
 }
 
+func TestMaterializeCopiesFromIngestCASWithoutLocalFile(t *testing.T) {
+	root := t.TempDir()
+	ingest, err := newLocalBackend("disk", map[string]any{
+		"type": "local", "baseUrl": "http://127.0.0.1/rup/", "outputDir": filepath.Join(root, "ingest"),
+	}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirror, err := newLocalBackend("mirror", map[string]any{
+		"type": "local", "baseUrl": "http://127.0.0.1/mirror/", "outputDir": filepath.Join(root, "mirror"),
+	}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("hello")
+	src := filepath.Join(t.TempDir(), "app.bin")
+	if err := os.WriteFile(src, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	digest, size, err := model.Sha256File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := PutArtifactCAS(ingest, src, "artifact/demo/1.0.0/app.bin", digest, size); err != nil {
+		t.Fatal(err)
+	}
+	urls, err := Materialize(ingest, mirror, "artifact/demo/1.0.0/app.bin", digest, size, filepath.Join(root, "missing.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(urls) != 1 {
+		t.Fatalf("urls=%v", urls)
+	}
+	got, err := mirror.Get("artifact/demo/1.0.0/app.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("mirror=%q", got)
+	}
+	casKey, _ := model.CasKey(digest)
+	if data, _ := mirror.Get(casKey); len(data) != 0 {
+		t.Fatal("mirror must not receive cas/")
+	}
+}
+
 type typeOnlyNoIngest struct{}
 
 func (typeOnlyNoIngest) Name() string                                 { return "stub" }

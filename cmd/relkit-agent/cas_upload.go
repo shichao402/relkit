@@ -121,9 +121,6 @@ func (s *Server) productIngest(product string) (backends.Backend, backends.Inges
 	if profile.Product != product {
 		return nil, nil, fmt.Errorf("profile product %q does not match %q", profile.Product, product)
 	}
-	if len(profile.PublishTo) != 1 {
-		return nil, nil, fmt.Errorf("CAS upload currently requires exactly one publishTo backend; Materialize is not implemented")
-	}
 	cfg := &config.Config{
 		Root:      pc.Root,
 		Product:   profile.Product,
