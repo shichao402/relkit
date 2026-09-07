@@ -183,6 +183,21 @@ func ArtifactKey(product, version, filename string) string {
 	return path.Join("artifact", product, version, filename)
 }
 
+// CasKey is the ingest-only content-addressed object. Clients never fetch it.
+func CasKey(sha256 string) (string, error) {
+	digest := strings.ToLower(strings.TrimSpace(sha256))
+	if len(digest) != 64 {
+		return "", fmt.Errorf("cas key: sha256 must be 64 hex chars, got %d", len(digest))
+	}
+	for _, c := range digest {
+		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' {
+			continue
+		}
+		return "", fmt.Errorf("cas key: sha256 must be lowercase hex")
+	}
+	return path.Join("cas", digest), nil
+}
+
 func InferKind(filename string) string {
 	lowered := strings.ToLower(filename)
 	for _, entry := range kindBySuffix {

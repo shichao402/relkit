@@ -119,6 +119,35 @@ func TestGCRemovesUnreferencedRelease(t *testing.T) {
 	}
 }
 
+func TestGCRemovesUnreferencedCAS(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	writeRelease(t, dir, "app", "stable", "2.0.0", 200)
+	liveCAS, err := casKeyFromRepeat('b')
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphanCAS := "cas/" + strings.Repeat("c", 64)
+	writeFile(t, dir, liveCAS, []byte("live-blob"))
+	writeFile(t, dir, orphanCAS, []byte("orphan-blob"))
+
+	if _, err := cfg.gcOnce(); err != nil {
+		t.Fatalf("gcOnce: %v", err)
+	}
+	if !fileExists(dir, liveCAS) {
+		t.Fatal("cas still named by live manifest was deleted")
+	}
+	if fileExists(dir, orphanCAS) {
+		t.Fatal("unreferenced cas was kept")
+	}
+	if !fileExists(dir, "artifact/app/2.0.0/app.zip") {
+		t.Fatal("live artifact was deleted")
+	}
+}
+
+func casKeyFromRepeat(ch byte) (string, error) {
+	return "cas/" + strings.Repeat(string(ch), 64), nil
+}
+
 func TestGCKeepsArtifactBehindStaleLatestPointer(t *testing.T) {
 	cfg, dir := newTestConfig(t, false)
 	writeRelease(t, dir, "app", "stable", "2.0.0", 200)

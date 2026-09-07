@@ -117,8 +117,8 @@ curl -sI https://dl.example.com/index/app/stable.json | grep -i cache-control
 默认开启 GC：定时（默认 1h）扫一次，并且每次成功 `PUT index/...` 后异步再扫。规则是：
 
 1. 读全部 `index/<product>/<channel>.json`（解码签名信封拿 payload，**不验签、不改写**）；
-2. 收集仍指向本机的 `manifest/` / `artifact/` 路径（所有 channel 取并集）；
-3. 删掉不在集合里的旧文件与空目录。
+2. 收集仍指向本机的 `manifest/` / `artifact/` 路径，以及这些 manifest 里仍出现的 `cas/{sha256}`（所有 channel 取并集）；
+3. 删掉不在集合里的旧文件与空目录（含未再被引用的 `cas/`）。
 
 安全阀：没有可读 index、全部解析失败、或解析后没有本机引用时，**整轮不删任何东西**，只打 `gc: aborted` 日志。
 

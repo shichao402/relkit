@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/webmeta"
 )
 
@@ -20,7 +21,7 @@ const (
 )
 
 // gcState schedules orphan cleanup. The server never rewrites index files; it
-// only deletes manifest/ and artifact/ objects that no index still references.
+// only deletes manifest/, artifact/, and cas/ objects that no index still references.
 type gcState struct {
 	enabled  bool
 	interval time.Duration
@@ -181,21 +182,37 @@ func (c *config) gcOnce() (gcResult, error) {
 		}
 	}
 	for _, key := range manifestKeys {
-		artifactURLs, err := readManifestArtifactURLs(c.root, key)
+		doc, err := readManifestDoc(c.root, key)
 		if err != nil {
 			return gcResult{}, fmt.Errorf("referenced manifest %s: %w", key, err)
 		}
-		for _, raw := range artifactURLs {
-			if art, ok := localKeyFromURL(raw); ok {
-				live[art] = struct{}{}
+		if len(doc.Artifacts) == 0 {
+			return gcResult{}, fmt.Errorf("referenced manifest %s: manifest has no artifacts", key)
+		}
+		gotURL := false
+		for _, a := range doc.Artifacts {
+			if a == nil {
+				continue
 			}
+			for _, raw := range a.Urls {
+				if art, ok := localKeyFromURL(raw); ok {
+					live[art] = struct{}{}
+					gotURL = true
+				}
+			}
+			if casKey, err := model.CasKey(a.Sha256); err == nil {
+				live[casKey] = struct{}{}
+			}
+		}
+		if !gotURL {
+			return gcResult{}, fmt.Errorf("referenced manifest %s: manifest artifacts have no urls", key)
 		}
 	}
 
 	var result gcResult
 	result.live = len(live)
 
-	for _, prefix := range []string{"manifest", "artifact"} {
+	for _, prefix := range []string{"manifest", "artifact", "cas"} {
 		files, err := listFilesUnder(c.root, prefix)
 		if err != nil {
 			if os.IsNotExist(err) {

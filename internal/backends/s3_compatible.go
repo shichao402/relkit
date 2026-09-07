@@ -175,6 +175,130 @@ func (b *s3CompatibleBackend) Get(key string) ([]byte, error) {
 	return body, nil
 }
 
+func (b *s3CompatibleBackend) Head(key string) (int64, bool, error) {
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return 0, false, err
+	}
+	req, err := b.newObjectRequest(http.MethodHead, key, nil, 0)
+	if err != nil {
+		return 0, false, err
+	}
+	if err := signAWSV4(req, emptyPayloadHash, b.region, "s3", accessKey, secretKey, time.Now()); err != nil {
+		return 0, false, err
+	}
+	timeout := b.timeout
+	if timeout > 60*time.Second {
+		timeout = 60 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, false, Error{Message: fmt.Sprintf("HEAD %s failed: %v", req.URL.String(), err)}
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return 0, false, nil
+	}
+	if resp.StatusCode >= 400 {
+		return 0, false, Error{Message: fmt.Sprintf("HEAD %s returned %d", req.URL.String(), resp.StatusCode)}
+	}
+	return resp.ContentLength, true, nil
+}
+
+func (b *s3CompatibleBackend) Promote(srcKey, dstKey string) ([]string, error) {
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return nil, err
+	}
+	req, err := b.newObjectRequest(http.MethodPut, dstKey, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentTypeFor(dstKey))
+	req.Header.Set("x-amz-copy-source", b.copySource(srcKey))
+	req.ContentLength = 0
+	if err := signAWSV4(req, emptyPayloadHash, b.region, "s3", accessKey, secretKey, time.Now()); err != nil {
+		return nil, err
+	}
+	client := &http.Client{
+		Timeout: b.timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, Error{Message: fmt.Sprintf("COPY %s -> %s failed: %v", srcKey, dstKey, err)}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return nil, Error{Message: fmt.Sprintf("COPY %s was redirected to %s; point the backend endpoint at the final address instead", req.URL.String(), resp.Header.Get("Location"))}
+	}
+	if resp.StatusCode >= 400 {
+		detail := strings.TrimSpace(string(body))
+		if len(detail) > 200 {
+			detail = detail[:200]
+		}
+		msg := fmt.Sprintf("COPY %s -> %s returned %d", srcKey, dstKey, resp.StatusCode)
+		if detail != "" {
+			msg += ": " + detail
+		}
+		return nil, Error{Message: msg}
+	}
+	return []string{*b.URLFor(dstKey)}, nil
+}
+
+func (b *s3CompatibleBackend) copySource(key string) string {
+	objectKey := b.objectKey(key)
+	return "/" + b.bucket + "/" + escapeObjectKey(objectKey)
+}
+
+func (b *s3CompatibleBackend) Delete(key string) error {
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return err
+	}
+	req, err := b.newObjectRequest(http.MethodDelete, key, nil, 0)
+	if err != nil {
+		return err
+	}
+	if err := signAWSV4(req, emptyPayloadHash, b.region, "s3", accessKey, secretKey, time.Now()); err != nil {
+		return err
+	}
+	timeout := b.timeout
+	if timeout > 60*time.Second {
+		timeout = 60 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return Error{Message: fmt.Sprintf("DELETE %s failed: %v", req.URL.String(), err)}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	if resp.StatusCode >= 400 {
+		detail := strings.TrimSpace(string(body))
+		if len(detail) > 200 {
+			detail = detail[:200]
+		}
+		msg := fmt.Sprintf("DELETE %s returned %d", req.URL.String(), resp.StatusCode)
+		if detail != "" {
+			msg += ": " + detail
+		}
+		return Error{Message: msg}
+	}
+	return nil
+}
+
+var _ Ingest = (*s3CompatibleBackend)(nil)
+var _ Deleter = (*s3CompatibleBackend)(nil)
+
 func (b *s3CompatibleBackend) Probe(rawURL string) (bool, *int64, string) {
 	timeout := b.timeout
 	if timeout > 60*time.Second {

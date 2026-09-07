@@ -107,7 +107,7 @@ func runServer() {
 		defaultMaxAge = flag.Int("default-max-age", 60, "max-age for paths matching neither list")
 		shutdownWait  = flag.Duration("shutdown-timeout", 30*time.Second, "how long to let in-flight downloads finish on shutdown")
 		quiet         = flag.Bool("quiet", false, "do not log requests")
-		gcEnabled     = flag.Bool("gc", true, "enable orphan manifest/artifact cleanup")
+		gcEnabled     = flag.Bool("gc", true, "enable orphan manifest/artifact/cas cleanup")
 		gcInterval    = flag.Duration("gc-interval", defaultGCInterval, "how often to sweep unreferenced objects; 0 disables GC")
 		showVersion   = flag.Bool("version", false, "print version and exit")
 	)

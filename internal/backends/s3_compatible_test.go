@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"cnb.cool/shichao402/relkit/internal/model"
 )
 
 func TestS3CompatiblePutGetRoundTrip(t *testing.T) {
@@ -69,6 +71,73 @@ func TestS3CompatiblePutGetRoundTrip(t *testing.T) {
 	}
 	if missing != nil {
 		t.Fatalf("missing key should return nil, got %q", missing)
+	}
+}
+
+func TestPutArtifactCASS3SkipsSecondUpload(t *testing.T) {
+	store := t.TempDir()
+	accessKey := "AKIATEST"
+	secretKey := "secret-test-key"
+	fake := newFakeS3(t, store, accessKey, secretKey, "us-east-1")
+	server := httptest.NewServer(fake)
+	defer server.Close()
+
+	t.Setenv("COS_SECRET_ID", accessKey)
+	t.Setenv("COS_SECRET_KEY", secretKey)
+
+	backend, err := newS3CompatibleBackend("cos", map[string]any{
+		"type":           "s3-compatible",
+		"endpoint":       server.URL,
+		"bucket":         "release",
+		"prefix":         "rup/",
+		"baseUrl":        server.URL + "/release/rup/",
+		"accessKeyEnv":   "COS_SECRET_ID",
+		"secretKeyEnv":   "COS_SECRET_KEY",
+		"region":         "us-east-1",
+		"forcePathStyle": true,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := bytes.Repeat([]byte("y"), 256)
+	src := filepath.Join(t.TempDir(), "app.zip")
+	if err := os.WriteFile(src, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	digest, size, err := model.Sha256File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, skipped, err := PutArtifactCAS(backend, src, "artifact/demo/1.0.0/app.zip", digest, size); err != nil {
+		t.Fatal(err)
+	} else if skipped {
+		t.Fatal("first put must upload")
+	}
+	firstBytes := fake.bytesUploaded
+	if firstBytes != size {
+		t.Fatalf("uploaded %d, want %d", firstBytes, size)
+	}
+
+	if err := os.Remove(src); err != nil {
+		t.Fatal(err)
+	}
+	if _, skipped, err := PutArtifactCAS(backend, src, "artifact/demo/2.0.0/app.zip", digest, size); err != nil {
+		t.Fatal(err)
+	} else if !skipped {
+		t.Fatal("second put must skip upload")
+	}
+	if fake.bytesUploaded != firstBytes {
+		t.Fatalf("cas hit still uploaded %d extra bytes", fake.bytesUploaded-firstBytes)
+	}
+
+	got, err := backend.Get("artifact/demo/2.0.0/app.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("promoted object mismatch")
 	}
 }
 
@@ -154,14 +223,15 @@ func TestSignAWSV4StableShape(t *testing.T) {
 }
 
 type fakeS3 struct {
-	t         *testing.T
-	dir       string
-	accessKey string
-	secretKey string
-	region    string
+	t             *testing.T
+	dir           string
+	accessKey     string
+	secretKey     string
+	region        string
+	bytesUploaded int64
 }
 
-func newFakeS3(t *testing.T, dir string, accessKey string, secretKey string, region string) http.Handler {
+func newFakeS3(t *testing.T, dir string, accessKey string, secretKey string, region string) *fakeS3 {
 	return &fakeS3{t: t, dir: dir, accessKey: accessKey, secretKey: secretKey, region: region}
 }
 
@@ -181,6 +251,28 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target := filepath.Join(append([]string{f.dir}, strings.Split(path, "/")...)...)
 	switch r.Method {
 	case http.MethodPut:
+		if src := r.Header.Get("x-amz-copy-source"); src != "" {
+			decoded, err := url.PathUnescape(src)
+			if err != nil {
+				http.Error(w, "bad copy-source", http.StatusBadRequest)
+				return
+			}
+			decoded = strings.TrimPrefix(decoded, "/")
+			source := filepath.Join(append([]string{f.dir}, strings.Split(decoded, "/")...)...)
+			data, err := os.ReadFile(source)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				f.t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(target, data, 0o644); err != nil {
+				f.t.Fatalf("write: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			f.t.Fatalf("mkdir: %v", err)
 		}
@@ -191,6 +283,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := os.WriteFile(target, data, 0o644); err != nil {
 			f.t.Fatalf("write: %v", err)
 		}
+		f.bytesUploaded += int64(len(data))
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet, http.MethodHead:
 		info, err := os.Stat(target)
@@ -204,6 +297,15 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.ServeFile(w, r, target)
+	case http.MethodDelete:
+		if err := os.Remove(target); err != nil {
+			if os.IsNotExist(err) {
+				http.NotFound(w, r)
+				return
+			}
+			f.t.Fatalf("delete: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method", http.StatusMethodNotAllowed)
 	}

@@ -149,6 +149,9 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 		printer(fmt.Sprintf("would write sequence %d and these keys:", baseSequence+1))
 		for _, artifact := range staged.Artifacts {
 			printer("  " + model.ArtifactKey(cfg.Product, version, artifact.Filename))
+			if casKey, err := model.CasKey(artifact.Sha256); err == nil {
+				printer("  " + casKey + "  <- cas (skip PUT when size matches)")
+			}
 		}
 		printer("  " + model.ManifestKey(cfg.Product, version))
 		printer("  " + model.IndexKey(cfg.Product, channel) + "  <- pointer, written last")
@@ -175,12 +178,17 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	for _, backend := range openedBackends {
 		for _, artifact := range staged.Artifacts {
 			key := model.ArtifactKey(cfg.Product, version, artifact.Filename)
-			urls, err := backend.PutArtifact(filepath.Join(directory, artifact.Filename), key)
+			localPath := filepath.Join(directory, artifact.Filename)
+			urls, skipped, err := backends.PutArtifactCAS(backend, localPath, key, artifact.Sha256, artifact.Size)
 			if err != nil {
 				return nil, err
 			}
 			urlsByArtifact[artifact.Id] = append(urlsByArtifact[artifact.Id], urls...)
-			printer(fmt.Sprintf("  %-12s %s", backend.Name(), key))
+			if skipped {
+				printer(fmt.Sprintf("  %-12s %s  (cas hit, skipped upload)", backend.Name(), key))
+			} else {
+				printer(fmt.Sprintf("  %-12s %s", backend.Name(), key))
+			}
 		}
 	}
 
@@ -208,7 +216,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	}
 
 	node := model.NewIndexNode(staged, manifestDigest, manifestSize, manifestURLs, "")
-	mergedFinal, _ := applyRetainVersions(mergeNode(existing.Versions, node), cfg.RetainVersions)
+	mergedFinal, pruned := applyRetainVersions(mergeNode(existing.Versions, node), cfg.RetainVersions)
 	if err := changelog.CompactPriorNodes(mergedFinal, cfg.Changelog.URLTemplate, staged.Code); err != nil {
 		return nil, Error{Message: err.Error()}
 	}
@@ -260,6 +268,8 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if len(failures) > 0 && !allowPartial {
 		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest/browse pointer or Makers index is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
 	}
+
+	sweepOrphanCAS(cfg, index, pruned, staged, committed, printer)
 
 	printer("")
 	printer(fmt.Sprintf("published %s (code %d) on channel %s, sequence %d", version, staged.Code, channel, index.Sequence))

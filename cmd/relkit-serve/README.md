@@ -195,7 +195,7 @@ relkit verify --deep
 
 ### 只留最新版时怎么配合
 
-本服务**不改写、不重签** index。GC 只做一件事：扫全部 `index/<product>/<channel>.json`，把仍被引用的本地 `manifest/`、`artifact/` 留住，其余删掉。
+本服务**不改写、不重签** index。GC 只做一件事：扫全部 `index/<product>/<channel>.pb`，把仍被引用的本地 `manifest/`、`artifact/`，以及这些 manifest 里仍出现的 `cas/{sha256}` 留住，其余删掉。
 
 因此若运营策略是「整包更新、磁盘上只留当前版本」，发布侧 PUT 的 index 就应只含当前那一个版本节点。在 `relkit.json` 设 `"retainVersions": 1`（或 `2`/`3` 留最近几个回退点）即可；`relkit publish` 会在签名前裁掉更旧的节点。若 index 里仍挂着历史节点，那些节点引用的对象会被视为 live，GC 不会删 —— 这是刻意的安全行为。多 channel（如 `stable` / `beta`）按引用并集保留。
 

@@ -94,7 +94,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 
 `pointerTo` 未声明时等于 `artifactTo`。两个列表都必须 `Writable()`。
 
-**落地状态：`ingest` / `artifactTo` / `pointerTo` 与 `Materialize` 尚未实现。** 现网 profile 仍只有 `publishTo` 一个列表，`publish.Run` 仍对它循环 `PutArtifact` + `PutImmutable` + `PutPointer`。落地时：
+**落地状态：CI `cas/credentials`、`artifactTo` / `pointerTo` 与 `Materialize` 尚未实现。** 现网 profile 仍只有 `publishTo`。`publish.Run` 对实现了 `Ingest` 的后端（`local`、`s3-compatible`）走 `PutArtifactCAS`：Head `cas/{sha256}` 比 size → 命中则 Promote，未命中则 PUT cas 再 Promote。其余后端仍 `PutArtifact`。落地其余部分时：
 
 - `artifactTo` / `pointerTo` 默认都由 `publishTo` 迁移而来（未声明即全等），保持旧 profile 可用。
 - 已有的 `directory.publishTo` 是 `pointerTo` 的雏形，**并进 `pointerTo`**，不要再加第三个目标列表。
