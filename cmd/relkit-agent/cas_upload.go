@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -147,18 +146,17 @@ func blobAlreadyAvailable(ingest backends.Ingest, key string, blob casCredential
 }
 
 func (s *Server) authorizeCASUpload(r *http.Request, product string, backend backends.Backend, key string, size int64, expiresAt time.Time) (*backends.CASUpload, error) {
-	if authorizer, ok := backend.(backends.CASUploadAuthorizer); ok {
-		return authorizer.AuthorizeCASUpload(key, size, time.Until(expiresAt))
+	authorizer, ok := backend.(backends.CASUploadAuthorizer)
+	if !ok {
+		return nil, fmt.Errorf("ingest backend %q cannot authorize CAS uploads", backend.Name())
 	}
-	if _, ok := backend.(backends.CASProxyReceiver); !ok {
-		return nil, fmt.Errorf("ingest backend %q cannot authorize direct or proxied CAS uploads", backend.Name())
-	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	return &backends.CASUpload{
-		PutURL:    fmt.Sprintf("/v1/cas/%s/%s?size=%d", url.PathEscape(product), path.Base(key), size),
-		Headers:   map[string]string{"Authorization": "Bearer " + token},
-		ExpiresAt: expiresAt,
-	}, nil
+	return authorizer.AuthorizeCASUpload(backends.CASUploadRequest{
+		Product:       product,
+		Key:           key,
+		Size:          size,
+		TTL:           time.Until(expiresAt),
+		Authorization: r.Header.Get("Authorization"),
+	})
 }
 
 func (s *Server) handleCASPut(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +195,7 @@ func (s *Server) handleCASPut(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	receiver, ok := ingest.(backends.CASProxyReceiver)
+	receiver, ok := ingest.(backends.CASUploadReceiver)
 	if !ok {
 		http.Error(w, "ingest uses direct upload, not agent proxy", http.StatusBadRequest)
 		return

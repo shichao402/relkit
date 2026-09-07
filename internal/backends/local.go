@@ -5,8 +5,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"time"
 )
 
 type localBackend struct {
@@ -54,6 +57,22 @@ func (b *localBackend) PutArtifact(localPath string, key string) ([]string, erro
 		return nil, err
 	}
 	return []string{*b.URLFor(key)}, nil
+}
+
+func (b *localBackend) AuthorizeCASUpload(req CASUploadRequest) (*CASUpload, error) {
+	if req.Product == "" || req.Key == "" || req.Size < 0 || req.TTL <= 0 {
+		return nil, fmt.Errorf("invalid local CAS upload request")
+	}
+	return &CASUpload{
+		PutURL: fmt.Sprintf(
+			"/v1/cas/%s/%s?size=%d",
+			url.PathEscape(req.Product),
+			path.Base(req.Key),
+			req.Size,
+		),
+		Headers:   map[string]string{"Authorization": req.Authorization},
+		ExpiresAt: time.Now().UTC().Add(req.TTL),
+	}, nil
 }
 
 func (b *localBackend) ReceiveCAS(key string, body io.Reader, size int64) error {
@@ -171,4 +190,5 @@ func (b *localBackend) Delete(key string) error {
 
 var _ Ingest = (*localBackend)(nil)
 var _ Deleter = (*localBackend)(nil)
-var _ CASProxyReceiver = (*localBackend)(nil)
+var _ CASUploadAuthorizer = (*localBackend)(nil)
+var _ CASUploadReceiver = (*localBackend)(nil)

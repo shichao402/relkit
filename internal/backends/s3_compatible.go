@@ -106,32 +106,36 @@ func (b *s3CompatibleBackend) Writable() bool {
 	return true
 }
 
-func (b *s3CompatibleBackend) AuthorizeCASUpload(key string, _ int64, ttl time.Duration) (*CASUpload, error) {
+func (b *s3CompatibleBackend) AuthorizeCASUpload(uploadReq CASUploadRequest) (*CASUpload, error) {
 	accessKey, secretKey, err := b.credentials()
 	if err != nil {
 		return nil, err
 	}
-	req, err := b.newObjectRequest(http.MethodPut, key, nil, 0)
+	req, err := b.newObjectRequest(http.MethodPut, uploadReq.Key, nil, 0)
 	if err != nil {
 		return nil, err
 	}
-	payloadHash := path.Base(key)
-	if len(payloadHash) != sha256.Size*2 {
-		return nil, fmt.Errorf("CAS key %q does not end in a sha256", key)
+	digest := path.Base(uploadReq.Key)
+	if len(digest) != sha256.Size*2 {
+		return nil, fmt.Errorf("CAS key %q does not end in a sha256", uploadReq.Key)
 	}
-	req.Header.Set("Content-Type", contentTypeFor(key))
-	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	// COS query-string auth always verifies HashedPayload as UNSIGNED-PAYLOAD.
+	// Signing the object sha256 into X-Amz-Content-Sha256 makes COS return
+	// SignatureDoesNotMatch (Dec dev/v1.13.58). Integrity is the cas/{sha256}
+	// key plus later size/hash checks, not SigV4 payload hashing.
+	req.Header.Set("Content-Type", contentTypeFor(uploadReq.Key))
+	req.Header.Set("X-Amz-Content-Sha256", unsignedPayload)
 	now := time.Now().UTC()
-	if err := PresignS3Request(req, b.region, accessKey, secretKey, now, ttl); err != nil {
+	if err := PresignS3Request(req, b.region, accessKey, secretKey, now, uploadReq.TTL); err != nil {
 		return nil, err
 	}
 	return &CASUpload{
 		PutURL: req.URL.String(),
 		Headers: map[string]string{
-			"Content-Type":         contentTypeFor(key),
-			"X-Amz-Content-Sha256": payloadHash,
+			"Content-Type":         contentTypeFor(uploadReq.Key),
+			"X-Amz-Content-Sha256": unsignedPayload,
 		},
-		ExpiresAt: now.Add(ttl),
+		ExpiresAt: now.Add(uploadReq.TTL),
 	}, nil
 }
 

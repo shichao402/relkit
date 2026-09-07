@@ -6,9 +6,40 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
 )
+
+func TestLocalAuthorizeCASUploadDescribesAgentPut(t *testing.T) {
+	root := t.TempDir()
+	backendAny, err := newLocalBackend("disk", map[string]any{
+		"type":      "local",
+		"baseUrl":   "http://127.0.0.1/rup/",
+		"outputDir": filepath.Join(root, "out"),
+	}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	upload, err := backendAny.(*localBackend).AuthorizeCASUpload(CASUploadRequest{
+		Product:       "demo",
+		Key:           "cas/" + digest,
+		Size:          123,
+		TTL:           time.Hour,
+		Authorization: "Bearer product-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantURL := "/v1/cas/demo/" + digest + "?size=123"
+	if upload.PutURL != wantURL {
+		t.Fatalf("put URL=%q, want %q", upload.PutURL, wantURL)
+	}
+	if upload.Headers["Authorization"] != "Bearer product-token" {
+		t.Fatalf("headers=%v", upload.Headers)
+	}
+}
 
 func TestPutArtifactCASLocalSkipsSecondUpload(t *testing.T) {
 	root := t.TempDir()

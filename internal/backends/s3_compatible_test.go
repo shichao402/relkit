@@ -259,7 +259,11 @@ func TestS3AuthorizeCASUploadBindsPayloadHash(t *testing.T) {
 	}
 	backend := backendAny.(*s3CompatibleBackend)
 	digest := strings.Repeat("a", 64)
-	upload, err := backend.AuthorizeCASUpload("cas/"+digest, 123, time.Hour)
+	upload, err := backend.AuthorizeCASUpload(CASUploadRequest{
+		Key:  "cas/" + digest,
+		Size: 123,
+		TTL:  time.Hour,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

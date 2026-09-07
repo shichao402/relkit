@@ -17,15 +17,27 @@ type CASUpload struct {
 	ExpiresAt time.Time
 }
 
-// CASUploadAuthorizer is implemented by ingest backends that can let CI upload
-// a blob directly without proxying its bytes through relkit-agent.
-type CASUploadAuthorizer interface {
-	AuthorizeCASUpload(key string, size int64, ttl time.Duration) (*CASUpload, error)
+// CASUploadRequest contains the transport-neutral inputs an ingest backend
+// needs to describe how CI should upload one blob. Product and Authorization
+// are used by backends whose upload endpoint is hosted by relkit-agent.
+type CASUploadRequest struct {
+	Product       string
+	Key           string
+	Size          int64
+	TTL           time.Duration
+	Authorization string
 }
 
-// CASProxyReceiver is implemented by an ingest that receives CI bytes through
-// relkit-agent rather than through a directly presigned storage URL.
-type CASProxyReceiver interface {
+// CASUploadAuthorizer is implemented by ingest backends that can describe how
+// CI should upload a blob. The backend type owns the resulting URL and headers;
+// callers always execute the returned HTTP PUT without switching on Type().
+type CASUploadAuthorizer interface {
+	AuthorizeCASUpload(req CASUploadRequest) (*CASUpload, error)
+}
+
+// CASUploadReceiver is implemented by a backend whose upload URL is served by
+// relkit-agent instead of by an external object store.
+type CASUploadReceiver interface {
 	ReceiveCAS(key string, body io.Reader, size int64) error
 }
 
