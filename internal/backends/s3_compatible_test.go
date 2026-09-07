@@ -2,6 +2,7 @@ package backends
 
 import (
 	"bytes"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -245,7 +246,7 @@ func TestPresignS3RequestStableShape(t *testing.T) {
 	}
 }
 
-func TestS3AuthorizeCASUploadBindsPayloadHash(t *testing.T) {
+func TestS3AuthorizeCASUploadUsesUnsignedPayload(t *testing.T) {
 	t.Setenv("TEST_S3_ACCESS", "AKID")
 	t.Setenv("TEST_S3_SECRET", "SECRET")
 	backendAny, err := newS3CompatibleBackend("cos", map[string]any{
@@ -267,7 +268,7 @@ func TestS3AuthorizeCASUploadBindsPayloadHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if upload.Headers["X-Amz-Content-Sha256"] != digest {
+	if upload.Headers["X-Amz-Content-Sha256"] != unsignedPayload {
 		t.Fatalf("headers=%v", upload.Headers)
 	}
 	parsed, err := url.Parse(upload.PutURL)
@@ -275,9 +276,69 @@ func TestS3AuthorizeCASUploadBindsPayloadHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	signedHeaders := parsed.Query().Get("X-Amz-SignedHeaders")
-	if !strings.Contains(signedHeaders, "x-amz-content-sha256") {
+	if !strings.Contains(signedHeaders, "x-amz-content-sha256") || !strings.Contains(signedHeaders, "content-type") {
 		t.Fatalf("signed headers=%q", signedHeaders)
 	}
+	got := parsed.Query().Get("X-Amz-Signature")
+	want := cosQueryAuthSignature(http.MethodPut, parsed, upload.Headers, "ap-guangzhou", "SECRET")
+	if got != want {
+		t.Fatalf("presign does not match COS query-auth: got %s want %s", got, want)
+	}
+
+	wrong := map[string]string{
+		"Content-Type":         upload.Headers["Content-Type"],
+		"X-Amz-Content-Sha256": digest,
+	}
+	if cosQueryAuthSignature(http.MethodPut, parsed, wrong, "ap-guangzhou", "SECRET") == got {
+		t.Fatal("COS would accept a PUT that binds the object sha256 as x-amz-content-sha256")
+	}
+}
+
+func headerValueCI(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
+}
+
+// cosQueryAuthSignature rebuilds a Tencent COS query-auth signature: signed
+// headers come from the PUT, HashedPayload is always UNSIGNED-PAYLOAD.
+func cosQueryAuthSignature(method string, u *url.URL, headers map[string]string, region, secretKey string) string {
+	query := u.Query()
+	amzDate := query.Get("X-Amz-Date")
+	signedHeaders := query.Get("X-Amz-SignedHeaders")
+	query.Del("X-Amz-Signature")
+
+	signed := make(http.Header)
+	for _, name := range strings.Split(signedHeaders, ";") {
+		if name == "host" {
+			signed.Set("Host", u.Host)
+			continue
+		}
+		if value := headerValueCI(headers, name); value != "" {
+			signed.Set(name, value)
+		}
+	}
+	_, canonicalHeaders := canonicalHeaderBlock(signed)
+	canonicalRequest := strings.Join([]string{
+		method,
+		canonicalURI(u),
+		canonicalQuery(query),
+		canonicalHeaders,
+		signedHeaders,
+		unsignedPayload,
+	}, "\n")
+	dateStamp := amzDate[:8]
+	credentialScope := strings.Join([]string{dateStamp, region, "s3", "aws4_request"}, "/")
+	stringToSign := strings.Join([]string{
+		sigv4Algorithm,
+		amzDate,
+		credentialScope,
+		hashSHA256Hex([]byte(canonicalRequest)),
+	}, "\n")
+	return hex.EncodeToString(hmacSHA256(deriveSigningKey(secretKey, dateStamp, region, "s3"), stringToSign))
 }
 
 type fakeS3 struct {

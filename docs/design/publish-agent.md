@@ -113,7 +113,7 @@ agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不
 
 agent 按 **ingest 后端**（不是整个 `artifactTo`）填内容：
 
-- `s3-compatible`：`putUrl` 指向桶内 `cas/{sha256}` 的 **SigV4 预签名 PUT**（agent 用发布机已有的长期 `COS_SECRET_*` 签名，TTL 约 1h），并签入 `X-Amz-Content-Sha256` 绑定正文。`headers` 承载 PUT 必须带上的签名头。响应形状固定，以后若换成 STS 临时钥，CI 不必改。本切片**不**接腾讯云 AssumeRole。
+- `s3-compatible`：`putUrl` 指向桶内 `cas/{sha256}` 的 **SigV4 预签名 PUT**（agent 用发布机已有的长期 `COS_SECRET_*` 签名，TTL 约 1h）。腾讯云 COS 的 query 预签名验签时 **HashedPayload 固定为 `UNSIGNED-PAYLOAD`**，因此必须把 `X-Amz-Content-Sha256` 也签成该字面量；CI `headers` 原样带回。不要把对象 sha256 写进预签名 payload hash，COS 会 `SignatureDoesNotMatch`。正文完整性靠 `cas/{sha256}` key、Head 比 size、以及客户端按签名 manifest 验收。响应形状固定，以后若换成 STS 临时钥，CI 不必改。本切片**不**接腾讯云 AssumeRole。
 - `local`：`putUrl` 是相对本 agent 基址的 `PUT /v1/cas/{product}/{sha256}`；Bearer 放在 `headers.Authorization`，避免信任请求侧伪造的 forwarded host/proto。CI 仍只认同一份文档。
 
 响应里**永远只有一个上传目的地**。禁止给 CI 两套脚本（「COS 用 aws cli / 内网用 curl agent」），也禁止让 CI 按后端数量循环上传。`relkit cas-put` 只认这份文档。

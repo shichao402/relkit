@@ -88,6 +88,10 @@ func SignS3Request(req *http.Request, payloadHash, region, accessKey, secretKey 
 
 // PresignS3Request adds AWS SigV4 query authentication to req. The returned
 // URL authorizes only this method, object path, and expiry window.
+//
+// If X-Amz-Content-Sha256 is unset, HashedPayload is UNSIGNED-PAYLOAD. Tencent
+// COS query-auth verifies that literal; do not bind a real body sha256 when
+// the destination is COS.
 func PresignS3Request(req *http.Request, region, accessKey, secretKey string, now time.Time, ttl time.Duration) error {
 	if req.URL == nil {
 		return fmt.Errorf("request URL is nil")
