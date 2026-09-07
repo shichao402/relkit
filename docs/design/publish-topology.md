@@ -16,7 +16,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 ## 1. 决议
 
 - 控制面只有一个 **publish 节点**：nginx/Caddy（`:443` 切面）+ 本机 `relkit-agent`（`127.0.0.1:8787`）。反代是 HTTPS / 证书 / 入口日志的外壳，不是独立架构角色，也不是安全隔离层。
-- CI 多端先 `relkit stage`。**目标**对 agent 走同一套 CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 各 `cas/{sha256}` → 交 pb/policy → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**：CI 只喂该产品的 **primary ingest**，其余后端的副本由 agent 在数据面之间 `Materialize`。**写 index 指针才是真发布**。**现网**仍是整包 `PUT /v1/staged` tar，再由 agent `PutArtifactCAS`；`cas/credentials`、`artifactTo` / `pointerTo`、`Materialize` **尚未实现**。双 Job 并行时 mac 先 `PUT /v1/drop`，Windows 收齐后再 stage；drop 不是发布。
+- CI 多端先 `relkit stage`。`relkit cas-put` 对 agent 走同一套 CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 缺失的 `cas/{sha256}` → 交瘦 staged tar → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**：当前要求 `publishTo` 恰好是一家 ingest。整包 `PUT /v1/staged` → agent `PutArtifactCAS` 仍是兼容路径。其余后端由 agent `Materialize`、以及 `artifactTo` / `pointerTo` 拆分**尚未实现**。**写 index 指针才是真发布**。双 Job 并行时 mac 先 `PUT /v1/drop`，Windows 收齐后再 stage；drop 不是发布。
 - **`artifactTo` 与 `pointerTo` 分开（目标，profile 字段尚未落地）。** 几百 MiB 的 `artifact/` 只发给能当数据面的后端（COS、`local`），默认就 ingest 一家；几 KB 的签名 pb 才扇给 `entryUrls` 备桶。现网仍用一份 `publishTo`。用一个 `publishTo` 把产物也镜像进 git 仓，等于每次发版往历史灌一份删不掉的大文件。承载 `entryUrls` 的备援须过 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 三条准入（目标网络可达、`Cache-Control` 我方可配、失效域与主正交）；CNB / GitHub raw 不合格，当前形态是异地域第二个 COS 桶 + 独立自有二级域名。
 - 协议对象走 **Backend adapter**。CAS 的 `cas/{sha256}` inbox **只存在于 ingest 后端**；其余后端只有 `artifact/...`。**切面不因 type 分叉**：CI、`publish.Run`、客户端看到的接口对所有后端相同。预签名 / hardlink / git push / 字节从哪儿来都是实现细节，禁止 `if backend.Type()=="s3-compatible"` 出现在 publish 或 CI 脚本里。
 - **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。落地走 **BrowseSink**（外网 Makers、内网数据面 `browse/`、以后其它 site）。不要用 `Backend.Type()` 猜人页，也不要用 serve 现算一页当对外目录。
@@ -36,7 +36,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 
 ## 3. 发布
 
-下图是**目标切面**。现网仍从 `relkit stage` 整包 `PUT /v1/staged` 进 agent，再 `PutArtifactCAS`；图中的 `cas/credentials`、瘦 staged tar、`Materialize` 尚未实现。
+下图中 `cas/credentials`、CI 直传与瘦 staged tar 已实现；`Materialize` 和 `artifactTo` / `pointerTo` 尚未实现。整包 staged-put 仍可并行保留。
 
 ```mermaid
 flowchart TB

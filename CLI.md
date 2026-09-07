@@ -470,6 +470,8 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换 zip（Bearer；GET/HEAD 同样鉴权）
 - `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer；整包兼容路径）
 - `relkit staged-put FILE --product ID --version VER --url URL` — 分片并发上传（`--part-size` / `--concurrency`，或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）
+- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 PUT URL；S3/COS 是 SigV4 预签名 URL，local 是 agent 代理 URL
+- `relkit cas-put --version VER [--product ID] [--url URL]` — 上传缺失 CAS blob，然后自动上传只含 `staged.pb` + `release-policy.json` 的瘦 staged tar
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
 - `GET /-/health`
 
@@ -479,9 +481,9 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 
 ## 7. CI 集成
 
-CI **不持**签名私钥，也 **不持** 长期 COS 写密钥。现网 Runner 仍 `relkit stage` 后把 staged 树打包交给 `relkit-agent`。
+CI **不持**签名私钥，也 **不持**长期 COS 写密钥。Runner 可在 `relkit stage` 后用 `relkit cas-put` 直传缺失 blob；原有整包 staged-put 路径继续兼容。
 
-目标拓扑：产物直传该产品 **primary ingest** 的 `cas/`，**每个 blob 恰好一次**（凭据文档只给一个目的地，CI 不按后端数量循环）；agent 签发 **SigV4 预签名 PUT**（不持 STS SDK）、Promote / Materialize、签名。届时 profile 的 `publishTo` 拆成 `artifactTo` / `pointerTo`，`pointerTo` 只承载几 KB 签名 pb（`entryUrls` 备援须过 ADR 0007 三条准入，当前是异地域第二个 COS 桶）。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3——**尚未落地**，现网仍是下面这段整包流程。
+已落地切面：产物直传该产品第一个 ingest 的 `cas/`，凭据文档只给一个目的地；agent 签发 **SigV4 预签名 PUT**（不接 STS SDK）、Promote、签名。尚未落地的是 Materialize，以及 profile 从 `publishTo` 拆成 `artifactTo` / `pointerTo`。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3。
 
 ```yaml
 - name: Stage
@@ -507,6 +509,18 @@ CI **不持**签名私钥，也 **不持** 长期 COS 写密钥。现网 Runner 
       -d "{\"product\":\"${PRODUCT}\",\"version\":\"${VERSION}\",\"stagedSha256\":\"${SHA}\"}" \
       "${RELKIT_AGENT_URL}/v1/publish"
 ```
+
+CAS 路径把上面的打包与 `staged-put` 换成：
+
+```yaml
+- name: Upload CAS and thin staged metadata
+  env:
+    RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
+    RELKIT_AGENT_URL: ${{ vars.RELKIT_AGENT_URL }}
+  run: relkit cas-put --version "${VERSION}" --product "${PRODUCT}"
+```
+
+随后仍调用 `POST /v1/publish`；`cas-put` 的输出包含瘦 staged tar 的 sha256，可传给 `stagedSha256`。
 
 不要在 CI 里设置 `RELKIT_PRIVATE_KEY` 或任何签名私钥环境变量。设计说明：[`docs/design/publish-agent.md`](docs/design/publish-agent.md)。
 

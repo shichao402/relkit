@@ -326,12 +326,25 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 }
 
 func VerifyStagedHashes(cfg *config.Config, staged *model.StagedDocument) []string {
+	return verifyStagedHashes(cfg, staged, false)
+}
+
+// VerifyPresentStagedHashes verifies every artifact that is present locally,
+// while allowing a thin staged tree whose bytes were uploaded to CAS first.
+func VerifyPresentStagedHashes(cfg *config.Config, staged *model.StagedDocument) []string {
+	return verifyStagedHashes(cfg, staged, true)
+}
+
+func verifyStagedHashes(cfg *config.Config, staged *model.StagedDocument, allowMissing bool) []string {
 	var mismatches []string
 	directory := ArtifactsDir(cfg.Root, staged.Version)
 	for _, artifact := range staged.Artifacts {
 		path := filepath.Join(directory, artifact.Filename)
 		info, err := os.Stat(path)
 		if err != nil || info.IsDir() {
+			if allowMissing && os.IsNotExist(err) {
+				continue
+			}
 			mismatches = append(mismatches, fmt.Sprintf("%s: missing from staging tree", artifact.Filename))
 			continue
 		}

@@ -281,6 +281,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/-/health", s.handleHealth)
 	mux.HandleFunc("/v1/drop/", s.handleDrop)
+	mux.HandleFunc("/v1/cas/credentials", s.handleCASCredentials)
+	mux.HandleFunc("/v1/cas/", s.handleCASPut)
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
 	return mux
@@ -646,7 +648,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load staged: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if mismatches := stage.VerifyStagedHashes(cfg, staged); len(mismatches) > 0 {
+	if mismatches := stage.VerifyPresentStagedHashes(cfg, staged); len(mismatches) > 0 {
 		http.Error(w, "staged hash mismatch; re-upload", http.StatusConflict)
 		return
 	}

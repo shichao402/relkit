@@ -86,6 +86,65 @@ func SignS3Request(req *http.Request, payloadHash, region, accessKey, secretKey 
 	return signAWSV4(req, payloadHash, region, "s3", accessKey, secretKey, now)
 }
 
+// PresignS3Request adds AWS SigV4 query authentication to req. The returned
+// URL authorizes only this method, object path, and expiry window.
+func PresignS3Request(req *http.Request, region, accessKey, secretKey string, now time.Time, ttl time.Duration) error {
+	if req.URL == nil {
+		return fmt.Errorf("request URL is nil")
+	}
+	if ttl < time.Second || ttl > 7*24*time.Hour {
+		return fmt.Errorf("presign ttl must be between 1s and 168h")
+	}
+	now = now.UTC()
+	amzDate := now.Format("20060102T150405Z")
+	dateStamp := now.Format("20060102")
+	credentialScope := strings.Join([]string{dateStamp, region, "s3", "aws4_request"}, "/")
+	payloadHash := req.Header.Get("X-Amz-Content-Sha256")
+	if payloadHash == "" {
+		payloadHash = unsignedPayload
+	}
+	signed := make(http.Header)
+	signed.Set("Host", req.URL.Host)
+	for name, values := range req.Header {
+		lower := strings.ToLower(name)
+		if lower != "content-type" && !strings.HasPrefix(lower, "x-amz-") {
+			continue
+		}
+		for _, value := range values {
+			signed.Add(name, value)
+		}
+	}
+	signedHeaders, canonicalHeaders := canonicalHeaderBlock(signed)
+
+	query := req.URL.Query()
+	query.Set("X-Amz-Algorithm", sigv4Algorithm)
+	query.Set("X-Amz-Credential", accessKey+"/"+credentialScope)
+	query.Set("X-Amz-Date", amzDate)
+	query.Set("X-Amz-Expires", fmt.Sprintf("%d", int64(ttl/time.Second)))
+	query.Set("X-Amz-SignedHeaders", signedHeaders)
+	req.URL.RawQuery = canonicalQuery(query)
+
+	canonicalRequest := strings.Join([]string{
+		req.Method,
+		canonicalURI(req.URL),
+		canonicalQuery(req.URL.Query()),
+		canonicalHeaders,
+		signedHeaders,
+		payloadHash,
+	}, "\n")
+	stringToSign := strings.Join([]string{
+		sigv4Algorithm,
+		amzDate,
+		credentialScope,
+		hashSHA256Hex([]byte(canonicalRequest)),
+	}, "\n")
+	signingKey := deriveSigningKey(secretKey, dateStamp, region, "s3")
+	query = req.URL.Query()
+	query.Set("X-Amz-Signature", hex.EncodeToString(hmacSHA256(signingKey, stringToSign)))
+	req.URL.RawQuery = canonicalQuery(query)
+	return nil
+}
+
 // SHA256Hex is the hex SHA-256 of data, for SigV4 payload hashing.
 func SHA256Hex(data []byte) string {
 	return hashSHA256Hex(data)

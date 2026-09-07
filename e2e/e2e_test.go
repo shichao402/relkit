@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -418,6 +419,27 @@ func (f *e2eFakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target := filepath.Join(append([]string{f.dir}, strings.Split(path, "/")...)...)
 	switch r.Method {
 	case http.MethodPut:
+		if sourceHeader := r.Header.Get("x-amz-copy-source"); sourceHeader != "" {
+			decoded, err := url.PathUnescape(strings.TrimPrefix(sourceHeader, "/"))
+			if err != nil {
+				http.Error(w, "bad copy-source", http.StatusBadRequest)
+				return
+			}
+			source := filepath.Join(append([]string{f.dir}, strings.Split(decoded, "/")...)...)
+			data, err := os.ReadFile(source)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				f.t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(target, data, 0o644); err != nil {
+				f.t.Fatalf("write: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			f.t.Fatalf("mkdir: %v", err)
 		}

@@ -2,11 +2,13 @@ package backends
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -102,6 +104,35 @@ func (b *s3CompatibleBackend) URLsAreLive() bool {
 
 func (b *s3CompatibleBackend) Writable() bool {
 	return true
+}
+
+func (b *s3CompatibleBackend) AuthorizeCASUpload(key string, _ int64, ttl time.Duration) (*CASUpload, error) {
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return nil, err
+	}
+	req, err := b.newObjectRequest(http.MethodPut, key, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	payloadHash := path.Base(key)
+	if len(payloadHash) != sha256.Size*2 {
+		return nil, fmt.Errorf("CAS key %q does not end in a sha256", key)
+	}
+	req.Header.Set("Content-Type", contentTypeFor(key))
+	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	now := time.Now().UTC()
+	if err := PresignS3Request(req, b.region, accessKey, secretKey, now, ttl); err != nil {
+		return nil, err
+	}
+	return &CASUpload{
+		PutURL: req.URL.String(),
+		Headers: map[string]string{
+			"Content-Type":         contentTypeFor(key),
+			"X-Amz-Content-Sha256": payloadHash,
+		},
+		ExpiresAt: now.Add(ttl),
+	}, nil
 }
 
 func (b *s3CompatibleBackend) PutArtifact(localPath string, key string) ([]string, error) {
@@ -298,6 +329,7 @@ func (b *s3CompatibleBackend) Delete(key string) error {
 
 var _ Ingest = (*s3CompatibleBackend)(nil)
 var _ Deleter = (*s3CompatibleBackend)(nil)
+var _ CASUploadAuthorizer = (*s3CompatibleBackend)(nil)
 
 func (b *s3CompatibleBackend) Probe(rawURL string) (bool, *int64, string) {
 	timeout := b.timeout

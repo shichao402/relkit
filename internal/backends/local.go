@@ -1,7 +1,10 @@
 package backends
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -51,6 +54,39 @@ func (b *localBackend) PutArtifact(localPath string, key string) ([]string, erro
 		return nil, err
 	}
 	return []string{*b.URLFor(key)}, nil
+}
+
+func (b *localBackend) ReceiveCAS(key string, body io.Reader, size int64) error {
+	target, err := b.resolveUnder(b.outputDir, key)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".cas-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	hash := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(tmp, hash), io.LimitReader(body, size+1))
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if written != size {
+		return fmt.Errorf("cas body size %d does not match declared %d", written, size)
+	}
+	if got := hex.EncodeToString(hash.Sum(nil)); filepath.Base(key) != got {
+		return fmt.Errorf("cas body sha256 %s does not match key", got)
+	}
+	_ = os.Remove(target)
+	return os.Rename(tmpPath, target)
 }
 
 func (b *localBackend) PutImmutable(data []byte, key string) ([]string, error) {
@@ -135,3 +171,4 @@ func (b *localBackend) Delete(key string) error {
 
 var _ Ingest = (*localBackend)(nil)
 var _ Deleter = (*localBackend)(nil)
+var _ CASProxyReceiver = (*localBackend)(nil)

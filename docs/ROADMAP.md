@@ -22,12 +22,12 @@
 
 ## 发布侧：未变 blob 不重复上传（B）
 
-- **状态**：**agent 侧已落地**（`8bbf755`）：`PutArtifactCAS`、Head + Promote、按 live sha256 收 cas。CI `cas/credentials` 仍未做。整包 `PUT /v1/staged` 仍可用，解包后 publish 走 CAS。
+- **状态**：agent 侧 `PutArtifactCAS`、Head + Promote、按 live sha256 收 cas 已落地（`8bbf755`）；CI `cas/credentials`、`relkit cas-put` 与瘦 staged tar 也已落地。整包 `PUT /v1/staged` 仍可用。
 - **目标**：同一内容只 PUT 一次。blob 已存在 → 跳过上传，Promote 到本版 `artifact/`。
 - **Promote 用 Copy 不是 Move**：COS 没有改 key 的真正 Move（文档里的移动 = Copy + Delete）。Promote 必须 Copy，才能留下 `cas/{sha256}` 供下一版 Head；Move 会拆掉跨版本去重。同桶 Copy 仍占第二份存储，靠下面的 cas 回收压住。
 - **现网**：`local` / `s3-compatible` 实现 `Ingest`（Head 比 size，不重算 sha256；Promote = hardlink / CopyObject）和 `Deleter`。`http-put` 仍整文件 `PutArtifact`。
 - **cas 回收**：仍被任意 channel 的 index → manifest 点名的 sha256 保留。`relkit-serve` GC 扫 `cas/`。`publish.Run` 在写完 index 后，只删本产品本轮裁掉且其他 channel 也不再引用的 cas（不 List 整棵 `cas/`）。删除失败只打日志。
-- **未走**：`POST /v1/cas/credentials`（目标：s3 用 SigV4 预签名 PUT，不接 STS）、CI 直传 ingest、瘦 staged tar、`Materialize` / `artifactTo` 拆分。设计见 [`design/publish-agent.md`](design/publish-agent.md)。
+- **未走**：已有可 GET URL 的 artifact 直接申报、`Materialize` / `artifactTo` / `pointerTo` 拆分，以及宿主 CI 切换到 `relkit cas-put`。设计见 [`design/publish-agent.md`](design/publish-agent.md)。
 - **未变判定**：sha256（及 size），不是文件名、不是版本号。
 - **产品构建**：宿主每次把 `BuildTime` 打进二进制，哈希会变，B 也跳不过。relkit 不替宿主改编译。
 - **落点**：`internal/backends` + `publish.Run` + serve GC。客户端契约不变。不改 SPEC 去做 delta/patch。

@@ -44,7 +44,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 		return nil, err
 	}
 	channel := staged.Channel
-	mismatches := stage.VerifyStagedHashes(cfg, staged)
+	mismatches := stage.VerifyPresentStagedHashes(cfg, staged)
 	if len(mismatches) > 0 {
 		return nil, Error{Message: "staging tree no longer matches staged.pb:\n  " + strings.Join(mismatches, "\n  ") + "\nre-run 'relkit stage'"}
 	}

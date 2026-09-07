@@ -186,7 +186,7 @@ func detectItem(item Item, hostRoot string, cfg *config.Config, cfgErr error, op
 		return detectSimulate(cfg, cfgErr, res)
 	case "cas-planned":
 		res.Status = StatusPassed
-		res.Evidence = "agent publish uses CAS Head+Promote; CI whole-tree PUT /v1/staged is still valid"
+		res.Evidence = "agent supports CAS credentials + Head/Promote; relkit cas-put uploads missing blobs and thin staged metadata"
 		return res
 	case "public-keys":
 		if cfg == nil {

@@ -222,6 +222,60 @@ func TestSignAWSV4StableShape(t *testing.T) {
 	}
 }
 
+func TestPresignS3RequestStableShape(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPut, "https://bucket.example/cas/abc", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 7, 8, 0, 0, 0, time.UTC)
+	if err := PresignS3Request(req, "ap-guangzhou", "AKID", "SECRET", now, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	query := req.URL.Query()
+	if query.Get("X-Amz-Algorithm") != "AWS4-HMAC-SHA256" ||
+		query.Get("X-Amz-Credential") != "AKID/20260907/ap-guangzhou/s3/aws4_request" ||
+		query.Get("X-Amz-Date") != "20260907T080000Z" ||
+		query.Get("X-Amz-Expires") != "3600" ||
+		query.Get("X-Amz-SignedHeaders") != "host" ||
+		len(query.Get("X-Amz-Signature")) != 64 {
+		t.Fatalf("unexpected presign query: %s", req.URL.RawQuery)
+	}
+	if req.Header.Get("Authorization") != "" {
+		t.Fatal("presigned request must not carry Authorization header")
+	}
+}
+
+func TestS3AuthorizeCASUploadBindsPayloadHash(t *testing.T) {
+	t.Setenv("TEST_S3_ACCESS", "AKID")
+	t.Setenv("TEST_S3_SECRET", "SECRET")
+	backendAny, err := newS3CompatibleBackend("cos", map[string]any{
+		"type": "s3-compatible", "baseUrl": "https://download.example/rup/",
+		"endpoint": "https://cos.ap-guangzhou.myqcloud.com", "bucket": "bucket",
+		"accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
+		"region": "ap-guangzhou",
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := backendAny.(*s3CompatibleBackend)
+	digest := strings.Repeat("a", 64)
+	upload, err := backend.AuthorizeCASUpload("cas/"+digest, 123, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upload.Headers["X-Amz-Content-Sha256"] != digest {
+		t.Fatalf("headers=%v", upload.Headers)
+	}
+	parsed, err := url.Parse(upload.PutURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedHeaders := parsed.Query().Get("X-Amz-SignedHeaders")
+	if !strings.Contains(signedHeaders, "x-amz-content-sha256") {
+		t.Fatalf("signed headers=%q", signedHeaders)
+	}
+}
+
 type fakeS3 struct {
 	t             *testing.T
 	dir           string

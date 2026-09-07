@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cnb.cool/shichao402/relkit/internal/model"
@@ -72,6 +73,20 @@ func TestPutArtifactCASFallsBackWithoutIngest(t *testing.T) {
 	}
 	if len(urls) != 0 {
 		t.Fatalf("urls=%v", urls)
+	}
+}
+
+func TestPutArtifactCASReportsThinStagedMiss(t *testing.T) {
+	root := t.TempDir()
+	backend, err := newLocalBackend("disk", map[string]any{
+		"type": "local", "baseUrl": "http://127.0.0.1/rup/", "outputDir": filepath.Join(root, "out"),
+	}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = PutArtifactCAS(backend, filepath.Join(root, "missing.bin"), "artifact/demo/1/app.bin", strings.Repeat("a", 64), 5)
+	if err == nil || !strings.Contains(err.Error(), "CAS miss") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

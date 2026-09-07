@@ -77,7 +77,7 @@ https://updates.<your-domain>/artifact/...
 ### 4.1 发布流程（构建 → CAS → 签名 → 提交）
 
 目标：发布机只做控制面（发预签名上传凭据、签名、Copy、写指针）。产物字节不进 CVM。  
-**现网**仍是 `PUT /v1/staged` 整包 tar（含 `artifacts/`）再由 agent `PutArtifactCAS`。下图是**已确认的目标切面**（`cas/credentials` 代码尚未落地）；整包路径继续可用。
+`POST /v1/cas/credentials`、S3 SigV4 预签名 PUT、`relkit cas-put` 与瘦 staged tar 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` 扇出 / `Materialize` 仍是目标态。
 
 ```mermaid
 flowchart TB
@@ -135,7 +135,7 @@ flowchart TB
 - **字节只跨「CI → 数据面」一次。** 凭据文档只给一个目的地（该产品的 primary ingest）。CI **不按后端数量循环上传**；其余 `artifactTo` 后端的副本由 agent `Materialize`。
 - `cas/` inbox **只存在于 ingest 后端**，别的后端只有 `artifact/...`。`publish.Run` 只调用 Head / Promote / Materialize / PutArtifact，**禁止**按 `Type()` 写第二条发布路径。细节 [`publish-agent.md`](publish-agent.md) §2.3。
 - **第二 backend 必须是另一只桶。** 同桶的多个自定义域名只是 GET 别名，禁止写成两条 `s3-compatible`。成都桶（`raw2.firoyang.com`）是验证期第二 backend，已按单独指令拆除。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
-- agent 对 CAS **不重算 sha256**，只 HEAD 比 size。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
+- agent 对 S3/COS CAS **不重算 sha256**，只 HEAD 比 size；local 代理 PUT 会在落盘前校验长度与 sha256。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
 - **写 index 指针才是真发布。** ingest `Head` 命中则只 Promote，不要求 agent 盘上有该文件；`Head` 不到且本地无整包副本时**整轮失败**，不写任何指针。
 - `publish.Run` **不幂等**；发布入口必须幂等键与串行化。
 - 发布机 **不必**出现在客户端 `entryUrls` 里。目的是健壮，不是跨境加速。

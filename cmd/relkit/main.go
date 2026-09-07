@@ -88,6 +88,8 @@ func run(argv []string) (code int) {
 		err = cmdPublish(rest, configPath)
 	case "staged-put":
 		err = cmdStagedPut(rest)
+	case "cas-put":
+		err = cmdCASPut(rest, configPath)
 	case "fallback":
 		err = cmdFallback(rest, configPath)
 	case "directory":
@@ -1003,6 +1005,7 @@ Commands:
   verify
   publish
   staged-put
+  cas-put
   fallback
   directory
   agent-guide

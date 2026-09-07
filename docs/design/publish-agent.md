@@ -95,7 +95,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 
 `pointerTo` 未声明时等于 `artifactTo`。两个列表都必须 `Writable()`。
 
-**落地状态（2026-09-07）：** agent 侧 `PutArtifactCAS`（Head + Promote + cas GC）已落地。**CI `cas/credentials`、瘦 staged tar、`artifactTo` / `pointerTo` 与 `Materialize` 仍未实现**——本节以下是已确认的目标，不是现网接口。现网 profile 仍只有 `publishTo`。`publish.Run` 对实现了 `Ingest` 的后端（`local`、`s3-compatible`）走 `PutArtifactCAS`：Head `cas/{sha256}` 比 size → 命中则 Promote，未命中且本地有文件则 PUT cas 再 Promote。其余后端仍 `PutArtifact`。落地其余部分时：
+**落地状态（2026-09-07）：** agent 侧 `PutArtifactCAS`（Head + Promote + cas GC）、`POST /v1/cas/credentials`、local 代理 PUT、s3-compatible 预签名 PUT、`relkit cas-put` 与瘦 staged tar 已落地。**`artifactTo` / `pointerTo`、已有外部 URL 申报与 `Materialize` 仍未实现。** 现网 profile 仍只有 `publishTo`；credentials 暂要求它恰好包含一个 `Ingest`。`publish.Run` 对实现了 `Ingest` 的后端（`local`、`s3-compatible`）走 `PutArtifactCAS`：Head `cas/{sha256}` 比 size → 命中则 Promote，未命中且本地有文件则 PUT cas 再 Promote。其余后端仍 `PutArtifact`。落地其余部分时：
 
 - `artifactTo` / `pointerTo` 默认都由 `publishTo` 迁移而来（未声明即全等），保持旧 profile 可用。
 - 已有的 `directory.publishTo` 是 `pointerTo` 的雏形，**并进 `pointerTo`**，不要再加第三个目标列表。
@@ -109,14 +109,16 @@ agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不
 
 #### 凭据文档（CI 唯一入口）
 
-`POST /v1/cas/credentials` 的请求带每个 blob 的 sha256 / size / 可选已有 URL；响应 **形状固定**，字段不随 type 改名：每个**仍需上传**的 blob 一个 `putUrl`（或分片 uploads URL）、过期时间、可选 `headers`。已有可 GET URL 的 blob、以及 ingest 上 `Head(cas/{sha256})` 已命中且 size 一致的 blob，不出现在响应里。CI 只做 HTTP PUT，一个 blob 最多一次。
+`POST /v1/cas/credentials` 的请求带每个 blob 的 sha256 / size / 预留的已有 URL；响应 **形状固定**，字段不随 type 改名：每个**仍需上传**的 blob 一个 `putUrl`、过期时间、可选 `headers`。当前已实现 ingest 上 `Head(cas/{sha256})` 命中且 size 一致时不返回 upload；`urls` 字段暂不触发跳过，等 staged 能持久化这些取货 URL 与 `Materialize` 后再启用，避免凭据层跳过但 publish 无处取货。CI 只做 HTTP PUT，一个 blob 最多一次。
 
 agent 按 **ingest 后端**（不是整个 `artifactTo`）填内容：
 
-- `s3-compatible`：`putUrl` 指向桶内 `cas/{sha256}` 的 **SigV4 预签名 PUT**（agent 用发布机已有的长期 `COS_SECRET_*` 签名，TTL 约 1h）。可选 `headers` 承载必须随 PUT 带上的 SigV4 头。响应形状固定，以后若换成 STS 临时钥，CI 不必改。本切片**不**接腾讯云 AssumeRole。
-- `local`：`putUrl` 指向本 agent 的 `PUT /v1/cas/{product}/{sha256}`；Bearer 可放在 `headers.Authorization`，CI 仍只认同一份文档。
+- `s3-compatible`：`putUrl` 指向桶内 `cas/{sha256}` 的 **SigV4 预签名 PUT**（agent 用发布机已有的长期 `COS_SECRET_*` 签名，TTL 约 1h），并签入 `X-Amz-Content-Sha256` 绑定正文。`headers` 承载 PUT 必须带上的签名头。响应形状固定，以后若换成 STS 临时钥，CI 不必改。本切片**不**接腾讯云 AssumeRole。
+- `local`：`putUrl` 是相对本 agent 基址的 `PUT /v1/cas/{product}/{sha256}`；Bearer 放在 `headers.Authorization`，避免信任请求侧伪造的 forwarded host/proto。CI 仍只认同一份文档。
 
 响应里**永远只有一个上传目的地**。禁止给 CI 两套脚本（「COS 用 aws cli / 内网用 curl agent」），也禁止让 CI 按后端数量循环上传。`relkit cas-put` 只认这份文档。
+
+`Materialize` 落地前，credentials 要求 profile **恰好一个 `publishTo`**；多后端产品继续走整包 staged-put，不能让瘦树在第二后端退回打开不存在的本地 artifact。
 
 #### Promote 与 Materialize
 
@@ -183,7 +185,8 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 - `GET` / `DELETE` `/v1/staged/{product}/{version}/uploads/{id}` — 查询已收片 / 放弃
 - `POST /v1/staged/{product}/{version}/uploads/{id}/complete` — 拼装、校验整包 sha256、解包（与整包 PUT 同一落地路径）
 - `POST /v1/publish` — JSON：`product` / `version` / 可选 `to` / `dryRun` / `stagedSha256` / `idempotencyKey`
-- **计划** `POST /v1/cas/credentials` — 统一上传说明（每个仍需上传的 blob 一个 `putUrl` / 可选 headers / 过期），目的地只有 **ingest 后端**一个。ingest 是 `s3-compatible` 时 agent 填 SigV4 预签名 PUT；是 `local` 时填本机 `PUT /v1/cas/...`。CI 不分支、不按后端数量循环。**代码未落地，不要当现网接口。**
+- `POST /v1/cas/credentials` — 统一上传说明（每个仍需上传的 blob 一个 `putUrl` / 可选 headers / 过期），目的地只有 **ingest 后端**一个。ingest 是 `s3-compatible` 时 agent 填 SigV4 预签名 PUT；是 `local` 时填本机 `PUT /v1/cas/...`。CI 不分支、不按后端数量循环。
+- `PUT /v1/cas/{product}/{sha256}?size=N` — 仅 local ingest 的代理上传口；Bearer 与产品绑定，服务端同时校验长度与 sha256。
 
 CI 默认走 `relkit staged-put`：多连接并发 PUT 各片。片大小与并发由客户端 `--part-size` / `--concurrency`（或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）决定，agent 配置夹取上限。同一 `bytes+sha256` 的未完成会话可续传。
 
@@ -233,7 +236,7 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
    - 旧机：产品根已有整份 `relkit.json` 时执行 `init -product <id> -migrate-profile`。它抽出机器侧字段写到 `/etc/relkit-agent/products/<id>.json`，把产品根那份改名为 `relkit.json.migrated`，且拒绝覆盖已存在的 profile。
    - 新机：按 `deploy/relkit-intranet-product.example.json` 或公网 `s3-compatible` 样例手写 `/etc/relkit-agent/products/<id>.json`（`product` / `signing.keyId` 与仓库 policy 对齐）。**不要**往 `/srv/relkit/<id>/` 塞发布凭据。
 6. `systemctl restart relkit-agent`。
-7. 目标 CI：`relkit stage` → `cas/credentials` → 按唯一 putUrl 上传一次 → `PUT /v1/staged` 瘦 tar（无 `artifacts/`）→ `POST /v1/publish`（agent Head + Promote；`Materialize` 仍未落地）。**现网仍是整包 staged-put**，credentials 代码未落地前不要改宿主流水线。
+7. CI 可改走：`relkit stage` → `relkit cas-put --version <ver>`（内部请求 credentials、按唯一 putUrl 上传缺失 blob、再上传无 `artifacts/` 的瘦 tar）→ `POST /v1/publish`。整包 `staged-put` 仍是兼容路径；`Materialize` 仍未落地。
 
 ## 6. Token 轮换
 

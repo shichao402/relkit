@@ -2,9 +2,32 @@ package backends
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
 )
+
+// CASUpload describes one temporary direct-upload destination. Callers only
+// execute the returned HTTP PUT; backend-specific signing stays here.
+type CASUpload struct {
+	PutURL    string
+	Headers   map[string]string
+	ExpiresAt time.Time
+}
+
+// CASUploadAuthorizer is implemented by ingest backends that can let CI upload
+// a blob directly without proxying its bytes through relkit-agent.
+type CASUploadAuthorizer interface {
+	AuthorizeCASUpload(key string, size int64, ttl time.Duration) (*CASUpload, error)
+}
+
+// CASProxyReceiver is implemented by an ingest that receives CI bytes through
+// relkit-agent rather than through a directly presigned storage URL.
+type CASProxyReceiver interface {
+	ReceiveCAS(key string, body io.Reader, size int64) error
+}
 
 // Ingest is the optional content-addressed write path on a data-plane backend.
 // publish.Run must not switch on Type(); it type-asserts this interface.
@@ -44,6 +67,12 @@ func PutArtifactCAS(backend Backend, localPath, artifactKey, sha256 string, size
 	if exists && gotSize == size {
 		urls, err = ingest.Promote(casKey, artifactKey)
 		return urls, true, err
+	}
+	if _, statErr := os.Stat(localPath); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, false, fmt.Errorf("CAS miss for %s and staged artifact is unavailable: %s", casKey, localPath)
+		}
+		return nil, false, fmt.Errorf("inspect staged artifact %s: %w", localPath, statErr)
 	}
 	if _, err := backend.PutArtifact(localPath, casKey); err != nil {
 		return nil, false, fmt.Errorf("put cas %s: %w", casKey, err)
