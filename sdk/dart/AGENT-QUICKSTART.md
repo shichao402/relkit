@@ -14,7 +14,7 @@
 dependencies:
   rup_client:
     git:
-      url: https://cnb.cool/shichao402/relkit.git
+      url: https://github.com/shichao402/relkit.git
       path: sdk/dart
 ```
 
@@ -87,6 +87,7 @@ switch (result) {
     // result.priorReleaseNotes — 更早版本（优先 notesUrl）
     final file = await updater.download(
       result,
+      // 用已装目录；每次新建空临时目录会让未变文件也重新 GET
       destinationDir: stagingDownloadDir,
       onProgress: (p) {
         // p.received / p.total / p.bytesPerSecond / p.eta
@@ -146,6 +147,8 @@ scheduler.stop();
 - [ ] product / indexUrl / keyId / selectors 与现网发布一致
 - [ ] 强制 check 对旧 code 能看到更新（或明确 up-to-date）
 - [ ] download 进度能显示 % 与速度；完成后 hash 校验通过
+- [ ] download 目标是已装路径（或明确接受整包安装器无法跳过）
+- [ ] 发版不注入每次不同的 `BuildTime`
 - [ ] 公钥仅编译期常量；轮换流程写进宿主文档
 - [ ] （若 apply）preserve 列表覆盖日志与重成本运行时数据
 

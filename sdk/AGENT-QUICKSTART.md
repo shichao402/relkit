@@ -76,7 +76,7 @@ func CheckOnce(ctx context.Context) error {
 		return nil
 	}
 
-	dest := "update-download.bin"
+	dest := "update-download.bin" // 已装路径：多组件套件对每个 bin/<name> 调 Download；先下到新临时目录会让 size+sha256 跳过永远 miss
 	if err := u.Download(ctx, res.Available, dest); err != nil {
 		return fmt.Errorf("download: %w", err)
 	}
@@ -112,6 +112,8 @@ func CheckOnce(ctx context.Context) error {
 - [ ] `go build` 含 sdk 导入通过
 - [ ] 对真实或 `local` 发布的 directory/index：`CheckForce` 返回预期
 - [ ] `Download` 后文件 hash 与 manifest 一致
+- [ ] `Download` 的 destPath 是已装文件（套件循环不要先下到全新临时目录）
+- [ ] 发版不注入每次不同的 `BuildTime`（否则跳过下载 / CAS 跳过上传打不中）
 - [ ] README/内部文档写明公钥轮换：先双钥并存发一版，再删旧钥
 - [ ] Apply 策略有书面说明（`sdk/apply` 或宿主自定义）
 - [ ] 远程 check 失败时 `result.Recovery` 仍能给出内嵌文案与官方链接

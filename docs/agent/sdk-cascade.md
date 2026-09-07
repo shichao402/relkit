@@ -48,6 +48,9 @@
 
 - 何时检查、UI、是否安装
 - Apply（换目录 / 装包 / 重启）；Go SDK 默认不带 apply，Dart 可选 `apply/`，Node 不提供 apply
+- **`Download` dest 对准已装文件**，不要版本新就把套件全下到新临时目录
+- **发版哈希稳定**（不要每次 `BuildTime`）；否则客户端跳过下载和 agent CAS 跳过上传都失效
+- sparse / vendor relkit 时从 **GitHub** clone、默认跟 **`main`**
 
 ## 开箱后冒烟
 

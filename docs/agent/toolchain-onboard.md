@@ -13,7 +13,7 @@ relkit --version
 
 ```bash
 go install cnb.cool/shichao402/relkit/cmd/relkit@latest
-# 或从 https://cnb.cool/shichao402/relkit/-/releases 下载二进制并加入 PATH
+# 或从 https://github.com/shichao402/relkit/releases 下载二进制并加入 PATH
 ```
 
 自托管分发时再装 serve：
@@ -81,8 +81,10 @@ relkit verify --deep                # 对真实 HTTP 后端有意义
 2. 构建产物 → `relkit stage`（会写出 `release-policy.json`）→ 上传 staged → 发布机 `publish`
 3. **私钥、COS 密钥不进 CI、不进 staged 包。** 仓库 `relkit.json` 只给 stage 抽策略；机器侧 `publishTo` / 密钥 env 名在 `/etc/relkit-agent/products/<id>.json`
 4. **禁止**把完整 `relkit.json` scp/覆盖到 `/srv/relkit/<id>/`。agent 不读产品根那份；覆盖只会冲掉本机密钥引用
-5. 宿主仓若 vendored / sparse 钉 relkit，写**完整 SHA**。CNB `git fetch origin <短SHA>` 会失败
+5. 宿主仓若 sparse / vendor relkit：clone **`https://github.com/shichao402/relkit.git`**，默认跟 **`main`**。只有要冻结某次发版才 `--ref` **完整 SHA**（短 SHA 多数 remote 拒绝 `git fetch`）。Go 模块路径仍是 `cnb.cool/shichao402/relkit`，那不是 git URL
 6. 发版排障与红线：改读 `relkit agent-guide`，不要复制粘贴过期命令
+7. **产物哈希要稳**：不要把每次不同的 `BuildTime` / 随机 seed 打进二进制。relkit 只认 sha256；哈希漂了，agent CAS 跳过上传和客户端跳过下载都打不中
+8. **发布 CAS 不用宿主再实现**：`relkit-agent` 的 `publish` 已 Head+Promote；CI 仍可整包 `PUT /v1/staged`
 
 参考实现（非规范）：SvnMergeTool 的蓝盾双 Job（一端 upload-only，一端等 peer 后统一 publish）。
 
@@ -94,6 +96,9 @@ relkit verify --deep                # 对真实 HTTP 后端有意义
 - [ ] 至少一次成功 `publish`（或 dry-run + 用户确认后端稍后配）
 - [ ] 已记下 index URL 形态：`…/index/<product>/<channel>.pb`
 - [ ] `relkit.json` 含 `recovery`（至少两个官方手动入口）且已 `relkit onboard run repo.recovery-embed` 与 `repo.client-contract`
+- [ ] 若 sparse / vendor relkit：GitHub 仓、跟 `main`（或完整 SHA pin）；已 `relkit onboard ack human.vendor-relkit`
+- [ ] 发版 ldflags 不注入每次不同的 `BuildTime`；已 `ack human.stable-artifact-hash`
+- [ ] SDK `Download` 的 dest 对准已装路径（或已 ack N/A）；已 `ack human.download-dest-installed`
 
 然后去做 [`sdk-cascade.md`](sdk-cascade.md)。
 

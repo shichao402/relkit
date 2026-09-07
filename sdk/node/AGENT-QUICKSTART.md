@@ -137,6 +137,8 @@ SDK 已做（宿主不要重做一遍）：
 - [ ] `npm test` 在 `sdk/node/` 全绿（conformance 13 项 + 单测 29 项）
 - [ ] 用比 head 更小的 `currentCode` 调 `check` → 得到 `update-available`
 - [ ] `download` 得到的文件 sha256 与 manifest 一致
+- [ ] `download` 目标是已装路径（未变 artifact 才能跳过 GET）
+- [ ] 发版不注入每次不同的 `BuildTime`
 - [ ] 断网 → 失败且不留下「通过校验」的假文件
 - [ ] 故意换错公钥 → 验签失败且拒绝使用，不降级为不验签
 - [ ] `product` 改错一个字 → 整份 index 被拒

@@ -185,8 +185,8 @@ func detectItem(item Item, hostRoot string, cfg *config.Config, cfgErr error, op
 	case "simulate":
 		return detectSimulate(cfg, cfgErr, res)
 	case "cas-planned":
-		res.Status = StatusNA
-		res.Evidence = "CAS ingest is planned and does not block the current whole-tree publish path"
+		res.Status = StatusPassed
+		res.Evidence = "agent publish uses CAS Head+Promote; CI whole-tree PUT /v1/staged is still valid"
 		return res
 	case "public-keys":
 		if cfg == nil {

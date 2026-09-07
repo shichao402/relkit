@@ -82,12 +82,15 @@ Node SDK 开箱：[`../../sdk/node/AGENT-QUICKSTART.md`](../../sdk/node/AGENT-QU
 - [ ] `relkit.json` 含 `recovery.message` 与至少两个官方手动入口；已 `relkit onboard run repo.recovery-embed`
 - [ ] 宿主能在远程 check 失败时展示内嵌 `RecoveryHelp`（不经网络）
 - [ ] 每个 `s3-compatible` backend 使用不同 bucket（同桶多域名不是多个 backend）
+- [ ] 若 vendor/sparse relkit：从 GitHub clone、跟 `main`（冻结才用完整 SHA）
+- [ ] 发版产物不注入每次不同的 `BuildTime`（否则 CAS / 跳过下载打不中）
 
 SDK 侧（按语言）：
 
 - [ ] 依赖已加入（Go module / Dart pub）
 - [ ] `product`、`channel`、`indexUrls`、`trustedKeys`、`clientSelectors` 与发布侧一致
 - [ ] 进程内能跑通 `check`；有产物时可 `download` 且 sha256 校验通过
+- [ ] `Download` 的 destPath / destination 是**已装文件**（多组件各对已装路径调一次），不要先下到全新临时目录再拷；整包 DMG 当单一 artifact 时跳过几乎省不了，接受即可
 - [ ] Apply（若需要）有明确宿主策略；未实现则文档里写明「仅下载到目录」
 
 ## 4. 对 Agent 的硬性要求
