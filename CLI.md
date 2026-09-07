@@ -481,7 +481,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 
 CI **不持**签名私钥，也 **不持** 长期 COS 写密钥。现网 Runner 仍 `relkit stage` 后把 staged 树打包交给 `relkit-agent`。
 
-目标拓扑：产物直传该产品 **primary ingest** 的 `cas/`，**每个 blob 恰好一次**（凭据文档只给一个目的地，CI 不按后端数量循环）；agent 只发 STS、Promote / Materialize、签名。届时 profile 的 `publishTo` 拆成 `artifactTo` / `pointerTo`，`pointerTo` 只承载几 KB 签名 pb（`entryUrls` 备援须过 ADR 0007 三条准入，当前是异地域第二个 COS 桶）。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3——**尚未落地**，现网仍是下面这段整包流程。
+目标拓扑：产物直传该产品 **primary ingest** 的 `cas/`，**每个 blob 恰好一次**（凭据文档只给一个目的地，CI 不按后端数量循环）；agent 签发 **SigV4 预签名 PUT**（不持 STS SDK）、Promote / Materialize、签名。届时 profile 的 `publishTo` 拆成 `artifactTo` / `pointerTo`，`pointerTo` 只承载几 KB 签名 pb（`entryUrls` 备援须过 ADR 0007 三条准入，当前是异地域第二个 COS 桶）。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3——**尚未落地**，现网仍是下面这段整包流程。
 
 ```yaml
 - name: Stage

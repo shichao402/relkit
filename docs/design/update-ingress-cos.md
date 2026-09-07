@@ -4,7 +4,7 @@
 title: 更新入口拓扑（COS 固定入口）
 category: design
 created: 2026-08-11
-updated: 2026-09-04
+updated: 2026-09-07
 status: approved
 related: ADR 0005, ADR 0007, docs/design/bootstrap-directory.md, docs/design/publish-topology.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
 ---
@@ -76,8 +76,8 @@ https://updates.<your-domain>/artifact/...
 
 ### 4.1 发布流程（构建 → CAS → 签名 → 提交）
 
-目标：发布机只做控制面（发窄权限临时凭据、签名、Copy、写指针）。产物字节不进 CVM。  
-**现网代码仍是** `PUT /v1/staged` 整包 tar（含 `artifacts/`）再由 agent `PutArtifact`；切 CAS 之前那条路径继续可用。
+目标：发布机只做控制面（发预签名上传凭据、签名、Copy、写指针）。产物字节不进 CVM。  
+**现网**仍是 `PUT /v1/staged` 整包 tar（含 `artifacts/`）再由 agent `PutArtifactCAS`。下图是**已确认的目标切面**（`cas/credentials` 代码尚未落地）；整包路径继续可用。
 
 ```mermaid
 flowchart TB
@@ -93,7 +93,7 @@ flowchart TB
 
   subgraph agentSide [发布机 控制面 大字节不驻留]
     ingress["publish.your-domain → 127.0.0.1:8787"]
-    tokSvc["签发凭据文档<br/>目的地只有 ingest 一个<br/>COS 填 STS；local 填本机 PUT"]
+    tokSvc["签发凭据文档<br/>目的地只有 ingest 一个<br/>COS 预签名 PUT；local 填本机 PUT"]
     headCas["Head cas 比 size<br/>不重算 sha256"]
     mergeStep["release-policy.json +<br/>本机 products/PRODUCT.json"]
     publishStep["publish.Run<br/>不按 Type 分支"]
@@ -131,12 +131,12 @@ flowchart TB
 
 要点：
 
-- **CI 不签名、不持长期后端写密钥。** 只认凭据文档里的 `putUrl`（COS 时里面是 STS；`local` 时是 agent）。长期 `COS_SECRET_*` 仍只在发布机。
+- **CI 不签名、不持长期后端写密钥。** 只认凭据文档里的 `putUrl`（COS 时是 SigV4 预签名 PUT；`local` 时是 agent）。长期 `COS_SECRET_*` 仍只在发布机。不接腾讯云 STS SDK；响应形状固定，以后换 STS 不必改 CI。
 - **字节只跨「CI → 数据面」一次。** 凭据文档只给一个目的地（该产品的 primary ingest）。CI **不按后端数量循环上传**；其余 `artifactTo` 后端的副本由 agent `Materialize`。
 - `cas/` inbox **只存在于 ingest 后端**，别的后端只有 `artifact/...`。`publish.Run` 只调用 Head / Promote / Materialize / PutArtifact，**禁止**按 `Type()` 写第二条发布路径。细节 [`publish-agent.md`](publish-agent.md) §2.3。
 - **第二 backend 必须是另一只桶。** 同桶的多个自定义域名只是 GET 别名，禁止写成两条 `s3-compatible`。成都桶（`raw2.firoyang.com`）是验证期第二 backend，已按单独指令拆除。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
 - agent 对 CAS **不重算 sha256**，只 HEAD 比 size。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
-- **写 index 指针才是真发布。** ingest 上 Head 不到且本地无整包副本时**整轮失败**，不写任何指针。
+- **写 index 指针才是真发布。** ingest `Head` 命中则只 Promote，不要求 agent 盘上有该文件；`Head` 不到且本地无整包副本时**整轮失败**，不写任何指针。
 - `publish.Run` **不幂等**；发布入口必须幂等键与串行化。
 - 发布机 **不必**出现在客户端 `entryUrls` 里。目的是健壮，不是跨境加速。
 

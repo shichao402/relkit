@@ -4,7 +4,7 @@
 title: Publish Agent
 category: design
 created: 2026-08-12
-updated: 2026-09-04
+updated: 2026-09-07
 status: approved
 related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md
 ---
@@ -45,7 +45,7 @@ agent 只需要清单与策略，不需要产物副本：
   release-policy.json    # 仓库侧 portable 策略
 ```
 
-CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。这些文件按凭据文档 PUT 到 **ingest 后端**的 `cas/{sha256}`，**每个 blob 一次**，与本轮有几个后端无关。现网整包 tar 仍可带上 `artifacts/`，agent 解包后 `PutArtifact`。
+CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。目标路径：这些文件按凭据文档 PUT 到 **ingest 后端**的 `cas/{sha256}`，**每个 blob 一次**，与本轮有几个后端无关；交给 agent 的 tar **不含** `artifacts/`（只有 `staged.pb` + `release-policy.json`）。现网整包 tar 仍可带上 `artifacts/`，agent 解包后走 `PutArtifactCAS`。瘦 tar 路径下，缺文件是否可发布由 ingest 上是否已有对应 `cas/{sha256}` 决定（见失败语义），不要在解包时因为没有 `artifacts/` 就失败。
 
 缺少 `release-policy.json` 或本机没有可读 profile 时直接失败。
 
@@ -57,7 +57,7 @@ CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。这些文件按凭
 
 **硬约束一：字节只跨「CI → 数据面」一次。** 产物由 CI 上传**恰好一次**到该产品的 **primary ingest**；其余 Backend 的副本由 agent 在数据面之间取得。CI 不知道本轮有几个后端。
 
-**硬约束二：对外切面不按后端类型分叉。** CI、`publish.Run`、客户端看到同一套 key 与同一套调用。STS、hardlink、git push、字节从哪儿来，只允许出现在 **Backend / agent 实现**里。
+**硬约束二：对外切面不按后端类型分叉。** CI、`publish.Run`、客户端看到同一套 key 与同一套调用。预签名 / STS、hardlink、git push、字节从哪儿来，只允许出现在 **Backend / agent 实现**里。
 
 上一版让 CI 按 `publishTo` 里每个后端各拿一个 `putUrl`、各传一遍，**作废**。两个后端就是同样的 380MiB 跨境两次；更糟的是 git 类后端的写路径会把字节从 GitHub 送进广州 CVM 再推回 GitHub，跨境三次去搬一份本来就在 GitHub 上的文件。
 
@@ -68,6 +68,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 - 必须支持 `Head` + `Promote`（今天即 `s3-compatible` 与 `local`）。
 - 公网产品选 COS，内网产品选 `local`。git 类后端**不可**作 ingest：内容寻址 blob 一旦 commit 就永久留在历史里，`git rm` 删不掉。
 - 未声明时取 `artifactTo` 里第一个满足条件的后端；一个都没有则拒绝发布。
+- **`artifactTo` 落地前：** 现网 profile 只有 `publishTo`。ingest 取 `publishTo` 里**第一个实现 `Ingest` 的后端**。一个都没有 → `POST /v1/cas/credentials` 返回 400，CI 继续整包 `PUT /v1/staged`。
 
 `cas/{sha256}` 只存在于 ingest 后端（可加 `prefix`）。别的后端只有 `artifact/<product>/<version>/<filename>`。
 
@@ -75,7 +76,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 
 | 谁 | 看见什么 | 不许看见 |
 |---|---|---|
-| 客户端 | 签名文档里的 `urls[]`；按 size / sha256 验收 | `cas/`、STS、ingest 是谁、agent |
+| 客户端 | 签名文档里的 `urls[]`；按 size / sha256 验收 | `cas/`、预签名、ingest 是谁、agent |
 | `publish.Run` | 对 ingest：`Head(casKey)` → `Promote(casKey, artifactKey)`；对其余 artifact 后端：`Materialize(blob, artifactKey)`；再 `PutImmutable` / `PutPointer` | `Type()=="s3-compatible"` 分支、腾讯云 STS SDK |
 | CI | `POST /v1/cas/credentials` → 对**尚无可 GET URL** 的 blob 各 PUT 一次 → 元数据里带上已有 URL → `POST /v1/publish` | 本轮有几个后端；按托管商写两套脚本；自己签 index |
 
@@ -94,7 +95,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 
 `pointerTo` 未声明时等于 `artifactTo`。两个列表都必须 `Writable()`。
 
-**落地状态：CI `cas/credentials`、`artifactTo` / `pointerTo` 与 `Materialize` 尚未实现。** 现网 profile 仍只有 `publishTo`。`publish.Run` 对实现了 `Ingest` 的后端（`local`、`s3-compatible`）走 `PutArtifactCAS`：Head `cas/{sha256}` 比 size → 命中则 Promote，未命中则 PUT cas 再 Promote。其余后端仍 `PutArtifact`。落地其余部分时：
+**落地状态（2026-09-07）：** agent 侧 `PutArtifactCAS`（Head + Promote + cas GC）已落地。**CI `cas/credentials`、瘦 staged tar、`artifactTo` / `pointerTo` 与 `Materialize` 仍未实现**——本节以下是已确认的目标，不是现网接口。现网 profile 仍只有 `publishTo`。`publish.Run` 对实现了 `Ingest` 的后端（`local`、`s3-compatible`）走 `PutArtifactCAS`：Head `cas/{sha256}` 比 size → 命中则 Promote，未命中且本地有文件则 PUT cas 再 Promote。其余后端仍 `PutArtifact`。落地其余部分时：
 
 - `artifactTo` / `pointerTo` 默认都由 `publishTo` 迁移而来（未声明即全等），保持旧 profile 可用。
 - 已有的 `directory.publishTo` 是 `pointerTo` 的雏形，**并进 `pointerTo`**，不要再加第三个目标列表。
@@ -108,18 +109,18 @@ agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不
 
 #### 凭据文档（CI 唯一入口）
 
-`POST /v1/cas/credentials` 的请求带每个 blob 的 sha256 / size / 可选已有 URL；响应 **形状固定**，字段不随 type 改名：每个**仍需上传**的 blob 一个 `putUrl`（或分片 uploads URL）、过期时间、可选 `headers`（SigV4 临时钥放这里）。已有可 GET URL 的 blob 不出现在响应里。CI 只做 HTTP PUT，一个 blob 最多一次。
+`POST /v1/cas/credentials` 的请求带每个 blob 的 sha256 / size / 可选已有 URL；响应 **形状固定**，字段不随 type 改名：每个**仍需上传**的 blob 一个 `putUrl`（或分片 uploads URL）、过期时间、可选 `headers`。已有可 GET URL 的 blob、以及 ingest 上 `Head(cas/{sha256})` 已命中且 size 一致的 blob，不出现在响应里。CI 只做 HTTP PUT，一个 blob 最多一次。
 
 agent 按 **ingest 后端**（不是整个 `artifactTo`）填内容：
 
-- `s3-compatible`：`putUrl` 指向桶内 `cas/{sha256}`，`headers` 带 STS
-- `local`：`putUrl` 指向本 agent 的 `PUT /v1/cas/{product}/{sha256}`
+- `s3-compatible`：`putUrl` 指向桶内 `cas/{sha256}` 的 **SigV4 预签名 PUT**（agent 用发布机已有的长期 `COS_SECRET_*` 签名，TTL 约 1h）。可选 `headers` 承载必须随 PUT 带上的 SigV4 头。响应形状固定，以后若换成 STS 临时钥，CI 不必改。本切片**不**接腾讯云 AssumeRole。
+- `local`：`putUrl` 指向本 agent 的 `PUT /v1/cas/{product}/{sha256}`；Bearer 可放在 `headers.Authorization`，CI 仍只认同一份文档。
 
 响应里**永远只有一个上传目的地**。禁止给 CI 两套脚本（「COS 用 aws cli / 内网用 curl agent」），也禁止让 CI 按后端数量循环上传。`relkit cas-put` 只认这份文档。
 
 #### Promote 与 Materialize
 
-- **`Promote(cas, artifact)`** 只在 ingest 后端上发生：同存储内把对象变成正式 key。COS 用 CopyObject，同盘 hardlink，跨卷 copy。缺源则 `PutArtifact` 回退（现网整包路径，本地仍有文件时）。
+- **`Promote(cas, artifact)`** 只在 ingest 后端上发生：同存储内把对象变成正式 key。COS 用 CopyObject，同盘 hardlink，跨卷 copy。`Head` 命中且 size 一致时 **只 Promote**，即使 agent 盘上没有该文件（CI 已直传到 `cas/`）。缺源且本地仍有整包副本时才 `PutArtifact` 回退。
 - **`Materialize(blob, artifactKey)`** 是其余 `artifactTo` 后端拿到副本的唯一途径：agent 取字节（从 ingest，或从 staged 已带的 URL）再交该后端写入。git 类后端在这一步 `add` + `commit` + `push`，raw 之后才能 GET。
 
 调用方不选实现，`publish.Run` 里不出现后端类型判断。
@@ -149,7 +150,7 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 上传在 CI、`Promote` / `Materialize` 在 agent，两段分属不同进程与时刻，所以：
 
 - 凭据文档过期或 PUT 失败 → CI 自己重试。同 sha256 写同 key 是幂等的，重传安全。
-- `POST /v1/publish` 时 ingest 上 `Head` 不到某 blob，本地又没有整包副本 → **整轮失败**，不是部分发布。这一步在写任何指针之前，此时回退 `PutArtifact` 已无字节可用。
+- `POST /v1/publish` 时：ingest `Head` 命中 → 只 Promote，不要求本地文件；`Head` 不到且 staged 树里有该文件 → 现网整包回退（PUT cas 再 Promote）；`Head` 不到且本地也没有 → **整轮失败**，不写任何指针。
 - 某个非 ingest 的 `artifactTo` 后端 `Materialize` 失败 → 该后端这一版缺副本。是继续（manifest 少一条取货点）还是整轮失败由 `--allow-partial` 决定；缺副本的后端名必须打出来。
 - 指针写失败仍是原来的 `allowPartial` 语义：签名版本可能已上线，而 site / latest / browse 落后。
 
@@ -164,7 +165,7 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 | GET 切面 | 匿名 HTTP | 匿名 HTTP | 匿名 raw HTTP（`/-/raw/` 或 raw.githubusercontent） |
 | 写切面 | SigV4 / CopyObject | 盘 + hardlink | **git add/commit/push**（agent 持仓库写权限） |
 | 可作 ingest | 是 | 是 | **否**（blob 进 git 历史删不掉） |
-| CI 字节直达 | 是（STS 直传 `cas/`） | 经 agent `PUT /v1/cas/...` | 不适用 |
+| CI 字节直达 | 是（预签名 PUT `cas/`） | 经 agent `PUT /v1/cas/...` | 不适用 |
 | 取得 artifact 副本 | `Promote`（同桶 CopyObject） | `Promote`（hardlink / copyFile） | `Materialize`：agent 取字节 → 工作树 → push |
 | 默认角色 | `artifactTo` + `pointerTo`（ingest 与 `entryUrls` 主备都在这一类） | `artifactTo` + `pointerTo`（内网） | **都不进**；不合 ADR 0007，只能当只读校验镜像 |
 | 清 inbox | 桶生命周期 `Days=1` | unlink cas 名 | 无 inbox |
@@ -176,13 +177,13 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 - `GET /-/health`
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换口：一端先把 zip 放下，另一端再 HEAD/GET 取走。Bearer。不是发布。
 - GET / HEAD `/v1/drop/{product}/{version}/{filename}` — 同上，鉴权后才能读未发布包
-- `PUT /v1/staged/{product}/{version}` — 整包 `tar.gz`（兼容小文件 / 内网）
+- `PUT /v1/staged/{product}/{version}` — staged 树的 `tar.gz`。现网常带 `artifacts/`；目标路径只含 `staged.pb` + `release-policy.json`
 - `POST /v1/staged/{product}/{version}/uploads` — 创建分片会话。JSON：`bytes`、`sha256`、可选 `partSize`
 - `PUT /v1/staged/{product}/{version}/uploads/{id}/parts/{n}` — 一片；可选 `X-Relkit-Part-SHA256`
 - `GET` / `DELETE` `/v1/staged/{product}/{version}/uploads/{id}` — 查询已收片 / 放弃
 - `POST /v1/staged/{product}/{version}/uploads/{id}/complete` — 拼装、校验整包 sha256、解包（与整包 PUT 同一落地路径）
 - `POST /v1/publish` — JSON：`product` / `version` / 可选 `to` / `dryRun` / `stagedSha256` / `idempotencyKey`
-- **计划** `POST /v1/cas/credentials` — 统一上传说明（每个仍需上传的 blob 一个 `putUrl` / 可选 headers / 过期），目的地只有 **ingest 后端**一个。ingest 是 COS 时 agent 填 STS；是 `local` 时填本机 `/v1/cas/...`。CI 不分支、不按后端数量循环。代码未落地前不要当现网接口。
+- **计划** `POST /v1/cas/credentials` — 统一上传说明（每个仍需上传的 blob 一个 `putUrl` / 可选 headers / 过期），目的地只有 **ingest 后端**一个。ingest 是 `s3-compatible` 时 agent 填 SigV4 预签名 PUT；是 `local` 时填本机 `PUT /v1/cas/...`。CI 不分支、不按后端数量循环。**代码未落地，不要当现网接口。**
 
 CI 默认走 `relkit staged-put`：多连接并发 PUT 各片。片大小与并发由客户端 `--part-size` / `--concurrency`（或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）决定，agent 配置夹取上限。同一 `bytes+sha256` 的未完成会话可续传。
 
@@ -232,7 +233,7 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
    - 旧机：产品根已有整份 `relkit.json` 时执行 `init -product <id> -migrate-profile`。它抽出机器侧字段写到 `/etc/relkit-agent/products/<id>.json`，把产品根那份改名为 `relkit.json.migrated`，且拒绝覆盖已存在的 profile。
    - 新机：按 `deploy/relkit-intranet-product.example.json` 或公网 `s3-compatible` 样例手写 `/etc/relkit-agent/products/<id>.json`（`product` / `signing.keyId` 与仓库 policy 对齐）。**不要**往 `/srv/relkit/<id>/` 塞发布凭据。
 6. `systemctl restart relkit-agent`。
-7. 之后 CI：`relkit stage` → `cas/credentials` → 按唯一 putUrl 上传一次 → `PUT /v1/staged` 元数据 → `POST /v1/publish`（agent 再 Promote / Materialize 到其余后端）。现网仍可整包 staged-put。
+7. 目标 CI：`relkit stage` → `cas/credentials` → 按唯一 putUrl 上传一次 → `PUT /v1/staged` 瘦 tar（无 `artifacts/`）→ `POST /v1/publish`（agent Head + Promote；`Materialize` 仍未落地）。**现网仍是整包 staged-put**，credentials 代码未落地前不要改宿主流水线。
 
 ## 6. Token 轮换
 
