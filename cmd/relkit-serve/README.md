@@ -173,7 +173,7 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 }
 ```
 
-`baseUrl` 是客户端匿名下载地址；`uploadUrl` 可省略，默认等于 `baseUrl`。`tokenEnv` 必填且只写变量名。发布控制面用运营方 token 调 `POST /-/cas/uploads`，serve 为 `cas/{sha256}` 签发短期绝对能力 URL；CI 只执行 agent 返回的 `requests[]`，不持 serve 长期 token。
+`baseUrl` 是客户端匿名下载地址；`uploadUrl` 是与对象存储 endpoint 同义的完整数据面地址，必须同时可被 agent 和 CI 访问，禁止在远程 CI 场景填 loopback。它可省略并默认等于 `baseUrl`。`tokenEnv` 必填且只写变量名。发布控制面用运营方 token 调 `POST /-/cas/uploads`，serve 为 `cas/{sha256}` 签发短期绝对能力 URL；CI 只执行 agent 返回的 `requests[]`，不持 serve 长期 token。公开暴露写入面是正常形态：普通写操作由运营方 Bearer 保护，CAS PUT 由短期能力签名保护。
 
 本机演练必须起真实数据面：
 

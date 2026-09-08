@@ -82,6 +82,48 @@ func TestRelkitCompatiblePreflightReportsRequiredUpgrade(t *testing.T) {
 	}
 }
 
+func TestRelkitCompatibleGetUsesEndpointNotPublicBaseURL(t *testing.T) {
+	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("control-plane read used public baseUrl: %s", r.URL)
+		http.Error(w, "wrong endpoint", http.StatusBadGateway)
+	}))
+	defer public.Close()
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/app/dev.pb" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, "index")
+	}))
+	defer endpoint.Close()
+
+	backend := testRelkitBackend(endpoint.URL)
+	backend.baseURL = public.URL + "/"
+	got, err := backend.Get("index/app/dev.pb")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if string(got) != "index" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestCreateRejectsRemoteBaseWithLoopbackRelkitEndpoint(t *testing.T) {
+	cfg := &config.Config{
+		Backends: map[string]map[string]any{
+			"intranet": {
+				"type":      "relkit-compatible",
+				"baseUrl":   "https://update.example/",
+				"uploadUrl": "http://127.0.0.1:8080/",
+				"tokenEnv":  "RELKIT_SERVE_TOKEN",
+			},
+		},
+	}
+	_, err := Create("intranet", cfg, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "must be reachable by CI") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestCreateRejectsRemovedBackendTypes(t *testing.T) {
 	for _, backendType := range []string{"local", "http-put"} {
 		t.Run(backendType, func(t *testing.T) {

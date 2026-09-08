@@ -193,6 +193,7 @@ def migrate_backend(
     *,
     serve_addr: str,
     public_base_url: Optional[str],
+    public_upload_url: Optional[str] = None,
 ) -> tuple[dict[str, Any], list[str]]:
     notes: list[str] = []
     kind = backend.get("type")
@@ -207,6 +208,11 @@ def migrate_backend(
         if not cleaned.get("tokenEnv"):
             cleaned["tokenEnv"] = TOKEN_ENV
             notes.append(f"set tokenEnv={TOKEN_ENV}")
+        if public_upload_url:
+            upload = public_upload_url.rstrip("/") + "/"
+            if cleaned.get("uploadUrl") != upload:
+                cleaned["uploadUrl"] = upload
+                notes.append(f"set uploadUrl={upload}")
         return cleaned, notes
 
     base = public_base_url or cleaned.get("baseUrl") or cleaned.get("url")
@@ -219,7 +225,7 @@ def migrate_backend(
             f'cannot migrate backend type {kind!r}: need public baseUrl '
             "(pass --public-base-url)"
         )
-    upload = _guess_upload_url(cleaned, serve_addr)
+    upload = public_upload_url.rstrip("/") + "/" if public_upload_url else _guess_upload_url(cleaned, serve_addr)
     if not upload:
         raise ValueError(
             f"cannot migrate backend type {kind!r}: no uploadUrl/outputDir to derive from"
@@ -240,6 +246,7 @@ def migrate_profile(
     *,
     serve_addr: str,
     public_base_url: Optional[str],
+    public_upload_url: Optional[str] = None,
 ) -> tuple[dict[str, Any], list[str]]:
     cfg, n = strip_cas_credentials(deepcopy(profile))
     if not isinstance(cfg, dict):
@@ -254,7 +261,10 @@ def migrate_profile(
             if not isinstance(backend, dict):
                 raise ValueError(f"backend {name!r} is not an object")
             migrated, more = migrate_backend(
-                backend, serve_addr=serve_addr, public_base_url=public_base_url
+                backend,
+                serve_addr=serve_addr,
+                public_base_url=public_base_url,
+                public_upload_url=public_upload_url,
             )
             new_backends[name] = migrated
             notes.extend(f"{name}: {item}" for item in more)

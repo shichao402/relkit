@@ -3,6 +3,7 @@ package backends
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -51,6 +52,12 @@ func newRelkitCompatibleBackend(name string, cfg map[string]any, root string) (B
 	if !strings.HasSuffix(uploadURL, "/") {
 		uploadURL += "/"
 	}
+	if isLoopbackHTTPURL(uploadURL) && !isLoopbackHTTPURL(base.baseURL) {
+		return nil, Error{Message: fmt.Sprintf(
+			"uploadUrl of backend %q is loopback but baseUrl is remote; relkit-compatible uploadUrl is a data-plane endpoint and must be reachable by CI",
+			name,
+		)}
+	}
 
 	tokenEnv, err := requiredString(cfg, "tokenEnv", name)
 	if err != nil {
@@ -63,6 +70,19 @@ func newRelkitCompatibleBackend(name string, cfg map[string]any, root string) (B
 		tokenEnv:         tokenEnv,
 		timeout:          optionalDurationSeconds(cfg, "timeoutSeconds", 600*time.Second),
 	}, nil
+}
+
+func isLoopbackHTTPURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (b *relkitCompatibleBackend) Describe() string {
@@ -125,7 +145,9 @@ func (b *relkitCompatibleBackend) Get(key string) ([]byte, error) {
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
 	}
-	return httpx.Get(*b.URLFor(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
+	// Control-plane reads use the backend endpoint, just like
+	// s3-compatible.Get uses its S3 endpoint rather than its CDN baseUrl.
+	return httpx.Get(b.uploadTarget(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
 }
 
 func (b *relkitCompatibleBackend) Probe(rawURL string) (bool, *int64, string) {

@@ -259,7 +259,7 @@ curl -fsS -X DELETE -H "Authorization: Bearer $RELKIT_SERVE_TOKEN" $BASE/cas/aaa
 }
 ```
 
-`baseUrl` 是客户端下载基址；`uploadUrl` 可省略；`tokenEnv` 必填，只写环境变量名。这里必须使用运营方 `RELKIT_SERVE_TOKEN`，因为 `cas/{sha256}` 不含产品 id，产品 token不能安全隔离 CAS。
+`baseUrl` 是客户端下载基址；`uploadUrl` 是完整 `relkit-compatible` 数据面 endpoint，必须同时可被 agent 与 CI 访问，远程 CI 场景禁止使用 loopback。它可省略并默认等于 `baseUrl`。`tokenEnv` 必填，只写环境变量名。这里必须使用运营方 `RELKIT_SERVE_TOKEN`，因为 `cas/{sha256}` 不含产品 id，产品 token不能安全隔离 CAS。公开 endpoint 与 COS 同形：普通写操作由 Bearer 保护，CAS PUT 由短期对象能力保护。
 
 本机演练：
 

@@ -293,9 +293,14 @@ def wait_health(base: str, unit: str) -> None:
     raise Fail(f"{unit} did not become healthy at {url}")
 
 
-def self_check_serve(addr: str, token: str) -> None:
-    base = loopback_base(addr)
-    wait_health(base, "relkit-serve")
+def self_check_serve(
+    addr: str, token: str, public_upload_url: Optional[str] = None
+) -> None:
+    local_base = loopback_base(addr)
+    wait_health(local_base, "relkit-serve")
+    base = (public_upload_url or local_base).rstrip("/")
+    if public_upload_url:
+        print(f"relkit-compatible endpoint {base}")
     print("1/7 health              ok")
     code, _ = http_call("PUT", base + "/.probe~", data=b"x")
     if code == 405:
@@ -643,6 +648,7 @@ def apply_serve_upgrade(
     user: str,
     prefix: str,
     public_base_url: Optional[str],
+    public_upload_url: Optional[str],
     restart: bool,
     backup_root: Path,
 ) -> list[str]:
@@ -673,7 +679,11 @@ def apply_serve_upgrade(
     if restart:
         run(["systemctl", "restart", "relkit-serve"])
         token = token_file.read_text(encoding="utf-8").strip()
-        self_check_serve(str(cfg.get("addr") or ""), token)
+        self_check_serve(
+            str(cfg.get("addr") or ""),
+            token,
+            public_upload_url=public_upload_url,
+        )
         notes.append("serve restarted and self-checked")
     else:
         notes.append("serve files updated; restart skipped")
@@ -686,6 +696,7 @@ def apply_agent_upgrade(
     user: str,
     prefix: str,
     public_base_url: Optional[str],
+    public_upload_url: Optional[str],
     serve_addr: str,
     restart: bool,
     backup_root: Path,
@@ -708,7 +719,10 @@ def apply_agent_upgrade(
         for path in sorted(products_dir.glob("*.json")):
             profile = load_json_object(path.read_text(encoding="utf-8"))
             migrated, more = migrate_profile(
-                profile, serve_addr=serve_addr, public_base_url=public_base_url
+                profile,
+                serve_addr=serve_addr,
+                public_base_url=public_base_url,
+                public_upload_url=public_upload_url,
             )
             if more:
                 path.write_text(dump_json(migrated), encoding="utf-8")
@@ -807,6 +821,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
         user = str(spec.get("user") or "relkit")
         restart = bool(spec.get("restart"))
         public_base = spec.get("publicBaseUrl")
+        public_upload = spec.get("publicUploadUrl")
         serve_bin = Path(spec["serveBinary"]) if spec.get("serveBinary") else None
         agent_bin = Path(spec["agentBinary"]) if spec.get("agentBinary") else None
         notes: list[str] = []
@@ -818,6 +833,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         user=user,
                         prefix=prefix,
                         public_base_url=public_base,
+                        public_upload_url=public_upload,
                         restart=restart,
                         backup_root=backup,
                     )
@@ -834,6 +850,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         user=user,
                         prefix=prefix,
                         public_base_url=public_base,
+                        public_upload_url=public_upload,
                         serve_addr=serve_addr,
                         restart=restart,
                         backup_root=backup,
@@ -909,6 +926,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         _, grace = ensure_cas_grace(serve_cfg)
         print("serve migrate notes:", grace or ["addr/dir preserved"])
     public = args.public_base_url
+    public_upload = args.public_upload_url
     for name, profile in (probe.get("profiles") or {}).items():
         if not isinstance(profile, dict) or profile.get("error"):
             continue
@@ -917,6 +935,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
                 profile,
                 serve_addr=str(serve_cfg.get("addr") or ""),
                 public_base_url=public,
+                public_upload_url=public_upload,
             )
             print(f"profile {name}:", notes or ["no changes"])
         except ValueError as exc:
@@ -931,6 +950,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "prefix": args.prefix,
         "user": args.user,
         "publicBaseUrl": public,
+        "publicUploadUrl": public_upload,
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
     }
     uploads: list[Path] = []
@@ -1091,6 +1111,10 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--serve-binary", default="dist/relkit-serve-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")
     upgrade.add_argument("--public-base-url")
+    upgrade.add_argument(
+        "--public-upload-url",
+        help="CI- and agent-reachable relkit-compatible write endpoint",
+    )
     upgrade.add_argument("--user", default="relkit")
     upgrade.add_argument("--prefix", default="/usr/local/bin")
     upgrade.add_argument("--serve-only", action="store_true")

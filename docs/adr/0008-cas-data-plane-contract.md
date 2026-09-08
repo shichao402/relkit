@@ -20,6 +20,7 @@
 5. **删除 `local` 与 `http-put`。** 内网 ingest 用 `relkit-compatible`。本机演练起真 `relkit-serve`（文档与 `Skeleton()` 对齐 `127.0.0.1:30341`）。`http-put` 的配置形状（`baseUrl`、可选 `uploadUrl`、`tokenEnv`、`timeoutSeconds`）由 `relkit-compatible` 沿用。
 6. **不自建 STS，不接厂商 STS SDK。** CAS 单对象与日后分片都由服务端签发 URL。STS 仅当客户端必须跑厂商传输管理器、分片数无法枚举时才考虑，届时是新的会话类型，不是复活 `sign`。
 7. **自托管 CAS 用对象级能力 URL。** `cas/{sha256}` 没有产品分量，`productAllowsKey` 不能隔离 CAS。签名密钥只留在 `relkit-serve`；agent 向 serve 索取 URL，自己不持签发密钥。
+   `relkit-compatible.uploadUrl` 与对象存储 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景不得使用 loopback。serve 的完整数据面 API 可以公开可达：普通写操作由运营方 Bearer 保护，CAS PUT 由短期对象能力保护。
 8. **`cas/` GC 须未被引用且过保护期。** 默认 `gc.casGrace` 为 24h；`POST /-/cas/uploads` 登记的租约优先跳过。`manifest/` 与 `artifact/` 仍按 index 引用回收。
 9. **传输错误与请求日志抹掉签名 query**（`sig`、`X-Amz-Signature` 及同等参数）。
 

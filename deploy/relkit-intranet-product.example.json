@@ -5,7 +5,7 @@
     "serve": {
       "type": "relkit-compatible",
       "baseUrl": "https://update.devcloud.woa.com/",
-      "uploadUrl": "http://127.0.0.1:30341/",
+      "uploadUrl": "http://update.devcloud.woa.com/",
       "tokenEnv": "RELKIT_SERVE_TOKEN",
       "timeoutSeconds": 600
     }

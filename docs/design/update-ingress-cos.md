@@ -11,7 +11,7 @@ related: ADR 0005, ADR 0007, docs/design/bootstrap-directory.md, docs/design/pub
 
 ## 1. 决议
 
-**只记一套角色：CI 打包 → 控制面 agent 持钥写入 → 数据面只提供已经存在的文件 → 客户端匿名 GET。**
+**只记一套角色：CI 打包 → 控制面 agent 签发上传说明并编排发布 → CI 直传数据面 → 数据面完成 Promote 与受控写入 → 客户端匿名 GET。** 数据面不是只读：COS 与 relkit-serve 都提供完整、受鉴权保护的写入 API；只有客户端读取正式对象时匿名。
 
 发布完成之后，树上每一项都已经是普通文件（或 COS 里的普通对象），URL 和路径一一对应。下载路径上不再查库、不现场拼给人看的索引、不验 Bearer（Bearer 只在控制面）。公网文件在 COS，内网文件在 WOA 磁盘上；看起来都是「按路径取文件」。
 

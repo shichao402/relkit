@@ -378,7 +378,7 @@ relkit-serve -dir ./dist -addr 127.0.0.1:30341
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `baseUrl` | 是 | 客户端匿名下载基址 |
-| `uploadUrl` | 否 | relkit-serve 写入 API 基址；默认等于 `baseUrl` |
+| `uploadUrl` | 否 | 完整 relkit-serve 数据面 endpoint；必须同时可被 agent 与 CI 访问，默认等于 `baseUrl` |
 | `tokenEnv` | 是 | 运营方 token 的环境变量名；不得写 token 明文 |
 | `timeoutSeconds` | 否 | 写入超时，默认 600 |
 

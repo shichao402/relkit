@@ -659,7 +659,7 @@ CAS 凭据文档对每个 blob 给出 `requests[]`。每个请求**必须**包�
 
 `s3-compatible` 对 COS / S3 / MinIO 使用发布机长期钥生成 query 预签名 URL。配置中的 `casCredentials` 仅可作为迁移兼容字段被接受并忽略，**禁止**把 `casCredentials=sts`、临时 STS 凭据或客户端签名当作现行流程。
 
-`relkit-compatible` 的 `baseUrl` 是客户端匿名下载基址，`uploadUrl` 可选且默认等于 `baseUrl`，`tokenEnv` 必填，`timeoutSeconds` 可选。其 CAS 能力 URL 由 serve 自己签发；能力签名密钥禁止离开数据面。
+`relkit-compatible` 的 `baseUrl` 是客户端匿名下载基址；`uploadUrl` 是与对象存储 endpoint 同义的完整数据面地址，必须同时可被 agent 与 CI 访问，禁止在远程 CI 场景配置 loopback。`uploadUrl` 可选且默认等于 `baseUrl`，`tokenEnv` 必填，`timeoutSeconds` 可选。其 CAS 能力 URL 由 serve 自己签发；能力签名密钥禁止离开数据面。普通写操作由运营方 Bearer 保护，CAS PUT 由短期对象能力保护；公开可达不等于匿名可写。
 
 约束：
 

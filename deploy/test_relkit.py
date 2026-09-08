@@ -152,13 +152,32 @@ class MigrateTests(unittest.TestCase):
             profile,
             serve_addr="127.0.0.1:8080",
             public_base_url="https://update.devcloud.woa.com/",
+            public_upload_url="http://update.devcloud.woa.com/",
         )
         b = out["backends"]["intranet"]
         self.assertEqual(b["type"], "relkit-compatible")
         self.assertEqual(b["baseUrl"], "https://update.devcloud.woa.com/")
-        self.assertEqual(b["uploadUrl"], "http://127.0.0.1:8080/")
+        self.assertEqual(b["uploadUrl"], "http://update.devcloud.woa.com/")
         self.assertNotIn("casCredentials", b)
         self.assertTrue(notes)
+
+    def test_public_upload_url_replaces_compatible_loopback(self):
+        backend = {
+            "type": "relkit-compatible",
+            "baseUrl": "https://update.devcloud.woa.com/",
+            "uploadUrl": "http://127.0.0.1:8080/",
+            "tokenEnv": "RELKIT_SERVE_TOKEN",
+        }
+        migrated, notes = ops.migrate_backend(
+            backend,
+            serve_addr="127.0.0.1:8080",
+            public_base_url=None,
+            public_upload_url="http://update.devcloud.woa.com",
+        )
+        self.assertEqual(
+            migrated["uploadUrl"], "http://update.devcloud.woa.com/"
+        )
+        self.assertTrue(any("set uploadUrl" in item for item in notes))
 
     def test_unknown_backend_left_alone(self):
         backend = {"type": "s3-compatible", "bucket": "x"}

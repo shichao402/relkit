@@ -16,7 +16,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 ## 1. 决议
 
 - 控制面只有一个 **publish 节点**：nginx/Caddy（`:443` 切面）+ 本机 `relkit-agent`（`127.0.0.1:8787`）。反代是 HTTPS / 证书 / 入口日志的外壳，不是独立架构角色，也不是安全隔离层。
-- CI 多端先 `relkit stage`。`relkit cas-put` 对 agent 走同一套 CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 缺失的 `cas/{sha256}` → 交瘦 staged tar → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**：CI 只喂第一个 ingest；其余 `publishTo` 由 agent `Materialize`。整包 `PUT /v1/staged` 仍是兼容路径。`artifactTo` / `pointerTo` 拆分尚未实现。**写 index 指针才是真发布**。双 Job 并行时 mac 先 `PUT /v1/drop`，Windows 收齐后再 stage；drop 不是发布。
+- CI 各平台 Job 只构建并把产物上传到按本次 `buildId` 隔离的 drop；依赖全部平台成功的独立汇总 Job 才执行 `relkit stage`、版本闸门、`cas-put` 与唯一一次 publish。任何平台 Job 都不是发布协调者，drop 不得跨流水线构建复用。`relkit cas-put` 对 agent 走同一套 CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 缺失的 `cas/{sha256}` → 交瘦 staged tar → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**：CI 只喂第一个 ingest；其余 `publishTo` 由 agent `Materialize`。整包 `PUT /v1/staged` 仍是兼容路径。`artifactTo` / `pointerTo` 拆分尚未实现。**写 index 指针才是真发布**。
 - **`artifactTo` 与 `pointerTo` 分开（目标，profile 字段尚未落地）。** 几百 MiB 的 `artifact/` 只发给能当数据面的后端（`s3-compatible`、`relkit-compatible`），默认就 ingest 一家；几 KB 的签名 pb 才扇给 `entryUrls` 备桶。现网仍用一份 `publishTo`。用一个 `publishTo` 把产物也镜像进 git 仓，等于每次发版往历史灌一份删不掉的大文件。承载 `entryUrls` 的备援须过 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 三条准入（目标网络可达、`Cache-Control` 我方可配、失效域与主正交）；CNB / GitHub raw 不合格，当前形态是异地域第二个 COS 桶 + 独立自有二级域名。
 - 协议对象走 **Backend adapter**。CAS 的 `cas/{sha256}` inbox **只存在于 ingest 后端**；其余后端只有 `artifact/...`。**切面不因 type 分叉**：CI、`publish.Run`、客户端看到的接口对所有后端相同。query 预签名 / 能力 URL / COPY / 字节从哪儿来都是实现细节，禁止 `if backend.Type()=="s3-compatible"` 出现在 publish 或 CI 脚本里。
 - **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。落地走 **BrowseSink**（外网 Makers、内网数据面 `browse/`、以后其它 site）。不要用 `Backend.Type()` 猜人页，也不要用 serve 现算一页当对外目录。
@@ -28,8 +28,8 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 | 进程 | listen | 切面 |
 |---|---|---|
 | nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
-| relkit-agent | `127.0.0.1:8787` | 不对外；drop · staged 元数据 · CAS 凭据 / 代理 PUT · `POST /v1/publish` |
-| relkit-serve | `127.0.0.1:8080` | 内网数据面：协议对象 GET + 原样返回 `browse/`；操作面板在 `/-/`（现算，以后后台） |
+| relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
+| relkit-serve | `127.0.0.1:8080` | 内网完整 `relkit-compatible` 数据面：能力 PUT / Bearer 写操作 / 匿名 GET；操作面板在 `/-/` |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / BrowseSink 节点 |
 
 同机可以是一个 nginx、两个 `server_name`（CI 的 `/v1/*` → 8787，客户端 GET → 8080 或读盘）。内网 CI 打的是该箱**内网 IP:443** 上的名字，不是回环 hostname。
@@ -142,7 +142,7 @@ flowchart TB
 
 外网 CVM（`publish.firoyang.com:443` → `127.0.0.1:8787`）已按上表运行。内网同一切面，本机 origin 先 `:80`：
 
-- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余 **GET/HEAD** → serve `127.0.0.1:8080`
+- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余请求 → serve 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 serve 自己鉴权
 - 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变
 - 配置样例：`deploy/nginx-intranet.example.conf`
 - **已按 §5 改代码。** 内网 GET `/` 不再现算门户；没有 `browse/` dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`。外网 `dec` 尚未配 `site.makers`，COS 根路径 403，没有对外目录页。
