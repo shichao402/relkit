@@ -380,7 +380,7 @@ SSH 端口与身份走本机 `~/.ssh/config`。目标机要有 `python3`（3.9+�
 
 不会做：改 `addr`/`dir`、动 nginx、轮换 token、用 skeleton 覆盖 JSON。轮换走 §5 的 `token --prepare` / `--activate`。
 
-内网 `uploadUrl` 是 `127.0.0.1` 时，agent 会把 CAS 能力 URL 改写成 `baseUrl` 的 host（HMAC 不含 host）。CI 的 `cas-put` 必须能对公网 origin 执行 `PUT /cas/…`。nginx 若 `limit_except GET HEAD` 拦掉整站 PUT，Windows 构建机会连自己的 127.0.0.1，发布停在 mint 之后。对照 [`deploy/nginx-intranet.example.conf`](../../deploy/nginx-intranet.example.conf) 给 `/cas/` 单独放行 PUT，然后 `nginx -t && nginx -s reload`。upgrade 脚本不会改 nginx。
+内网 `uploadUrl` 是 `127.0.0.1` 时，agent 把 CAS `requests[]` 改写成 **`/v1/cas/forward/cas/{sha}`**（与 drop/staged 一样走 agent，不把 loopback 交给 CI）。nginx 的 `/v1/` 已经反代 agent。蓝盾构建机若只能写 `/v1/`，对 `/cas/` 的 PUT 会被改成 `PUT /` 并 403。可选地仍给 `/cas/` 放行 PUT（[`deploy/nginx-intranet.example.conf`](../../deploy/nginx-intranet.example.conf)），给本机 curl 自检用；upgrade 脚本不会改 nginx。
 
 完整命令与红线：仓库 [`deploy/README.md`](../../deploy/README.md)。
 

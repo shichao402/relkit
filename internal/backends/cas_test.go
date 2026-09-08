@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
 )
@@ -191,5 +192,15 @@ func TestRewriteLoopbackCASURLUsesPublicBase(t *testing.T) {
 	loop := rewriteLoopbackURL("http://127.0.0.1:8080/cas/aa", "http://127.0.0.1:8080/")
 	if loop != "http://127.0.0.1:8080/cas/aa" {
 		t.Fatalf("loopback base should not rewrite: %s", loop)
+	}
+}
+
+func TestWrapLoopbackCASThroughAgent(t *testing.T) {
+	raw := "http://127.0.0.1:8080/cas/" + strings.Repeat("a", 64) + "?exp=1&size=1&sig=abc"
+	upload := SinglePUT(raw, nil, time.Time{})
+	WrapLoopbackCASThroughAgent("http://update.example", upload)
+	got := upload.Requests[0].URL
+	if !strings.HasPrefix(got, "http://update.example/v1/cas/forward/cas/") || !strings.Contains(got, "sig=abc") {
+		t.Fatalf("got %s", got)
 	}
 }

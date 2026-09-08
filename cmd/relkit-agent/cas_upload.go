@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -95,6 +97,7 @@ func (s *Server) handleCASCredentials(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "authorize cas upload: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		backends.WrapLoopbackCASThroughAgent(requestOrigin(r), upload)
 		response.Uploads = append(response.Uploads, casUploadDocument{
 			SHA256:   strings.ToLower(blob.SHA256),
 			Size:     blob.Size,
@@ -151,4 +154,86 @@ func (s *Server) authorizeCASUpload(backend backends.Backend, key string, size i
 		Size: size,
 		TTL:  time.Until(expiresAt),
 	})
+}
+
+func requestOrigin(r *http.Request) string {
+	proto := r.Header.Get("X-Forwarded-Proto")
+	if proto != "http" && proto != "https" {
+		if r.TLS != nil {
+			proto = "https"
+		} else {
+			proto = "http"
+		}
+	}
+	host := r.Host
+	if host == "" {
+		return ""
+	}
+	return proto + "://" + host
+}
+
+type casUploadOrigin interface {
+	CASUploadOrigin() string
+}
+
+func (s *Server) handleCASForward(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	key := strings.TrimPrefix(r.URL.Path, "/v1/cas/forward/")
+	canonical, err := model.CasKey(path.Base(key))
+	if err != nil || key != canonical {
+		http.Error(w, "invalid cas key", http.StatusBadRequest)
+		return
+	}
+	destBase, err := s.casForwardOrigin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	target, err := url.Parse(destBase + "/" + canonical)
+	if err != nil {
+		http.Error(w, "invalid ingest origin", http.StatusBadRequest)
+		return
+	}
+	target.RawQuery = r.URL.RawQuery
+	out, err := http.NewRequestWithContext(r.Context(), http.MethodPut, target.String(), r.Body)
+	if err != nil {
+		http.Error(w, "proxy cas upload", http.StatusBadGateway)
+		return
+	}
+	out.ContentLength = r.ContentLength
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		out.Header.Set("Content-Type", ct)
+	}
+	resp, err := http.DefaultClient.Do(out)
+	if err != nil {
+		http.Error(w, "proxy cas upload", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, 1<<20))
+}
+
+func (s *Server) casForwardOrigin() (string, error) {
+	for product := range s.cfg.Products {
+		backend, _, err := s.productIngest(product)
+		if err != nil {
+			continue
+		}
+		origin, ok := backend.(casUploadOrigin)
+		if !ok {
+			continue
+		}
+		base := strings.TrimSuffix(origin.CASUploadOrigin(), "/")
+		if base != "" {
+			return base, nil
+		}
+	}
+	return "", fmt.Errorf("no ingest origin to forward CAS uploads")
 }

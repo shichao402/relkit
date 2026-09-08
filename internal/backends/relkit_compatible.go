@@ -202,12 +202,7 @@ func (b *relkitCompatibleBackend) AuthorizeCASUpload(req CASUploadRequest) (*CAS
 		return nil, err
 	}
 	target := strings.TrimSuffix(b.uploadURL, "/") + relkitCASUploadsPath
-	headers := publisherHeaders()
-	if host, proto := forwardedFromBase(b.baseURL); host != "" {
-		headers["X-Forwarded-Host"] = host
-		headers["X-Forwarded-Proto"] = proto
-	}
-	status, data, err := httpx.PostJSON(target, token, minDuration(b.timeout, 60*time.Second), body, headers)
+	status, data, err := httpx.PostJSON(target, token, minDuration(b.timeout, 60*time.Second), body, publisherHeaders())
 	if err != nil {
 		return nil, err
 	}
@@ -221,9 +216,11 @@ func (b *relkitCompatibleBackend) AuthorizeCASUpload(req CASUploadRequest) (*CAS
 	if err := json.Unmarshal(data, &minted); err != nil || minted.URL == "" {
 		return nil, Error{Message: "mint CAS upload returned invalid json"}
 	}
-	upload := SinglePUT(minted.URL, nil, minted.ExpiresAt)
-	rewriteLoopbackCASRequests(upload, b.baseURL)
-	return upload, nil
+	return SinglePUT(minted.URL, nil, minted.ExpiresAt), nil
+}
+
+func (b *relkitCompatibleBackend) CASUploadOrigin() string {
+	return strings.TrimSuffix(b.uploadURL, "/")
 }
 
 func (b *relkitCompatibleBackend) Head(key string) (int64, bool, error) {

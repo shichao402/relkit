@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -93,6 +94,38 @@ func forwardedFromBase(publicBase string) (host, proto string) {
 		return "", ""
 	}
 	return base.Host, base.Scheme
+}
+
+// WrapLoopbackCASThroughAgent rewrites loopback capability PUTs onto the agent
+// origin so CI can upload via /v1/ instead of serve's 127.0.0.1 address.
+func WrapLoopbackCASThroughAgent(origin string, upload *CASUpload) {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if upload == nil || origin == "" {
+		return
+	}
+	for i := range upload.Requests {
+		upload.Requests[i].URL = wrapLoopbackCASURL(origin, upload.Requests[i].URL)
+	}
+}
+
+func wrapLoopbackCASURL(origin, raw string) string {
+	target, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !target.IsAbs() || !isLoopbackHost(target.Hostname()) {
+		return raw
+	}
+	key := strings.TrimPrefix(target.Path, "/")
+	canonical, err := model.CasKey(path.Base(key))
+	if err != nil || key != canonical {
+		return raw
+	}
+	wrapped, err := url.Parse(origin)
+	if err != nil || !wrapped.IsAbs() {
+		return raw
+	}
+	wrapped.Path = "/v1/cas/forward/" + key
+	wrapped.RawQuery = target.RawQuery
+	wrapped.Fragment = ""
+	return wrapped.String()
 }
 
 func (u *CASUpload) ExpiresAt() time.Time {

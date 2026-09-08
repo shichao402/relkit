@@ -23,6 +23,9 @@ func TestCASCredentialsUploadAndSkip(t *testing.T) {
 	if len(doc.Uploads) != 1 {
 		t.Fatalf("uploads=%v", doc.Uploads)
 	}
+	if !strings.Contains(doc.Uploads[0].Requests[0].URL, "/v1/cas/forward/cas/") {
+		t.Fatalf("expected agent forward URL, got %s", doc.Uploads[0].Requests[0].URL)
+	}
 	putCAS(t, doc.Uploads[0], payload, http.StatusCreated)
 
 	doc = requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":5}]}`)
