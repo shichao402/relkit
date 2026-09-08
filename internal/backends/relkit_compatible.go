@@ -125,9 +125,7 @@ func (b *relkitCompatibleBackend) Get(key string) ([]byte, error) {
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
 	}
-	// Control-plane reads must use uploadUrl. baseUrl is the public download
-	// origin and often hairpins (HTTPS on a VIP this box does not listen on).
-	return httpx.Get(b.uploadTarget(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
+	return httpx.Get(*b.URLFor(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
 }
 
 func (b *relkitCompatibleBackend) Probe(rawURL string) (bool, *int64, string) {
@@ -219,10 +217,6 @@ func (b *relkitCompatibleBackend) AuthorizeCASUpload(req CASUploadRequest) (*CAS
 		return nil, Error{Message: "mint CAS upload returned invalid json"}
 	}
 	return SinglePUT(minted.URL, nil, minted.ExpiresAt), nil
-}
-
-func (b *relkitCompatibleBackend) CASUploadOrigin() string {
-	return strings.TrimSuffix(b.uploadURL, "/")
 }
 
 func (b *relkitCompatibleBackend) Head(key string) (int64, bool, error) {

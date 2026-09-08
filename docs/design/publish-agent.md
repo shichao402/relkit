@@ -202,7 +202,7 @@ Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请
 - `relkit-agent.example.json`
 - `relkit-agent.intranet.example.json`（WOA 控制面）
 - `relkit-intranet-product.example.json`（内网 `relkit-compatible` publish profile 骨架）
-- `nginx-intranet.example.conf`（内网 `update.devcloud.woa.com`：`/v1/` → agent `:8787`，GET → serve；CI 的 CAS PUT 走 `/v1/cas/forward/`；`/cas/` 可另放开签名 PUT 供本机探针）
+- `nginx-intranet.example.conf`（内网 `update.devcloud.woa.com`：`/v1/` → agent `:8787`，GET → serve 数据面）
 - `relkit-agent.service`
 - `Caddyfile.relkit-agent.example`（`publish.firoyang.com` → `127.0.0.1:8787`）
 - `python deploy/relkit.py`（`build` / `install` / `upgrade` / `token`）

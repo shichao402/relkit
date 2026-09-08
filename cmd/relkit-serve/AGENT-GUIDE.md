@@ -380,13 +380,6 @@ SSH 端口与身份走本机 `~/.ssh/config`。目标机要有 `python3`（3.9+�
 
 不会做：改 `addr`/`dir`、动 nginx、轮换 token、用 skeleton 覆盖 JSON。轮换走 §5 的 `token --prepare` / `--activate`。
 
-内网 `uploadUrl` 是 `127.0.0.1` 时有两条各自独立的坑，都出现过：
-
-- **CI 上传 CAS**：agent 把能力 URL 改写成 **`/v1/cas/forward/cas/{sha}`**（连同旧客户端读的 `putUrl`），与 drop/staged 同一入口，不把 loopback 地址交给构建机。直接给 `/cas/` 的签名 PUT 会被 nginx 的 `limit_except GET HEAD` 变成 `PUT /` 然后 403。
-- **publish 读线上 index**：控制面的 `Get` 走 `uploadUrl`，**不走** `baseUrl`。`baseUrl` 是公网下载域名，这台机往往只听 `:80`，hairpin 回自己的 `:443` 会 `connection refused`，症状是 `POST /v1/publish` 400 且 `could not read the current index`。CI 侧同一个坑在 SvnMergeTool `0.2.0+117` 修过一次。
-
-`/cas/` 那段 nginx 放行（[`deploy/nginx-intranet.example.conf`](../../deploy/nginx-intranet.example.conf)）现在只服务本机 curl 自检；upgrade 脚本不会改 nginx。
-
 完整命令与红线：仓库 [`deploy/README.md`](../../deploy/README.md)。
 
 ---

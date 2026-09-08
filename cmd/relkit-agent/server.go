@@ -282,7 +282,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/-/health", s.handleHealth)
 	mux.HandleFunc("/v1/drop/", s.handleDrop)
 	mux.HandleFunc("/v1/cas/credentials", s.handleCASCredentials)
-	mux.HandleFunc("/v1/cas/forward/", s.handleCASForward)
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
 	return mux

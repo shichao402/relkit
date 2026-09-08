@@ -82,31 +82,6 @@ func TestRelkitCompatiblePreflightReportsRequiredUpgrade(t *testing.T) {
 	}
 }
 
-func TestRelkitCompatibleGetReadsFromUploadURL(t *testing.T) {
-	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("control-plane read hit the public origin: %s %s", r.Method, r.URL.Path)
-		http.Error(w, "public origin", http.StatusForbidden)
-	}))
-	defer public.Close()
-	upload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/index/app/dev.pb" {
-			t.Errorf("path = %q", r.URL.Path)
-		}
-		io.WriteString(w, "index-bytes")
-	}))
-	defer upload.Close()
-
-	backend := testRelkitBackend(upload.URL)
-	backend.baseURL = public.URL + "/"
-	got, err := backend.Get("index/app/dev.pb")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if string(got) != "index-bytes" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestCreateRejectsRemovedBackendTypes(t *testing.T) {
 	for _, backendType := range []string{"local", "http-put"} {
 		t.Run(backendType, func(t *testing.T) {

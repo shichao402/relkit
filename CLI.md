@@ -384,7 +384,7 @@ relkit-serve -dir ./dist -addr 127.0.0.1:30341
 
 ### 6.4 CAS 上传请求文档
 
-`POST /v1/cas/credentials` 对每个待上传 blob 返回 `requests[]`。每项只有 `method`、绝对 `url`、可选 `headers` 与 `expiresAt`；单对象上传恰好一个请求。内网 loopback ingest 时 `url` 是 agent 的 `/v1/cas/forward/cas/{sha}`。为仍读 `putUrl` 的旧 `relkit cas-put`（`cc729b2`）同时填上相同绝对 URL。客户端逐项执行 HTTP 请求，**不认识 SigV4 / STS，也不签名**。禁止恢复 `sign` 字段或相对 URL。
+`POST /v1/cas/credentials` 对每个待上传 blob 返回 `requests[]`。每项只有 `method`、绝对 `url`、可选 `headers` 与 `expiresAt`；单对象上传恰好一个请求。客户端逐项执行 HTTP 请求，**不认识 SigV4 / STS，也不签名**。禁止恢复 `sign` 字段或相对 URL。
 
 ### 6.5 推荐对外入口（自有域名 + COS）
 

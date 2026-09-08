@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
 )
@@ -176,31 +175,3 @@ func (typeOnlyNoIngest) PutPointer([]byte, string) ([]string, error) { return ni
 func (typeOnlyNoIngest) Get(string) ([]byte, error)                  { return nil, nil }
 func (typeOnlyNoIngest) URLFor(string) *string                       { return nil }
 func (typeOnlyNoIngest) Probe(string) (bool, *int64, string)         { return false, nil, "" }
-
-func TestRewriteLoopbackCASURLUsesPublicBase(t *testing.T) {
-	got := rewriteLoopbackURL(
-		"http://127.0.0.1:8080/cas/"+strings.Repeat("a", 64)+"?exp=1&size=1&sig=abc",
-		"https://update.example/",
-	)
-	if !strings.HasPrefix(got, "https://update.example/cas/") || !strings.Contains(got, "sig=abc") {
-		t.Fatalf("got %s", got)
-	}
-	same := rewriteLoopbackURL("https://cos.example/cas/aa", "https://update.example/")
-	if same != "https://cos.example/cas/aa" {
-		t.Fatalf("non-loopback rewritten: %s", same)
-	}
-	loop := rewriteLoopbackURL("http://127.0.0.1:8080/cas/aa", "http://127.0.0.1:8080/")
-	if loop != "http://127.0.0.1:8080/cas/aa" {
-		t.Fatalf("loopback base should not rewrite: %s", loop)
-	}
-}
-
-func TestWrapLoopbackCASThroughAgent(t *testing.T) {
-	raw := "http://127.0.0.1:8080/cas/" + strings.Repeat("a", 64) + "?exp=1&size=1&sig=abc"
-	upload := SinglePUT(raw, nil, time.Time{})
-	WrapLoopbackCASThroughAgent("http://update.example", upload)
-	got := upload.Requests[0].URL
-	if !strings.HasPrefix(got, "http://update.example/v1/cas/forward/cas/") || !strings.Contains(got, "sig=abc") {
-		t.Fatalf("got %s", got)
-	}
-}
