@@ -176,7 +176,7 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 
 - `GET /-/health`
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换口：一端先把 zip 放下，另一端再 HEAD/GET 取走。Bearer。不是发布。
-- GET / HEAD `/v1/drop/{product}/{version}/{filename}` — 同上，鉴权后才能读未发布包
+- GET / HEAD / DELETE `/v1/drop/{product}/{version}/{filename}` — 同上，鉴权后才能读或清理未发布包；build-scoped 汇总成功后删除，失败时保留现场
 - `PUT /v1/staged/{product}/{version}` — staged 树的 `tar.gz`。现网常带 `artifacts/`；目标路径只含 `staged.pb` + `release-policy.json`
 - `POST /v1/staged/{product}/{version}/uploads` — 创建分片会话。JSON：`bytes`、`sha256`、可选 `partSize`
 - `PUT /v1/staged/{product}/{version}/uploads/{id}/parts/{n}` — 一片；可选 `X-Relkit-Part-SHA256`

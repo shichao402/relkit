@@ -439,7 +439,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 
 - 发布配置：staged `release-policy.json` + `/etc/relkit-agent/products/<product>.json`（缺一不可）
 - 迁 profile：`relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile`（迁完把产品根 `relkit.json` 改名为 `.migrated`）
-- `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换 zip（Bearer；GET/HEAD 同样鉴权）
+- `PUT /v1/drop/{product}/{version}/{filename}` — 多平台 Job 交换 build-scoped zip（Bearer；GET/HEAD/DELETE 同样鉴权）
 - `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer；整包兼容路径）
 - `relkit staged-put FILE --product ID --version VER --url URL` — 分片并发上传（`--part-size` / `--concurrency`，或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）
 - `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 `requests[]`；每项都是绝对 URL。COS/S3 用长期钥 query 预签名，relkit-serve 用对象能力 URL，客户端不签名

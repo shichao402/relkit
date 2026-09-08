@@ -68,7 +68,7 @@ relkit-agent onboard check -config /etc/relkit-agent/relkit-agent.json -product 
 ## HTTP
 
 - `GET /-/health`
-- `PUT /v1/drop/{product}/{version}/{filename}`（及鉴权 GET/HEAD）
+- `PUT /v1/drop/{product}/{version}/{filename}`（及鉴权 GET/HEAD/DELETE；供 build-scoped 多平台交换）
 - `POST /v1/cas/credentials`（按 profile 的第一个 ingest 返回缺失 blob 的绝对 URL `requests[]`；客户端不签名）
 - `PUT /v1/staged/{product}/{version}`
 - `POST /v1/staged/{product}/{version}/uploads`（分片会话；`partSize` 可在 JSON 里请求，受配置夹取）

@@ -267,6 +267,28 @@ func TestAgentDropPutGetHead(t *testing.T) {
 	if string(got) != string(payload) {
 		t.Fatalf("drop get body=%q", got)
 	}
+
+	del, _ := http.NewRequest(http.MethodDelete, url, nil)
+	del.Header.Set("Authorization", "Bearer test-token")
+	respD, err := http.DefaultClient.Do(del)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respD.Body.Close()
+	if respD.StatusCode != http.StatusNoContent {
+		t.Fatalf("drop delete status=%d", respD.StatusCode)
+	}
+
+	after, _ := http.NewRequest(http.MethodHead, url, nil)
+	after.Header.Set("Authorization", "Bearer test-token")
+	respAfter, err := http.DefaultClient.Do(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respAfter.Body.Close()
+	if respAfter.StatusCode != http.StatusNotFound {
+		t.Fatalf("drop after delete status=%d", respAfter.StatusCode)
+	}
 }
 
 func TestExtractRefusesTraversal(t *testing.T) {

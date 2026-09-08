@@ -18,7 +18,7 @@ func dropDir(root, version string) string {
 
 func (s *Server) handleDrop(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
-	case http.MethodPut, http.MethodGet, http.MethodHead:
+	case http.MethodPut, http.MethodGet, http.MethodHead, http.MethodDelete:
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -52,6 +52,12 @@ func (s *Server) handleDrop(w http.ResponseWriter, r *http.Request) {
 		s.putDropFile(w, r, product, version, dest)
 	case http.MethodGet, http.MethodHead:
 		http.ServeFile(w, r, dest)
+	case http.MethodDelete:
+		if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+			http.Error(w, "delete drop", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
