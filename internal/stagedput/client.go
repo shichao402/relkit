@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"cnb.cool/shichao402/relkit/internal/humansize"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 )
 
 const (
@@ -125,6 +126,14 @@ type runner struct {
 	sha256 string
 }
 
+// authorize stamps the credential and the publisher protocol handshake on
+// every agent request. Both travel together so a new call site cannot pass
+// authentication while staying silent about which contract it speaks.
+func (c *runner) authorize(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
+	publishproto.Apply(req.Header)
+}
+
 func (c *runner) log(format string, args ...any) {
 	if c.opts.Log == nil {
 		return
@@ -143,7 +152,7 @@ func (c *runner) putWhole(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 	req.ContentLength = c.bytes
-	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -249,7 +258,7 @@ func (c *runner) create(ctx context.Context) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
+	c.authorize(req)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -275,7 +284,7 @@ func (c *runner) get(ctx context.Context, id string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -297,7 +306,7 @@ func (c *runner) complete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
@@ -362,7 +371,7 @@ func (c *runner) putPartOnce(ctx context.Context, id string, part int, start, le
 		return err
 	}
 	req.ContentLength = length
-	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
+	c.authorize(req)
 	req.Header.Set(partSHAHeader, sum)
 	resp, err := c.client.Do(req)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"testing"
 
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"cnb.cool/shichao402/relkit/internal/stage"
 	"cnb.cool/shichao402/relkit/internal/stagedput"
 )
@@ -57,6 +58,7 @@ func TestMultipartResumeSkipsReceivedParts(t *testing.T) {
 	})
 	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/staged/demo/1.0.0/uploads", bytes.NewReader(create))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -78,6 +80,7 @@ func TestMultipartResumeSkipsReceivedParts(t *testing.T) {
 	part0 := fx.tarball[:session.PartSize]
 	put, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/demo/1.0.0/uploads/"+session.ID+"/parts/0", bytes.NewReader(part0))
 	put.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(put.Header)
 	putResp, err := http.DefaultClient.Do(put)
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +112,7 @@ func TestMultipartRejectsWrongSHA(t *testing.T) {
 	})
 	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/staged/demo/1.0.0/uploads", bytes.NewReader(create))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -128,6 +132,7 @@ func TestMultipartRejectsWrongSHA(t *testing.T) {
 		}
 		put, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/demo/1.0.0/uploads/"+session.ID+"/parts/"+strconv.Itoa(i), bytes.NewReader(fx.tarball[start:end]))
 		put.Header.Set("Authorization", "Bearer "+fx.token)
+		publishproto.Apply(put.Header)
 		putResp, err := http.DefaultClient.Do(put)
 		if err != nil {
 			t.Fatal(err)
@@ -140,6 +145,7 @@ func TestMultipartRejectsWrongSHA(t *testing.T) {
 	}
 	complete, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/staged/demo/1.0.0/uploads/"+session.ID+"/complete", http.NoBody)
 	complete.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(complete.Header)
 	done, err := http.DefaultClient.Do(complete)
 	if err != nil {
 		t.Fatal(err)

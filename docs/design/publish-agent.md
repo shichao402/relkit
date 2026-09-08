@@ -118,6 +118,14 @@ agent 只向 **ingest 后端**索取请求描述：
 
 响应永远只有 ingest 一个上传目的地。禁止相对 URL、禁止把长期 Bearer 抄入 `requests[].headers`、禁止给 CI 两套脚本，也禁止让 CI 按后端数量循环上传。
 
+#### publisher 握手（凭据文档能演进的前提）
+
+凭据文档是**机器可读结构**，字段改名就会让老 publisher 读出空值。因此每个发往 agent 写端点的请求都必须带 `X-Relkit-Publish-Protocol`（与 `X-Relkit-Version` 一起，后者仅供诊断）。agent 在**鉴权之后**校验，低于本机 `minPublishProtocol`（默认等于本 build 的 `publishproto.Current`）一律 `426` + `publisher_upgrade_required`。
+
+这不是可选的加固。`requests[]` 取代 `putUrl` 后，一个仍在读 `putUrl` 的 publisher 会拿到空串，把它当相对 URL 解析到 agent origin 根，发出 `PUT /`——鉴权、token、URL 全都"正确"，只有路径是错的，排查成本极高。握手把这类漂移变成一条明确的升级提示。
+
+推论：**消费方 CI 检入的 relkit 二进制是契约的一部分。** 升级 agent 时必须同步重建各消费仓库的 publisher，或让其 CI 每次从固定 ref 构建；只升级发布机不算升级完成。运维需要滚动放行时可临时下调 `minPublishProtocol`，设 0 关闭握手。
+
 #### Promote 与 Materialize
 
 - **`Promote(cas, artifact)`** 只在 ingest 后端上发生：同存储内把对象变成正式 key。COS 用 CopyObject，serve 用 COPY。`Head` 命中且 size 一致时 **只 Promote**，即使 agent 盘上没有该文件（CI 已直传到 `cas/`）。缺源且本地仍有整包副本时才 `PutArtifact` 回退。
@@ -187,7 +195,7 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 
 CI 默认走 `relkit staged-put`：多连接并发 PUT 各片。片大小与并发由客户端 `--part-size` / `--concurrency`（或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）决定，agent 配置夹取上限。同一 `bytes+sha256` 的未完成会话可续传。
 
-无 token 时写端点返回 405。Token 加载时 SHA-256，比较用 constant-time。
+无 token 时写端点返回 405。Token 加载时 SHA-256，比较用 constant-time。所有写端点在鉴权通过后再校验 publisher 握手，不带 `X-Relkit-Publish-Protocol` 或版本过低返回 426。
 
 ## 4. 幂等与串行
 

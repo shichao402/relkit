@@ -18,6 +18,7 @@ import (
 
 	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/httpx"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"cnb.cool/shichao402/relkit/internal/stage"
 	"cnb.cool/shichao402/relkit/internal/stagedput"
 )
@@ -143,6 +144,7 @@ func fetchCredentials(ctx context.Context, client *http.Client, opts Options, in
 	}
 	req.Header.Set("Authorization", "Bearer "+opts.Token)
 	req.Header.Set("Content-Type", "application/json")
+	publishproto.Apply(req.Header)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

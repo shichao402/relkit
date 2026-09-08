@@ -12,6 +12,7 @@ import (
 
 	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/model"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 )
 
 func TestCASCredentialsUploadAndSkip(t *testing.T) {
@@ -36,6 +37,91 @@ func TestCASPutRejectsWrongHash(t *testing.T) {
 	digest := strings.Repeat("a", 64)
 	doc := requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":5}]}`)
 	putCAS(t, doc.Uploads[0], []byte("hello"), http.StatusBadRequest)
+}
+
+// A publisher built before the CAS document grew `requests[]` reads no upload
+// URL, resolves the empty string against the agent origin, and sends `PUT /`.
+// The agent must refuse the handshake instead of handing that publisher a
+// document it cannot act on.
+func TestCASCredentialsRejectsPublisherWithoutProtocolHandshake(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	digest := model.Sha256Bytes([]byte("hello"))
+	body := `{"product":"demo","blobs":[{"sha256":"` + digest + `","size":5}]}`
+
+	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUpgradeRequired {
+		t.Fatalf("status=%d, want 426", resp.StatusCode)
+	}
+	var doc struct {
+		Error       string `json:"error"`
+		MinProtocol int    `json:"minProtocol"`
+		Protocol    int    `json:"protocol"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Error != "publisher_upgrade_required" {
+		t.Errorf("error=%q", doc.Error)
+	}
+	if doc.MinProtocol != publishproto.Current || doc.Protocol != 0 {
+		t.Errorf("minProtocol=%d protocol=%d", doc.MinProtocol, doc.Protocol)
+	}
+}
+
+// The gate sits on the shared auth path, so it covers every publisher route,
+// not just the one whose document shape changed.
+func TestPublisherHandshakeGuardsEveryWriteRoute(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	digest := model.Sha256Bytes([]byte("hello"))
+	routes := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPut, "/v1/drop/demo/1.0.0/app.zip", "zip-bytes"},
+		{http.MethodPost, "/v1/cas/credentials", `{"product":"demo","blobs":[{"sha256":"` + digest + `","size":5}]}`},
+		{http.MethodPut, "/v1/staged/demo/1.0.0", "tarball-bytes"},
+		{http.MethodPost, "/v1/publish", `{"product":"demo","version":"1.0.0","dryRun":true}`},
+	}
+	for _, route := range routes {
+		req, _ := http.NewRequest(route.method, fx.ts.URL+route.path, strings.NewReader(route.body))
+		req.Header.Set("Authorization", "Bearer "+fx.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUpgradeRequired {
+			t.Errorf("%s %s: status=%d, want 426", route.method, route.path, resp.StatusCode)
+		}
+	}
+}
+
+// Operators can lower the floor to ride out a publisher rollout.
+func TestPublisherHandshakeCanBeDisabled(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	fx.cfg.MinPublishProtocol = 0
+	digest := model.Sha256Bytes([]byte("hello"))
+	body := `{"product":"demo","blobs":[{"sha256":"` + digest + `","size":5}]}`
+
+	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200", resp.StatusCode)
+	}
 }
 
 func TestCASCredentialsRequiresProductToken(t *testing.T) {
@@ -66,6 +152,7 @@ func TestCASCredentialsRejectsProfileWithoutIngest(t *testing.T) {
 	})
 	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(`{"product":"demo","blobs":[{"sha256":"`+strings.Repeat("a", 64)+`","size":1}]}`))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +192,7 @@ func TestThinStagedPublishesFromCASWithoutLocalArtifact(t *testing.T) {
 	thin := stripArtifactsFromTar(t, fx.tarball)
 	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/demo/1.0.0", bytes.NewReader(thin))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +228,7 @@ func TestThinStagedMaterializesSecondBackend(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/demo/1.0.0", bytes.NewReader(stripArtifactsFromTar(t, fx.tarball)))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -192,6 +281,7 @@ func requestCASCredentials(t *testing.T, fx *agentFixture, body string) casCrede
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

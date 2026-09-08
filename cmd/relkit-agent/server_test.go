@@ -17,6 +17,7 @@ import (
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
 	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/keys"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"cnb.cool/shichao402/relkit/internal/stage"
 )
 
@@ -163,6 +164,7 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/staged/demo/1.0.0", bytes.NewReader(buf.Bytes()))
 	req.Header.Set("Authorization", "Bearer test-token")
+	publishproto.Apply(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +178,7 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 	pubBody := `{"product":"demo","version":"1.0.0","dryRun":true}`
 	req2, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/publish", bytes.NewReader([]byte(pubBody)))
 	req2.Header.Set("Authorization", "Bearer test-token")
+	publishproto.Apply(req2.Header)
 	req2.Header.Set("Content-Type", "application/json")
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
@@ -229,6 +232,7 @@ func TestAgentDropPutGetHead(t *testing.T) {
 	url := ts.URL + "/v1/drop/demo/0.2.0+105/SvnAutoMerge_macos_0.2.0+105.zip"
 	req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader(payload))
 	req.Header.Set("Authorization", "Bearer test-token")
+	publishproto.Apply(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -244,6 +248,7 @@ func TestAgentDropPutGetHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	head.Header.Set("Authorization", "Bearer test-token")
+	publishproto.Apply(head.Header)
 	respH, err := http.DefaultClient.Do(head)
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +260,7 @@ func TestAgentDropPutGetHead(t *testing.T) {
 
 	get, _ := http.NewRequest(http.MethodGet, url, nil)
 	get.Header.Set("Authorization", "Bearer test-token")
+	publishproto.Apply(get.Header)
 	respG, err := http.DefaultClient.Do(get)
 	if err != nil {
 		t.Fatal(err)
@@ -270,6 +276,7 @@ func TestAgentDropPutGetHead(t *testing.T) {
 
 	del, _ := http.NewRequest(http.MethodDelete, url, nil)
 	del.Header.Set("Authorization", "Bearer test-token")
+	publishproto.Apply(del.Header)
 	respD, err := http.DefaultClient.Do(del)
 	if err != nil {
 		t.Fatal(err)
@@ -281,6 +288,7 @@ func TestAgentDropPutGetHead(t *testing.T) {
 
 	after, _ := http.NewRequest(http.MethodHead, url, nil)
 	after.Header.Set("Authorization", "Bearer test-token")
+	publishproto.Apply(after.Header)
 	respAfter, err := http.DefaultClient.Do(after)
 	if err != nil {
 		t.Fatal(err)
@@ -341,6 +349,7 @@ type agentFixture struct {
 	productRoot string
 	profilePath string
 	legacyPath  string
+	cfg         *Config
 	ts          *httptest.Server
 	token       string
 	tarball     []byte
@@ -513,6 +522,7 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 		productRoot: productRoot,
 		profilePath: profilePath,
 		legacyPath:  legacyPath,
+		cfg:         cfg,
 		ts:          ts,
 		token:       "test-token",
 		tarball:     tarball,
@@ -576,6 +586,7 @@ func (f *agentFixture) putStaged(t *testing.T, product, version string) (int, []
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPut, f.ts.URL+"/v1/staged/"+product+"/"+version, bytes.NewReader(f.tarball))
 	req.Header.Set("Authorization", "Bearer "+f.token)
+	publishproto.Apply(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -589,6 +600,7 @@ func (f *agentFixture) publish(t *testing.T, body string) (int, []byte) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, f.ts.URL+"/v1/publish", bytes.NewReader([]byte(body)))
 	req.Header.Set("Authorization", "Bearer "+f.token)
+	publishproto.Apply(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -746,6 +758,7 @@ func TestProductTokenCannotWriteOtherProduct(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{})
 	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/cronkit/1.0.0", bytes.NewReader(fx.tarball))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
+	publishproto.Apply(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

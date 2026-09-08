@@ -21,6 +21,7 @@ import (
 	"cnb.cool/shichao402/relkit/internal/humansize"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/publish"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"cnb.cool/shichao402/relkit/internal/stage"
 )
 
@@ -45,6 +46,7 @@ type FileConfig struct {
 	MaxPartConcurrency int                      `json:"maxPartConcurrency,omitempty"`
 	UploadTTL          string                   `json:"uploadTTL,omitempty"`
 	StateDir           string                   `json:"stateDir,omitempty"`
+	MinPublishProtocol *int                     `json:"minPublishProtocol,omitempty"`
 	Products           map[string]ProductConfig `json:"products"`
 }
 
@@ -81,6 +83,7 @@ type Config struct {
 	MaxPartConcurrency int
 	UploadTTL          time.Duration
 	StateDir           string
+	MinPublishProtocol int
 	Products           map[string]ProductConfig
 	ConfigPath         string
 }
@@ -104,8 +107,14 @@ func LoadConfig(path string) (*Config, error) {
 		MaxPartConcurrency: 16,
 		UploadTTL:          24 * time.Hour,
 		StateDir:           raw.StateDir,
+		MinPublishProtocol: publishproto.Current,
 		Products:           raw.Products,
 		ConfigPath:         path,
+	}
+	// Default to the contract this build speaks. An operator can lower it to
+	// ride out a publisher rollout, or set 0 to disable the handshake.
+	if raw.MinPublishProtocol != nil {
+		cfg.MinPublishProtocol = *raw.MinPublishProtocol
 	}
 	if raw.MaxFiles > 0 {
 		cfg.MaxFiles = raw.MaxFiles
@@ -324,7 +333,9 @@ func (s *Server) requireAuthFor(w http.ResponseWriter, r *http.Request, product 
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return false
 	}
-	return true
+	// Every publisher endpoint funnels through here, so the protocol handshake
+	// is checked in one place and cannot be forgotten on a new route.
+	return s.requirePublishProtocol(w, r)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
