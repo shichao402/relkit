@@ -20,8 +20,8 @@
 
 ```bash
 python deploy/relkit.py build --serve --agent --os linux --arch amd64
-python deploy/relkit.py upgrade --host update.devcloud.woa.com --plan --serve-listen-addr :8080 --public-base-url http://9.134.240.235:8080/ --public-upload-url http://9.134.240.235:8080/
-python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --restart --serve-listen-addr :8080 --public-base-url http://9.134.240.235:8080/ --public-upload-url http://9.134.240.235:8080/
+python deploy/relkit.py upgrade --host update.devcloud.woa.com --plan --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
+python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --restart --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
 ```
 
 `--plan` 只读并打印脱敏探测结果。`--apply` 在目标机 `/var/backups/relkit/<utc>/` 备份后改文件；没有 `--restart` 则不切进程。失败会从该备份回滚。
@@ -30,7 +30,11 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 `uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-serve` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
 
-现网暂用 `9.134.240.235:8080`，因为蓝盾网络会把 `update.devcloud.woa.com` 的 HTTP 请求透明送到 nginx `:80`，即使 URL 显式带 `:8080`。后续应给该地址绑定独立数据面 DNS，再同时替换两个 URL；不要重新复用控制面域名。
+现网数据面是 `update.devcloud.woa.com:8080`，与控制面共用主机名但不共用端口，也不经 nginx。后续可给数据面绑定独立 DNS，届时同时替换 `baseUrl` 与 `uploadUrl`。
+
+`upgrade` 上传的是 `dist/` 里已构建好的二进制，**不会**替你重新编译；改完代码要先跑上面的 `build` 再 `upgrade`，否则装上去的还是旧版本。
+
+agent 的写端点要求 publisher 握手（`X-Relkit-Publish-Protocol`），默认门槛等于该 build 的 `publishproto.Current`。**升级 agent 后必须同步重建各消费仓库检入的 relkit CLI**，否则它们会收到 426 `publisher_upgrade_required`。需要滚动放行时在 `relkit-agent.json` 里临时下调 `minPublishProtocol`（设 0 关闭）。
 
 目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 
