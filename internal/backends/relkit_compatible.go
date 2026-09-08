@@ -125,7 +125,9 @@ func (b *relkitCompatibleBackend) Get(key string) ([]byte, error) {
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
 	}
-	return httpx.Get(*b.URLFor(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
+	// Control-plane reads must use uploadUrl. baseUrl is the public download
+	// origin and often hairpins (HTTPS on a VIP this box does not listen on).
+	return httpx.Get(b.uploadTarget(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
 }
 
 func (b *relkitCompatibleBackend) Probe(rawURL string) (bool, *int64, string) {

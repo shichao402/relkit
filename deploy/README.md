@@ -30,7 +30,9 @@ upgrade **保留** 现网 `addr` / `dir` / nginx。它会：补 `gc.casGrace`、
 
 目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 
-CI 在另一台机器时，`cas-put` 不能 PUT 到 serve 的 `127.0.0.1`。agent 会把能力 URL 改到 `/v1/cas/forward/`，与控制面同一入口。本机 upgrade 自检仍打 loopback，不能代替一次真实 `cas-put`。
+CI 在另一台机器时，`cas-put` 不能 PUT 到 serve 的 `127.0.0.1`。agent 会把能力 URL 改到 `/v1/cas/forward/`，与控制面同一入口。publish 读线上 index 同样走 `uploadUrl`，不走公网 `baseUrl`（源站没有 `:443`，hairpin 会 `connection refused`）。
+
+本机 upgrade 自检只打 loopback，`cas-put` 与 publish 这两段都验不到，**不能代替一次真实发版**。判定要看构建机日志里 `cas uploaded=N` 和 `POST /v1/publish` 的返回，不要只看流水线红绿。
 
 ## 首装
 
