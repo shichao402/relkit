@@ -1,6 +1,7 @@
 package backends
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -96,5 +97,37 @@ func TestCreateRejectsRemovedBackendTypes(t *testing.T) {
 				t.Fatalf("err=%v", err)
 			}
 		})
+	}
+}
+
+func TestAuthorizeCASUploadRewritesLoopbackMintToBaseURL(t *testing.T) {
+	t.Setenv("RELKIT_TEST_UPLOAD_TOKEN", "secret")
+	key := "cas/" + strings.Repeat("a", 64)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != relkitCASUploadsPath {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("X-Forwarded-Host"); got != "update.example" {
+			t.Errorf("X-Forwarded-Host = %q", got)
+		}
+		if got := r.Header.Get("X-Forwarded-Proto"); got != "https" {
+			t.Errorf("X-Forwarded-Proto = %q", got)
+		}
+		putURL := "http://" + r.Host + "/" + key + "?sig=loop"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": putURL})
+	}))
+	t.Cleanup(srv.Close)
+
+	backend := testRelkitBackend(srv.URL)
+	backend.baseURL = "https://update.example/"
+	upload, err := backend.AuthorizeCASUpload(CASUploadRequest{Key: key, Size: 1, TTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := upload.Requests[0].URL
+	if !strings.HasPrefix(got, "https://update.example/"+key) {
+		t.Fatalf("url=%s", got)
 	}
 }

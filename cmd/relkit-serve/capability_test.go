@@ -72,6 +72,31 @@ func TestCASMintReturnsAbsoluteURLAndRegistersLease(t *testing.T) {
 	}
 }
 
+func TestCASMintHonorsForwardedHost(t *testing.T) {
+	cfg, _ := newTestConfig(t, true)
+	srv := newLocalServer(t, cfg)
+	t.Cleanup(srv.Close)
+	key := "cas/" + strings.Repeat("b", 64)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+casUploadsPath,
+		strings.NewReader(`{"key":"`+key+`","size":12,"ttl":60}`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set(publishproto.ProtocolHeader, "2")
+	req.Header.Set("X-Forwarded-Host", "update.example")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("mint status = %d body = %s", resp.StatusCode, raw)
+	}
+	if !bytes.Contains(raw, []byte(`"url":"https://update.example/`+key)) {
+		t.Fatalf("mint body = %s", raw)
+	}
+}
+
 func TestCASCapabilityUploadAndServerSideCopy(t *testing.T) {
 	cfg, dir := newTestConfig(t, true)
 	srv := newLocalServer(t, cfg)

@@ -3,7 +3,9 @@ package backends
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
@@ -39,6 +41,58 @@ func (u *CASUpload) primary() (CASRequest, error) {
 		return CASRequest{}, fmt.Errorf("CAS upload has no requests")
 	}
 	return u.Requests[0], nil
+}
+
+// rewriteLoopbackCASRequests rewrites capability URLs that serve minted against
+// a loopback uploadUrl so CI can PUT them at the public download origin instead.
+// The HMAC does not cover host. Callers must still let that origin proxy PUT /cas/.
+func rewriteLoopbackCASRequests(upload *CASUpload, publicBase string) {
+	if upload == nil {
+		return
+	}
+	for i := range upload.Requests {
+		upload.Requests[i].URL = rewriteLoopbackURL(upload.Requests[i].URL, publicBase)
+	}
+}
+
+func rewriteLoopbackURL(raw, publicBase string) string {
+	target, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !target.IsAbs() {
+		return raw
+	}
+	if !isLoopbackHost(target.Hostname()) {
+		return raw
+	}
+	base, err := url.Parse(strings.TrimSpace(publicBase))
+	if err != nil || !base.IsAbs() || base.Host == "" || isLoopbackHost(base.Hostname()) {
+		return raw
+	}
+	if base.Scheme != "http" && base.Scheme != "https" {
+		return raw
+	}
+	target.Scheme = base.Scheme
+	target.Host = base.Host
+	return target.String()
+}
+
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func forwardedFromBase(publicBase string) (host, proto string) {
+	base, err := url.Parse(strings.TrimSpace(publicBase))
+	if err != nil || !base.IsAbs() || base.Host == "" || isLoopbackHost(base.Hostname()) {
+		return "", ""
+	}
+	if base.Scheme != "http" && base.Scheme != "https" {
+		return "", ""
+	}
+	return base.Host, base.Scheme
 }
 
 func (u *CASUpload) ExpiresAt() time.Time {

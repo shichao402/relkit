@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
@@ -121,7 +122,10 @@ func (c *config) signCASPutURL(r *http.Request, key string, size int64, expires 
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "http" || proto == "https" {
 		scheme = proto
 	}
-	host := r.Host
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = r.Host
+	}
 	if host == "" {
 		host = r.URL.Host
 	}
