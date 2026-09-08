@@ -10,7 +10,7 @@
 
 1. **对外提供下载**，正确支持 Range 请求，因此客户端可以多线程并发下载。
 2. **对外目录是发布写好的 `browse/` 静态页。** GET `/` 原样返回 `browse/index.html`；没有 dump 就一页说明，不再现场扫盘画门户。操作面板在 `/-/admin`（现算产品卡、`/-/p/`、`/-/admin/files`）。
-3. **可选地接受带鉴权的 PUT 上传**（遗留）。迁到本机 agent 之后应关掉 token，让 PUT 返回 405。
+3. **提供 `relkit-compatible` 写入面**：`POST /-/cas/uploads` 签发对象能力 URL，并支持 PUT / HEAD / COPY / DELETE。
 4. **按 index 引用清理孤儿**，删掉已不被任何 channel 的 index 引用的旧 `manifest/` / `artifact/`。
 
 也可以纯当通用静态服务用 —— 把缓存前缀改成你自己的路径约定即可。只是它的差异化价值来自理解 RUP 的可变/不可变语义，见下文。
@@ -36,7 +36,7 @@
 
 自己写只有两个理由，都与 RUP 直接相关：
 
-**一、历史上需要一个上传端点。** 让旧的 `http-put` 一条命令完成发布。新产品应改走 `relkit-agent` 写同一目录（`local` 后端）。没有 token 时 PUT 已是 405。
+**一、需要一个与对象存储同形的自托管数据面。** `relkit-compatible` 让 agent 通过能力 URL 上传 CAS，再用 HEAD / COPY / DELETE 完成 Promote 与回收；控制面不再直接写服务目录。
 
 **二、需要服务端理解「哪个路径是可变的」。** RUP 里 `index/` 是可变指针，`manifest/` 与 `artifact/` 一旦发布就不再改变。通用服务器无法区分，只能给所有路径同一套缓存策略，而两种错法都有代价：
 
@@ -156,42 +156,33 @@ preflight 的旧工具绕过。`minProtocol: 0` 保留对通用 PUT / WebDAV 发
 
 ## 与 relkit 对接
 
-配一个 `http-put` 后端：
+配置 `relkit-compatible`：
 
 ```json
 {
   "backends": {
     "dl": {
-      "type": "http-put",
-      "baseUrl": "http://dl.internal:8080/",
-      "tokenEnv": "RELKIT_UPLOAD_TOKEN"
+      "type": "relkit-compatible",
+      "baseUrl": "https://dl.example.com/releases/",
+      "uploadUrl": "http://10.0.0.5:30341/",
+      "tokenEnv": "RELKIT_SERVE_TOKEN",
+      "timeoutSeconds": 600
     }
   },
   "publishTo": ["dl"]
 }
 ```
 
+`baseUrl` 是客户端匿名下载地址；`uploadUrl` 可省略，默认等于 `baseUrl`。`tokenEnv` 必填且只写变量名。发布控制面用运营方 token 调 `POST /-/cas/uploads`，serve 为 `cas/{sha256}` 签发短期绝对能力 URL；CI 只执行 agent 返回的 `requests[]`，不持 serve 长期 token。
+
+本机演练必须起真实数据面：
+
 ```bash
-export RELKIT_UPLOAD_TOKEN='<init -product 打印的那个，只属于本产品>'
-relkit stage 1.0.0 --code 100 --add dist/app.zip os=windows,arch=x64
-relkit publish 1.0.0
-relkit verify --deep
+export RELKIT_SERVE_TOKEN='<relkit-serve init 输出的运营方 token>'
+relkit-serve -dir ./dist -addr 127.0.0.1:30341
 ```
 
-`baseUrl` 与 `uploadUrl` 可以不同，而且这是常见情形而非特例：下载走 CDN 或公网域名，上传走内网地址。
-
-```json
-{
-  "type": "http-put",
-  "baseUrl": "https://cdn.example.com/releases/",
-  "uploadUrl": "http://10.0.0.5:8080/",
-  "tokenEnv": "RELKIT_UPLOAD_TOKEN"
-}
-```
-
-`baseUrl` 会被写进 manifest 并被签名，所以它必须是客户端实际访问的地址；写错了要重新发布才能改。
-
-若产物由别的机制送达（仓库 CI、rsync），则用 `static-http` 后端配 `stageDir`，本服务只管对外下载。
+serve 的现行写接口包括普通 PUT、CAS 能力 PUT、HEAD、带 `X-Relkit-Copy-Source` 的 COPY 与 DELETE。`local` / `http-put` 后端已经删除。
 
 ### 只留最新版时怎么配合
 
@@ -199,7 +190,7 @@ relkit verify --deep
 
 因此若运营策略是「整包更新、磁盘上只留当前版本」，发布侧 PUT 的 index 就应只含当前那一个版本节点。在 `relkit.json` 设 `"retainVersions": 1`（或 `2`/`3` 留最近几个回退点）即可；`relkit publish` 会在签名前裁掉更旧的节点。若 index 里仍挂着历史节点，那些节点引用的对象会被视为 live，GC 不会删 —— 这是刻意的安全行为。多 channel（如 `stable` / `beta`）按引用并集保留。
 
-触发方式：默认每小时扫一次；每次成功 PUT `index/` 后也会异步再扫（带短 debounce）。可用 `-gc=false` 或配置 `"gc": {"enabled": false}` 关闭。业务侧始终只 PUT，不需要 DELETE。
+触发方式：默认每小时扫一次；每次成功 PUT `index/` 后也会异步再扫（带短 debounce）。未被引用的 `cas/` 还必须没有有效上传租约且已超过 `gc.casGrace`；默认保护期 `24h`。未被引用的 `cas/` 还必须没有有效上传租约且已超过 `gc.casGrace`；默认保护期 `24h`。未被引用的 `cas/` 还必须没有有效上传租约且已超过 `gc.casGrace`；默认保护期 `24h`。可用 `-gc=false` 或配置 `"gc": {"enabled": false}` 关闭。业务侧始终只 PUT，不需要 DELETE。
 
 ---
 

@@ -110,7 +110,7 @@ func CheckOnce(ctx context.Context) error {
 ## G5. 开箱 Done
 
 - [ ] `go build` 含 sdk 导入通过
-- [ ] 对真实或 `local` 发布的 directory/index：`CheckForce` 返回预期
+- [ ] 对真实或本机 `relkit-compatible` 发布的 directory/index：`CheckForce` 返回预期
 - [ ] `Download` 后文件 hash 与 manifest 一致
 - [ ] `Download` 的 destPath 是已装文件（套件循环不要先下到全新临时目录）
 - [ ] 发版不注入每次不同的 `BuildTime`（否则跳过下载 / CAS 跳过上传打不中）

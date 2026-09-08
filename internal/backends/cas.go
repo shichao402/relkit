@@ -2,42 +2,59 @@ package backends
 
 import (
 	"fmt"
-	"io"
+	"net/http"
 	"os"
 	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
 )
 
-// CASSign is optional SigV4 material so CI can PUT an unsigned object URL
-// with header authentication (STS). Query-presigned URLs leave this nil.
-type CASSign struct {
-	Algorithm    string `json:"algorithm"`
-	Region       string `json:"region"`
-	AccessKey    string `json:"accessKey"`
-	SecretKey    string `json:"secretKey"`
-	SessionToken string `json:"sessionToken,omitempty"`
-	PayloadHash  string `json:"payloadHash"`
+// CASRequest is one HTTP request the client must execute as written.
+// Authorization is already in the URL or headers; the client never signs.
+type CASRequest struct {
+	Method    string            `json:"method"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	ExpiresAt time.Time         `json:"expiresAt"`
 }
 
-// CASUpload describes one temporary direct-upload destination. Callers only
-// execute the returned HTTP PUT; backend-specific signing stays here.
+// CASUpload describes how to upload one blob. Today this is a single PUT.
+// Multipart later adds more requests without changing the client contract.
 type CASUpload struct {
-	PutURL    string
-	Headers   map[string]string
-	Sign      *CASSign
-	ExpiresAt time.Time
+	Requests []CASRequest `json:"requests"`
+}
+
+// SinglePUT builds a one-request CAS upload.
+func SinglePUT(putURL string, headers map[string]string, expiresAt time.Time) *CASUpload {
+	return &CASUpload{Requests: []CASRequest{{
+		Method:    http.MethodPut,
+		URL:       putURL,
+		Headers:   headers,
+		ExpiresAt: expiresAt,
+	}}}
+}
+
+func (u *CASUpload) primary() (CASRequest, error) {
+	if u == nil || len(u.Requests) == 0 {
+		return CASRequest{}, fmt.Errorf("CAS upload has no requests")
+	}
+	return u.Requests[0], nil
+}
+
+func (u *CASUpload) ExpiresAt() time.Time {
+	req, err := u.primary()
+	if err != nil {
+		return time.Time{}
+	}
+	return req.ExpiresAt
 }
 
 // CASUploadRequest contains the transport-neutral inputs an ingest backend
-// needs to describe how CI should upload one blob. Product and Authorization
-// are used by backends whose upload endpoint is hosted by relkit-agent.
+// needs to describe how CI should upload one blob.
 type CASUploadRequest struct {
-	Product       string
-	Key           string
-	Size          int64
-	TTL           time.Duration
-	Authorization string
+	Key  string
+	Size int64
+	TTL  time.Duration
 }
 
 // CASUploadAuthorizer is implemented by ingest backends that can describe how
@@ -47,17 +64,11 @@ type CASUploadAuthorizer interface {
 	AuthorizeCASUpload(req CASUploadRequest) (*CASUpload, error)
 }
 
-// CASUploadReceiver is implemented by a backend whose upload URL is served by
-// relkit-agent instead of by an external object store.
-type CASUploadReceiver interface {
-	ReceiveCAS(key string, body io.Reader, size int64) error
-}
-
 // Ingest is the optional content-addressed write path on a data-plane backend.
 // publish.Run must not switch on Type(); it type-asserts this interface.
 //
 // Head compares size only and does not re-hash. Promote is a same-store copy
-// (S3 CopyObject / local hardlink).
+// (S3 CopyObject / relkit-compatible server-side copy).
 type Ingest interface {
 	Head(key string) (size int64, exists bool, err error)
 	Promote(srcKey, dstKey string) (urls []string, err error)

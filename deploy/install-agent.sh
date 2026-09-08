@@ -36,4 +36,4 @@ echo "rotate: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -product <
 echo "list: relkit-agent init -config $CONFIG_DIR/relkit-agent.json -list-products"
 echo "onboard: relkit-agent onboard check -config $CONFIG_DIR/relkit-agent.json -product <id> -json"
 echo "COS cert timer (separate process): install deploy/relkit-cos-cert-renew.service and .timer"
-echo "intranet: copy relkit-agent.intranet.example.json; put the local backend in the product profile"
+echo "intranet: copy relkit-agent.intranet.example.json; put a relkit-compatible backend in the product profile"

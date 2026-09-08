@@ -22,7 +22,7 @@ related: ADR 0005, ADR 0007, docs/design/bootstrap-directory.md, docs/design/pub
 | 数据面 | COS 桶前缀（如 `rup/`） | WOA 上一棵同样布局的目录 |
 | 给人看的索引页 | 发布时写好的 HTML，托管在 **EdgeOne Makers**；**不**塞进 COS | 写入发布树 `browse/`，由 GET 原样返回（对齐前 serve 仍可现算一页） |
 
-CVM / 发布机 **不是**客户端默认主入口。`relkit-serve` 是内网数据面的一种实现（Range GET；历史 PUT 为遗留），不是另一套发布协议。
+CVM / 发布机 **不是**客户端默认主入口。`relkit-serve` 是内网 `relkit-compatible` 数据面（Range GET + CAS 能力写入），不是另一套发布协议。
 
 `s3-compatible` 后端（SigV4 Put/Get）已实现，是公网写桶的前提；凭据只经环境变量传入。
 
@@ -77,7 +77,7 @@ https://updates.<your-domain>/artifact/...
 ### 4.1 发布流程（构建 → CAS → 签名 → 提交）
 
 目标：发布机只做控制面（发预签名上传凭据、签名、Copy、写指针）。产物字节不进 CVM。  
-`POST /v1/cas/credentials`、S3 SigV4 预签名 PUT、`relkit cas-put`、瘦 staged tar 与 `Materialize` 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` / `pointerTo` 字段拆分仍是目标态。
+`POST /v1/cas/credentials`、S3/COS 长期钥 query 预签名 PUT、`relkit cas-put`、瘦 staged tar 与 `Materialize` 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` / `pointerTo` 字段拆分仍是目标态。
 
 ```mermaid
 flowchart TB
@@ -93,7 +93,7 @@ flowchart TB
 
   subgraph agentSide [发布机 控制面 大字节不驻留]
     ingress["publish.your-domain → 127.0.0.1:8787"]
-    tokSvc["签发凭据文档<br/>目的地只有 ingest 一个<br/>COS 预签名 PUT；local 填本机 PUT"]
+    tokSvc["签发 requests[]<br/>目的地只有 ingest 一个<br/>COS query 预签名；serve 能力 URL"]
     headCas["Head cas 比 size<br/>不重算 sha256"]
     mergeStep["release-policy.json +<br/>本机 products/PRODUCT.json"]
     publishStep["publish.Run<br/>不按 Type 分支"]
@@ -131,11 +131,11 @@ flowchart TB
 
 要点：
 
-- **CI 不签名私钥、不持长期后端写密钥。** 只认凭据文档里的 `putUrl`（及可选 `sign`）。COS 上 agent 用长期 `COS_SECRET_*` 调 GetFederationToken，CI 用返回的临时钥做 Header SigV4 PUT；`local` 时 PUT agent。泛 S3 仍可 query 预签名。不接官方 STS SDK。COS query 预签名若启用，HashedPayload 必须是 `UNSIGNED-PAYLOAD`。
+- **CI 不签名私钥、不持长期后端写密钥。** 只执行凭据文档中绝对 URL 的 `requests[]`。COS/S3 由 agent 使用长期 `COS_SECRET_*` 生成 query 预签名，内网由 serve 签发能力 URL；客户端不认识 SigV4 / STS，也没有 `sign` 字段。
 - **字节只跨「CI → 数据面」一次。** 凭据文档只给一个目的地（该产品的 primary ingest）。CI **不按后端数量循环上传**；其余 `artifactTo` 后端的副本由 agent `Materialize`。
 - `cas/` inbox **只存在于 ingest 后端**，别的后端只有 `artifact/...`。`publish.Run` 只调用 Head / Promote / Materialize / PutArtifact，**禁止**按 `Type()` 写第二条发布路径。细节 [`publish-agent.md`](publish-agent.md) §2.3。
 - **第二 backend 必须是另一只桶。** 同桶的多个自定义域名只是 GET 别名，禁止写成两条 `s3-compatible`。成都桶（`raw2.firoyang.com`）是验证期第二 backend，已按单独指令拆除。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
-- agent 对 S3/COS CAS **不重算 sha256**，只 HEAD 比 size；local 代理 PUT 会在落盘前校验长度与 sha256。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
+- agent 对 S3/COS CAS **不重算 sha256**，只 HEAD 比 size；relkit-serve 能力 PUT 会校验长度。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
 - **写 index 指针才是真发布。** ingest `Head` 命中则只 Promote，不要求 agent 盘上有该文件；`Head` 不到且本地无整包副本时**整轮失败**，不写任何指针。
 - `publish.Run` **不幂等**；发布入口必须幂等键与串行化。
 - 发布机 **不必**出现在客户端 `entryUrls` 里。目的是健壮，不是跨境加速。
@@ -177,7 +177,7 @@ flowchart TB
 
 ### 4.3 谁持有什么
 
-- **CI**：源码、产物、该产品 Bearer。没有私钥，没有长期后端写密钥。只认凭据文档的**那一个** `putUrl`，不知道本轮有几个后端。staged 只有 portable `release-policy.json`。
+- **CI**：源码、产物、该产品 Bearer。没有私钥，没有长期后端写密钥。只执行凭据文档中唯一 ingest 的绝对 URL `requests[]`，不知道本轮有几个后端。staged 只有 portable `release-policy.json`。
 - **发布机**：签名私钥、长期后端凭据（填凭据文档、Promote、Materialize、写指针）、`/etc/relkit-agent/products/<product>.json`。不对外提供下载，大产物也不在盘上驻留。
 - **数据面**：`cas/` 是 **ingest 后端专有**的 inbox（不必匿名读，`Days=1` 清）。正式对象 `artifact` / `index` / `directory` 匿名 GET。长期写权限只属于发布机。
 - **客户端**：公钥、`entryUrls`、`product` / `channel`。只读。按签名文档验 size / sha256。看不见 `cas/`。
@@ -197,9 +197,9 @@ flowchart TB
 
 不要把「内网有一台 HTTP」记成另一套发布协议。角色已经一样，只是内网曾经把两台机器的工作塞进一个二进制：
 
-- **控制面永远是 `relkit-agent`**：持私钥、串行 publish、写入数据面。客户端永远不连它。公网写 COS（`s3-compatible`）；内网写本地目录（`local`，或 agent 写盘、前面再挂 nginx / serve GET）。
+- **控制面永远是 `relkit-agent`**：持私钥、串行 publish、写入数据面。客户端永远不连它。公网写 COS（`s3-compatible`）；内网调用 `relkit-compatible`（serve 能力 URL / COPY / HEAD / DELETE）。
 - **数据面只是文件**：匿名 GET 返回已写入的字节。公网 = COS；内网 = WOA 磁盘。COS、nginx 裸目录、CDN 都能干这件事。
-- **`relkit-serve`** = 内网数据面的一种实现：正确的 Range GET、按前缀分流缓存、可选孤儿 GC。鉴权 PUT 是迁到 agent 之前的遗留写入面，不是新产品该走的发布控制面。它不认识 COS，也不会把 PUT 转发到对象存储。
+- **`relkit-serve`** = 内网 `relkit-compatible` 数据面：Range GET、对象级 CAS 能力 URL、COPY / HEAD / DELETE 与孤儿 GC。它不持发布私钥，也不把正文转发给 agent。
 - **给人看的索引页也是文件**（发布时写好）。协议客户端不读它。公网 HTML 走 EdgeOne Makers，COS 只留协议对象；内网写在 `browse/`。打开更新域名应看到产品/版本/下载，而不是把 `.pb` 当导航。
 
 `baseUrl`（客户端下载）与控制面域名分开：`publish.*` 只给 CI，`updates.*` / `raw.*` / 内网更新域名只给 GET。
@@ -244,11 +244,20 @@ flowchart TB
 | 目标 | 后端 type | 状态 / 备注 |
 |---|---|---|
 | COS 自定义域名整树托管，CLI 直接写桶 | `s3-compatible` | **已实现**；字段见 CLI.md（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`，可选 `region` / `forcePathStyle` / `timeoutSeconds`）。公网产品的 **primary ingest** |
-| CNB / GitHub 仓库上的 `entryUrls` 备援 | `static-http` + `stageDir`（**写 = git push**，GET = raw） | 落盘已实现；commit/push 仍欠，见 publish-agent §2.3。不要当成只读 HTTP，也**不可**作 ingest；默认只进 `pointerTo` |
-| 自建磁盘上的发布树（内网 agent 写盘，或离线演练） | `local` | **已实现**；内网主路径与内网产品的 **primary ingest** |
-| 遗留：经 serve 鉴权 PUT | `http-put` | **已实现**；新产品改走 agent；旧产品可暂留直到迁完 |
+| CNB / GitHub 仓库上的 `entryUrls` 备援 | `static-http`（GET = raw） | 只描述已由外部流程提交并可匿名读取的树；不可写、不可作 ingest |
+| 自建 relkit-serve 数据面 | `relkit-compatible` | **已实现**；`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`；内网 primary ingest |
+| 只读 HTTP / 外部已送达对象 | `static-http` | **已实现**；不可作 ingest |
 
 正式发布优先配置 `s3-compatible`。**禁止**手工打乱「产物 → manifest → 指针最后写」顺序冒充正式发布（见 AGENT-GUIDE）。
+
+## 7.1 删除旧后端前的部署顺序
+
+1. **发布机清 `casCredentials`**：字段虽被过渡版本接受并忽略，仍须先从全部 profile 删除。
+2. **内网 serve 先 GC**：先上线上传租约与 `gc.casGrace: "24h"`，确认 GC 不会清理刚上传但尚未发布的 CAS。
+3. **开写入面并迁 profile 后发版验证**：配置 `RELKIT_SERVE_TOKEN`，把内网后端改为 `relkit-compatible`，完成一次真实 `cas-put` / publish / verify。
+4. **稳定后才部署删除类型版本**：最后再升级不含 `local` / `http-put` 的 agent/CLI。
+
+`casCredentials=sts`、GetFederationToken、临时钥与客户端 `sign` 只属于已废弃方案，不得用于新配置。
 
 ## 8. 迁移 runbook：COS ↔ CNB（或其它路径型镜像）
 
@@ -257,9 +266,9 @@ flowchart TB
 
 ### 8.1 阶段 A — 双写，不关旧源
 
-1. 增加目标后端（例：CNB `static-http`，`baseUrl` 为可匿名 GET 的 `/-/raw/...` 前缀，`stageDir` 指向仓库内发布树）。  
-2. `pointerTo` 同时包含 `cos` 与 `cnb`（名称随意）。只有确实要迁 **artifact 整树**时才把 `cnb` 也加进 `artifactTo`，且先定 LFS / 体积上限；只做 `entryUrls` 备援不需要这一步。  
-3. 再发至少一版：manifest / index 字节落到两边；`artifactTo` 覆盖到的一侧才有 artifact 副本，新文档 `urls[]` 含所有**实际存在**的取货点。  
+1. 先由仓库 CI 或其它外部流程把完整发布树送到 CNB / GitHub，并确认 raw URL 可匿名读取；再增加只读 `static-http` 后端，`baseUrl` 指向 `/-/raw/...` 前缀。
+2. `pointerTo` / `artifactTo` 只能包含可写的 `s3-compatible` 或 `relkit-compatible`；只读 `static-http` 用于 verify 与声明已经存在的取货点。
+3. 再发至少一版：新文档 `urls[]` 只能包含已经实际存在、可匿名读取的取货点。
 4. `relkit verify`（必要时 `--deep`）两侧都通过。
 
 ### 8.2 阶段 B — 改引导，仍保留旧源 URL
@@ -333,8 +342,7 @@ manifest / artifact **发布后不可变**。若某历史版本的 manifest 当�
   "prefix": "rup/",
   "baseUrl": "https://raw.firoyang.com/rup/",
       "accessKeyEnv": "COS_SECRET_ID",
-      "secretKeyEnv": "COS_SECRET_KEY",
-      "casCredentials": "sts"
+      "secretKeyEnv": "COS_SECRET_KEY"
 }
 ```
 

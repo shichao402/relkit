@@ -87,7 +87,7 @@ type SiteConfig struct {
 	Description string `json:"description,omitempty"`
 	Homepage    string `json:"homepage,omitempty"`
 	// Makers deploys the human index to EdgeOne Pages after a public publish.
-	// Intranet local/http-put backends skip this even when it is set.
+	// Intranet relkit-compatible backends skip this even when it is set.
 	Makers *MakersConfig `json:"makers,omitempty"`
 }
 
@@ -568,13 +568,13 @@ func Skeleton(product string) map[string]any {
 			"publicKeys":     []any{},
 		},
 		"backends": map[string]any{
-			"local": map[string]any{
-				"type":      "local",
-				"outputDir": "dist/publish",
-				"baseUrl":   "https://example.invalid/rup/",
+			"serve": map[string]any{
+				"type":     "relkit-compatible",
+				"baseUrl":  "http://127.0.0.1:30341/",
+				"tokenEnv": "RELKIT_SERVE_TOKEN",
 			},
 		},
-		"publishTo": []string{"local"},
+		"publishTo": []string{"serve"},
 		"recovery": map[string]any{
 			"message": "Automatic updates are unavailable. Install a release from an official page.",
 			"links": []any{

@@ -6,7 +6,7 @@ RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管�
 |---|---|---|
 | `relkit` | `cmd/relkit` | stage / 签名 / 上传 / 提交 |
 | `relkit-agent` | `cmd/relkit-agent` | CI 交 staged 树；本机持钥写入数据面 |
-| `relkit-serve` | `cmd/relkit-serve` | Range 下载 + 鉴权 PUT + 孤儿 GC |
+| `relkit-serve` | `cmd/relkit-serve` | Range 下载 + CAS 能力上传 + 孤儿 GC |
 
 当前版本：`0.2.0`（RUP **protobuf v2** 线格式）
 
@@ -64,7 +64,7 @@ relkit agent-guide
 relkit backends
 ```
 
-已实现后端：`local` · `static-http` · `http-put`
+已实现后端：`s3-compatible` · `relkit-compatible` · `static-http`
 
 ### 快速开始
 
@@ -117,7 +117,7 @@ relkit verify --deep
 
 - 每个 channel 发布都覆盖 `site/<product>.json`，由 `relkit-serve` 产品门户读取。
 - 每个 channel 发布只覆盖自己那份 `latest/<product>/<channel>.json`，在发布时固化本版各 artifact 的 ID、selectors 与 URL。dev 发布不影响 stable 的指针。
-- 公网 COS 发布若配了 `site.makers`，同一轮还会把 `.relkit/browse/` 部署到 EdgeOne Makers（HTML 不进 COS）。内网 `local` 把同一份文件写到数据面 `browse/`。
+- 公网 COS 发布若配了 `site.makers`，同一轮还会把 `.relkit/browse/` 部署到 EdgeOne Makers（HTML 不进 COS）。内网 `relkit-compatible` 把同一份文件写到数据面 `browse/`。
 
 因此 `relkit-serve` 可按 channel 提供 `/-/latest/<product>/<channel>/<artifact-id>` 这种长期有效地址，例如 `/-/latest/demoapp/stable/windows`。请求只读取已发布的 latest 指针并跳转，不实时扫描 index / manifest。
 
@@ -184,7 +184,7 @@ cd sdk/node && npm test
 覆盖：
 
 - `chain` / `selectors` / `envelope` 的 conformance 夹具回归
-- `local` / `static-http` / `http-put` 端到端发布与校验（`.pb`）
+- `s3-compatible` / `relkit-compatible` 端到端发布，以及 `static-http` 只读校验（`.pb`）
 - `relkit-serve` 的 Range / PUT / GC / 配置加载 / 操作面板鉴权
 - `sdk` 客户端 Check/Download（Go 与 Node）
 - `version` 项目 VERSION.json SSOT（get/set/bump/code）

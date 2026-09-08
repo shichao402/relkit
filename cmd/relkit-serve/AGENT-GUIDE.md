@@ -42,9 +42,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 
 ## 1. 适用判定
 
-**适用：** 需要在自己掌管的机器上对已经写好的 RUP 树做 Range GET（内网数据面）。发布写入应走同机或旁路的 `relkit-agent`（`local` 后端），见 `docs/design/publish-agent.md` §7。
-
-**仍可用、但是遗留：** `http-put` 打到本服务的鉴权 PUT。旧产品可留到迁完。
+**适用：** 需要在自己掌管的机器上运行 `relkit-compatible` 数据面：Range GET、CAS 能力 URL、HEAD / COPY / DELETE 与 GC。发布控制面仍是旁路 `relkit-agent`。
 
 **不适用：**
 
@@ -118,7 +116,7 @@ curl -sI https://dl.example.com/index/app/stable.json | grep -i cache-control
 
 1. 读全部 `index/<product>/<channel>.json`（解码签名信封拿 payload，**不验签、不改写**）；
 2. 收集仍指向本机的 `manifest/` / `artifact/` 路径，以及这些 manifest 里仍出现的 `cas/{sha256}`（所有 channel 取并集）；
-3. 删掉不在集合里的旧文件与空目录（含未再被引用的 `cas/`）。
+3. 删掉不在集合里的旧文件与空目录；`cas/` 还必须没有有效上传租约且 mtime 已超过 `gc.casGrace`（默认 24h）。
 
 安全阀：没有可读 index、全部解析失败、或解析后没有本机引用时，**整轮不删任何东西**，只打 `gc: aborted` 日志。
 
@@ -135,7 +133,7 @@ curl -sI https://dl.example.com/index/app/stable.json | grep -i cache-control
 - [ ] 2. 装二进制
 - [ ] 3. init 生成配置与 token
 - [ ] 4. 装 systemd 单元并启动
-- [ ] 5. 自检五项
+- [ ] 5. 自检七项
 - [ ] 6. 把**产品** token 交给对应发布方（不要把运营方全树 token 发给产品 CI）
 ```
 
@@ -192,12 +190,12 @@ sudo relkit-serve init -out /etc/relkit-serve -product siblingapp -share-with de
 sudo relkit-serve init -out /etc/relkit-serve -list-products
 ```
 
-### 第 5 步：自检五项
+### 第 5 步：自检七项
 
 每一项都独立排除一类故障，全过才算部署完成。
 
 ```bash
-BASE=http://localhost:8080
+BASE=http://127.0.0.1:30341
 
 # 1) 活着
 curl -fsS $BASE/-/health && echo OK
@@ -206,22 +204,36 @@ curl -fsS $BASE/-/health && echo OK
 curl -s -o /dev/null -w '%{http_code}\n' -X PUT --data-binary 'x' $BASE/probe.txt
 # 期望 401。得到 405 说明服务是只读的（没读到 token，回看启动日志）
 
-# 3) 带 token 能写
-curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" --data-binary 'x' $BASE/probe.txt
+# 3) 运营方 token 能签发 CAS 能力 URL；从 JSON 取绝对 url
+MINT=$(curl -fsS -X POST \
+  -H "Authorization: Bearer $RELKIT_SERVE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"key":"cas/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"ttl":300}' \
+  $BASE/-/cas/uploads)
+CAPABILITY_URL=$(printf '%s' "$MINT" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
 
-# 4) Range 生效 —— 客户端并发下载依赖它
-curl -s -o /dev/null -w '%{http_code}\n' -r 0-0 $BASE/probe.txt
+# 4) 用返回的能力 URL PUT，再 COPY 到正式对象
+curl -fsS -X PUT --data-binary 'x' "$CAPABILITY_URL"
+curl -fsS -X PUT \
+  -H "Authorization: Bearer $RELKIT_SERVE_TOKEN" \
+  -H "X-Relkit-Copy-Source: cas/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  $BASE/artifact/probe/1/probe.txt
+
+# 5) HEAD 与 Range 生效
+curl -fsSI -H "Authorization: Bearer $RELKIT_SERVE_TOKEN" $BASE/artifact/probe/1/probe.txt
+curl -s -o /dev/null -w '%{http_code}\n' -r 0-0 $BASE/artifact/probe/1/probe.txt
 # 期望 206。得到 200 说明 Range 没生效，客户端会退化成单线程
 
-# 5) 根路径是对外目录；操作面板在 /-/admin（未登录应 302 到 setup 或 login）
+# 6) 根路径是对外目录；操作面板在 /-/admin（未登录应 302 到 setup 或 login）
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/-/admin
 # / 期望 200。有 browse/index.html 时是静态目录页，否则是说明。
 # $BASE/-/admin 未登录期望 302（有引导凭据 → /-/admin/setup；已有账户 → /-/admin/login）。
 # 登录后 $BASE/-/admin 是现算门户，$BASE/-/admin/files 是文件列表。
 
-curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" $BASE/probe.txt 2>/dev/null || \
-  sudo rm -f /srv/releases/probe.txt   # 服务不支持 DELETE，探针文件手工清掉
+# 7) DELETE 回收探针
+curl -fsS -X DELETE -H "Authorization: Bearer $RELKIT_SERVE_TOKEN" $BASE/artifact/probe/1/probe.txt
+curl -fsS -X DELETE -H "Authorization: Bearer $RELKIT_SERVE_TOKEN" $BASE/cas/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```
 
 第 4 项容易被跳过，但它是唯一能证明"多线程下载真的可用"的检查。经过反代之后尤其要重测：有些反代配置会吃掉 `Range`。
@@ -230,45 +242,33 @@ curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" $BASE/probe.txt 2>/dev/nul
 
 ## 4. 流程 B：让 relkit 推到这台机器
 
-在**发布方**（不是服务器）的项目里配一个 `http-put` 后端：
+在发布机 profile 配置 `relkit-compatible`：
 
 ```json
 {
   "backends": {
     "dl": {
-      "type": "http-put",
-      "baseUrl": "http://dl.internal:8080/",
-      "tokenEnv": "RELKIT_UPLOAD_TOKEN"
+      "type": "relkit-compatible",
+      "baseUrl": "https://dl.example.com/releases/",
+      "uploadUrl": "http://10.0.0.5:30341/",
+      "tokenEnv": "RELKIT_SERVE_TOKEN",
+      "timeoutSeconds": 600
     }
   },
   "publishTo": ["dl"]
 }
 ```
 
-`tokenEnv` 写的是**环境变量名**，不是 token 本身。这个文件要进版本控制。产品仓库**不用**声明 scope：PUT 的 key 已经带本产品 id，服务端按 token 的 `products` 列表拦。
+`baseUrl` 是客户端下载基址；`uploadUrl` 可省略；`tokenEnv` 必填，只写环境变量名。这里必须使用运营方 `RELKIT_SERVE_TOKEN`，因为 `cas/{sha256}` 不含产品 id，产品 token不能安全隔离 CAS。
+
+本机演练：
 
 ```bash
-export RELKIT_UPLOAD_TOKEN='<init -product 打印的那个，只属于本产品>'
-relkit publish 1.0.0
-relkit verify --deep
+export RELKIT_SERVE_TOKEN='<init 输出的运营方 token>'
+relkit-serve -dir ./dist -addr 127.0.0.1:30341
 ```
 
-多个产品可以都用变量名 `RELKIT_UPLOAD_TOKEN`，因为值在不同仓库 / CI job 里不同。同一台发布机要发多个产品时，用不同变量名（如 `RELKIT_UPLOAD_TOKEN_DEMOAPP`）并改对应 `tokenEnv`。
-
-下载与上传地址可以不同，而且这是常见情形而非特例 —— 下载走公网域名或 CDN，上传走内网：
-
-```json
-{
-  "type": "http-put",
-  "baseUrl": "https://dl.example.com/releases/",
-  "uploadUrl": "http://10.0.0.5:8080/",
-  "tokenEnv": "RELKIT_UPLOAD_TOKEN"
-}
-```
-
-`baseUrl` 必须与客户端实际访问的地址一致，因为它会被写进 manifest 的 `urls` 并被签名。写错了要重新发布才能改。配完先跑 `relkit verify --deep`，它会逐个产物发 HEAD，确认那些 URL 真的能匿名取到。
-
----
+agent 调 `POST /-/cas/uploads` 获取短期绝对能力 URL；CI 执行 `requests[]`。Promote 与回收分别使用 HEAD、带 `X-Relkit-Copy-Source` 的 COPY 和 DELETE。`local` / `http-put` 不再是现行后端。
 
 ## 5. 流程 C：轮换与吊销 token
 
@@ -374,6 +374,7 @@ ssh <host> sudo systemctl restart relkit-serve
 | `cache.defaultMaxAge` | `-default-max-age` | `60` | 两个列表都不命中时的 `max-age` |
 | `gc.enabled` | `-gc` | `true` | 是否启用孤儿 `manifest/` / `artifact/` 清理，见 §2.7 |
 | `gc.interval` | `-gc-interval` | `1h` | 定时扫盘间隔；`0` 与 `enabled=false` 一样关闭 GC |
+| `gc.casGrace` | 无 | `24h` | 未被引用的 CAS 在删除前至少保留多久；上传租约未过期时也不删 |
 | `shutdownTimeout` | `-shutdown-timeout` | `30s` | 收到停止信号后留给进行中下载的时间 |
 | `statsFile` | 无 | `<dir>/.relkit-serve-stats.json` | 下载计数 JSON；默认在服务目录根下且不对外提供。放到树外时需给 systemd 加 `ReadWritePaths` |
 | `adminStateFile` | 无 | `<dir>/.relkit-serve-admin.json` | 面板账户与引导哈希；0600；默认在服务目录以便进程能在首次建账户时作废引导凭据。放到树外时同样要加 `ReadWritePaths` |
@@ -416,7 +417,7 @@ ssh <host> sudo systemctl restart relkit-serve
 
 发布方的 token 与服务端不一致。服务端只存 sha256，**无法反查明文**，所以不要试图"确认服务端 token 是什么"，直接按 §5 重设。
 
-也确认发布方那侧环境变量真的传进去了 —— `relkit` 读的是 `relkit.json` 里 `tokenEnv` 指定的那个名字，不是固定的 `RELKIT_UPLOAD_TOKEN`。
+也确认发布方那侧环境变量真的传进去了 —— `relkit` 读的是 profile 里 `tokenEnv` 指定的名字；推荐统一为 `RELKIT_SERVE_TOKEN`。
 
 ### `PUT` 返回 403
 
@@ -490,7 +491,7 @@ curl -sI $BASE/index/<product>/<channel>.json | grep -iE 'cache-control|last-mod
 - 实际生效的配置文件路径（照抄启动日志那一行）；
 - 上传端点是开还是关；
 - GC 是开还是关（照抄启动日志）；
-- §3 自检五项的结果（`/-/admin` 未登录应是 302）；
+- §3 自检七项的结果（`/-/admin` 未登录应是 302）；
 - token 交付给了谁、通过什么渠道（**不要**在汇报里带上 token 或引导凭据本身）；
 - 面板是仍待首次建账户，还是已经能登录（照抄启动日志 `panel:`）；
 - 若挂了反代：`Cache-Control` 透传的复验结果。

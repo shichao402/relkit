@@ -48,6 +48,8 @@ func newTestConfig(t *testing.T, withToken bool) (*config, string) {
 		defaultMaxAge: 60,
 		stats:         newDownloadStats(defaultStatsPath(dir), dir),
 		admin:         readyTestAdmin(t, dir),
+		casSecret:     bytes.Repeat([]byte{7}, 32),
+		gc:            newGCState(true, time.Hour, defaultGCDebounce, defaultCASGrace),
 	}
 	if withToken {
 		cfg.credentials = []credential{{hash: hashToken(testToken)}}

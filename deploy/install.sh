@@ -15,7 +15,7 @@ set -eu
 BINARY=""
 DIR=/srv/releases
 CONFIG_DIR=/etc/relkit-serve
-ADDR=":8080"
+ADDR="127.0.0.1:30341"
 USER_NAME=relkit
 PREFIX=/usr/local/bin
 ROTATE=0
@@ -33,9 +33,8 @@ Usage: sudo ./install.sh --binary PATH [options]
   --rotate-token    generate a new token, invalidating the current one
   -h, --help        this text
 
-Read-only by default is not an option here: this script always configures an
-upload token, because the point of running this service instead of Nginx is
-that relkit can publish to it directly.
+This script configures the operator token required by relkit-compatible to
+mint object-level CAS capability URLs and perform HEAD/COPY/DELETE.
 EOF
 }
 
@@ -126,7 +125,7 @@ if [ ! -f "$CONFIG" ] || [ ! -f "$TOKEN_FILE" ]; then
 	NEW_TOKEN=$(printf '%s\n' "$INIT_OUT" | extract_token)
 	NEW_BOOTSTRAP=$(printf '%s\n' "$INIT_OUT" | extract_bootstrap)
 
-	# init writes addr :8080; honour --addr without needing a JSON parser here.
+	# init writes its built-in addr; honour --addr without needing a JSON parser here.
 	if [ "$ADDR" != ":8080" ]; then
 		tmp="$CONFIG.tmp$$"
 		sed "s|\"addr\": \".*\"|\"addr\": \"$ADDR\"|" "$CONFIG" >"$tmp"
@@ -161,8 +160,7 @@ sed -e "s|^User=.*|User=$USER_NAME|" \
 
 # A port below 1024 cannot be bound by an unprivileged user without help. The
 # alternatives are worse: running as root gives away everything to protect one
-# bind, and moving to a high port puts ":8080" into every signed manifest, where
-# it cannot be changed later without cutting a new release. One capability,
+# bind, and changing the public address changes URLs in signed manifests. One capability,
 # granted only when the port actually needs it, is the smallest of the three.
 UNIT_PORT=$(printf '%s' "$ADDR" | sed 's/.*://')
 if [ -n "$UNIT_PORT" ] && [ "$UNIT_PORT" -lt 1024 ] 2>/dev/null; then
@@ -207,11 +205,11 @@ done
 	journalctl -u relkit-serve -n 30 --no-pager >&2 || true
 	exit 1
 }
-echo "1/5 health              ok"
+echo "1/7 health              ok"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT --data-binary 'x' "$BASE/.probe~" || true)
 case "$code" in
-401) echo "2/5 upload auth         ok (unauthenticated PUT rejected)" ;;
+401) echo "2/7 upload auth         ok (unauthenticated PUT rejected)" ;;
 405) fail "upload endpoint is disabled; the service did not read the token" ;;
 *) fail "unauthenticated PUT returned $code, expected 401" ;;
 esac
@@ -223,23 +221,45 @@ else
 fi
 [ -n "$TOKEN" ] || fail "cannot read the token to finish the self-check"
 
-curl -fsS -o /dev/null -X PUT -H "Authorization: Bearer $TOKEN" \
-	--data-binary 'relkit-serve probe' "$BASE/.probe~" ||
-	fail "authenticated PUT failed"
-echo "3/5 upload              ok"
+DIGEST=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+MINT=$(curl -fsS -X POST \
+	-H "Authorization: Bearer $TOKEN" \
+	-H "Content-Type: application/json" \
+	--data "{\"key\":\"cas/$DIGEST\",\"size\":18,\"ttl\":300}" \
+	"$BASE/-/cas/uploads") || fail "CAS capability mint failed"
+CAP_URL=$(printf '%s' "$MINT" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
+[ -n "$CAP_URL" ] || fail "CAS capability response has no url"
+curl -fsS -o /dev/null -X PUT --data-binary 'relkit-serve probe' "$CAP_URL" ||
+	fail "CAS capability PUT failed"
+echo "3/7 capability upload   ok"
+
+ARTIFACT=artifact/probe/1/probe.txt
+curl -fsS -o /dev/null -X PUT \
+	-H "Authorization: Bearer $TOKEN" \
+	-H "X-Relkit-Copy-Source: cas/$DIGEST" \
+	"$BASE/$ARTIFACT" || fail "COPY promote failed"
+echo "4/7 copy promote        ok"
+
+code=$(curl -s -o /dev/null -w '%{http_code}' -I \
+	-H "Authorization: Bearer $TOKEN" "$BASE/$ARTIFACT" || true)
+[ "$code" = 200 ] || fail "authenticated HEAD returned $code, expected 200"
+echo "5/7 authenticated HEAD  ok"
 
 # Range is what makes concurrent download work. A proxy or a misconfiguration
 # that drops it silently degrades every client to a single stream, so this is
 # checked explicitly rather than assumed.
-code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-3 "$BASE/.probe~" || true)
+code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-3 "$BASE/$ARTIFACT" || true)
 [ "$code" = 206 ] || fail "ranged GET returned $code, expected 206"
-echo "4/5 range requests      ok"
+echo "6/7 range requests      ok"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/" || true)
 [ "$code" = 404 ] || fail "directory listing returned $code, expected 404"
-echo "5/5 no directory listing ok"
+echo "7/7 no directory listing ok"
 
-rm -f "$DIR/.probe~"
+curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/$ARTIFACT" ||
+	fail "artifact DELETE failed"
+curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/cas/$DIGEST" ||
+	fail "CAS DELETE failed"
 
 step "Done"
 echo "listening   $ADDR"
@@ -254,15 +274,16 @@ if [ -n "$NEW_TOKEN" ]; then
 The publisher needs this token. It is shown once; the server stores only its
 sha256 and cannot recover it.
 
-  export RELKIT_UPLOAD_TOKEN='$NEW_TOKEN'
+  export RELKIT_SERVE_TOKEN='$NEW_TOKEN'
 
-And in the publishing project's relkit.json:
+And in the publish profile:
 
   "backends": {
     "dl": {
-      "type": "http-put",
-      "baseUrl": "http://$(hostname -f 2>/dev/null || hostname)$ADDR/",
-      "tokenEnv": "RELKIT_UPLOAD_TOKEN"
+      "type": "relkit-compatible",
+      "baseUrl": "https://updates.example.com/",
+      "uploadUrl": "http://127.0.0.1:$PORT/",
+      "tokenEnv": "RELKIT_SERVE_TOKEN"
     }
   }
 
@@ -274,7 +295,7 @@ fi
 if [ -n "$NEW_BOOTSTRAP" ]; then
 	cat <<EOF
 
-Open http://127.0.0.1:${PORT:-8080}/-/admin and create the first operator with
+Open http://127.0.0.1:${PORT:-30341}/-/admin and create the first operator with
 this one-shot bootstrap. It is spent the moment that account exists; do not
 store it.
 

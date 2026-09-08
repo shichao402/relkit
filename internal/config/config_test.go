@@ -15,7 +15,7 @@ func TestLoadRetainVersions(t *testing.T) {
   "codeStrategy": "explicit",
   "retainVersions": 1,
   "backends": {
-    "local": {"type": "local", "outputDir": "out", "baseUrl": "https://example.invalid/"}
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
   }
 }`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
@@ -36,7 +36,7 @@ func TestLoadRetainVersionsDefaultZero(t *testing.T) {
 	raw := `{
   "product": "demo",
   "backends": {
-    "local": {"type": "local", "outputDir": "out", "baseUrl": "https://example.invalid/"}
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
   }
 }`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
@@ -57,7 +57,7 @@ func TestLoadSiteMakers(t *testing.T) {
 	raw := `{
   "product": "demo",
   "backends": {
-    "local": {"type": "local", "outputDir": "out", "baseUrl": "https://example.invalid/"}
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
   },
   "site": {
     "title": "Demo",
@@ -90,7 +90,7 @@ func TestLoadSiteMakersOnly(t *testing.T) {
 	raw := `{
   "product": "demo",
   "backends": {
-    "local": {"type": "local", "outputDir": "out", "baseUrl": "https://example.invalid/"}
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
   },
   "site": {
     "makers": {"projectId": "makers-only", "region": "global", "tokenEnv": "PAGES_TOKEN"}
@@ -114,7 +114,7 @@ func TestLoadSiteMakersRejectsBadRegion(t *testing.T) {
 	raw := `{
   "product": "demo",
   "backends": {
-    "local": {"type": "local", "outputDir": "out", "baseUrl": "https://example.invalid/"}
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
   },
   "site": {
     "makers": {"projectId": "makers-x", "region": "ap-guangzhou"}
@@ -169,7 +169,7 @@ func TestLoadRetainVersionsRejectsNegative(t *testing.T) {
   "product": "demo",
   "retainVersions": -1,
   "backends": {
-    "local": {"type": "local", "outputDir": "out", "baseUrl": "https://example.invalid/"}
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
   }
 }`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {

@@ -27,6 +27,7 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 	if err := os.MkdirAll(productRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	ingest := startFakeRelkitServe(t, "serve-token")
 
 	seed, err := keys.GenerateSeed()
 	if err != nil {
@@ -54,13 +55,9 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 			}},
 		},
 		"backends": map[string]any{
-			"local": map[string]any{
-				"type":      "local",
-				"outputDir": "dist",
-				"baseUrl":   "https://example.invalid/rup/",
-			},
+			"serve": ingest.backendConfig(),
 		},
-		"publishTo": []any{"local"},
+		"publishTo": []any{"serve"},
 	}
 	cfgBytes, _ := json.MarshalIndent(cfgDoc, "", "  ")
 	if err := os.WriteFile(filepath.Join(productRoot, config.ConfigName), cfgBytes, 0o644); err != nil {
@@ -325,6 +322,7 @@ type agentFixture struct {
 	ts          *httptest.Server
 	token       string
 	tarball     []byte
+	ingest      *fakeRelkitServe
 }
 
 func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
@@ -341,6 +339,7 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 	if err := os.MkdirAll(productRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	ingest := startFakeRelkitServe(t, "serve-token")
 
 	seed, err := keys.GenerateSeed()
 	if err != nil {
@@ -368,13 +367,9 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 			}},
 		},
 		"backends": map[string]any{
-			"local": map[string]any{
-				"type":      "local",
-				"outputDir": "dist",
-				"baseUrl":   "https://example.invalid/rup/",
-			},
+			"serve": ingest.backendConfig(),
 		},
-		"publishTo": []any{"local"},
+		"publishTo": []any{"serve"},
 		"changelog": map[string]any{
 			"file":        "CHANGELOG.md",
 			"urlTemplate": "https://example.invalid/notes/{version}",
@@ -499,6 +494,7 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 		ts:          ts,
 		token:       "test-token",
 		tarball:     tarball,
+		ingest:      ingest,
 	}
 }
 

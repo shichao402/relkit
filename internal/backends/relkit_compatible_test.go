@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"cnb.cool/shichao402/relkit/internal/config"
 	"cnb.cool/shichao402/relkit/internal/publishproto"
 )
 
-func testHTTPPutBackend(serverURL string) *httpPutBackend {
-	return &httpPutBackend{
+func testRelkitBackend(serverURL string) *relkitCompatibleBackend {
+	return &relkitCompatibleBackend{
 		pathStyleBackend: &pathStyleBackend{
-			baseBackend: baseBackend{name: "upload", backendType: "http-put"},
+			baseBackend: baseBackend{name: "upload", backendType: "relkit-compatible"},
 			baseURL:     serverURL + "/",
 		},
 		uploadURL: serverURL + "/",
@@ -23,7 +24,7 @@ func testHTTPPutBackend(serverURL string) *httpPutBackend {
 	}
 }
 
-func TestHTTPPutPreflightAndWritesAdvertisePublisher(t *testing.T) {
+func TestRelkitCompatiblePreflightAndWritesAdvertisePublisher(t *testing.T) {
 	t.Setenv("RELKIT_TEST_UPLOAD_TOKEN", "secret")
 	oldVersion := publishproto.PublisherVersion
 	publishproto.PublisherVersion = "0.2.0-test"
@@ -54,7 +55,7 @@ func TestHTTPPutPreflightAndWritesAdvertisePublisher(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	backend := testHTTPPutBackend(srv.URL)
+	backend := testRelkitBackend(srv.URL)
 	if err := backend.Preflight(); err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestHTTPPutPreflightAndWritesAdvertisePublisher(t *testing.T) {
 	}
 }
 
-func TestHTTPPutPreflightReportsRequiredUpgrade(t *testing.T) {
+func TestRelkitCompatiblePreflightReportsRequiredUpgrade(t *testing.T) {
 	t.Setenv("RELKIT_TEST_UPLOAD_TOKEN", "secret")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUpgradeRequired)
@@ -74,23 +75,26 @@ func TestHTTPPutPreflightReportsRequiredUpgrade(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := testHTTPPutBackend(srv.URL).Preflight()
+	err := testRelkitBackend(srv.URL).Preflight()
 	if err == nil || !strings.Contains(err.Error(), "publish protocol 3 is required") ||
 		!strings.Contains(err.Error(), "upgrade relkit") {
 		t.Fatalf("Preflight error = %v", err)
 	}
 }
 
-func TestHTTPPutPreflightAllowsLegacyGenericEndpoint(t *testing.T) {
-	t.Setenv("RELKIT_TEST_UPLOAD_TOKEN", "secret")
-	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(status)
-		}))
-		err := testHTTPPutBackend(srv.URL).Preflight()
-		srv.Close()
-		if err != nil {
-			t.Errorf("status %d: %v", status, err)
-		}
+func TestCreateRejectsRemovedBackendTypes(t *testing.T) {
+	for _, backendType := range []string{"local", "http-put"} {
+		t.Run(backendType, func(t *testing.T) {
+			cfg := &config.Config{
+				Backends: map[string]map[string]any{
+					"removed": {"type": backendType},
+				},
+			}
+			_, err := Create("removed", cfg, t.TempDir())
+			if err == nil || !strings.Contains(err.Error(), "removed") ||
+				!strings.Contains(err.Error(), "relkit-compatible") {
+				t.Fatalf("err=%v", err)
+			}
+		})
 	}
 }

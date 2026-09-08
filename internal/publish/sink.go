@@ -66,7 +66,7 @@ func (s makersSink) LoadCatalog() *browse.Catalog {
 
 // OpenBrowseSinks builds human-index destinations for this publish run.
 // HostsBrowse backends get a data-plane sink. site.makers is added only when
-// some target cannot host browse/ (so --to local skips Makers).
+// some target cannot host browse/ (so a relkit-compatible-only publish skips Makers).
 func OpenBrowseSinks(cfg *config.Config, targets []backends.Backend) []BrowseSink {
 	var sinks []BrowseSink
 	if cfg == nil {

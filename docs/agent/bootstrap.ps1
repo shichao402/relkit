@@ -1,8 +1,8 @@
-# RUP / relkit Agent 开箱探测：只打印下一步，不修改宿主仓库。
 param(
     [string]$HostRoot = "."
 )
 
+# RUP / relkit Agent 开箱探测：只打印下一步，不修改宿主仓库。
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RelkitRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
@@ -28,7 +28,7 @@ if (Test-Cmd "relkit-serve") {
     try { Write-Output ("OK  relkit-serve: " + (relkit-serve -version 2>$null)) }
     catch { Write-Output "OK  relkit-serve: present" }
 } else {
-    Write-Output "INFO  relkit-serve not in PATH (only needed for self-hosted http-put)"
+    Write-Output "INFO  relkit-serve not in PATH (needed for relkit-compatible or on-machine rehearsal)"
 }
 Write-Output ""
 

@@ -51,11 +51,18 @@ relkit keygen --key-id <key-id> --out keys --update-config
 
 | 场景 | 后端 | 下一步 |
 |------|------|--------|
-| 本机演练 / 离线 | `local` | `relkit backends` 看示例；**禁止**把 local 树当正式生产冒充上传 |
-| 产物已由 CI/rsync 放到可预测 HTTP 路径 | `static-http` | 配 `stageDir` + 公网/内网 base URL |
-| 自管机器 + 鉴权 PUT | `http-put` + `relkit-serve` | 先按 `relkit-serve agent-guide` 部署，再配 token 环境变量 |
+| COS / S3 / MinIO | `s3-compatible` | 配长期钥环境变量；agent 只生成 query 预签名 URL |
+| 自管 relkit-serve / 本机演练 | `relkit-compatible` | 配 `baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds` |
+| 外部系统已放好对象 / 只读镜像 | `static-http` | 配绝对 `baseUrl`；不可作 ingest |
 
-改 `relkit.json` 后不要手改远端已签名文件。
+本机演练：
+
+```bash
+export RELKIT_SERVE_TOKEN='<relkit-serve init 输出的运营方 token>'
+relkit-serve -dir ./dist -addr 127.0.0.1:30341
+```
+
+`local` / `http-put` 已删除。`casCredentials` 只过渡接受并忽略；新配置必须删除。
 
 ## A3. 第一次端到端（建议用假产物）
 
@@ -67,7 +74,7 @@ relkit stage --add dist/app-win.zip os=windows,arch=x64
 # 多平台则继续 --add；正式产品通常需要 windows+macos 同版本一起 stage
 relkit simulate --with-staged 0.1.0+1 --from all
 relkit publish --dry-run
-relkit publish                      # local / 已配好的后端
+relkit publish                      # 指向本机 serve 或已配好的后端
 relkit verify --deep                # 对真实 HTTP 后端有意义
 ```
 
@@ -84,7 +91,7 @@ relkit verify --deep                # 对真实 HTTP 后端有意义
 5. 宿主仓若 sparse / vendor relkit：clone **`https://github.com/shichao402/relkit.git`**，默认跟 **`main`**。只有要冻结某次发版才 `--ref` **完整 SHA**（短 SHA 多数 remote 拒绝 `git fetch`）。Go 模块路径仍是 `cnb.cool/shichao402/relkit`，那不是 git URL
 6. 发版排障与红线：改读 `relkit agent-guide`，不要复制粘贴过期命令
 7. **产物哈希要稳**：不要把每次不同的 `BuildTime` / 随机 seed 打进二进制。relkit 只认 sha256；哈希漂了，agent CAS 跳过上传和客户端跳过下载都打不中
-8. **发布 CAS 不用宿主再实现**：`relkit-agent` 的 `publish` 已 Head+Promote；CI 仍可整包 `PUT /v1/staged`
+8. **发布 CAS 不用宿主再实现**：agent 返回绝对 URL `requests[]`；客户端只执行请求，不实现 STS / SigV4 / `sign`
 
 参考实现（非规范）：SvnMergeTool 的蓝盾双 Job（一端 upload-only，一端等 peer 后统一 publish）。
 

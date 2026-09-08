@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,6 @@ import (
 	"testing"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/backends"
 	"cnb.cool/shichao402/relkit/internal/model"
 	"cnb.cool/shichao402/relkit/internal/stage"
 )
@@ -70,7 +70,8 @@ func TestPutUploadsCASAndThinStaged(t *testing.T) {
 			}
 			writeTestJSON(w, map[string]any{
 				"uploads": []any{map[string]any{
-					"sha256": digest, "size": len(payload), "putUrl": "/cas-upload",
+					"sha256": digest, "size": len(payload),
+					"requests": []any{map[string]any{"method": "PUT", "url": server.URL + "/cas-upload"}},
 				}},
 			})
 		case r.Method == http.MethodPut && r.URL.Path == "/cas-upload":
@@ -128,7 +129,7 @@ func TestUploadAllDoesNotFollowRedirect(t *testing.T) {
 	defer server.Close()
 	digest := model.Sha256Bytes([]byte("hello"))
 	err := uploadAll(context.Background(), server.Client(), Options{URL: server.URL, Concurrency: 1}, []upload{{
-		SHA256: digest, Size: 5, PutURL: server.URL + "/redirect",
+		SHA256: digest, Size: 5, Requests: []uploadRequest{{Method: "PUT", URL: server.URL + "/redirect"}},
 	}}, map[string]string{digest: source})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 307") {
 		t.Fatalf("err=%v", err)
@@ -138,42 +139,17 @@ func TestUploadAllDoesNotFollowRedirect(t *testing.T) {
 	}
 }
 
-func TestUploadOneAppliesCASSign(t *testing.T) {
-	source := filepath.Join(t.TempDir(), "blob")
-	payload := []byte("hello")
-	if err := os.WriteFile(source, payload, 0o644); err != nil {
-		t.Fatal(err)
+func TestUploadOneRejectsRelativeURL(t *testing.T) {
+	_, err := normalizeUpload(upload{SHA256: "aa", Size: 1, Requests: []uploadRequest{{URL: "/cas-upload"}}})
+	if err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("err=%v", err)
 	}
-	signed := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") == "" || r.Header.Get("X-Amz-Security-Token") != "session-token" {
-			t.Errorf("auth=%q token=%q", r.Header.Get("Authorization"), r.Header.Get("X-Amz-Security-Token"))
-		}
-		if r.Header.Get("X-Amz-Content-Sha256") != backends.UnsignedPayload {
-			t.Errorf("sha256=%q", r.Header.Get("X-Amz-Content-Sha256"))
-		}
-		signed = true
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-	digest := model.Sha256Bytes(payload)
-	err := uploadOne(context.Background(), server.Client(), source, upload{
-		SHA256: digest, Size: int64(len(payload)), PutURL: server.URL + "/cas/" + digest,
-		Headers: map[string]string{"Content-Type": "application/octet-stream"},
-		Sign: &backends.CASSign{
-			Algorithm:    "AWS4-HMAC-SHA256",
-			Region:       "ap-guangzhou",
-			AccessKey:    "AKIATMP",
-			SecretKey:    "tmp-secret",
-			SessionToken: "session-token",
-			PayloadHash:  backends.UnsignedPayload,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !signed {
-		t.Fatal("PUT was not received")
+}
+
+func TestRedactTransportErrorHidesSignedQuery(t *testing.T) {
+	err := redactErr(errors.New(`Put "https://bucket.example/cas/x?X-Amz-Signature=secret&sig=also-secret": timeout`))
+	if strings.Contains(err.Error(), "secret") || !strings.Contains(err.Error(), "REDACTED") {
+		t.Fatalf("redacted error = %q", err)
 	}
 }
 

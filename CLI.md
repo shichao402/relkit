@@ -177,7 +177,7 @@ mandatory: no
 
 ```
 relkit publish 1.5.0                    # 鍙戝竷鍒伴厤缃腑 publishTo 鍒楀嚭鐨勬墍鏈夊悗绔?
-relkit publish 1.5.0 --to local         # 鍙骇鍑哄埌鏈湴鐩綍
+relkit publish 1.5.0 --to serve         # 发布到 relkit-compatible 数据面
 relkit publish 1.5.0 --dry-run          # 鍙仛鏍￠獙骞舵墦鍗拌鍒掞紝涓嶄骇鐢熶换浣曞壇浣滅敤
 relkit publish 1.5.0 --allow-partial    # 鍏佽閮ㄥ垎鍚庣澶辫触
 ```
@@ -275,13 +275,13 @@ relkit min-supported 120
       "prefix": "rup/",
       "baseUrl": "https://dl.example.com/rup/",
       "accessKeyEnv": "COS_SECRET_ID",
-      "secretKeyEnv": "COS_SECRET_KEY",
-      "casCredentials": "sts"
+      "secretKeyEnv": "COS_SECRET_KEY"
     },
-    "local": {
-      "type": "local",
-      "outputDir": "dist/publish",
-      "baseUrl": "https://dl.example.com/"
+    "serve": {
+      "type": "relkit-compatible",
+      "baseUrl": "http://127.0.0.1:30341/",
+      "tokenEnv": "RELKIT_SERVE_TOKEN",
+      "timeoutSeconds": 600
     }
   },
 
@@ -319,102 +319,72 @@ type Backend interface {
 }
 ```
 
-`Get` 鐢ㄤ簬璇诲洖鐜扮姸锛歚publish` 绗?2 姝ヨ璇荤幇鏈?index锛宍verify` 瑕佽 index 涓庡叏閮?manifest銆傚畠**涓嶈兘**鏇挎崲鎴愩€屾寜鏂囨。閲岀殑 URL 鍘讳笅杞姐€嶏紝鍥犱负 `local` 鍚庣鐨?`baseUrl` 鎻忚堪鐨勬槸銆屽皢鏉ュ噯澶囨墭绠″湪鍝€嶏紝姝ゅ埢閫氬父骞朵笉鍙В鏋愩€?
+`static-http` 的 `baseUrl` 描述外部系统已经托管、可匿名读取的位置；该后端始终只读。
 
 `URLFor` 鏄矾寰勫瀷鍚庣鎵嶆湁鐨勮兘鍔涳細URL 鍦ㄤ笂浼犲墠灏辫兘绠楀嚭鏉ャ€俁elease 鍨嬭繑鍥?false銆俙verify` 鐢ㄥ畠鍋氫竴椤瑰鏄撹蹇界暐鐨勬鏌?鈥斺€?鍚庣涓烘煇涓?key 鐢熸垚鐨?URL 鏄惁鐪熺殑鍑虹幇鍦ㄥ凡鍙戝竷鐨勬枃妗ｉ噷銆備笉涓€鑷存剰鍛崇潃 `baseUrl` 鏀硅繃浣嗘病鏈夐噸鏂板彂甯冿紝姝ゆ椂鏂囦欢鍦ㄦ柊浣嶇疆銆佹枃妗ｆ寚鍚戞棫浣嶇疆锛屽鎴风浼氶潤榛樺湴涓嬭浇澶辫触銆?
 
-### 6.1 涓ょ被鍚庣
+### 6.1 三种后端
 
-鎸?SPEC.md 搂13.1锛屽悗绔垎鎴愪袱绫伙紝鍒嗙晫鍐冲畾浜嗗疄鐜拌兘涓嶈兘鎷嗭細
+后端按「发布工具连接哪套数据面 API」命名，现行实现只保留三种：
 
-**璺緞鍨?*鍏辩敤 `PathStyleBackend`锛屽畠瀹炵幇 URL 鎺ㄥ锛坄baseUrl + quote(key)`锛変笌杈撳嚭璺緞鐨勮秺鐣屼繚鎶ゃ€傚瓙绫诲彧闇€瀹炵幇銆屾€庝箞鎶婂瓧鑺傛斁涓婂幓銆嶏細
+| type | 写入 / 读取方式 | CAS ingest | 状态 |
+|---|---|---|---|
+| `s3-compatible` | S3 API：PUT / HEAD / CopyObject / DELETE；客户端下载走 `baseUrl` | 是 | **已实现** |
+| `relkit-compatible` | relkit-serve：能力 URL / HEAD / COPY / DELETE；客户端下载走 `baseUrl` | 是 | **已实现** |
+| `static-http` | 匿名 HTTP GET，只读审计既有外部树 | 否 | **已实现** |
 
-| type | 鏀剧疆鏂瑰紡 | 鐘舵€?|
-|---|---|---|
-| `local` | 鍐欐湰鍦扮洰褰?| **宸插疄鐜?* |
-| `static-http` | 鍐欐湰鍦扮洰褰曪紝浜ょ粰浠撳簱 CI / rsync / 涓婁紶姝ラ鎺ユ墜锛涗笉閰嶅垯鍙 | **宸插疄鐜?* |
-| `http-put` | 甯﹂壌鏉冪殑 PUT 涓婁紶锛堥厤 relkit-serve锛屾垨浠讳綍 PUT / WebDAV 绔偣锛?| **宸插疄鐜?* |
-| `s3-compatible` | COS / S3 / MinIO，SigV4 签名 | **已实现** |
+`local` 与 `http-put` 已删除。需要本机演练时启动真实数据面：
 
-**Release 鍨?*蹇呴』鏁翠綋瀹炵幇锛屽洜涓?URL 鐢变笂浼犲搷搴旇繑鍥烇細
+```bash
+export RELKIT_SERVE_TOKEN='<relkit-serve init 输出的运营方 token>'
+relkit-serve -dir ./dist -addr 127.0.0.1:30341
+```
 
-| type | 璇存槑 | 鐘舵€?|
-|---|---|---|
-| `github-release` | GitHub Release asset | 鏈疄鐜?|
-| `cnb-release` | CNB Release 闄勪欢锛岃蛋 Open API | 鏈疄鐜帮紝涓旈渶鍏堥獙璇佸尶鍚嶄笅杞斤紙瑙?搂6.2锛?|
-| `gitee-release` | Gitee Release asset | 鏈疄鐜?|
-
-`local` 鏈€鍏堝疄鐜帮紝鍥犱负瀹冭宸ュ叿绔嬪埢鍙敤浜庝换浣曢潤鎬佹墭绠℃柟寮忥紝涓嶈浠讳綍鍗曚竴骞冲彴鐨勮兘鍔涙垨鏀跨瓥鍗′綇锛屼篃鏄鍒扮娴嬭瘯鐨勫熀纭€ 鈥斺€?鏁翠釜鍙戝竷娴佺▼鍙互瀹屽叏绂荤嚎璺戦€氥€?
+然后配置 `relkit-compatible` 指向 `http://127.0.0.1:30341/`。不要用本地目录后端伪造一条生产写入链路。
 
 ### 6.2 `static-http`
 
-瑕嗙洊涓€鍒囥€屾寜鍙娴嬭矾寰勬彁渚?HTTP 涓嬭浇銆嶇殑鎵樼锛欳NB 浠撳簱鐩撮摼銆佸璞″瓨鍌ㄦ寕鍩熷悕銆丯ginx銆丟itHub Pages銆丆DN 鍥炴簮銆備粠瀹㈡埛绔湅瀹冧滑姣棤鍖哄埆锛岄兘鍙槸涓€娆?HTTP GET锛屾墍浠ュ畠浠槸鍚屼竴涓悗绔€?
+用于只读镜像或已经由 CI、rsync、git 等外部机制送达的树：
 
 ```json
 {
   "type": "static-http",
   "baseUrl": "https://cnb.cool/group/repo/-/raw/main/release/",
-  "stageDir": "release",
   "timeoutSeconds": 30
 }
 ```
 
-| 瀛楁 | 蹇呭～ | 璇存槑 |
+| 字段 | 必填 | 说明 |
 |---|---|---|
-| `baseUrl` | 鏄?| 缁濆 http(s) URL锛屾湯灏炬枩鏉犲彲鐪佺暐銆俇RL 鍗?`baseUrl + key` |
-| `stageDir` | 鍚?| 鐩稿椤圭洰鏍圭殑鐩綍锛屽彂甯冩椂鎶?key 鐩綍鏍戝啓杩涘幓銆?*涓嶉厤鍒欏悗绔彉涓哄彧璇?* |
-| `timeoutSeconds` | 鍚?| 鍗曟璇锋眰瓒呮椂锛岄粯璁?30 |
+| `baseUrl` | 是 | 绝对 http(s) URL；URL = `baseUrl + key` |
+| `timeoutSeconds` | 否 | 单次请求超时，默认 30 |
 
-`stageDir` 灏辨槸 SPEC.md 搂13.1 閲岄偅涓€鍒椼€屾斁缃€嶇殑鏈€绠€瀹炵幇锛氭枃浠惰惤杩涘伐浣滃尯锛屽墿涓嬬殑浜ょ粰浠撳簱 CI锛圕NB 鍦烘櫙锛夈€乺sync 浠诲姟鎴栫嫭绔嬬殑涓婁紶姝ラ銆?*CNB 鍥犳涓嶉渶瑕佷换浣曚笂浼犲疄鐜?* 鈥斺€?浜х墿闅忎粨搴撴祦杞槸瀹冩湰鏉ュ氨鏈夌殑鑳藉姏銆?
+`static-http` 不签发 CAS 上传请求，不能作为 ingest，也不能参与 publish 写入。外部系统必须先把完整树送达并确保 URL 可读，再用它执行 verify 或声明既有 URL。
 
-涓嶉厤 `stageDir` 寰楀埌涓€涓彧璇诲悗绔紝鐢ㄩ€旀槸瀹¤锛氭寚鍚戝埆浜哄彂甯冪殑绔欑偣璺?`relkit verify`锛屼笉闇€瑕佸嚟鎹篃涓嶉渶瑕佸啓鏉冮檺銆傛鏃?`publish` 浼氬湪**浠讳綍缃戠粶璇诲彇涔嬪墠**灏辨嫆缁濓紝鍥犳 `--dry-run` 鐨勭粨璁轰笌鐪熷疄鍙戝竷涓€鑷淬€?
+### 6.3 `relkit-compatible`
 
-### 6.3 `http-put`
-
-涓嬭浇渚т笌 `static-http` 瀹屽叏涓€鑷?鈥斺€?鍚屾牱鐨?URL銆佸悓鏍风殑鏍￠獙銆佸悓鏍风殑瀹㈡埛绔涓?鈥斺€?鍙湁鏀剧疆涓嶅悓锛氫笉鏄啓杩涚洰褰曠瓑鍒汉鎼繍锛岃€屾槸 PUT 鍒颁竴涓鐐广€傞厤鍚屼粨鐨?`relkit-serve`锛坄cmd/relkit-serve`锛夋垨浠讳綍瀹炵幇鏍囧噯 PUT 璇箟鐨勬湇鍔★紙鍚?WebDAV锛夈€?
+用于自建 `relkit-serve` 数据面。普通文档写入使用 Bearer；CAS 正文先由发布控制面调用 `POST /-/cas/uploads`，再把服务端签发的绝对能力 URL放进 `requests[]`。后端同时使用 HEAD、带 `X-Relkit-Copy-Source` 的 COPY 语义和 DELETE。
 
 ```json
 {
-  "type": "http-put",
-  "baseUrl": "https://cdn.example.com/releases/",
-  "uploadUrl": "http://10.0.0.5:8080/",
-  "tokenEnv": "RELKIT_UPLOAD_TOKEN",
+  "type": "relkit-compatible",
+  "baseUrl": "https://dl.example.com/releases/",
+  "uploadUrl": "http://10.0.0.5:30341/",
+  "tokenEnv": "RELKIT_SERVE_TOKEN",
   "timeoutSeconds": 600
 }
 ```
 
-| 瀛楁 | 蹇呭～ | 璇存槑 |
+| 字段 | 必填 | 说明 |
 |---|---|---|
-| `baseUrl` | 鏄?| 瀹㈡埛绔笅杞界敤鐨勫熀鍦板潃锛孶RL 鍗?`baseUrl + key` |
-| `uploadUrl` | 鍚?| PUT 鐨勭洰鏍囧熀鍦板潃锛岄粯璁ょ瓑浜?`baseUrl` |
-| `tokenEnv` | 鏄?| 瀛樻斁涓婁紶 token 鐨勭幆澧冨彉閲忓悕 |
-| `timeoutSeconds` | 鍚?| 涓婁紶瓒呮椂锛岄粯璁?600锛堣鍙栧姩浣滃彟鎸変笉瓒呰繃 60 绉掕锛?|
+| `baseUrl` | 是 | 客户端匿名下载基址 |
+| `uploadUrl` | 否 | relkit-serve 写入 API 基址；默认等于 `baseUrl` |
+| `tokenEnv` | 是 | 运营方 token 的环境变量名；不得写 token 明文 |
+| `timeoutSeconds` | 否 | 写入超时，默认 600 |
 
-`uploadUrl` 涓?`baseUrl` 涓嶅悓鏄父瑙佹儏褰㈣€岄潪鐗逛緥锛氫笅杞借蛋 CDN 鎴栧叕缃戝煙鍚嶏紝涓婁紶璧板唴缃戝湴鍧€銆?
+### 6.4 CAS 上传请求文档
 
-token 鍙粠鐜鍙橀噺璇伙紝**涓嶅啓杩涢厤缃枃浠?*锛屽洜涓洪厤缃槸瑕佹彁浜よ繘浠撳簱鐨勩€?
-
-浜х墿涓婁紶鏄祦寮忕殑锛堟樉寮?`Content-Length`锛屼笉鏁磋杩涘唴瀛橈級锛屽洜涓轰竴涓骇鐗╁姩杈勬暟鐧?MB锛岃€屾墽琛屽彂甯冪殑寰€寰€鏄唴瀛樻湁闄愮殑 CI runner銆?
-
-**PUT 涓嶈窡闅忛噸瀹氬悜銆?* 瀵逛笅杞芥潵璇撮噸瀹氬悜鏄父鎬侊紝涓斾簨鍚庢湁 sha256 鍏滃簳锛涘涓婁紶鏉ヨ閲嶅畾鍚戞剰鍛崇潃瀛楄妭钀藉埌浜嗛厤缃箣澶栫殑鍦版柟锛屼笖娌℃湁浠讳綍浜嬪悗妫€鏌ヨ兘鍙戠幇銆備笂浼犵鐐硅嫢杩佺Щ浜嗭紝搴斿綋鏀归厤缃紝鑰屼笉鏄宸ュ叿鍘昏拷銆?
-
-璇诲彇涓€寰嬭蛋鐪熷疄 HTTP锛岃繖鏄畠涓?`local` 鐨勬牴鏈尯鍒細妫€鏌ユ湰鍦扮鐩樹笂鐨勫瓧鑺傚彧鑳借瘉鏄庡彂甯冩楠よ窇杩囦簡锛岃€屾姄鍙栧啓杩?manifest 鐨勯偅涓?URL 鎵嶈兘璇佹槑瀹㈡埛绔嬁寰楀埌銆傝姹傞伒瀹?SPEC.md 搂3.2 鐨勫鎴风瑙勫垯 鈥斺€?璺熼殢閲嶅畾鍚戜絾涓婇檺 5 璺炽€佹嫆缁?https 闄嶇骇涓?http銆佽 index 鏃堕檮甯︾紦瀛樺嚮绌垮弬鏁颁笌 `Cache-Control: no-cache`銆?
-
-`verify --deep` 鐢?HEAD锛堟湇鍔″櫒涓嶆敮鎸佹椂閫€鍖栦负 1 瀛楄妭 Range 璇锋眰锛夋帰娴嬫瘡涓骇鐗╋紝**涓嶄笅杞戒骇鐗╂湰浣?*锛氫竴娆″彂甯冨姩杈勬暟鐧?MB锛屽叏閲忎笅杞戒細璁?`--deep` 鏄傝吹鍒版病浜烘効鎰忚窇锛岃€屾病浜鸿窇鐨勬鏌ョ瓑浜庝笉瀛樺湪銆傚畠鏍稿瀛樺湪鎬т笌澶у皬锛涘唴瀹圭敱 manifest 閲岀殑 `sha256` 淇濊瘉锛屾瘡涓鎴风涓嬭浇鏃堕兘浼氳嚜琛岄獙璇併€?
-
-### 6.4 CNB 寰呴獙璇佷簨椤?
-
-CNB 鐨勫埗鍝佸簱鍙湁鐢熸€佷笓鐢ㄧ被鍨嬶紙Docker / Helm / Maven / npm / PyPI / Cargo / Conan 绛夛級锛?*娌℃湁閫氱敤锛坮aw / generic锛夊埗鍝佸簱**锛岀ぞ鍖哄凡鎻愬嚭璇夋眰浣嗗皻鏈疄鐜般€傞€氱敤鏂囦欢鐨勫畼鏂硅矾寰勬槸 **Release 闄勪欢**锛坄cnbcool/attachments` 鎻掍欢鎴?Open API锛夛紝鑰屾枃妗ｄ腑鐨勪笅杞界ず渚嬪潎鎼哄甫 token銆?
-
-鍥犳瀹炵幇 `cnb-release` 涔嬪墠**蹇呴』**鍏堢‘璁わ細鍏紑浠撳簱鐨?Release 闄勪欢鏄惁瀛樺湪绋冲畾鐨勩€佸尶鍚嶅彲璁块棶鐨?HTTP 鐩撮摼銆傞獙璇佹柟娉曪細鍦ㄤ竴涓叕寮€鐨?CNB 浠撳簱涓婁紶涓€涓檮浠讹紝鐒跺悗鍦?*鏈璇?*鐨勭幆澧冧笅锛堜笉甯︿换浣?token銆佷笉甯?cookie锛夎姹傚叾涓嬭浇鍦板潃锛岀‘璁よ繑鍥?200 涓斿唴瀹规纭紝骞惰褰曟槸鍚﹀彂鐢?302 璺宠浆銆?
-
-鑻ョ粨璁烘槸蹇呴』閴存潈锛屽垯 CNB **涓嶈兘**浣滀负瀹㈡埛绔殑鐩存帴涓嬭浇婧愶紝鍙兘鐢ㄤ簬鍐呴儴鍒嗗彂锛涙鏃跺簲鏀圭敤 `s3-compatible` 鎴栬嚜寤洪潤鎬佹墭绠°€傝繖涓笉纭畾鎬т笉闃诲浠讳綍鍏朵粬宸ヤ綔 鈥斺€?鐢变簬 URL 涓€寰嬪啓鍦ㄧ鍚嶆枃妗ｉ噷锛屽悗绔崲鎴愪粈涔堥兘涓嶅奖鍝嶅凡鍙戝竷鐨勫鎴风銆?
-
-**鍙︿竴鏉¤矾寰勫彲鑳借 `cnb-release` 瀹屽叏娌℃湁蹇呰锛?* 鑻?CNB 鐨?*浠撳簱鐩撮摼**锛坄/-/raw/<branch>/<path>` 褰㈠紡锛夊彲鍖垮悕璁块棶锛岀洿鎺ョ敤 `static-http` 鍗冲彲 鈥斺€?浜х墿鎻愪氦杩涗粨搴擄紝CI 澶╃劧瀹屾垚鍒嗗彂锛屾棤闇€浠讳綍涓婁紶瀹炵幇銆傝繖鏉¤矾鍊煎緱鍏堥獙锛屽洜涓哄畠鎴愭湰鏇翠綆涓斾笉渚濊禆 Release 闄勪欢鐨勯壌鏉冪瓥鐣ャ€備唬浠锋槸浜х墿浼氳繘鍏ヤ粨搴撳巻鍙诧紝闇€瑕佽瘎浼颁綋绉笌 LFS 閰嶇疆銆?
-
----
-
-
+`POST /v1/cas/credentials` 对每个待上传 blob 返回 `requests[]`。每项只有 `method`、绝对 `url`、可选 `headers` 与 `expiresAt`；单对象上传恰好一个请求。客户端逐项执行 HTTP 请求，**不认识 SigV4 / STS，也不签名**。禁止恢复 `sign` 字段或相对 URL。
 
 ### 6.5 推荐对外入口（自有域名 + COS）
 
@@ -443,8 +413,7 @@ CNB 鐨勫埗鍝佸簱鍙湁鐢熸€佷笓鐢ㄧ被鍨嬶紙Docker / Helm / 
   "prefix": "rup/",
   "baseUrl": "https://updates.firoyang.com/rup/",
   "accessKeyEnv": "COS_SECRET_ID",
-  "secretKeyEnv": "COS_SECRET_KEY",
-  "casCredentials": "sts"
+  "secretKeyEnv": "COS_SECRET_KEY"
 }
 ```
 
@@ -457,8 +426,7 @@ CNB 鐨勫埗鍝佸簱鍙湁鐢熸€佷笓鐢ㄧ被鍨嬶紙Docker / Helm / 
 | `prefix` | 否 | 对象 key 前缀，自动补末尾 `/` |
 | `region` | 否 | 签名区域；COS 可从 `endpoint` 推导（如 `ap-guangzhou`） |
 | `forcePathStyle` | 否 | 强制 path-style；自定义/本地 endpoint 默认开启，COS/AWS 默认 virtual-hosted |
-| `casCredentials` | 否 | `sts` 或 `presign`。腾讯云 COS endpoint 默认 `sts`（GetFederationToken + Header SigV4）；泛 S3 默认 `presign` |
-| `appId` | 否 | COS 应用 ID；默认从桶名 `*-<appid>` 推断。`sts` 时必有 |
+| `casCredentials` | 否 | **仅迁移兼容**：接受但忽略；请从配置删除 |
 | `timeoutSeconds` | 否 | 上传超时，默认 600 |
 
 拓扑与缓存约定见 [`docs/design/update-ingress-cos.md`](docs/design/update-ingress-cos.md)。
@@ -474,7 +442,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换 zip（Bearer；GET/HEAD 同样鉴权）
 - `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer；整包兼容路径）
 - `relkit staged-put FILE --product ID --version VER --url URL` — 分片并发上传（`--part-size` / `--concurrency`，或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）
-- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 PUT URL；COS 默认 STS（未签名 `putUrl` + 可选 `sign`），泛 S3 为 query 预签名，local 是 agent 代理 URL
+- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 `requests[]`；每项都是绝对 URL。COS/S3 用长期钥 query 预签名，relkit-serve 用对象能力 URL，客户端不签名
 - `relkit cas-put --version VER [--product ID] [--url URL]` — 上传缺失 CAS blob，然后自动上传只含 `staged.pb` + `release-policy.json` 的瘦 staged tar
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
 - `GET /-/health`
@@ -487,7 +455,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 
 CI **不持**签名私钥，也 **不持**长期 COS 写密钥。Runner 可在 `relkit stage` 后用 `relkit cas-put` 直传缺失 blob；原有整包 staged-put 路径继续兼容。
 
-已落地切面：产物直传该产品第一个 ingest 的 `cas/`，凭据文档只给一个目的地；agent 签发 **SigV4 预签名 PUT**（不接 STS SDK）、Promote、Materialize、签名。尚未落地的是 profile 从 `publishTo` 拆成 `artifactTo` / `pointerTo`。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3。
+已落地切面：产物直传该产品第一个 ingest 的 `cas/`，凭据文档只给一个目的地；agent 返回绝对 URL 的 `requests[]`，S3/COS 用长期钥 query 预签名、relkit-serve 用能力 URL，再由后端 Promote、Materialize、签名。尚未落地的是 profile 从 `publishTo` 拆成 `artifactTo` / `pointerTo`。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3。
 
 ```yaml
 - name: Stage
@@ -543,7 +511,7 @@ internal/model/ jsonio/     瀵硅薄鏋勯€犮€佺‘瀹氭€у簭鍒楀�
 internal/config/ keys/      閰嶇疆涓庡瘑閽?
 internal/stage/ publish/    鍥哄寲涓庡崄姝ュ彂甯冪紪鎺?
 internal/verify/ simulate/  鏍￠獙涓庨€夎矾妯℃嫙
-internal/httpx/ backends/   HTTP 涓?local / static-http / http-put / s3-compatible
+internal/httpx/ backends/   HTTP 与 static-http / relkit-compatible / s3-compatible
 e2e/                        绂荤嚎涓庣湡瀹?HTTP 绔埌绔?
 testdata/conformance/       鍗忚澶瑰叿鍓湰锛堜笌鏈洰褰曞悓姝ワ級
 ```

@@ -22,7 +22,7 @@ fi
 if have relkit-serve; then
   echo "OK  relkit-serve: $(relkit-serve -version 2>/dev/null || echo present)"
 else
-  echo "INFO  relkit-serve not in PATH (only needed for self-hosted http-put)"
+  echo "INFO  relkit-serve not in PATH (needed for relkit-compatible or on-machine rehearsal)"
 fi
 echo
 

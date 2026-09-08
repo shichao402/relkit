@@ -129,6 +129,10 @@ func TestGCRemovesUnreferencedCAS(t *testing.T) {
 	orphanCAS := "cas/" + strings.Repeat("c", 64)
 	writeFile(t, dir, liveCAS, []byte("live-blob"))
 	writeFile(t, dir, orphanCAS, []byte("orphan-blob"))
+	old := time.Now().Add(-defaultCASGrace - time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, filepath.FromSlash(orphanCAS)), old, old); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := cfg.gcOnce(); err != nil {
 		t.Fatalf("gcOnce: %v", err)
@@ -141,6 +145,38 @@ func TestGCRemovesUnreferencedCAS(t *testing.T) {
 	}
 	if !fileExists(dir, "artifact/app/2.0.0/app.zip") {
 		t.Fatal("live artifact was deleted")
+	}
+}
+
+func TestGCKeepsRecentAndLeasedCAS(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	writeRelease(t, dir, "app", "stable", "2.0.0", 200)
+	recent := "cas/" + strings.Repeat("c", 64)
+	leased := "cas/" + strings.Repeat("d", 64)
+	leasedTemp := leased + ".tmp~"
+	writeFile(t, dir, recent, []byte("recent"))
+	writeFile(t, dir, leased, []byte("leased"))
+	writeFile(t, dir, leasedTemp, []byte("uploading"))
+	old := time.Now().Add(-defaultCASGrace - time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, filepath.FromSlash(leased)), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, filepath.FromSlash(leasedTemp)), old, old); err != nil {
+		t.Fatal(err)
+	}
+	cfg.gc.retainCAS(leased, time.Now().Add(time.Hour))
+
+	if _, err := cfg.gcOnce(); err != nil {
+		t.Fatalf("gcOnce: %v", err)
+	}
+	if !fileExists(dir, recent) {
+		t.Fatal("recent CAS was deleted during grace period")
+	}
+	if !fileExists(dir, leased) {
+		t.Fatal("leased CAS was deleted")
+	}
+	if !fileExists(dir, leasedTemp) {
+		t.Fatal("leased in-flight CAS temp file was deleted")
 	}
 }
 
@@ -260,7 +296,7 @@ func TestLocalKeyFromURL(t *testing.T) {
 
 func TestIndexPutSchedulesGC(t *testing.T) {
 	cfg, dir := newTestConfig(t, true)
-	cfg.gc = newGCState(true, time.Hour, 20*time.Millisecond)
+	cfg.gc = newGCState(true, time.Hour, 20*time.Millisecond, defaultCASGrace)
 
 	writeRelease(t, dir, "app", "stable", "1.0.0", 100)
 	// Leave an orphan that the upcoming index will not reference.
@@ -303,7 +339,8 @@ func TestSkeletonIncludesGC(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.GC == nil || cfg.GC.Enabled == nil || !*cfg.GC.Enabled || cfg.GC.Interval != "1h" {
+	if cfg.GC == nil || cfg.GC.Enabled == nil || !*cfg.GC.Enabled ||
+		cfg.GC.Interval != "1h" || cfg.GC.CasGrace != "24h" {
 		t.Fatalf("skeleton gc = %+v", cfg.GC)
 	}
 }

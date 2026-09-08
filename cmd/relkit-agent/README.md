@@ -69,8 +69,7 @@ relkit-agent onboard check -config /etc/relkit-agent/relkit-agent.json -product 
 
 - `GET /-/health`
 - `PUT /v1/drop/{product}/{version}/{filename}`（及鉴权 GET/HEAD）
-- `POST /v1/cas/credentials`（按 profile 的第一个 ingest 返回缺失 blob 的唯一 PUT 目的地）
-- `PUT /v1/cas/{product}/{sha256}?size=N`（仅 local ingest；校验长度和 sha256）
+- `POST /v1/cas/credentials`（按 profile 的第一个 ingest 返回缺失 blob 的绝对 URL `requests[]`；客户端不签名）
 - `PUT /v1/staged/{product}/{version}`
 - `POST /v1/staged/{product}/{version}/uploads`（分片会话；`partSize` 可在 JSON 里请求，受配置夹取）
 - `PUT /v1/staged/{product}/{version}/uploads/{id}/parts/{n}`
@@ -79,3 +78,10 @@ relkit-agent onboard check -config /etc/relkit-agent/relkit-agent.json -product 
 - `POST /v1/publish`
 
 无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`deploy/install-agent.sh`。
+
+## 删除旧后端前的四步部署顺序
+
+1. 发布机先从全部 profile 清掉 `casCredentials`。
+2. 内网先部署带上传租约与 `gc.casGrace`（默认 24h）的 relkit-serve。
+3. 开启 serve 写入面，把 profile 迁到 `relkit-compatible`，完成一次真实发版与 verify。
+4. 稳定后才部署已删除 `local` / `http-put` 类型的 agent/CLI。

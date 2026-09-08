@@ -1,37 +1,21 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 )
 
-// upload accepts PUT of a single file.
-//
-// Writes go to a temporary name and are then renamed into place. rename(2) is
-// atomic within a filesystem, which matters more here than it looks: the index
-// is the commit point of a release, so a client fetching it must see either the
-// previous release or the new one, never a half-written file. A reader that
-// already has the old file open keeps reading it unharmed, since the rename
-// only replaces the directory entry.
 func (c *config) upload(w http.ResponseWriter, r *http.Request) {
 	if !c.uploadsEnabled() {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "uploads are disabled on this server", http.StatusMethodNotAllowed)
-		return
-	}
-	cred := c.lookupCredential(r)
-	if cred == nil {
-		// No detail about which part was wrong, and no hint about whether the
-		// path exists.
-		w.Header().Set("WWW-Authenticate", `Bearer realm="relkit-serve"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if !c.requirePublishProtocol(w, r) {
 		return
 	}
 
@@ -48,30 +32,128 @@ func (c *config) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
+
+	if source := strings.TrimSpace(r.Header.Get(copySourceHeader)); source != "" {
+		c.uploadCopy(w, r, name, source)
+		return
+	}
+	if strings.HasPrefix(name, "cas/") && r.URL.Query().Get("sig") != "" {
+		c.uploadCASCapability(w, r, name)
+		return
+	}
+
+	cred := c.lookupCredential(r)
+	if cred == nil {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="relkit-serve"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !c.requirePublishProtocol(w, r) {
+		return
+	}
 	if !cred.allowsKey(name) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	written, err := c.commitUpload(w, r, name, c.maxUpload, nil)
+	if err != nil {
+		return
+	}
+	if strings.HasPrefix(name, "index/") {
+		c.scheduleGC()
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "wrote %s (%d bytes)\n", name, written)
+}
 
+func (c *config) uploadCopy(w http.ResponseWriter, r *http.Request, dst, src string) {
+	cred := c.lookupCredential(r)
+	if cred == nil {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="relkit-serve"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !c.requirePublishProtocol(w, r) {
+		return
+	}
+	srcKey, ok := cleanKey("/" + src)
+	if !ok || srcKey == "." || c.hiddenKey(srcKey) {
+		http.Error(w, "invalid copy source", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(srcKey, "cas/") || !strings.HasPrefix(dst, "artifact/") {
+		http.Error(w, "copy only supports cas/ to artifact/", http.StatusBadRequest)
+		return
+	}
+	if !cred.allowsKey(dst) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if _, err := c.root.Stat(srcKey); err != nil {
+		http.Error(w, "copy source not found", http.StatusNotFound)
+		return
+	}
+	if err := c.copyObject(dst, srcKey); err != nil {
+		http.Error(w, "copy failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "copied %s -> %s\n", srcKey, dst)
+}
+
+func (c *config) uploadCASCapability(w http.ResponseWriter, r *http.Request, name string) {
+	declared, ok := c.verifyCASCapability(r, name)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.ContentLength >= 0 && r.ContentLength != declared {
+		http.Error(w, "content length does not match ticket", http.StatusBadRequest)
+		return
+	}
+	hash := sha256.New()
+	written, err := c.commitUpload(w, r, name, declared, hash)
+	if err != nil {
+		return
+	}
+	if written != declared {
+		c.root.Remove(name)
+		http.Error(w, "cas body size does not match ticket", http.StatusBadRequest)
+		return
+	}
+	if got := hex.EncodeToString(hash.Sum(nil)); path.Base(name) != got {
+		c.root.Remove(name)
+		http.Error(w, "cas body sha256 does not match key", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "wrote %s (%d bytes)\n", name, written)
+}
+
+func (c *config) commitUpload(w http.ResponseWriter, r *http.Request, name string, limit int64, hash io.Writer) (int64, error) {
 	if dir := path.Dir(name); dir != "." {
 		if err := c.root.MkdirAll(dir, 0o755); err != nil {
 			http.Error(w, "cannot create parent directory", http.StatusInternalServerError)
-			return
+			return 0, err
 		}
 	}
-
 	temp := name + ".tmp~"
 	file, err := c.root.Create(temp)
 	if err != nil {
 		http.Error(w, "cannot create file", http.StatusInternalServerError)
-		return
+		return 0, err
 	}
-
-	body := http.MaxBytesReader(w, r.Body, c.maxUpload)
-	written, copyErr := io.Copy(file, body)
+	var dest io.Writer = file
+	if hash != nil {
+		dest = io.MultiWriter(file, hash)
+	}
+	body := http.MaxBytesReader(w, r.Body, limit)
+	written, copyErr := io.Copy(dest, body)
 	syncErr := file.Sync()
 	closeErr := file.Close()
-
 	if copyErr != nil || syncErr != nil || closeErr != nil {
 		c.root.Remove(temp)
 		if copyErr != nil {
@@ -79,28 +161,59 @@ func (c *config) upload(w http.ResponseWriter, r *http.Request) {
 			if ok := asMaxBytes(copyErr, &tooLarge); ok {
 				http.Error(w, fmt.Sprintf("upload exceeds the %s limit",
 					humanBytes(c.maxUpload)), http.StatusRequestEntityTooLarge)
-				return
+				return 0, copyErr
 			}
 		}
 		http.Error(w, "write failed", http.StatusInternalServerError)
-		return
+		if copyErr != nil {
+			return 0, copyErr
+		}
+		if syncErr != nil {
+			return 0, syncErr
+		}
+		return 0, closeErr
 	}
-
 	if err := c.root.Rename(temp, name); err != nil {
 		c.root.Remove(temp)
 		http.Error(w, "cannot commit file", http.StatusInternalServerError)
+		return 0, err
+	}
+	return written, nil
+}
+
+func (c *config) deleteObject(w http.ResponseWriter, r *http.Request) {
+	if !c.uploadsEnabled() {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "uploads are disabled on this server", http.StatusMethodNotAllowed)
 		return
 	}
-
-	// Index is the release commit point: artifacts and manifests are already
-	// on disk, so a sweep now can drop anything the new indexes no longer name.
-	if strings.HasPrefix(name, "index/") {
-		c.scheduleGC()
+	cred := c.lookupCredential(r)
+	if cred == nil {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="relkit-serve"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
-
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "wrote %s (%d bytes)\n", name, written)
+	if !c.requirePublishProtocol(w, r) {
+		return
+	}
+	name, ok := cleanKey(r.URL.Path)
+	if !ok || name == "." || strings.HasSuffix(name, "/") || c.hiddenKey(name) {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if !cred.allowsKey(name) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if err := c.root.Remove(name); err != nil {
+		if os.IsNotExist(err) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Error(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (c *config) uploadsEnabled() bool {

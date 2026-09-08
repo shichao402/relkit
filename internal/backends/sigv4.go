@@ -85,30 +85,8 @@ func signAWSV4(req *http.Request, payloadHash string, region string, service str
 }
 
 // SignS3Request signs req with AWS SigV4 for service "s3".
-// Set X-Amz-Security-Token on req before calling when using STS credentials.
 func SignS3Request(req *http.Request, payloadHash, region, accessKey, secretKey string, now time.Time) error {
 	return signAWSV4(req, payloadHash, region, "s3", accessKey, secretKey, now)
-}
-
-// ApplyCASSign attaches STS session token (if any) and header-authenticates req.
-func ApplyCASSign(req *http.Request, sign *CASSign, now time.Time) error {
-	if sign == nil {
-		return nil
-	}
-	if sign.Algorithm != "" && sign.Algorithm != sigv4Algorithm {
-		return fmt.Errorf("unsupported CAS sign algorithm %q", sign.Algorithm)
-	}
-	if sign.Region == "" || sign.AccessKey == "" || sign.SecretKey == "" {
-		return fmt.Errorf("CAS sign is missing region or keys")
-	}
-	if sign.SessionToken != "" {
-		req.Header.Set("X-Amz-Security-Token", sign.SessionToken)
-	}
-	payloadHash := sign.PayloadHash
-	if payloadHash == "" {
-		payloadHash = unsignedPayload
-	}
-	return SignS3Request(req, payloadHash, sign.Region, sign.AccessKey, sign.SecretKey, now)
 }
 
 // PresignS3Request adds AWS SigV4 query authentication to req. The returned

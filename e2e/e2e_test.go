@@ -2,7 +2,11 @@ package e2e_test
 
 import (
 	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,17 +27,19 @@ import (
 	"cnb.cool/shichao402/relkit/internal/webmeta"
 )
 
-func TestCLIEndToEndLocalBackend(t *testing.T) {
+func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	exe := buildRelkit(t)
 	project := t.TempDir()
 	dist := filepath.Join(project, "dist")
 	mustMkdirAll(t, dist)
 
 	backendsOut := runRelkit(t, exe, project, nil, 0, "backends")
-	assertContains(t, backendsOut, "local")
+	assertContains(t, backendsOut, "relkit-compatible")
 	assertContains(t, backendsOut, "static-http")
-	assertContains(t, backendsOut, "http-put")
 	assertContains(t, backendsOut, "s3-compatible")
+	if strings.Contains(backendsOut, "\nlocal") || strings.Contains(backendsOut, "http-put") {
+		t.Fatalf("removed backend was listed:\n%s", backendsOut)
+	}
 
 	guideOut := runRelkit(t, exe, project, nil, 0, "agent-guide")
 	assertContains(t, guideOut, "RUP 发布操作手册")
@@ -41,6 +47,19 @@ func TestCLIEndToEndLocalBackend(t *testing.T) {
 	runRelkit(t, exe, project, nil, 0, "init", "--product", "demoapp")
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
 	setPrivateKeyPath(t, project, "keys/k1.private.pb")
+	token := "e2e-relkit-token"
+	t.Setenv("RELKIT_SERVE_TOKEN", token)
+	handler := newUploadHandler(t, filepath.Join(dist, "publish"), token)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	updateConfigJSON(t, filepath.Join(project, "relkit.json"), func(doc map[string]any) {
+		doc["backends"] = map[string]any{
+			"serve": map[string]any{
+				"type": "relkit-compatible", "baseUrl": server.URL + "/",
+				"tokenEnv": "RELKIT_SERVE_TOKEN",
+			},
+		}
+	})
 
 	writeArtifact(t, dist, "demoapp-1.0.0-win-x64.zip", "win 1.0.0 ", 64)
 	writeArtifact(t, dist, "demoapp-1.0.0-mac-arm64.zip", "mac 1.0.0 ", 64)
@@ -215,8 +234,19 @@ func TestPublishRetainVersionsTrimsIndex(t *testing.T) {
 	runRelkit(t, exe, project, nil, 0, "init", "--product", "demoapp")
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
 	setPrivateKeyPath(t, project, "keys/k1.private.pb")
+	token := "retain-test-token"
+	t.Setenv("RELKIT_SERVE_TOKEN", token)
+	server := httptest.NewServer(newUploadHandler(t, filepath.Join(dist, "publish"), token))
+	defer server.Close()
 	updateConfigJSON(t, filepath.Join(project, "relkit.json"), func(doc map[string]any) {
 		doc["retainVersions"] = 1
+		doc["backends"] = map[string]any{
+			"serve": map[string]any{
+				"type": "relkit-compatible", "baseUrl": server.URL + "/",
+				"tokenEnv": "RELKIT_SERVE_TOKEN",
+			},
+		}
+		doc["publishTo"] = []any{"serve"}
 	})
 
 	writeArtifact(t, dist, "a.zip", "a ", 32)
@@ -252,22 +282,18 @@ func TestStaticHTTPBackend(t *testing.T) {
 	mustMkdirAll(t, dist)
 	mustMkdirAll(t, www)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/r/") {
-			http.Redirect(w, r, strings.TrimPrefix(r.URL.Path, "/r"), http.StatusFound)
-			return
-		}
-		http.FileServer(http.Dir(www)).ServeHTTP(w, r)
-	}))
+	token := "static-audit-token"
+	t.Setenv("RELKIT_SERVE_TOKEN", token)
+	server := httptest.NewServer(newUploadHandler(t, www, token))
 	defer server.Close()
 
 	runRelkit(t, exe, project, nil, 0, "init", "--product", "siteapp")
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
 	setPrivateKeyPath(t, project, "keys/k1.private.pb")
-	addBackend(t, project, "site", map[string]any{
-		"type":     "static-http",
-		"baseUrl":  server.URL + "/r/",
-		"stageDir": "www",
+	addBackend(t, project, "origin", map[string]any{
+		"type":     "relkit-compatible",
+		"baseUrl":  server.URL + "/",
+		"tokenEnv": "RELKIT_SERVE_TOKEN",
 	})
 
 	writeArtifact(t, dist, "siteapp-1.0.0-win-x64.zip", "site 1.0.0 ", 64)
@@ -275,20 +301,20 @@ func TestStaticHTTPBackend(t *testing.T) {
 		"stage", "1.0.0+100",
 		"--add", filepath.Join(dist, "siteapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
 	)
-	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100", "--to", "site")
-	out := runRelkit(t, exe, project, nil, 0, "verify", "--to", "site", "--deep")
+	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100", "--to", "origin")
+	out := runRelkit(t, exe, project, nil, 0, "verify", "--to", "origin", "--deep")
 	assertContains(t, out, "verify passed")
 	assertContains(t, out, "HEAD")
 
 	addBackend(t, project, "audit", map[string]any{
 		"type":    "static-http",
-		"baseUrl": server.URL + "/r/",
+		"baseUrl": server.URL + "/",
 	})
 	out = runRelkit(t, exe, project, nil, 0, "verify", "--to", "audit", "--deep")
 	assertContains(t, out, "verify passed")
 }
 
-func TestHTTPPutBackend(t *testing.T) {
+func TestRelkitCompatibleBackend(t *testing.T) {
 	exe := buildRelkit(t)
 	project := t.TempDir()
 	dist := filepath.Join(project, "dist")
@@ -304,7 +330,7 @@ func TestHTTPPutBackend(t *testing.T) {
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "srv", "--out", "keys", "--update-config")
 	setPrivateKeyPath(t, project, "keys/srv.private.pb")
 	addBackend(t, project, "dl", map[string]any{
-		"type":     "http-put",
+		"type":     "relkit-compatible",
 		"baseUrl":  server.URL + "/",
 		"tokenEnv": "RELKIT_UPLOAD_TOKEN",
 	})
@@ -641,10 +667,17 @@ func newUploadHandler(t *testing.T, dir string, token string) http.Handler {
 }
 
 func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPut:
+	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/-/publish/preflight":
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"ok":true,"protocol":2,"minProtocol":2}`)
+	case r.Method == http.MethodPost && r.URL.Path == "/-/cas/uploads":
+		h.handleCASMint(w, r)
+	case r.Method == http.MethodPut:
 		h.handlePut(w, r)
-	case http.MethodGet, http.MethodHead:
+	case r.Method == http.MethodDelete:
+		h.handleDelete(w, r)
+	case r.Method == http.MethodGet || r.Method == http.MethodHead:
 		http.FileServer(http.Dir(h.dir)).ServeHTTP(w, r)
 	default:
 		http.NotFound(w, r)
@@ -652,6 +685,10 @@ func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *uploadHandler) handlePut(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("cap") == "cas" {
+		h.handleCapabilityPut(w, r)
+		return
+	}
 	expected := "Bearer " + h.token
 	if !hmac.Equal([]byte(r.Header.Get("Authorization")), []byte(expected)) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -663,6 +700,22 @@ func (h *uploadHandler) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := filepath.Join(append([]string{h.dir}, strings.Split(key, "/")...)...)
+	if source := r.Header.Get("X-Relkit-Copy-Source"); source != "" {
+		src := filepath.Join(append([]string{h.dir}, strings.Split(source, "/")...)...)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			http.Error(w, "copy source not found", http.StatusNotFound)
+			return
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			h.t.Fatal(err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			h.t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		h.t.Fatalf("mkdir failed: %v", err)
 	}
@@ -675,4 +728,63 @@ func (h *uploadHandler) handlePut(w http.ResponseWriter, r *http.Request) {
 		h.t.Fatalf("copy failed: %v", err)
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (h *uploadHandler) handleCASMint(w http.ResponseWriter, r *http.Request) {
+	if !h.authorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Key  string `json:"key"`
+		Size int64  `json:"size"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"url":       scheme + "://" + r.Host + "/" + req.Key + "?cap=cas&size=" + fmt.Sprint(req.Size),
+		"expiresAt": "2099-01-01T00:00:00Z",
+	})
+}
+
+func (h *uploadHandler) handleCapabilityPut(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimPrefix(r.URL.Path, "/")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	if !strings.HasSuffix(key, hex.EncodeToString(sum[:])) {
+		http.Error(w, "sha256 mismatch", http.StatusBadRequest)
+		return
+	}
+	target := filepath.Join(append([]string{h.dir}, strings.Split(key, "/")...)...)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.WriteFile(target, body, 0o644); err != nil {
+		h.t.Fatal(err)
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (h *uploadHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
+	if !h.authorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	key := strings.TrimPrefix(r.URL.Path, "/")
+	_ = os.Remove(filepath.Join(append([]string{h.dir}, strings.Split(key, "/")...)...))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *uploadHandler) authorized(r *http.Request) bool {
+	return hmac.Equal([]byte(r.Header.Get("Authorization")), []byte("Bearer "+h.token))
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	"cnb.cool/shichao402/relkit/internal/httpx"
 	"cnb.cool/shichao402/relkit/internal/publishproto"
 	"google.golang.org/protobuf/proto"
 )
@@ -38,6 +39,7 @@ func (c *config) handler() http.Handler {
 		w.Write(body)
 	})
 	mux.HandleFunc(publishproto.PreflightPath, c.servePublishPreflight)
+	mux.HandleFunc(casUploadsPath, c.serveCASMint)
 
 	mux.HandleFunc(adminLoginPath, c.serveAdminLogin)
 	mux.HandleFunc(adminSetupPath, c.serveAdminSetup)
@@ -72,6 +74,8 @@ func (c *config) serve(w http.ResponseWriter, r *http.Request) {
 		c.download(w, r)
 	case http.MethodPut:
 		c.upload(w, r)
+	case http.MethodDelete:
+		c.deleteObject(w, r)
 	default:
 		w.Header().Set("Allow", allowedMethods(c.uploadsEnabled()))
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -80,7 +84,7 @@ func (c *config) serve(w http.ResponseWriter, r *http.Request) {
 
 func allowedMethods(uploads bool) string {
 	if uploads {
-		return "GET, HEAD, PUT"
+		return "GET, HEAD, PUT, DELETE"
 	}
 	return "GET, HEAD"
 }
@@ -424,9 +428,16 @@ func (c *config) withLogging(next http.Handler) http.Handler {
 			extra = " range=" + rng
 		}
 		log.Printf("%s %s %s %d %s %s%s",
-			clientIP(r), r.Method, r.URL.Path, rec.status,
+			clientIP(r), r.Method, redactRequestURL(r), rec.status,
 			humanBytes(rec.bytes), time.Since(start).Round(time.Millisecond), extra)
 	})
+}
+
+func redactRequestURL(r *http.Request) string {
+	if r.URL.RawQuery == "" {
+		return r.URL.Path
+	}
+	return httpx.RedactURL(r.URL.String())
 }
 
 func clientIP(r *http.Request) string {

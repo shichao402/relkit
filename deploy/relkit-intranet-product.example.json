@@ -1,11 +1,13 @@
 {
   "product": "svn-auto-merge",
-  "publishTo": ["disk"],
+  "publishTo": ["serve"],
   "backends": {
-    "disk": {
-      "type": "local",
-      "outputDir": "/data/relkit-serve",
-      "baseUrl": "https://update.devcloud.woa.com/"
+    "serve": {
+      "type": "relkit-compatible",
+      "baseUrl": "https://update.devcloud.woa.com/",
+      "uploadUrl": "http://127.0.0.1:30341/",
+      "tokenEnv": "RELKIT_SERVE_TOKEN",
+      "timeoutSeconds": 600
     }
   }
 }

@@ -2,10 +2,7 @@ package backends
 
 import (
 	"fmt"
-	"io"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,7 +37,7 @@ type Backend interface {
 }
 
 // PublishPreflighter is optional. Backends that can negotiate writer
-// capabilities implement it; storage backends such as local and S3 do not.
+// capabilities implement it; generic object stores such as S3 do not.
 type PublishPreflighter interface {
 	Preflight() error
 }
@@ -94,59 +91,6 @@ func (b *pathStyleBackend) HostsBrowse() bool {
 	return false
 }
 
-func (b *pathStyleBackend) resolveUnder(directory string, key string) (string, error) {
-	base, err := filepath.Abs(directory)
-	if err != nil {
-		return "", err
-	}
-	target := filepath.Join(append([]string{base}, strings.Split(key, "/")...)...)
-	target, err = filepath.Abs(target)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", Error{Message: fmt.Sprintf("key %q escapes %s", key, base)}
-	}
-	return target, nil
-}
-
-func (b *pathStyleBackend) writeFile(directory string, key string, data []byte) error {
-	target, err := b.resolveUnder(directory, key)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(target, data, 0o644)
-}
-
-func (b *pathStyleBackend) copyFile(directory string, key string, source string) error {
-	target, err := b.resolveUnder(directory, key)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	src, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	dst, err := os.Create(target)
-	if err != nil {
-		return err
-	}
-	defer dst.Close()
-	_, err = io.Copy(dst, src)
-	return err
-}
-
 func Create(name string, cfg *config.Config, root string) (Backend, error) {
 	entry, err := cfg.BackendConfig(name)
 	if err != nil {
@@ -157,31 +101,29 @@ func Create(name string, cfg *config.Config, root string) (Backend, error) {
 		return nil, err
 	}
 	switch backendType {
-	case "local":
-		return newLocalBackend(name, entry, root)
 	case "static-http":
 		return newStaticHTTPBackend(name, entry, root)
-	case "http-put":
-		return newHTTPPutBackend(name, entry, root)
+	case "relkit-compatible":
+		return newRelkitCompatibleBackend(name, entry, root)
 	case "s3-compatible":
 		return newS3CompatibleBackend(name, entry, root)
+	case "local", "http-put":
+		return nil, Error{Message: fmt.Sprintf("backend type %q was removed; use relkit-compatible (see ADR 0008)", backendType)}
 	default:
-		return nil, Error{Message: fmt.Sprintf("unsupported backend type %q for backend %q (available: http-put, local, s3-compatible, static-http)", backendType, name)}
+		return nil, Error{Message: fmt.Sprintf("unsupported backend type %q for backend %q (available: relkit-compatible, s3-compatible, static-http)", backendType, name)}
 	}
 }
 
 func AvailableTypes() []string {
-	return []string{"http-put", "local", "s3-compatible", "static-http"}
+	return []string{"relkit-compatible", "s3-compatible", "static-http"}
 }
 
 func SummaryFor(backendType string) (summary string, required []string, optional []string) {
 	switch backendType {
-	case "local":
-		return "writes the key tree to a local directory; URLs are not expected to resolve yet", []string{"baseUrl", "outputDir"}, nil
 	case "static-http":
-		return "any host serving files over HTTP at a predictable path; without stageDir it is read-only", []string{"baseUrl"}, []string{"stageDir", "timeoutSeconds"}
-	case "http-put":
-		return "uploads with authenticated PUT and serves over HTTP; works with relkit-serve or any PUT/WebDAV endpoint", []string{"baseUrl", "tokenEnv"}, []string{"uploadUrl", "timeoutSeconds"}
+		return "read-only mirror serving files over HTTP at a predictable path", []string{"baseUrl"}, []string{"timeoutSeconds"}
+	case "relkit-compatible":
+		return "uploads to relkit-serve with capability URLs; clients download via baseUrl", []string{"baseUrl", "tokenEnv"}, []string{"uploadUrl", "timeoutSeconds"}
 	case "s3-compatible":
 		return "uploads with SigV4 to COS / S3 / MinIO; clients download via baseUrl (custom domain or CDN)", []string{"baseUrl", "endpoint", "bucket", "accessKeyEnv", "secretKeyEnv"}, []string{"prefix", "region", "forcePathStyle", "timeoutSeconds"}
 	default:

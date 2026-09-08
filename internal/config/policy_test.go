@@ -62,7 +62,7 @@ func TestExtractProductPolicyOmitsMachineFields(t *testing.T) {
 
 func TestLoadProductPolicyStrictlyRejectsMachineAndUnknownFields(t *testing.T) {
 	for name, extra := range map[string]string{
-		"top-level backend": `,"backends":{"prod":{"type":"local"}}`,
+		"top-level backend": `,"backends":{"prod":{"type":"static-http"}}`,
 		"private key":       `,"privateKeyEnv":"SECRET"`,
 		"makers token":      `,"tokenEnv":"SECRET"`,
 		"directory target":  `,"publishTo":["prod"]`,
@@ -115,7 +115,7 @@ func TestMergeProductPolicy(t *testing.T) {
 	profile := &PublishProfile{
 		Product:   "demo",
 		Signing:   PublishSigningProfile{KeyID: "k1", PrivateKeyEnv: "DEMO_SEED"},
-		Backends:  map[string]map[string]any{"prod": {"type": "local", "outputDir": "out"}},
+		Backends:  map[string]map[string]any{"prod": {"type": "static-http", "baseUrl": "https://example.invalid/"}},
 		PublishTo: []string{"prod"},
 		Directory: &PublishDirectoryProfile{PublishTo: []string{"prod"}},
 		Site:      PublishSiteProfile{Makers: &PublishMakersProfile{TokenEnv: "MAKERS_TOKEN"}},
@@ -158,7 +158,7 @@ func TestMergeProductPolicyRejectsMismatchesAndUnknownTargets(t *testing.T) {
 	base := &PublishProfile{
 		Product:   "other",
 		Signing:   PublishSigningProfile{KeyID: "k1"},
-		Backends:  map[string]map[string]any{"prod": {"type": "local"}},
+		Backends:  map[string]map[string]any{"prod": {"type": "static-http"}},
 		PublishTo: []string{"prod"},
 	}
 	if _, err := MergeProductPolicy(policy, base, t.TempDir()); err == nil {

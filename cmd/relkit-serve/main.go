@@ -72,6 +72,7 @@ type config struct {
 	defaultMaxAge      int
 	logRequests        bool
 	gc                 *gcState
+	casSecret          []byte
 	site               *SiteConfig
 	stats              *downloadStats
 	admin              *adminAuth
@@ -109,6 +110,7 @@ func runServer() {
 		quiet         = flag.Bool("quiet", false, "do not log requests")
 		gcEnabled     = flag.Bool("gc", true, "enable orphan manifest/artifact/cas cleanup")
 		gcInterval    = flag.Duration("gc-interval", defaultGCInterval, "how often to sweep unreferenced objects; 0 disables GC")
+		gcCASGrace    = flag.Duration("gc-cas-grace", defaultCASGrace, "keep unreferenced cas/ objects younger than this")
 		showVersion   = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -177,6 +179,13 @@ func runServer() {
 				}
 				*gcInterval = parsed
 			}
+			if fileCfg.GC.CasGrace != "" && !explicit["gc-cas-grace"] {
+				parsed, err := ParseDuration(fileCfg.GC.CasGrace)
+				if err != nil {
+					log.Fatalf("config: gc.casGrace: %v", err)
+				}
+				*gcCASGrace = parsed
+			}
 		}
 	}
 
@@ -213,6 +222,14 @@ func runServer() {
 	}
 	defer root.Close()
 
+	var casSecret []byte
+	if len(credentials) > 0 {
+		casSecret, err = loadOrCreateCASSecret(root.Name())
+		if err != nil {
+			log.Fatalf("cas secret: %v", err)
+		}
+	}
+
 	gcOn := *gcEnabled && *gcInterval > 0
 	cfg := &config{
 		root:          root,
@@ -223,7 +240,8 @@ func runServer() {
 		immutable:     splitPrefixes(*immutable),
 		defaultMaxAge: *defaultMaxAge,
 		logRequests:   !*quiet,
-		gc:            newGCState(gcOn, *gcInterval, defaultGCDebounce),
+		gc:            newGCState(gcOn, *gcInterval, defaultGCDebounce, *gcCASGrace),
+		casSecret:     casSecret,
 		stats:         newDownloadStats(resolveStatsPath(root.Name(), statsFileFrom(fileCfg)), root.Name()),
 	}
 	admin, err := openAdminAuth(resolveAdminPath(root.Name(), usedPath, adminStateFileFrom(fileCfg)), root.Name())

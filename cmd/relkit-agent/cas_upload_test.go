@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,7 +14,7 @@ import (
 	"cnb.cool/shichao402/relkit/internal/model"
 )
 
-func TestCASCredentialsLocalUploadAndSkip(t *testing.T) {
+func TestCASCredentialsUploadAndSkip(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{})
 	payload := []byte("hello")
 	digest := model.Sha256Bytes(payload)
@@ -25,19 +23,7 @@ func TestCASCredentialsLocalUploadAndSkip(t *testing.T) {
 	if len(doc.Uploads) != 1 {
 		t.Fatalf("uploads=%v", doc.Uploads)
 	}
-	upload := doc.Uploads[0]
-	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+upload.PutURL, bytes.NewReader(payload))
-	for key, value := range upload.Headers {
-		req.Header.Set(key, value)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("PUT status=%d", resp.StatusCode)
-	}
+	putCAS(t, doc.Uploads[0], payload, http.StatusCreated)
 
 	doc = requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":5}]}`)
 	if len(doc.Uploads) != 0 {
@@ -48,17 +34,8 @@ func TestCASCredentialsLocalUploadAndSkip(t *testing.T) {
 func TestCASPutRejectsWrongHash(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{})
 	digest := strings.Repeat("a", 64)
-	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/cas/demo/"+digest+"?size=5", bytes.NewReader([]byte("hello")))
-	req.Header.Set("Authorization", "Bearer "+fx.token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
-	}
+	doc := requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":5}]}`)
+	putCAS(t, doc.Uploads[0], []byte("hello"), http.StatusBadRequest)
 }
 
 func TestCASCredentialsRequiresProductToken(t *testing.T) {
@@ -80,9 +57,8 @@ func TestCASCredentialsRejectsProfileWithoutIngest(t *testing.T) {
 		patchProfile: func(profile *config.PublishProfile) {
 			profile.Backends = map[string]map[string]any{
 				"static": {
-					"type":     "static-http",
-					"baseUrl":  "https://example.invalid/rup/",
-					"stageDir": "mirror",
+					"type":    "static-http",
+					"baseUrl": "https://example.invalid/rup/",
 				},
 			}
 			profile.PublishTo = []string{"static"}
@@ -102,12 +78,11 @@ func TestCASCredentialsRejectsProfileWithoutIngest(t *testing.T) {
 }
 
 func TestCASCredentialsAllowsMultiplePublishTargets(t *testing.T) {
+	mirror := startFakeRelkitServe(t, "serve-token")
 	fx := newAgentFixture(t, agentFixtureOpts{
 		patchProfile: func(profile *config.PublishProfile) {
-			profile.Backends["mirror"] = map[string]any{
-				"type": "local", "baseUrl": "https://mirror.invalid/rup/", "outputDir": "mirror-dist",
-			}
-			profile.PublishTo = []string{"local", "mirror"}
+			profile.Backends["mirror"] = mirror.backendConfig()
+			profile.PublishTo = []string{"serve", "mirror"}
 		},
 	})
 	digest := strings.Repeat("a", 64)
@@ -115,8 +90,8 @@ func TestCASCredentialsAllowsMultiplePublishTargets(t *testing.T) {
 	if len(doc.Uploads) != 1 {
 		t.Fatalf("uploads=%v", doc.Uploads)
 	}
-	if !strings.Contains(doc.Uploads[0].PutURL, "/v1/cas/demo/") {
-		t.Fatalf("putUrl=%s", doc.Uploads[0].PutURL)
+	if !strings.Contains(doc.Uploads[0].Requests[0].URL, "/cas/") {
+		t.Fatalf("url=%s", doc.Uploads[0].Requests[0].URL)
 	}
 }
 
@@ -125,24 +100,12 @@ func TestThinStagedPublishesFromCASWithoutLocalArtifact(t *testing.T) {
 	payload := []byte("hello")
 	digest := model.Sha256Bytes(payload)
 	doc := requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":5}]}`)
-	upload := doc.Uploads[0]
-	put, _ := http.NewRequest(http.MethodPut, fx.ts.URL+upload.PutURL, bytes.NewReader(payload))
-	for key, value := range upload.Headers {
-		put.Header.Set(key, value)
-	}
-	resp, err := http.DefaultClient.Do(put)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("CAS PUT status=%d", resp.StatusCode)
-	}
+	putCAS(t, doc.Uploads[0], payload, http.StatusCreated)
 
 	thin := stripArtifactsFromTar(t, fx.tarball)
 	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/demo/1.0.0", bytes.NewReader(thin))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
-	resp, err = http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,45 +119,28 @@ func TestThinStagedPublishesFromCASWithoutLocalArtifact(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("publish status=%d body=%s", status, body)
 	}
-	got, err := os.ReadFile(filepath.Join(fx.productRoot, "dist", "artifact", "demo", "1.0.0", "app.bin"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := fx.ingest.get("artifact/demo/1.0.0/app.bin")
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("artifact=%q", got)
 	}
 }
 
 func TestThinStagedMaterializesSecondBackend(t *testing.T) {
+	mirror := startFakeRelkitServe(t, "serve-token")
 	fx := newAgentFixture(t, agentFixtureOpts{
 		patchProfile: func(profile *config.PublishProfile) {
-			profile.Backends["mirror"] = map[string]any{
-				"type":      "local",
-				"baseUrl":   "https://mirror.invalid/rup/",
-				"outputDir": "mirror-dist",
-			}
-			profile.PublishTo = []string{"local", "mirror"}
+			profile.Backends["mirror"] = mirror.backendConfig()
+			profile.PublishTo = []string{"serve", "mirror"}
 		},
 	})
 	payload := []byte("hello")
 	digest := model.Sha256Bytes(payload)
 	doc := requestCASCredentials(t, fx, `{"product":"demo","blobs":[{"sha256":"`+digest+`","size":5}]}`)
-	put, _ := http.NewRequest(http.MethodPut, fx.ts.URL+doc.Uploads[0].PutURL, bytes.NewReader(payload))
-	for key, value := range doc.Uploads[0].Headers {
-		put.Header.Set(key, value)
-	}
-	resp, err := http.DefaultClient.Do(put)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("CAS PUT status=%d", resp.StatusCode)
-	}
+	putCAS(t, doc.Uploads[0], payload, http.StatusCreated)
 
 	req, _ := http.NewRequest(http.MethodPut, fx.ts.URL+"/v1/staged/demo/1.0.0", bytes.NewReader(stripArtifactsFromTar(t, fx.tarball)))
 	req.Header.Set("Authorization", "Bearer "+fx.token)
-	resp, err = http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,21 +154,37 @@ func TestThinStagedMaterializesSecondBackend(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("publish status=%d body=%s", status, body)
 	}
-	if !bytes.Contains(body, []byte("materialized from local")) {
+	if !bytes.Contains(body, []byte("materialized from serve")) {
 		t.Fatalf("publish log=%s", body)
 	}
-	for _, dir := range []string{"dist", "mirror-dist"} {
-		got, err := os.ReadFile(filepath.Join(fx.productRoot, dir, "artifact", "demo", "1.0.0", "app.bin"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, payload) {
-			t.Fatalf("%s artifact=%q", dir, got)
-		}
+	if !bytes.Equal(fx.ingest.get("artifact/demo/1.0.0/app.bin"), payload) {
+		t.Fatal("ingest missing artifact")
+	}
+	if !bytes.Equal(mirror.get("artifact/demo/1.0.0/app.bin"), payload) {
+		t.Fatal("mirror missing artifact")
 	}
 	casKey, _ := model.CasKey(digest)
-	if _, err := os.Stat(filepath.Join(fx.productRoot, "mirror-dist", filepath.FromSlash(casKey))); !os.IsNotExist(err) {
-		t.Fatalf("mirror should not store cas/: %v", err)
+	if len(mirror.get(casKey)) != 0 {
+		t.Fatal("mirror should not store cas/")
+	}
+}
+
+func putCAS(t *testing.T, doc casUploadDocument, payload []byte, want int) {
+	t.Helper()
+	if len(doc.Requests) == 0 {
+		t.Fatal("no requests")
+	}
+	req, _ := http.NewRequest(http.MethodPut, doc.Requests[0].URL, bytes.NewReader(payload))
+	for key, value := range doc.Requests[0].Headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != want {
+		t.Fatalf("PUT status=%d want %d", resp.StatusCode, want)
 	}
 }
 

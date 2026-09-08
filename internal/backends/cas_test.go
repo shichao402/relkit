@@ -6,52 +6,64 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
 )
 
-func TestLocalAuthorizeCASUploadDescribesAgentPut(t *testing.T) {
-	root := t.TempDir()
-	backendAny, err := newLocalBackend("disk", map[string]any{
-		"type":      "local",
-		"baseUrl":   "http://127.0.0.1/rup/",
-		"outputDir": filepath.Join(root, "out"),
-	}, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := strings.Repeat("a", 64)
-	upload, err := backendAny.(*localBackend).AuthorizeCASUpload(CASUploadRequest{
-		Product:       "demo",
-		Key:           "cas/" + digest,
-		Size:          123,
-		TTL:           time.Hour,
-		Authorization: "Bearer product-token",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantURL := "/v1/cas/demo/" + digest + "?size=123"
-	if upload.PutURL != wantURL {
-		t.Fatalf("put URL=%q, want %q", upload.PutURL, wantURL)
-	}
-	if upload.Headers["Authorization"] != "Bearer product-token" {
-		t.Fatalf("headers=%v", upload.Headers)
-	}
+type memStore struct {
+	name string
+	kind string
+	obj  map[string][]byte
 }
 
-func TestPutArtifactCASLocalSkipsSecondUpload(t *testing.T) {
-	root := t.TempDir()
-	backend, err := newLocalBackend("disk", map[string]any{
-		"type":      "local",
-		"baseUrl":   "http://127.0.0.1/rup/",
-		"outputDir": filepath.Join(root, "out"),
-	}, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+func newMem(name string) *memStore {
+	return &memStore{name: name, kind: "mem", obj: map[string][]byte{}}
+}
 
+func (m *memStore) Name() string                  { return m.name }
+func (m *memStore) Type() string                  { return m.kind }
+func (m *memStore) Describe() string              { return m.name }
+func (m *memStore) URLsAreLive() bool             { return true }
+func (m *memStore) Writable() bool                { return true }
+func (m *memStore) HostsBrowse() bool             { return false }
+func (m *memStore) URLFor(key string) *string     { u := "http://mem/" + key; return &u }
+func (m *memStore) Probe(string) (bool, *int64, string) {
+	return false, nil, ""
+}
+func (m *memStore) PutArtifact(localPath, key string) ([]string, error) {
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		return nil, err
+	}
+	m.obj[key] = data
+	return []string{*m.URLFor(key)}, nil
+}
+func (m *memStore) PutImmutable(data []byte, key string) ([]string, error) {
+	m.obj[key] = append([]byte(nil), data...)
+	return []string{*m.URLFor(key)}, nil
+}
+func (m *memStore) PutPointer(data []byte, key string) ([]string, error) {
+	return m.PutImmutable(data, key)
+}
+func (m *memStore) Get(key string) ([]byte, error) { return m.obj[key], nil }
+func (m *memStore) Head(key string) (int64, bool, error) {
+	data, ok := m.obj[key]
+	if !ok {
+		return 0, false, nil
+	}
+	return int64(len(data)), true, nil
+}
+func (m *memStore) Promote(srcKey, dstKey string) ([]string, error) {
+	data, ok := m.obj[srcKey]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	m.obj[dstKey] = append([]byte(nil), data...)
+	return []string{*m.URLFor(dstKey)}, nil
+}
+
+func TestPutArtifactCASSkipsSecondUpload(t *testing.T) {
+	backend := newMem("disk")
 	payload := bytes.Repeat([]byte("blob"), 32)
 	src := filepath.Join(t.TempDir(), "app.bin")
 	if err := os.WriteFile(src, payload, 0o644); err != nil {
@@ -61,7 +73,6 @@ func TestPutArtifactCASLocalSkipsSecondUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	urls, skipped, err := PutArtifactCAS(backend, src, "artifact/demo/1.0.0/app.bin", digest, size)
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +83,6 @@ func TestPutArtifactCASLocalSkipsSecondUpload(t *testing.T) {
 	if len(urls) != 1 {
 		t.Fatalf("urls=%v", urls)
 	}
-
 	if err := os.Remove(src); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +93,6 @@ func TestPutArtifactCASLocalSkipsSecondUpload(t *testing.T) {
 	if !skipped {
 		t.Fatal("second put must skip upload when cas exists")
 	}
-
 	got, err := backend.Get("artifact/demo/2.0.0/app.bin")
 	if err != nil {
 		t.Fatal(err)
@@ -108,33 +117,16 @@ func TestPutArtifactCASFallsBackWithoutIngest(t *testing.T) {
 }
 
 func TestPutArtifactCASReportsThinStagedMiss(t *testing.T) {
-	root := t.TempDir()
-	backend, err := newLocalBackend("disk", map[string]any{
-		"type": "local", "baseUrl": "http://127.0.0.1/rup/", "outputDir": filepath.Join(root, "out"),
-	}, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = PutArtifactCAS(backend, filepath.Join(root, "missing.bin"), "artifact/demo/1/app.bin", strings.Repeat("a", 64), 5)
+	backend := newMem("disk")
+	_, _, err := PutArtifactCAS(backend, filepath.Join(t.TempDir(), "missing.bin"), "artifact/demo/1/app.bin", strings.Repeat("a", 64), 5)
 	if err == nil || !strings.Contains(err.Error(), "CAS miss") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
 func TestMaterializeCopiesFromIngestCASWithoutLocalFile(t *testing.T) {
-	root := t.TempDir()
-	ingest, err := newLocalBackend("disk", map[string]any{
-		"type": "local", "baseUrl": "http://127.0.0.1/rup/", "outputDir": filepath.Join(root, "ingest"),
-	}, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mirror, err := newLocalBackend("mirror", map[string]any{
-		"type": "local", "baseUrl": "http://127.0.0.1/mirror/", "outputDir": filepath.Join(root, "mirror"),
-	}, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ingest := newMem("disk")
+	mirror := newMem("mirror")
 	payload := []byte("hello")
 	src := filepath.Join(t.TempDir(), "app.bin")
 	if err := os.WriteFile(src, payload, 0o644); err != nil {
@@ -147,7 +139,7 @@ func TestMaterializeCopiesFromIngestCASWithoutLocalFile(t *testing.T) {
 	if _, _, err := PutArtifactCAS(ingest, src, "artifact/demo/1.0.0/app.bin", digest, size); err != nil {
 		t.Fatal(err)
 	}
-	urls, err := Materialize(ingest, mirror, "artifact/demo/1.0.0/app.bin", digest, size, filepath.Join(root, "missing.bin"))
+	urls, err := Materialize(ingest, mirror, "artifact/demo/1.0.0/app.bin", digest, size, filepath.Join(t.TempDir(), "missing.bin"))
 	if err != nil {
 		t.Fatal(err)
 	}

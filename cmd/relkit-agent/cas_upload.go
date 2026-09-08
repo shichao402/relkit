@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,11 +27,9 @@ type casCredentialRequest struct {
 }
 
 type casUploadDocument struct {
-	SHA256  string            `json:"sha256"`
-	Size    int64             `json:"size"`
-	PutURL  string            `json:"putUrl"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Sign    *backends.CASSign `json:"sign,omitempty"`
+	SHA256   string                `json:"sha256"`
+	Size     int64                 `json:"size"`
+	Requests []backends.CASRequest `json:"requests"`
 }
 
 type casCredentialResponse struct {
@@ -94,20 +90,18 @@ func (s *Server) handleCASCredentials(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		upload, err := s.authorizeCASUpload(r, req.Product, backend, key, blob.Size, expiresAt)
+		upload, err := s.authorizeCASUpload(backend, key, blob.Size, expiresAt)
 		if err != nil {
 			http.Error(w, "authorize cas upload: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		response.Uploads = append(response.Uploads, casUploadDocument{
-			SHA256:  strings.ToLower(blob.SHA256),
-			Size:    blob.Size,
-			PutURL:  upload.PutURL,
-			Headers: upload.Headers,
-			Sign:    upload.Sign,
+			SHA256:   strings.ToLower(blob.SHA256),
+			Size:     blob.Size,
+			Requests: upload.Requests,
 		})
-		if upload.ExpiresAt.Before(response.ExpiresAt) {
-			response.ExpiresAt = upload.ExpiresAt
+		if exp := upload.ExpiresAt(); !exp.IsZero() && exp.Before(response.ExpiresAt) {
+			response.ExpiresAt = exp
 		}
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -147,84 +141,14 @@ func blobAlreadyAvailable(ingest backends.Ingest, key string, blob casCredential
 	return false
 }
 
-func (s *Server) authorizeCASUpload(r *http.Request, product string, backend backends.Backend, key string, size int64, expiresAt time.Time) (*backends.CASUpload, error) {
+func (s *Server) authorizeCASUpload(backend backends.Backend, key string, size int64, expiresAt time.Time) (*backends.CASUpload, error) {
 	authorizer, ok := backend.(backends.CASUploadAuthorizer)
 	if !ok {
 		return nil, fmt.Errorf("ingest backend %q cannot authorize CAS uploads", backend.Name())
 	}
 	return authorizer.AuthorizeCASUpload(backends.CASUploadRequest{
-		Product:       product,
-		Key:           key,
-		Size:          size,
-		TTL:           time.Until(expiresAt),
-		Authorization: r.Header.Get("Authorization"),
+		Key:  key,
+		Size: size,
+		TTL:  time.Until(expiresAt),
 	})
-}
-
-func (s *Server) handleCASPut(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	product, digest, ok := parseCASPutPath(r.URL.Path)
-	if !ok {
-		http.Error(w, "expected /v1/cas/{product}/{sha256}", http.StatusBadRequest)
-		return
-	}
-	if !s.requireAuthFor(w, r, product) {
-		return
-	}
-	if _, ok := s.cfg.Products[product]; !ok {
-		http.Error(w, "unknown product", http.StatusNotFound)
-		return
-	}
-	size, err := strconv.ParseInt(r.URL.Query().Get("size"), 10, 64)
-	if err != nil || size < 0 || size > s.cfg.MaxUpload {
-		http.Error(w, "valid size query required", http.StatusBadRequest)
-		return
-	}
-	if r.ContentLength >= 0 && r.ContentLength != size {
-		http.Error(w, "content length does not match size", http.StatusBadRequest)
-		return
-	}
-	key, err := model.CasKey(digest)
-	if err != nil {
-		http.Error(w, "invalid sha256", http.StatusBadRequest)
-		return
-	}
-	_, ingest, err := s.productIngest(product)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	receiver, ok := ingest.(backends.CASUploadReceiver)
-	if !ok {
-		http.Error(w, "ingest uses direct upload, not agent proxy", http.StatusBadRequest)
-		return
-	}
-	if existing, found, err := ingest.Head(key); err == nil && found && existing == size {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if err := receiver.ReceiveCAS(key, http.MaxBytesReader(w, r.Body, size+1), size); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
-}
-
-func parseCASPutPath(urlPath string) (product, digest string, ok bool) {
-	cleaned := path.Clean("/" + strings.TrimSpace(urlPath))
-	rest := strings.TrimPrefix(cleaned, "/v1/cas/")
-	if rest == cleaned {
-		return "", "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 2 || model.CheckIdentifier(parts[0], "product") != nil {
-		return "", "", false
-	}
-	if _, err := model.CasKey(parts[1]); err != nil {
-		return "", "", false
-	}
-	return parts[0], strings.ToLower(parts[1]), true
 }

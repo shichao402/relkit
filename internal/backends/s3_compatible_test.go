@@ -268,10 +268,10 @@ func TestS3AuthorizeCASUploadUsesUnsignedPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if upload.Headers["X-Amz-Content-Sha256"] != unsignedPayload {
-		t.Fatalf("headers=%v", upload.Headers)
+	if upload.Requests[0].Headers["X-Amz-Content-Sha256"] != unsignedPayload {
+		t.Fatalf("headers=%v", upload.Requests[0].Headers)
 	}
-	parsed, err := url.Parse(upload.PutURL)
+	parsed, err := url.Parse(upload.Requests[0].URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,13 +280,13 @@ func TestS3AuthorizeCASUploadUsesUnsignedPayload(t *testing.T) {
 		t.Fatalf("signed headers=%q", signedHeaders)
 	}
 	got := parsed.Query().Get("X-Amz-Signature")
-	want := cosQueryAuthSignature(http.MethodPut, parsed, upload.Headers, "ap-guangzhou", "SECRET")
+	want := cosQueryAuthSignature(http.MethodPut, parsed, upload.Requests[0].Headers, "ap-guangzhou", "SECRET")
 	if got != want {
 		t.Fatalf("presign does not match COS query-auth: got %s want %s", got, want)
 	}
 
 	wrong := map[string]string{
-		"Content-Type":         upload.Headers["Content-Type"],
+		"Content-Type":         upload.Requests[0].Headers["Content-Type"],
 		"X-Amz-Content-Sha256": digest,
 	}
 	if cosQueryAuthSignature(http.MethodPut, parsed, wrong, "ap-guangzhou", "SECRET") == got {
@@ -294,74 +294,26 @@ func TestS3AuthorizeCASUploadUsesUnsignedPayload(t *testing.T) {
 	}
 }
 
-func TestS3AuthorizeCASUploadSTSFederation(t *testing.T) {
+func TestS3IgnoresCasCredentialsField(t *testing.T) {
 	t.Setenv("TEST_S3_ACCESS", "AKID")
 	t.Setenv("TEST_S3_SECRET", "SECRET")
 	backendAny, err := newS3CompatibleBackend("cos", map[string]any{
 		"type": "s3-compatible", "baseUrl": "https://download.example/rup/",
-		"endpoint": "https://cos.ap-guangzhou.myqcloud.com", "bucket": "relkit-updates-1251882798",
-		"prefix": "rup/", "accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
-		"region": "ap-guangzhou",
+		"endpoint": "https://cos.ap-guangzhou.myqcloud.com", "bucket": "bucket-1251882798",
+		"accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
+		"region": "ap-guangzhou", "casCredentials": "sts",
 	}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	backend := backendAny.(*s3CompatibleBackend)
-	if backend.casCredentials != "sts" {
-		t.Fatalf("casCredentials=%q", backend.casCredentials)
-	}
-	var gotPolicy string
-	backend.federate = func(secretID, secretKey, name, policy string, duration time.Duration) (*federationCredentials, error) {
-		if secretID != "AKID" || secretKey != "SECRET" || name != "relkit-cas" {
-			t.Errorf("federate args %q %q %q", secretID, secretKey, name)
-		}
-		gotPolicy = policy
-		return &federationCredentials{
-			SecretID:   "AKIATMP",
-			SecretKey:  "tmp-secret",
-			Token:      "session-token",
-			Expiration: time.Now().UTC().Add(time.Hour),
-		}, nil
-	}
-	digest := strings.Repeat("b", 64)
-	upload, err := backend.AuthorizeCASUpload(CASUploadRequest{
-		Key:  "cas/" + digest,
-		Size: 123,
-		TTL:  time.Hour,
-	})
+	digest := strings.Repeat("a", 64)
+	upload, err := backend.AuthorizeCASUpload(CASUploadRequest{Key: "cas/" + digest, Size: 1, TTL: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if upload.Sign == nil || upload.Sign.AccessKey != "AKIATMP" || upload.Sign.SessionToken != "session-token" {
-		t.Fatalf("sign=%+v", upload.Sign)
-	}
-	if upload.Headers["X-Amz-Security-Token"] != "session-token" {
-		t.Fatalf("headers=%v", upload.Headers)
-	}
-	if upload.Sign.PayloadHash != unsignedPayload {
-		t.Fatalf("payload hash=%q", upload.Sign.PayloadHash)
-	}
-	if strings.Contains(upload.PutURL, "X-Amz-Signature") {
-		t.Fatalf("STS putUrl must be unsigned: %s", upload.PutURL)
-	}
-	if !strings.Contains(upload.PutURL, digest) {
-		t.Fatalf("putUrl=%s", upload.PutURL)
-	}
-	wantResource := "qcs::cos:ap-guangzhou:uid/1251882798:relkit-updates-1251882798/rup/cas/" + digest
-	if !strings.Contains(gotPolicy, wantResource) || !strings.Contains(gotPolicy, "name/cos:PutObject") {
-		t.Fatalf("policy=%s", gotPolicy)
-	}
-}
-
-func TestS3RejectsSTSOnGenericS3(t *testing.T) {
-	_, err := newS3CompatibleBackend("minio", map[string]any{
-		"type": "s3-compatible", "baseUrl": "https://download.example/rup/",
-		"endpoint": "https://minio.example:9000", "bucket": "bucket",
-		"accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
-		"region": "us-east-1", "casCredentials": "sts",
-	}, t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "requires a Tencent COS endpoint") {
-		t.Fatalf("err=%v", err)
+	if !strings.Contains(upload.Requests[0].URL, "X-Amz-Signature") {
+		t.Fatalf("expected presigned URL, got %s", upload.Requests[0].URL)
 	}
 }
 

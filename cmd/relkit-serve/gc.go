@@ -26,21 +26,57 @@ type gcState struct {
 	enabled  bool
 	interval time.Duration
 	debounce time.Duration
+	casGrace time.Duration
 
 	runMu     sync.Mutex
 	schedMu   sync.Mutex
 	debouncer *time.Timer
+	leaseMu   sync.Mutex
+	leases    map[string]time.Time
 }
 
-func newGCState(enabled bool, interval, debounce time.Duration) *gcState {
+func newGCState(enabled bool, interval, debounce, casGrace time.Duration) *gcState {
 	if debounce <= 0 {
 		debounce = defaultGCDebounce
+	}
+	if casGrace <= 0 {
+		casGrace = defaultCASGrace
 	}
 	return &gcState{
 		enabled:  enabled,
 		interval: interval,
 		debounce: debounce,
+		casGrace: casGrace,
+		leases:   map[string]time.Time{},
 	}
+}
+
+func (g *gcState) retainCAS(key string, until time.Time) {
+	if g == nil {
+		return
+	}
+	g.leaseMu.Lock()
+	defer g.leaseMu.Unlock()
+	if g.leases == nil {
+		g.leases = map[string]time.Time{}
+	}
+	g.leases[key] = until
+}
+
+func (g *gcState) casProtected(key string, mtime, now time.Time) bool {
+	if g == nil {
+		return false
+	}
+	g.leaseMu.Lock()
+	until, ok := g.leases[key]
+	g.leaseMu.Unlock()
+	if ok && now.Before(until) {
+		return true
+	}
+	if g.casGrace > 0 && now.Sub(mtime) < g.casGrace {
+		return true
+	}
+	return false
 }
 
 func (c *config) scheduleGC() {
@@ -222,6 +258,13 @@ func (c *config) gcOnce() (gcResult, error) {
 		}
 		for _, name := range files {
 			if strings.HasSuffix(name, ".tmp~") {
+				if strings.HasPrefix(name, "cas/") {
+					info, err := c.root.Stat(name)
+					key := strings.TrimSuffix(name, ".tmp~")
+					if err == nil && c.gc.casProtected(key, info.ModTime(), time.Now()) {
+						continue
+					}
+				}
 				if err := c.root.Remove(name); err == nil {
 					result.filesRemoved++
 				}
@@ -229,6 +272,12 @@ func (c *config) gcOnce() (gcResult, error) {
 			}
 			if _, keep := live[name]; keep {
 				continue
+			}
+			if strings.HasPrefix(name, "cas/") {
+				info, err := c.root.Stat(name)
+				if err == nil && c.gc.casProtected(name, info.ModTime(), time.Now()) {
+					continue
+				}
 			}
 			if err := c.root.Remove(name); err != nil {
 				log.Printf("gc: remove %s: %v", name, err)

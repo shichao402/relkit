@@ -18,7 +18,7 @@
 .relkit/browse/catalog.json
 ```
 
-| | `HostsBrowse` 数据面（`local` / `http-put`） | `site.makers`（现网外网） |
+| | `HostsBrowse` 数据面（`relkit-compatible`） | `site.makers`（现网外网） |
 |---|---|---|
 | 站点根 | 数据面上的 `browse/` | EdgeOne Makers（现网项目 `relkit-updates-index`） |
 | 要不要 Makers | 不要：本轮若只有 HostsBrowse 后端，即使配了 makers 也跳过 | 要：本轮有协议专用后端（如 COS）且配了 `site.makers` |
@@ -36,7 +36,7 @@
 }
 ```
 
-`tokenEnv` 默认 `EDGEONE_PAGES_API_TOKEN`。token 只进发布机环境，禁止写入仓库。`--to local` 或纯内网 `publishTo` 不会打 Makers。公网 COS 发布若没配 `site.makers`，publish 会警告：协议已提交，人页不会更新。
+`tokenEnv` 默认 `EDGEONE_PAGES_API_TOKEN`。token 只进发布机环境，禁止写入仓库。`--to serve` 或纯内网 `publishTo` 不会打 Makers。公网 COS 发布若没配 `site.makers`，publish 会警告：协议已提交，人页不会更新。
 
 Makers 失败与 `site` / `latest` / `browse` 指针失败同类：协议 index 可能已经 live，要用 `--allow-partial` 才接受人页落后。
 

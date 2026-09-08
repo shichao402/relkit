@@ -18,7 +18,7 @@ func (b typeOnlyBackend) Describe() string  { return b.kind }
 func (b typeOnlyBackend) URLsAreLive() bool { return true }
 func (b typeOnlyBackend) Writable() bool    { return true }
 func (b typeOnlyBackend) HostsBrowse() bool {
-	return b.kind == "local" || b.kind == "http-put"
+	return b.kind == "relkit-compatible"
 }
 func (b typeOnlyBackend) PutArtifact(string, string) ([]string, error) {
 	return nil, nil
@@ -51,27 +51,23 @@ func hasSinkPrefix(sinks []BrowseSink, prefix string) bool {
 func TestOpenBrowseSinks(t *testing.T) {
 	makers := &config.Config{Site: config.SiteConfig{Makers: &config.MakersConfig{ProjectID: "makers-test"}}}
 	s3 := []backends.Backend{typeOnlyBackend{kind: "s3-compatible"}}
-	local := []backends.Backend{typeOnlyBackend{kind: "local"}}
-	httpPut := []backends.Backend{typeOnlyBackend{kind: "http-put"}}
-	mixed := []backends.Backend{typeOnlyBackend{kind: "local"}, typeOnlyBackend{kind: "s3-compatible"}}
+	serve := []backends.Backend{typeOnlyBackend{kind: "relkit-compatible"}}
+	mixed := []backends.Backend{typeOnlyBackend{kind: "relkit-compatible"}, typeOnlyBackend{kind: "s3-compatible"}}
 
 	if !hasSinkPrefix(OpenBrowseSinks(makers, s3), "makers:") {
 		t.Fatal("protocol-only backend with site.makers should open MakersSink")
 	}
-	if hasSinkPrefix(OpenBrowseSinks(makers, local), "makers:") {
-		t.Fatal("--to local should skip Makers even when site.makers is set")
+	if hasSinkPrefix(OpenBrowseSinks(makers, serve), "makers:") {
+		t.Fatal("--to relkit-compatible should skip Makers even when site.makers is set")
 	}
-	if len(OpenBrowseSinks(makers, local)) != 1 || OpenBrowseSinks(makers, local)[0].Name() != "local" {
-		t.Fatal("local should open a data-plane BrowseSink")
-	}
-	if len(OpenBrowseSinks(makers, httpPut)) != 1 || OpenBrowseSinks(makers, httpPut)[0].Name() != "http-put" {
-		t.Fatal("http-put should host browse/ with the full dump")
+	if len(OpenBrowseSinks(makers, serve)) != 1 || OpenBrowseSinks(makers, serve)[0].Name() != "relkit-compatible" {
+		t.Fatal("relkit-compatible should open a data-plane BrowseSink")
 	}
 	sinks := OpenBrowseSinks(makers, mixed)
 	if !hasSinkPrefix(sinks, "makers:") {
 		t.Fatal("mixed publish including a protocol-only backend should deploy Makers")
 	}
-	if !hasSinkPrefix(sinks, "local") {
+	if !hasSinkPrefix(sinks, "relkit-compatible") {
 		t.Fatal("mixed publish should still write browse/ on the HostsBrowse backend")
 	}
 	if hasSinkPrefix(OpenBrowseSinks(&config.Config{}, s3), "makers:") {
@@ -88,8 +84,8 @@ func TestWarnMissingSiteSink(t *testing.T) {
 		t.Fatalf("lines=%v", lines)
 	}
 	lines = nil
-	warnMissingSiteSink(cfg, []backends.Backend{typeOnlyBackend{kind: "local"}}, printer)
+	warnMissingSiteSink(cfg, []backends.Backend{typeOnlyBackend{kind: "relkit-compatible"}}, printer)
 	if len(lines) != 0 {
-		t.Fatalf("local should not warn, got %v", lines)
+		t.Fatalf("relkit-compatible should not warn, got %v", lines)
 	}
 }

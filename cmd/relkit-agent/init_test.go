@@ -228,7 +228,7 @@ func TestInitMigrateProfileFromLegacy(t *testing.T) {
 			}},
 		},
 		"backends": map[string]any{
-			"prod": map[string]any{"type": "local", "outputDir": "dist", "secretIdEnv": "COS_SECRET"},
+			"prod": map[string]any{"type": "s3-compatible", "outputDir": "dist", "secretIdEnv": "COS_SECRET"},
 		},
 		"publishTo": []any{"prod"},
 		"changelog": map[string]any{

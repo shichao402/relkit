@@ -124,6 +124,7 @@ type CacheConfig struct {
 type GCConfig struct {
 	Enabled  *bool  `json:"enabled"`
 	Interval string `json:"interval"`
+	CasGrace string `json:"casGrace,omitempty"`
 }
 
 // LoadFileConfig reads a config file, or returns nil if there is none.
@@ -435,6 +436,7 @@ func skeletonBytes(dir, adminStateFile string) []byte {
 		GC: &GCConfig{
 			Enabled:  &gcEnabled,
 			Interval: "1h",
+			CasGrace: "24h",
 		},
 		Publish:         &PublishConfig{MinProtocol: 0},
 		ShutdownTimeout: "30s",

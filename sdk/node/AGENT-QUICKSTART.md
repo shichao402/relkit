@@ -144,7 +144,7 @@ SDK 已做（宿主不要重做一遍）：
 - [ ] `product` 改错一个字 → 整份 index 被拒
 
 夹具是 v1 JSON，验证的是**语义**对齐。上线前请另做一次**格式**对齐：
-用 `relkit publish` 真实写出的 v2 protobuf 发布树（`local` 后端 + 本机静态 HTTP 即可）
+用 `relkit publish` 真实写出的 v2 protobuf 发布树（本机启动 `relkit-serve -dir ./dist -addr 127.0.0.1:30341`，通过 `relkit-compatible` 发布）
 跑一遍 check → download，确认 SDK 能读 Go 侧真正产出的字节。本次接入已用此法抓到两个夹具覆盖不到的缺陷。
 
 ## N6 排障

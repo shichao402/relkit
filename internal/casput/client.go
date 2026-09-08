@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/backends"
 	"cnb.cool/shichao402/relkit/internal/config"
+	"cnb.cool/shichao402/relkit/internal/httpx"
 	"cnb.cool/shichao402/relkit/internal/stage"
 	"cnb.cool/shichao402/relkit/internal/stagedput"
 )
@@ -50,12 +50,17 @@ type credentialRequest struct {
 	Blobs   []blob `json:"blobs"`
 }
 
+type uploadRequest struct {
+	Method    string            `json:"method"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	ExpiresAt time.Time         `json:"expiresAt"`
+}
+
 type upload struct {
-	SHA256  string            `json:"sha256"`
-	Size    int64             `json:"size"`
-	PutURL  string            `json:"putUrl"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Sign    *backends.CASSign `json:"sign,omitempty"`
+	SHA256   string          `json:"sha256"`
+	Size     int64           `json:"size"`
+	Requests []uploadRequest `json:"requests"`
 }
 
 type credentialResponse struct {
@@ -173,7 +178,7 @@ func uploadAll(ctx context.Context, client *http.Client, opts Options, uploads [
 		go func() {
 			defer wg.Done()
 			for item := range jobs {
-				resolved, err := resolveUploadURL(opts.URL, item.PutURL)
+				item, err := normalizeUpload(item)
 				if err != nil {
 					select {
 					case errs <- err:
@@ -182,7 +187,6 @@ func uploadAll(ctx context.Context, client *http.Client, opts Options, uploads [
 					cancel()
 					return
 				}
-				item.PutURL = resolved
 				source := paths[strings.ToLower(item.SHA256)]
 				if source == "" {
 					select {
@@ -224,25 +228,27 @@ send:
 	}
 }
 
-func resolveUploadURL(agentURL, putURL string) (string, error) {
-	target, err := url.Parse(strings.TrimSpace(putURL))
+func normalizeUpload(item upload) (upload, error) {
+	if len(item.Requests) == 0 {
+		return item, fmt.Errorf("CAS credentials for %s have no requests", item.SHA256)
+	}
+	if len(item.Requests) != 1 {
+		return item, fmt.Errorf("CAS credentials for %s contain %d requests; this client supports one-request uploads", item.SHA256, len(item.Requests))
+	}
+	req := item.Requests[0]
+	if req.Method != "" && !strings.EqualFold(req.Method, http.MethodPut) {
+		return item, fmt.Errorf("unsupported CAS method %q", req.Method)
+	}
+	target, err := url.Parse(strings.TrimSpace(req.URL))
 	if err != nil {
-		return "", err
+		return item, err
 	}
-	if target.IsAbs() {
-		if target.Scheme != "http" && target.Scheme != "https" {
-			return "", fmt.Errorf("unsupported CAS upload URL scheme %q", target.Scheme)
-		}
-		return target.String(), nil
+	if !target.IsAbs() || (target.Scheme != "http" && target.Scheme != "https") {
+		return item, fmt.Errorf("CAS upload URL must be an absolute http(s) URL")
 	}
-	base, err := url.Parse(strings.TrimSpace(agentURL))
-	if err != nil || !base.IsAbs() {
-		return "", fmt.Errorf("cannot resolve relative CAS upload URL against %q", agentURL)
-	}
-	base.Path = "/"
-	base.RawQuery = ""
-	base.Fragment = ""
-	return base.ResolveReference(target).String(), nil
+	item.Requests[0].URL = target.String()
+	item.Requests[0].Method = http.MethodPut
+	return item, nil
 }
 
 func uploadOne(ctx context.Context, client *http.Client, source string, item upload) error {
@@ -258,20 +264,18 @@ func uploadOne(ctx context.Context, client *http.Client, source string, item upl
 	if info.Size() != item.Size {
 		return fmt.Errorf("%s size changed: got %d want %d", source, info.Size(), item.Size)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, item.PutURL, file)
+	reqDesc := item.Requests[0]
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqDesc.URL, file)
 	if err != nil {
 		return err
 	}
 	req.ContentLength = item.Size
-	for key, value := range item.Headers {
+	for key, value := range reqDesc.Headers {
 		req.Header.Set(key, value)
-	}
-	if err := backends.ApplyCASSign(req, item.Sign, time.Now()); err != nil {
-		return err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("PUT cas/%s: %v", item.SHA256, redactErr(err))
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -279,6 +283,13 @@ func uploadOne(ctx context.Context, client *http.Client, source string, item upl
 		return fmt.Errorf("PUT cas/%s HTTP %d: %s", item.SHA256, resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	return nil
+}
+
+func redactErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s", httpx.RedactText(err.Error()))
 }
 
 func buildThinArchive(root, version string) (string, error) {

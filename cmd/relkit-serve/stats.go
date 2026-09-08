@@ -80,6 +80,7 @@ func statsFileFrom(cfg *FileConfig) string {
 func reservedServeKey(name string) bool {
 	base := path.Base(name)
 	return base == statsFileName || strings.HasPrefix(base, statsFileName+".") ||
+		base == casKeyFileName || strings.HasPrefix(base, casKeyFileName+".") ||
 		reservedAdminKey(name)
 }
 

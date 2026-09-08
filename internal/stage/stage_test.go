@@ -33,7 +33,7 @@ func TestRunWritesNormalizedReleasePolicy(t *testing.T) {
 				map[string]any{"keyId": "k1", "publicKeyBase64": "public"},
 			},
 		},
-		Backends:  map[string]map[string]any{"prod": {"type": "local", "secretEnv": "BACKEND_SECRET"}},
+		Backends:  map[string]map[string]any{"prod": {"type": "relkit-compatible", "secretEnv": "BACKEND_SECRET"}},
 		PublishTo: []string{"prod"},
 		Site: config.SiteConfig{Makers: &config.MakersConfig{
 			ProjectID: "makers-demo",

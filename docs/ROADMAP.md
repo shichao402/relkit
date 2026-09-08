@@ -25,7 +25,7 @@
 - **状态**：agent 侧 `PutArtifactCAS`、Head + Promote、按 live sha256 收 cas 已落地（`8bbf755`）；CI `cas/credentials`、`relkit cas-put`、瘦 staged tar 与 `Materialize` 也已落地。整包 `PUT /v1/staged` 仍可用。
 - **目标**：同一内容只 PUT 一次。blob 已存在 → 跳过上传，Promote 到本版 `artifact/`。
 - **Promote 用 Copy 不是 Move**：COS 没有改 key 的真正 Move（文档里的移动 = Copy + Delete）。Promote 必须 Copy，才能留下 `cas/{sha256}` 供下一版 Head；Move 会拆掉跨版本去重。同桶 Copy 仍占第二份存储，靠下面的 cas 回收压住。
-- **现网**：`local` / `s3-compatible` 实现 `Ingest`（Head 比 size，不重算 sha256；Promote = hardlink / CopyObject）和 `Deleter`。`http-put` 仍整文件 `PutArtifact`。
+- **现网**：`relkit-compatible` / `s3-compatible` 实现统一 `Ingest`（Head 比 size；Promote = COPY / CopyObject）和 `Deleter`；`static-http` 只读。`local` / `http-put` 已删除。
 - **cas 回收**：仍被任意 channel 的 index → manifest 点名的 sha256 保留。`relkit-serve` GC 扫 `cas/`。`publish.Run` 在写完 index 后，只删本产品本轮裁掉且其他 channel 也不再引用的 cas（不 List 整棵 `cas/`）。删除失败只打日志。
 - **未走**：已有可 GET URL 的 artifact 直接申报、`artifactTo` / `pointerTo` 拆分，以及宿主 CI 切换到 `relkit cas-put`。设计见 [`design/publish-agent.md`](design/publish-agent.md)。
 - **未变判定**：sha256（及 size），不是文件名、不是版本号。
@@ -39,7 +39,7 @@
 - **macOS DMG 不拆（已拍）**。
 - **做**：
   1. **A**：SDK 已有 `destPath` 短路；宿主把已装路径对上。见上节。
-  2. **B**：agent CAS 已落地；CI credentials 仍待做。见上节。
+  2. **B**：agent CAS 已落地；CI `requests[]` 已落地。见上节。
   3. **产物哈希可稳定（产品侧）**。
 - **不做**：文件级 delta / patch；为差分拆 dll/so；强迫拆 DMG；跨 OS 共用原生库；在 `.app` 里打补丁换已签名文件。Windows 换单个 exe 仍须 rename-aside。
 - **与现网关系**：Download 对同一 `destPath` 已短路。发布：Ingest 后端 Head+Promote+cas GC；CI 仍可整包 staged-put。

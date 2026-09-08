@@ -14,6 +14,11 @@ import (
 	"cnb.cool/shichao402/relkit/internal/publishproto"
 )
 
+const (
+	relkitCopySourceHeader = "X-Relkit-Copy-Source"
+	relkitCASUploadsPath   = "/-/cas/uploads"
+)
+
 var contentTypes = map[string]string{
 	".pb":   "application/protobuf",
 	".json": "application/json",
@@ -22,15 +27,16 @@ var contentTypes = map[string]string{
 	".tgz":  "application/gzip",
 }
 
-type httpPutBackend struct {
+type relkitCompatibleBackend struct {
 	*pathStyleBackend
 	uploadURL string
 	tokenEnv  string
 	timeout   time.Duration
 }
 
-func newHTTPPutBackend(name string, cfg map[string]any, root string) (Backend, error) {
-	base, err := newPathStyleBackend(name, "http-put", cfg)
+func newRelkitCompatibleBackend(name string, cfg map[string]any, root string) (Backend, error) {
+	_ = root
+	base, err := newPathStyleBackend(name, "relkit-compatible", cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +57,7 @@ func newHTTPPutBackend(name string, cfg map[string]any, root string) (Backend, e
 		return nil, err
 	}
 
-	return &httpPutBackend{
+	return &relkitCompatibleBackend{
 		pathStyleBackend: base,
 		uploadURL:        uploadURL,
 		tokenEnv:         tokenEnv,
@@ -59,26 +65,26 @@ func newHTTPPutBackend(name string, cfg map[string]any, root string) (Backend, e
 	}, nil
 }
 
-func (b *httpPutBackend) Describe() string {
+func (b *relkitCompatibleBackend) Describe() string {
 	if b.uploadURL == b.baseURL {
-		return fmt.Sprintf("%s (http-put %s)", b.Name(), b.baseURL)
+		return fmt.Sprintf("%s (relkit-compatible %s)", b.Name(), b.baseURL)
 	}
-	return fmt.Sprintf("%s (http-put, PUT %s, serving %s)", b.Name(), b.uploadURL, b.baseURL)
+	return fmt.Sprintf("%s (relkit-compatible, PUT %s, serving %s)", b.Name(), b.uploadURL, b.baseURL)
 }
 
-func (b *httpPutBackend) URLsAreLive() bool {
+func (b *relkitCompatibleBackend) URLsAreLive() bool {
 	return true
 }
 
-func (b *httpPutBackend) Writable() bool {
+func (b *relkitCompatibleBackend) Writable() bool {
 	return true
 }
 
-func (b *httpPutBackend) HostsBrowse() bool {
+func (b *relkitCompatibleBackend) HostsBrowse() bool {
 	return true
 }
 
-func (b *httpPutBackend) PutArtifact(localPath string, key string) ([]string, error) {
+func (b *relkitCompatibleBackend) PutArtifact(localPath string, key string) ([]string, error) {
 	token, err := b.token()
 	if err != nil {
 		return nil, err
@@ -90,7 +96,7 @@ func (b *httpPutBackend) PutArtifact(localPath string, key string) ([]string, er
 	return []string{*b.URLFor(key)}, nil
 }
 
-func (b *httpPutBackend) PutImmutable(data []byte, key string) ([]string, error) {
+func (b *relkitCompatibleBackend) PutImmutable(data []byte, key string) ([]string, error) {
 	token, err := b.token()
 	if err != nil {
 		return nil, err
@@ -102,7 +108,7 @@ func (b *httpPutBackend) PutImmutable(data []byte, key string) ([]string, error)
 	return []string{*b.URLFor(key)}, nil
 }
 
-func (b *httpPutBackend) PutPointer(data []byte, key string) ([]string, error) {
+func (b *relkitCompatibleBackend) PutPointer(data []byte, key string) ([]string, error) {
 	token, err := b.token()
 	if err != nil {
 		return nil, err
@@ -114,7 +120,7 @@ func (b *httpPutBackend) PutPointer(data []byte, key string) ([]string, error) {
 	return []string{*b.URLFor(key)}, nil
 }
 
-func (b *httpPutBackend) Get(key string) ([]byte, error) {
+func (b *relkitCompatibleBackend) Get(key string) ([]byte, error) {
 	timeout := b.timeout
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
@@ -122,7 +128,7 @@ func (b *httpPutBackend) Get(key string) ([]byte, error) {
 	return httpx.Get(*b.URLFor(key), timeout, strings.HasPrefix(key, "index/") || strings.HasPrefix(key, "fallback/") || strings.HasPrefix(key, "directory/"))
 }
 
-func (b *httpPutBackend) Probe(rawURL string) (bool, *int64, string) {
+func (b *relkitCompatibleBackend) Probe(rawURL string) (bool, *int64, string) {
 	timeout := b.timeout
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
@@ -130,10 +136,7 @@ func (b *httpPutBackend) Probe(rawURL string) (bool, *int64, string) {
 	return httpx.Probe(rawURL, timeout)
 }
 
-// Preflight asks relkit-serve to validate this publisher before any artifact is
-// uploaded. A 404/405 means the target is a legacy or generic PUT endpoint; PUT
-// headers still let a current relkit-serve enforce its policy authoritatively.
-func (b *httpPutBackend) Preflight() error {
+func (b *relkitCompatibleBackend) Preflight() error {
 	token, err := b.token()
 	if err != nil {
 		return err
@@ -181,12 +184,77 @@ func (b *httpPutBackend) Preflight() error {
 	return Error{Message: message}
 }
 
-func (b *httpPutBackend) uploadTarget(key string) string {
+func (b *relkitCompatibleBackend) AuthorizeCASUpload(req CASUploadRequest) (*CASUpload, error) {
+	token, err := b.token()
+	if err != nil {
+		return nil, err
+	}
+	ttl := req.TTL
+	if ttl < time.Second {
+		ttl = time.Hour
+	}
+	body, err := json.Marshal(map[string]any{
+		"key":  req.Key,
+		"size": req.Size,
+		"ttl":  int(ttl.Seconds()),
+	})
+	if err != nil {
+		return nil, err
+	}
+	target := strings.TrimSuffix(b.uploadURL, "/") + relkitCASUploadsPath
+	status, data, err := httpx.PostJSON(target, token, minDuration(b.timeout, 60*time.Second), body, publisherHeaders())
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, Error{Message: fmt.Sprintf("mint CAS upload returned HTTP %d: %s", status, strings.TrimSpace(string(data)))}
+	}
+	var minted struct {
+		URL       string    `json:"url"`
+		ExpiresAt time.Time `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(data, &minted); err != nil || minted.URL == "" {
+		return nil, Error{Message: "mint CAS upload returned invalid json"}
+	}
+	return SinglePUT(minted.URL, nil, minted.ExpiresAt), nil
+}
+
+func (b *relkitCompatibleBackend) Head(key string) (int64, bool, error) {
+	token, err := b.token()
+	if err != nil {
+		return 0, false, err
+	}
+	return httpx.Head(b.uploadTarget(key), token, minDuration(b.timeout, 60*time.Second))
+}
+
+func (b *relkitCompatibleBackend) Promote(srcKey, dstKey string) ([]string, error) {
+	token, err := b.token()
+	if err != nil {
+		return nil, err
+	}
+	headers := publisherHeaders()
+	headers[relkitCopySourceHeader] = srcKey
+	_, err = httpx.PutEmpty(b.uploadTarget(dstKey), token, b.timeout, headers)
+	if err != nil {
+		return nil, err
+	}
+	return []string{*b.URLFor(dstKey)}, nil
+}
+
+func (b *relkitCompatibleBackend) Delete(key string) error {
+	token, err := b.token()
+	if err != nil {
+		return err
+	}
+	return httpx.Delete(b.uploadTarget(key), token, minDuration(b.timeout, 60*time.Second))
+}
+
+func (b *relkitCompatibleBackend) uploadTarget(key string) string {
 	value := b.uploadURL + url.PathEscape(key)
 	return strings.ReplaceAll(value, "%2F", "/")
 }
 
-func (b *httpPutBackend) token() (string, error) {
+func (b *relkitCompatibleBackend) token() (string, error) {
 	token := os.Getenv(b.tokenEnv)
 	if token == "" {
 		return "", Error{Message: fmt.Sprintf("backend %q needs the upload token in the environment variable %s, which is unset or empty", b.Name(), b.tokenEnv)}
@@ -216,3 +284,7 @@ func contentTypeFor(key string) string {
 	}
 	return "application/octet-stream"
 }
+
+var _ Ingest = (*relkitCompatibleBackend)(nil)
+var _ Deleter = (*relkitCompatibleBackend)(nil)
+var _ CASUploadAuthorizer = (*relkitCompatibleBackend)(nil)

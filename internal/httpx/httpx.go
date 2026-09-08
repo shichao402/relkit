@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ const (
 var retryableStatus = map[int]struct{}{
 	408: {}, 425: {}, 429: {}, 500: {}, 502: {}, 503: {}, 504: {},
 }
+
+var signedQueryValue = regexp.MustCompile(`(?i)([?&](?:sig|signature|x-amz-signature|x-amz-credential)=)[^&\s]+`)
 
 type Error struct {
 	Message string
@@ -96,6 +99,108 @@ func PutBytes(rawURL string, data []byte, token string, timeout time.Duration, c
 
 // Post sends a small authenticated control request and returns the response
 // unchanged so callers can distinguish a legacy 404/405 from a policy failure.
+func RedactURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	query := parsed.Query()
+	changed := false
+	for key := range query {
+		lower := strings.ToLower(key)
+		if lower == "sig" || lower == "x-amz-signature" || lower == "signature" || lower == "x-amz-credential" {
+			query.Set(key, "REDACTED")
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+// RedactText removes signed query values from an error or log line that may
+// contain a URL surrounded by transport-error text.
+func RedactText(text string) string {
+	return signedQueryValue.ReplaceAllString(text, `${1}REDACTED`)
+}
+
+func Head(rawURL, token string, timeout time.Duration) (int64, bool, error) {
+	headers := map[string]string{}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	status, hdr, _, err := request(rawURL, http.MethodHead, nil, timeout, headers, 1, false)
+	if err != nil {
+		return 0, false, &Error{Message: fmt.Sprintf("HEAD %s failed: %v", RedactURL(rawURL), err), URL: rawURL}
+	}
+	if status == http.StatusNotFound {
+		return 0, false, nil
+	}
+	if status >= 400 {
+		return 0, false, &Error{Message: fmt.Sprintf("HEAD %s returned %d", RedactURL(rawURL), status), Status: status, URL: rawURL}
+	}
+	length := hdr.Get("Content-Length")
+	if !isDigits(length) {
+		return 0, true, &Error{Message: fmt.Sprintf("HEAD %s missing Content-Length", RedactURL(rawURL)), URL: rawURL}
+	}
+	size, _ := strconv.ParseInt(length, 10, 64)
+	return size, true, nil
+}
+
+func Delete(rawURL, token string, timeout time.Duration) error {
+	headers := map[string]string{}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	status, _, body, err := request(rawURL, http.MethodDelete, nil, timeout, headers, 1, false)
+	if err != nil {
+		return &Error{Message: fmt.Sprintf("DELETE %s failed: %v", RedactURL(rawURL), err), URL: rawURL}
+	}
+	if status == http.StatusNotFound || status == http.StatusNoContent || status == http.StatusOK {
+		return nil
+	}
+	if status >= 400 {
+		detail := firstBodyLine(body)
+		msg := fmt.Sprintf("DELETE %s returned %d", RedactURL(rawURL), status)
+		if detail != "" {
+			msg += ": " + detail
+		}
+		return &Error{Message: msg, Status: status, URL: rawURL}
+	}
+	return nil
+}
+
+func PostJSON(rawURL, token string, timeout time.Duration, body []byte, extraHeaders map[string]string) (int, []byte, error) {
+	headers := make(map[string]string, len(extraHeaders)+2)
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	headers["Content-Type"] = "application/json"
+	status, _, data, err := request(rawURL, http.MethodPost, bytes.NewReader(body), timeout, headers, 1, false)
+	if err != nil {
+		return 0, nil, err
+	}
+	return status, data, nil
+}
+
+func PutEmpty(rawURL, token string, timeout time.Duration, extraHeaders map[string]string) (int, error) {
+	headers := map[string]string{
+		"Content-Length": "0",
+	}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
+	return put(rawURL, http.NoBody, 0, timeout, headers)
+}
+
 func Post(rawURL string, token string, timeout time.Duration, extraHeaders map[string]string) (int, http.Header, []byte, error) {
 	headers := make(map[string]string, len(extraHeaders)+1)
 	for key, value := range extraHeaders {
@@ -271,17 +376,17 @@ func put(rawURL string, body io.Reader, size int64, timeout time.Duration, heade
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, &Error{Message: fmt.Sprintf("PUT %s failed: %v", rawURL, err), URL: rawURL}
+		return 0, &Error{Message: fmt.Sprintf("PUT %s failed: %v", RedactURL(rawURL), err), URL: rawURL}
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		return 0, &Error{Message: fmt.Sprintf("PUT %s was redirected to %s; point the backend at the final address instead", rawURL, resp.Header.Get("Location")), Status: resp.StatusCode, URL: rawURL}
+		return 0, &Error{Message: fmt.Sprintf("PUT %s was redirected to %s; point the backend at the final address instead", RedactURL(rawURL), resp.Header.Get("Location")), Status: resp.StatusCode, URL: rawURL}
 	}
 	if resp.StatusCode >= 400 {
 		detail := firstBodyLine(bodyBytes)
-		message := fmt.Sprintf("PUT %s returned %d", rawURL, resp.StatusCode)
+		message := fmt.Sprintf("PUT %s returned %d", RedactURL(rawURL), resp.StatusCode)
 		if detail != "" {
 			message += ": " + detail
 		}
