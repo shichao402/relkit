@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -183,7 +184,17 @@ class TokenPermTests(unittest.TestCase):
 
 
 class BackupRollbackTests(unittest.TestCase):
-    def test_copy_roundtrip(self):
+    def test_atomic_replace_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "newbin"
+            dest = root / "relkit-serve"
+            src.write_bytes(b"new")
+            dest.write_bytes(b"old")
+            tmp_new = dest.with_name(dest.name + ".new")
+            shutil.copy2(src, tmp_new)
+            os.replace(tmp_new, dest)
+            self.assertEqual(dest.read_bytes(), b"new")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             src = root / "relkit-serve.json"
@@ -224,7 +235,9 @@ class CliParseTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
 
-    def test_empty_requirements_skips_venv(self):
+    def test_version_probe_avoids_percent(self):
+        probe = "python3 --version"
+        self.assertNotIn("%", probe)
         text = (DEPLOY / "requirements.txt").read_text(encoding="utf-8")
         self.assertEqual(ops.parse_requirements(text), [])
 

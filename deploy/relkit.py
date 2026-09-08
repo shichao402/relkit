@@ -8,6 +8,7 @@ file creates deploy/.venv, pip-installs, and re-execs itself.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -241,8 +242,10 @@ def ensure_user(name: str, home: str) -> None:
 
 def install_file(src: Path, dest: Path, mode: int) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
-    os.chmod(dest, mode)
+    tmp = dest.with_name(dest.name + ".new")
+    shutil.copy2(src, tmp)
+    os.chmod(tmp, mode)
+    os.replace(tmp, dest)
 
 
 def chown_path(path: Path, user: str) -> None:
@@ -256,8 +259,16 @@ def http_call(
     headers: Optional[dict[str, str]] = None,
     data: Optional[bytes] = None,
     timeout: int = 15,
+    publish_protocol: bool = True,
 ) -> tuple[int, bytes]:
-    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    hdrs: dict[str, str] = {}
+    if publish_protocol:
+        hdrs["X-Relkit-Publish-Protocol"] = "2"
+    if data is not None:
+        hdrs["Content-Length"] = str(len(data))
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, resp.read()
@@ -292,8 +303,9 @@ def self_check_serve(addr: str, token: str) -> None:
     if code != 401:
         raise Fail(f"unauthenticated PUT returned {code}, expected 401")
     print("2/7 upload auth         ok")
-    digest = "a" * 64
-    body = json.dumps({"key": f"cas/{digest}", "size": 18, "ttl": 300}).encode()
+    payload = b"relkit-serve probe"
+    digest = hashlib.sha256(payload).hexdigest()
+    mint_body = json.dumps({"key": f"cas/{digest}", "size": len(payload), "ttl": 300}).encode()
     code, raw = http_call(
         "POST",
         base + "/-/cas/uploads",
@@ -301,7 +313,7 @@ def self_check_serve(addr: str, token: str) -> None:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
-        data=body,
+        data=mint_body,
     )
     if code != 200:
         raise Fail(f"CAS mint returned {code}")
@@ -317,7 +329,7 @@ def self_check_serve(addr: str, token: str) -> None:
         raise Fail("CAS capability response has no url")
     if "://" not in cap or not cap.startswith("http"):
         raise Fail("CAS capability url is not absolute")
-    code, _ = http_call("PUT", cap, data=b"relkit-serve probe")
+    code, _ = http_call("PUT", cap, data=payload, publish_protocol=False)
     if code not in (200, 201, 204):
         raise Fail(f"capability PUT returned {code}")
     print("3/7 capability upload   ok")
@@ -852,19 +864,26 @@ def scp_to(host: str, sources: Sequence[Path], dest: str) -> None:
     run(argv)
 
 
-def remote_python_ok(host: str) -> None:
-    out = run(
-        ssh_argv(host, ["python3", "-c", "import sys; print('%d.%d' % sys.version_info[:2])"]),
-        capture=True,
-        check=False,
-    )
-    text = (out.stdout or "").strip()
-    parts = text.split(".")
-    if out.returncode != 0 or len(parts) != 2 or not all(p.isdigit() for p in parts):
-        die(f"{host} has no usable python3")
-    major, minor = int(parts[0]), int(parts[1])
-    if (major, minor) < MIN_PY:
-        die(f"{host} python3 is {major}.{minor}; need {MIN_PY[0]}.{MIN_PY[1]}+")
+def remote_python(host: str) -> str:
+    for interpreter in ("python3", "/usr/bin/python3", "python3.11", "python3.9"):
+        out = run(
+            ssh_argv(host, [interpreter, "--version"]),
+            capture=True,
+            check=False,
+        )
+        blob = (out.stdout or "") + "\n" + (out.stderr or "")
+        line = ""
+        for candidate in blob.splitlines():
+            if candidate.strip().startswith("Python "):
+                line = candidate.strip()
+        parts = line.replace("Python", "").strip().split(".")
+        if out.returncode != 0 or len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        major, minor = int(parts[0]), int(parts[1])
+        if (major, minor) < MIN_PY:
+            die(f"{host} {interpreter} is {major}.{minor}; need {MIN_PY[0]}.{MIN_PY[1]}+")
+        return interpreter
+    die(f"{host} has no usable python3 (tried python3 and /usr/bin/python3)")
 
 
 def cmd_upgrade(args: argparse.Namespace) -> None:
@@ -875,12 +894,12 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         args.plan = True
     if args.apply and args.plan:
         die("pass either --plan or --apply")
-    remote_python_ok(host)
+    py = remote_python(host)
     remote_dir = "/tmp/relkit-deploy"
     run(ssh_argv(host, ["mkdir", "-p", remote_dir]))
     scp_to(host, [DEPLOY_DIR / "relkit.py", DEPLOY_DIR / "relkit_ops.py", DEPLOY_DIR / "relkit-serve.service", DEPLOY_DIR / "relkit-agent.service"], remote_dir + "/")
     probe_out = run(
-        ssh_argv(host, ["sudo", "python3", remote_dir + "/relkit.py", "remote", "probe"]),
+        ssh_argv(host, ["sudo", py, remote_dir + "/relkit.py", "remote", "probe"]),
         capture=True,
     )
     probe = load_json_object(probe_out.stdout or "{}")
@@ -933,16 +952,23 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         spec["agentBinary"] = f"{remote_dir}/{agent_bin.name}"
     if uploads:
         scp_to(host, uploads, remote_dir + "/")
-    spec_path = Path(tempfile.mkstemp(prefix="relkit-spec-", suffix=".json")[1])
+    fd, spec_name = tempfile.mkstemp(prefix="relkit-spec-", suffix=".json")
+    os.close(fd)
+    spec_path = Path(spec_name)
     spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
-    scp_to(host, [spec_path], remote_dir + "/spec.json")
-    spec_path.unlink(missing_ok=True)
+    try:
+        scp_to(host, [spec_path], remote_dir + "/spec.json")
+    finally:
+        try:
+            spec_path.unlink()
+        except OSError:
+            pass
     apply = run(
         ssh_argv(
             host,
             [
                 "sudo",
-                "python3",
+                py,
                 remote_dir + "/relkit.py",
                 "remote",
                 "apply",
@@ -987,7 +1013,7 @@ def cmd_token(args: argparse.Namespace) -> None:
     host = args.host
     if not host:
         die("--host is required unless --local")
-    remote_python_ok(host)
+    remote_python(host)
     remote_dir = "/tmp/relkit-deploy"
     run(ssh_argv(host, ["mkdir", "-p", remote_dir]))
     scp_to(host, [DEPLOY_DIR / "relkit.py", DEPLOY_DIR / "relkit_ops.py"], remote_dir + "/")

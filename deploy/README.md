@@ -28,7 +28,7 @@ python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --restart
 
 upgrade **保留** 现网 `addr` / `dir` / nginx。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、按 live json 重写 `ReadWritePaths`。
 
-目标机必须已有 `python3`（3.9+）、`systemctl`、sudo。脚本不会在远端 `apt install`。
+目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 
 ## 首装
 
