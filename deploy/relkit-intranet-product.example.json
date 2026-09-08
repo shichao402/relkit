@@ -4,8 +4,8 @@
   "backends": {
     "serve": {
       "type": "relkit-compatible",
-      "baseUrl": "http://update.devcloud.woa.com:8080/",
-      "uploadUrl": "http://update.devcloud.woa.com:8080/",
+      "baseUrl": "http://9.134.240.235:8080/",
+      "uploadUrl": "http://9.134.240.235:8080/",
       "tokenEnv": "RELKIT_SERVE_TOKEN",
       "timeoutSeconds": 600
     }
