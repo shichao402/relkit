@@ -18,10 +18,10 @@ main:
             fi
             go vet ./cmd/relkit-serve/...
             go test -race ./cmd/relkit-serve/...
-        - name: shellcheck
+        - name: deploy python tests
           script: |
-            apt-get update && apt-get install -y shellcheck
-            shellcheck deploy/install.sh deploy/build-serve.sh
+            apt-get update && apt-get install -y python3
+            python3 -m unittest deploy/test_relkit.py
     - name: node-sdk
       docker:
         image: node:22
@@ -55,7 +55,7 @@ main:
                 -o "$out" ./cmd/relkit
             done
         - name: build serve binaries
-          script: ./deploy/build-serve.sh "${CNB_BRANCH#v}" dist
+          script: python3 deploy/relkit.py build --serve --version "${CNB_BRANCH#v}" --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu
@@ -79,7 +79,7 @@ main:
             Install the server on Linux with systemd:
 
             ```
-            sudo ./deploy/install.sh --binary ./relkit-serve-linux-amd64
+            python3 deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64
             ```
 
             Guides: `relkit agent-guide` · `relkit-serve agent-guide`

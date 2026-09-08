@@ -143,7 +143,7 @@ sequenceDiagram
 |---|---|---|---|---|---|
 | `<repo>/relkit.json` | 开发机 / CI checkout | 人 | 人（PR） | `relkit stage` | 阶段 C 开头 |
 | `.relkit/staged/<ver>/release-policy.json` | CI → 随包搬到发布机 | `relkit stage` | 每次发版重建 | agent | publish 时 |
-| `/etc/relkit-agent/relkit-agent.json` | 发布机 | `install-agent.sh` | `init -product` | agent | 启动时 |
+| `/etc/relkit-agent/relkit-agent.json` | 发布机 | `deploy/relkit.py install agent` | `init -product` | agent | 启动时 |
 | `/etc/relkit-agent/products/<id>.json` | 发布机 | `init -migrate-profile` 或手写 | 人（换 backend / keyId） | agent | publish 时 |
 | `/etc/relkit-agent/tokens/<id>.token` | 发布机 | `init -product` | `-token-only` | agent | 启动时 |
 | `/etc/relkit-agent/env` | 发布机 | 人 | 人 | systemd → agent 环境 | 启动时，**改后须 restart** |

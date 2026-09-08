@@ -1,0 +1,3 @@
+# Third-party Python packages for deploy/relkit.py.
+# Keep this file empty of package pins: the CLI is stdlib-only.
+# If a pin is added, relkit.py creates deploy/.venv, pip-installs, and re-execs.

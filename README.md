@@ -44,9 +44,8 @@ go get cnb.cool/shichao402/relkit/version@latest   # 项目 VERSION.json 读写�
 ```bash
 go build -o relkit ./cmd/relkit
 go build -o relkit-serve ./cmd/relkit-serve
-# 或交叉编译 serve：
-./deploy/build-serve.sh        # Unix
-./deploy/build-serve.ps1       # Windows
+# 或交叉编译 serve / agent：
+python deploy/relkit.py build --serve --agent
 ```
 
 ## relkit（发布 CLI）
@@ -131,8 +130,10 @@ relkit-serve -config /etc/relkit-serve/relkit-serve.json
 Linux + systemd：
 
 ```bash
-sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
+sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
 ```
+
+已有实例升级：`python deploy/relkit.py upgrade --host <Host> --plan` 然后 `--apply --restart`。细节见 [`deploy/README.md`](deploy/README.md)。
 
 运维手册：`relkit-serve agent-guide`（二进制内嵌），源文件在 [`cmd/relkit-serve/AGENT-GUIDE.md`](cmd/relkit-serve/AGENT-GUIDE.md)。设计说明见 [`cmd/relkit-serve/README.md`](cmd/relkit-serve/README.md)。
 

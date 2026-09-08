@@ -77,7 +77,7 @@ relkit-agent onboard check -config /etc/relkit-agent/relkit-agent.json -product 
 - `POST /v1/staged/{product}/{version}/uploads/{id}/complete`
 - `POST /v1/publish`
 
-无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`deploy/install-agent.sh`。
+无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`python3 deploy/relkit.py install agent --binary …`。已有实例：`python deploy/relkit.py upgrade --host <Host>`。
 
 ## 删除旧后端前的四步部署顺序
 

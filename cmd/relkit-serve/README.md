@@ -57,10 +57,10 @@ relkit-serve init -dir /srv/releases -out /etc/relkit-serve
 relkit-serve -config /etc/relkit-serve/relkit-serve.json
 ```
 
-Linux + systemd 上一步到位（建用户、装二进制、写配置、装单元、跑五项自检）：
+Linux + systemd 上一步到位（建用户、装二进制、写配置、装单元、跑自检）：
 
 ```bash
-sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
+sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
 ```
 
 未提供 token 时上传端点关闭，`PUT` 返回 405。这是默认状态，也就是说默认安全。

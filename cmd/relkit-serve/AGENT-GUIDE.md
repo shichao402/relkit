@@ -34,7 +34,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
   -o relkit-serve ./cmd/relkit-serve
 ```
 
-或用 `./deploy/build-serve.sh` / `deploy/build-serve.ps1` 交叉编译多平台。
+或用 `python deploy/relkit.py build --serve` 交叉编译多平台。
 
 `CGO_ENABLED=0` 不是可选项。少了它，二进制会链接构建机的 libc，换到 musl 发行版（Alpine）或更旧的 glibc 上会直接起不来，而错误信息（`No such file or directory` 指向一个明明存在的文件）极具误导性。
 
@@ -137,10 +137,10 @@ curl -sI https://dl.example.com/index/app/stable.json | grep -i cache-control
 - [ ] 6. 把**产品** token 交给对应发布方（不要把运营方全树 token 发给产品 CI）
 ```
 
-`deploy/install.sh` 把 1–4 步做完并跑第 5 步。**优先用它**，手工步骤仅在脚本不适用时参考（非 systemd 系统、容器内、无 root）：
+`python3 deploy/relkit.py install serve` 把 1–4 步做完并跑第 5 步。**优先用它**，手工步骤仅在脚本不适用时参考（非 systemd 系统、容器内、无 root）：
 
 ```bash
-sudo ./deploy/install.sh --binary ./dist/relkit-serve-linux-amd64
+sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
 ```
 
 脚本是幂等的：重复执行不会重新生成 token，也不会覆盖已有配置。要强制换 token 见 §5。
@@ -275,7 +275,15 @@ agent 调 `POST /-/cas/uploads` 获取短期绝对能力 URL；CI 执行 `reques
 运营方全树 token：
 
 ```bash
-sudo ./deploy/install.sh --binary /usr/local/bin/relkit-serve --rotate-token
+sudo python3 deploy/relkit.py token --local --prepare
+sudo python3 deploy/relkit.py token --local --activate
+```
+
+或远端：
+
+```bash
+python deploy/relkit.py token --host update.devcloud.woa.com --prepare
+python deploy/relkit.py token --host update.devcloud.woa.com --activate
 ```
 
 或者手工：
@@ -351,6 +359,28 @@ ssh <host> sudo systemctl restart relkit-serve
 - `-product` 打印的明文是**唯一一次**能看到它的机会。当场存进凭据管理系统并交给该产品，**不要**把它贴进工单、聊天记录或提交信息。`-share-with` 不打印明文。
 - `sudo init -product` 之后把 `/etc/relkit-serve` 收归服务用户（`chown -R relkit:relkit`），否则新 token 文件可能是 root 的 0600，重启后进程读不了、整台机起不来。面板状态文件在服务目录，`chown relkit:relkit /srv/releases/.relkit-serve-admin.json`，否则第一个账户写不上。
 - `-out` 必须指向真正生效的那个配置目录，照抄启动日志里的 `config:` 那行；指错了会在别处新建一份配置，而服务读的还是老的。
+
+---
+
+## 5.1 流程 E：升级已部署实例
+
+空机用 §3 的 `install`。已经在跑的机器**禁止**再拿 install 默认的 `127.0.0.1:30341` / `/srv/releases` 去覆盖。统一入口：
+
+```bash
+python deploy/relkit.py build --serve --agent --os linux --arch amd64
+python deploy/relkit.py upgrade --host <Host> --plan --public-base-url https://<public-host>/
+python deploy/relkit.py upgrade --host <Host> --apply --restart --public-base-url https://<public-host>/
+```
+
+SSH 端口与身份走本机 `~/.ssh/config`。目标机要有 `python3`（3.9+）；脚本不会在远端装系统包。
+
+顺序：serve 配置/二进制/unit → 健康与 CAS 自检 → profile 迁移 → agent 二进制 → 健康与 `onboard check`。失败从 `/var/backups/relkit/<utc>/` 回滚。
+
+会做：补 `gc.casGrace`、删 `casCredentials`、把能唯一推导的 `local`/`http-put` 改成 `relkit-compatible`、按现网 `dir`/`statsFile`/`adminStateFile` 写 `ReadWritePaths`。
+
+不会做：改 `addr`/`dir`、动 nginx、轮换 token、用 skeleton 覆盖 JSON。轮换走 §5 的 `token --prepare` / `--activate`。
+
+完整命令与红线：仓库 [`deploy/README.md`](../../deploy/README.md)。
 
 ---
 

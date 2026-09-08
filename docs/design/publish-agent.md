@@ -205,7 +205,7 @@ Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请
 - `nginx-intranet.example.conf`（内网 `update.devcloud.woa.com`：`/v1/` → agent `:8787`，GET → serve 数据面）
 - `relkit-agent.service`
 - `Caddyfile.relkit-agent.example`（`publish.firoyang.com` → `127.0.0.1:8787`）
-- `install-agent.sh`
+- `python deploy/relkit.py`（`build` / `install` / `upgrade` / `token`）
 
 DNS：`publish.firoyang.com` A → 发布机公网 IP。Agent 只听本机；TLS 由前面的反向代理终止。
 
@@ -232,6 +232,8 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 3. **开写入面、迁 profile、发版验证。** 为 serve 配运营方 `RELKIT_SERVE_TOKEN`，把 profile 改成 `relkit-compatible`（`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`），完成一次 `cas-put` → publish → verify。
 4. **稳定后才部署删除类型版本。** 观察现网稳定后，最后升级到不再包含 `local` / `http-put` 的 agent/CLI；否则旧 profile 会直接报 unsupported backend type。
 
+现网升级用 `python deploy/relkit.py upgrade --host …`（先 `--plan` 再 `--apply --restart`），不要重跑首装。细节 [`deploy/README.md`](../../deploy/README.md)。
+
 ## 6. Token 轮换
 
 1. `relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only`
@@ -245,7 +247,7 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 
 内网不必把产物发到公网 COS。控制面仍是 agent，数据面仍是 WOA 目录（现有 `https://update.devcloud.woa.com/` 的 GET 树）。
 
-1. 在箱上安装 `relkit-agent`（`deploy/install-agent.sh`），配置见 `deploy/relkit-agent.intranet.example.json`。
+1. 在箱上安装 `relkit-agent`（`python3 deploy/relkit.py install agent --binary …`），配置见 `deploy/relkit-agent.intranet.example.json`。已有实例用 `python deploy/relkit.py upgrade --host <Host>`。
 2. 每个产品的 **publish profile** 把 `ingest`、`artifactTo`、`pointerTo` 都指到 `relkit-compatible`；`baseUrl` 为现有内网更新域名，`uploadUrl` 指向 serve 写入面，`tokenEnv` 为 `RELKIT_SERVE_TOKEN`。样例：`deploy/relkit-intranet-product.example.json`。旧机若产品根还留着整份配置，可先 `-migrate-profile`。
 3. 私钥只在这台机上。CI 只持 **该产品** 的 `RELKIT_UPLOAD_TOKEN`。
 4. 对外继续匿名 GET 现有域名。`relkit-serve` 可以继续提供 Range GET；写入统一走 serve 签发的 CAS 能力 URL。
