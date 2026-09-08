@@ -208,6 +208,11 @@ def migrate_backend(
         if not cleaned.get("tokenEnv"):
             cleaned["tokenEnv"] = TOKEN_ENV
             notes.append(f"set tokenEnv={TOKEN_ENV}")
+        if public_base_url:
+            base = public_base_url.rstrip("/") + "/"
+            if cleaned.get("baseUrl") != base:
+                cleaned["baseUrl"] = base
+                notes.append(f"set baseUrl={base}")
         if public_upload_url:
             upload = public_upload_url.rstrip("/") + "/"
             if cleaned.get("uploadUrl") != upload:

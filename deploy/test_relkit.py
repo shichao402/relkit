@@ -171,12 +171,16 @@ class MigrateTests(unittest.TestCase):
         migrated, notes = ops.migrate_backend(
             backend,
             serve_addr="127.0.0.1:8080",
-            public_base_url=None,
-            public_upload_url="http://update.devcloud.woa.com",
+            public_base_url="http://update.devcloud.woa.com:8080",
+            public_upload_url="http://update.devcloud.woa.com:8080",
         )
         self.assertEqual(
-            migrated["uploadUrl"], "http://update.devcloud.woa.com/"
+            migrated["baseUrl"], "http://update.devcloud.woa.com:8080/"
         )
+        self.assertEqual(
+            migrated["uploadUrl"], "http://update.devcloud.woa.com:8080/"
+        )
+        self.assertTrue(any("set baseUrl" in item for item in notes))
         self.assertTrue(any("set uploadUrl" in item for item in notes))
 
     def test_unknown_backend_left_alone(self):

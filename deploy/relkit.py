@@ -647,6 +647,7 @@ def apply_serve_upgrade(
     binary: Optional[Path],
     user: str,
     prefix: str,
+    listen_addr: Optional[str],
     public_base_url: Optional[str],
     public_upload_url: Optional[str],
     restart: bool,
@@ -666,8 +667,11 @@ def apply_serve_upgrade(
     live_dir = cfg.get("dir")
     cfg, grace_notes = ensure_cas_grace(cfg)
     notes.extend(grace_notes)
-    if cfg.get("addr") != live_addr or cfg.get("dir") != live_dir:
-        raise Fail("upgrade refused to change addr/dir")
+    if listen_addr and listen_addr != live_addr:
+        cfg["addr"] = listen_addr
+        notes.append(f"changed serve addr {live_addr} -> {listen_addr}")
+    if cfg.get("dir") != live_dir:
+        raise Fail("upgrade refused to change dir")
     config_file.write_text(dump_json(cfg), encoding="utf-8")
     if binary:
         install_file(binary, dest_bin, 0o755)
@@ -832,6 +836,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         binary=serve_bin,
                         user=user,
                         prefix=prefix,
+                        listen_addr=spec.get("serveListenAddr"),
                         public_base_url=public_base,
                         public_upload_url=public_upload,
                         restart=restart,
@@ -949,6 +954,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "restart": bool(args.restart),
         "prefix": args.prefix,
         "user": args.user,
+        "serveListenAddr": args.serve_listen_addr,
         "publicBaseUrl": public,
         "publicUploadUrl": public_upload,
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
@@ -1110,6 +1116,10 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--restart", action="store_true")
     upgrade.add_argument("--serve-binary", default="dist/relkit-serve-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")
+    upgrade.add_argument(
+        "--serve-listen-addr",
+        help="explicit relkit-serve listen address (for example :8080)",
+    )
     upgrade.add_argument("--public-base-url")
     upgrade.add_argument(
         "--public-upload-url",

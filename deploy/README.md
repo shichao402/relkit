@@ -20,15 +20,15 @@
 
 ```bash
 python deploy/relkit.py build --serve --agent --os linux --arch amd64
-python deploy/relkit.py upgrade --host update.devcloud.woa.com --plan --public-base-url https://update.devcloud.woa.com/ --public-upload-url http://update.devcloud.woa.com/
-python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --restart --public-base-url https://update.devcloud.woa.com/ --public-upload-url http://update.devcloud.woa.com/
+python deploy/relkit.py upgrade --host update.devcloud.woa.com --plan --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
+python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --restart --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
 ```
 
 `--plan` 只读并打印脱敏探测结果。`--apply` 在目标机 `/var/backups/relkit/<utc>/` 备份后改文件；没有 `--restart` 则不切进程。失败会从该备份回滚。
 
-upgrade **保留** 现网 `addr` / `dir` / nginx。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、用显式 `--public-upload-url` 修正已有 `relkit-compatible.uploadUrl`、按 live json 重写 `ReadWritePaths`。
+upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
 
-`uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。`baseUrl` 只负责客户端匿名下载，两者允许使用不同 scheme/域名。nginx 必须采用 [`nginx-intranet.example.conf`](nginx-intranet.example.conf) 的完整数据面切面：`/v1/` 给 agent，其余请求给 serve；不能再保留旧的 GET-only `limit_except`。
+`uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-serve` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
 
 目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 
