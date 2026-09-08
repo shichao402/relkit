@@ -31,6 +31,7 @@ type casCredentialRequest struct {
 type casUploadDocument struct {
 	SHA256   string                `json:"sha256"`
 	Size     int64                 `json:"size"`
+	PutURL   string                `json:"putUrl,omitempty"`
 	Requests []backends.CASRequest `json:"requests"`
 }
 
@@ -98,11 +99,15 @@ func (s *Server) handleCASCredentials(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		backends.WrapLoopbackCASThroughAgent(requestOrigin(r), upload)
-		response.Uploads = append(response.Uploads, casUploadDocument{
+		doc := casUploadDocument{
 			SHA256:   strings.ToLower(blob.SHA256),
 			Size:     blob.Size,
 			Requests: upload.Requests,
-		})
+		}
+		if len(upload.Requests) == 1 {
+			doc.PutURL = upload.Requests[0].URL
+		}
+		response.Uploads = append(response.Uploads, doc)
 		if exp := upload.ExpiresAt(); !exp.IsZero() && exp.Before(response.ExpiresAt) {
 			response.ExpiresAt = exp
 		}
