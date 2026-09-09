@@ -69,6 +69,8 @@ type credentialResponse struct {
 	Uploads   []upload  `json:"uploads"`
 }
 
+const maxUploadAttempts = 4
+
 func Put(ctx context.Context, opts Options) (*Result, error) {
 	if opts.Root == "" || opts.Product == "" || opts.Version == "" || opts.URL == "" || opts.Token == "" {
 		return nil, fmt.Errorf("root, product, version, url, and token are required")
@@ -204,7 +206,7 @@ func uploadAll(ctx context.Context, client *http.Client, opts Options, uploads [
 					cancel()
 					return
 				}
-				if err := uploadOne(ctx, &putClient, source, item); err != nil {
+				if err := uploadOne(ctx, &putClient, source, item, opts.Log); err != nil {
 					select {
 					case errs <- err:
 					default:
@@ -259,23 +261,64 @@ func normalizeUpload(item upload) (upload, error) {
 	return item, nil
 }
 
-func uploadOne(ctx context.Context, client *http.Client, source string, item upload) error {
-	file, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	info, err := file.Stat()
+func uploadOne(ctx context.Context, client *http.Client, source string, item upload, log func(string)) error {
+	info, err := os.Stat(source)
 	if err != nil {
 		return err
 	}
 	if info.Size() != item.Size {
 		return fmt.Errorf("%s size changed: got %d want %d", source, info.Size(), item.Size)
 	}
+	var lastErr error
+	attemptsUsed := 0
+	for attempt := 1; attempt <= maxUploadAttempts; attempt++ {
+		attemptsUsed = attempt
+		retry, err := uploadOnce(ctx, client, source, item)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retry || attempt == maxUploadAttempts {
+			break
+		}
+		delay := time.Duration(1<<(attempt-1)) * time.Second
+		if log != nil {
+			log(fmt.Sprintf(
+				"retrying cas/%s after attempt %d/%d: %v",
+				item.SHA256, attempt, maxUploadAttempts, err,
+			))
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if attemptsUsed == 1 {
+		return lastErr
+	}
+	return fmt.Errorf("%w (after %d attempts)", lastErr, attemptsUsed)
+}
+
+func uploadOnce(ctx context.Context, client *http.Client, source string, item upload) (bool, error) {
+	file, err := os.Open(source)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.Size() != item.Size {
+		return false, fmt.Errorf("%s size changed: got %d want %d", source, info.Size(), item.Size)
+	}
 	reqDesc := item.Requests[0]
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqDesc.URL, file)
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.ContentLength = item.Size
 	for key, value := range reqDesc.Headers {
@@ -283,14 +326,31 @@ func uploadOne(ctx context.Context, client *http.Client, source string, item upl
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("PUT cas/%s: %v", item.SHA256, redactErr(err))
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return true, fmt.Errorf("PUT cas/%s: %v", item.SHA256, redactErr(err))
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("PUT cas/%s HTTP %d: %s", item.SHA256, resp.StatusCode, strings.TrimSpace(string(data)))
+		message := strings.TrimSpace(string(data))
+		return retryableUploadResponse(resp.StatusCode, message),
+			fmt.Errorf("PUT cas/%s HTTP %d: %s", item.SHA256, resp.StatusCode, message)
 	}
-	return nil
+	return false, nil
+}
+
+func retryableUploadResponse(status int, body string) bool {
+	if status == http.StatusRequestTimeout ||
+		status == http.StatusTooEarly ||
+		status == http.StatusTooManyRequests ||
+		status >= http.StatusInternalServerError {
+		return true
+	}
+	// Tencent COS reports a transport-speed timeout as HTTP 400 even though
+	// replaying the same idempotent, content-addressed PUT is safe.
+	return status == http.StatusBadRequest && strings.Contains(body, "<Code>UserNetworkTooSlow</Code>")
 }
 
 func redactErr(err error) error {

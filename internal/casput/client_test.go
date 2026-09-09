@@ -139,6 +139,66 @@ func TestUploadAllDoesNotFollowRedirect(t *testing.T) {
 	}
 }
 
+func TestUploadOneRetriesCOSUserNetworkTooSlow(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "blob")
+	payload := []byte("hello")
+	if err := os.WriteFile(source, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		got, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(got, payload) {
+			t.Errorf("attempt %d body=%q", attempts, got)
+		}
+		if attempts == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, "<Error><Code>UserNetworkTooSlow</Code></Error>")
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	var logs []string
+	item := upload{
+		SHA256: model.Sha256Bytes(payload),
+		Size:   int64(len(payload)),
+		Requests: []uploadRequest{{
+			Method: http.MethodPut,
+			URL:    server.URL,
+		}},
+	}
+	err := uploadOne(context.Background(), server.Client(), source, item, func(line string) {
+		logs = append(logs, line)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts=%d", attempts)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "attempt 1/4") {
+		t.Fatalf("logs=%v", logs)
+	}
+}
+
+func TestRetryableUploadResponse(t *testing.T) {
+	if !retryableUploadResponse(http.StatusBadRequest, "<Code>UserNetworkTooSlow</Code>") {
+		t.Fatal("COS slow-network response should be retryable")
+	}
+	if !retryableUploadResponse(http.StatusServiceUnavailable, "") {
+		t.Fatal("503 should be retryable")
+	}
+	if retryableUploadResponse(http.StatusBadRequest, "<Code>InvalidArgument</Code>") {
+		t.Fatal("ordinary 400 must not be retried")
+	}
+	if retryableUploadResponse(http.StatusTemporaryRedirect, "") {
+		t.Fatal("redirect must not be retried")
+	}
+}
+
 func TestUploadOneRejectsRelativeURL(t *testing.T) {
 	_, err := normalizeUpload(upload{SHA256: "aa", Size: 1, Requests: []uploadRequest{{URL: "/cas-upload"}}})
 	if err == nil || !strings.Contains(err.Error(), "absolute") {
