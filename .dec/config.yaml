@@ -10,4 +10,5 @@ layout_version: 1
 project_name: relkit
 enabled_bundles:
     - agents-board
+    - relkit
     - tencent-cloud

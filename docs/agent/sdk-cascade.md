@@ -5,6 +5,8 @@
 
 **唯一调用面**是生成的 `Updater` facade（ADR 0010 / `relkit.updater.v1`）。不要按语言各写一套 check/apply。Range、节流、skip、选路全部由 `relkit-updater` 引擎决定，**禁止**「以各 SDK 实现为准」。
 
+宿主仓安装 / 升级 cone：Dec 公开 skill **`relkit-host-consume`**（vault `relkit`，`public/global`）。产品仓只留 lock + 逐字节 `relkit_consume.py`。
+
 ## 级联规则（给 Agent）
 
 1. 探测宿主语言。
