@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/envelope"
-	"cnb.cool/shichao402/relkit/internal/keys"
-	"cnb.cool/shichao402/relkit/internal/onboard"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/envelope"
+	"firoyang.com/relkit/internal/keys"
+	"firoyang.com/relkit/internal/onboard"
 )
 
 func TestAgentChecklistRemoteMatch(t *testing.T) {

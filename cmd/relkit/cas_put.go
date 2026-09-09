@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"cnb.cool/shichao402/relkit/internal/casput"
-	"cnb.cool/shichao402/relkit/internal/config"
+	"firoyang.com/relkit/internal/casput"
+	"firoyang.com/relkit/internal/config"
 )
 
 func cmdCASPut(args []string, configPath string) error {

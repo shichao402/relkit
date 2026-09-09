@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	updaterv1 "cnb.cool/shichao402/relkit/api/updater/v1"
+	updaterv1 "firoyang.com/relkit/api/updater/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

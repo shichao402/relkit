@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"cnb.cool/shichao402/relkit/internal/humansize"
-	"cnb.cool/shichao402/relkit/internal/stagedput"
+	"firoyang.com/relkit/internal/humansize"
+	"firoyang.com/relkit/internal/stagedput"
 )
 
 func cmdStagedPut(args []string) error {

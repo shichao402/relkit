@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/webmeta"
+	"firoyang.com/relkit/internal/webmeta"
 )
 
 func TestApplyPublishMergesChannels(t *testing.T) {

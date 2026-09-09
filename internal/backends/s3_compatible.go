@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/httpx"
+	"firoyang.com/relkit/internal/httpx"
 )
 
 var cosRegionFromHost = regexp.MustCompile(`(?i)^(?:.*\.)?cos\.([a-z0-9-]+)\.(?:myqcloud\.com|tencentcos\.cn)$`)

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/publishproto"
 )
 
 func testRelkitBackend(serverURL string) *relkitCompatibleBackend {

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package relkit.updater.v1;
 
-option go_package = "cnb.cool/shichao402/relkit/api/updater/v1;updaterv1";
+option go_package = "firoyang.com/relkit/api/updater/v1;updaterv1";
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";

@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/backends"
-	"cnb.cool/shichao402/relkit/internal/browse"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/httpx"
+	"firoyang.com/relkit/internal/backends"
+	"firoyang.com/relkit/internal/browse"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/httpx"
 )
 
 const (

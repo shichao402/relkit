@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/config"
+	"firoyang.com/relkit/internal/config"
 )
 
 func TestRunWritesNormalizedReleasePolicy(t *testing.T) {

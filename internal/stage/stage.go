@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/changelog"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/jsonio"
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/selectors"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/changelog"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/jsonio"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/selectors"
 )
 
 const stagingRoot = ".relkit/staged"

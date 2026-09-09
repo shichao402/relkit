@@ -16,13 +16,13 @@ import (
 	"sync"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/directory"
-	"cnb.cool/shichao402/relkit/internal/humansize"
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/publish"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
-	"cnb.cool/shichao402/relkit/internal/stage"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/directory"
+	"firoyang.com/relkit/internal/humansize"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/publish"
+	"firoyang.com/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/stage"
 )
 
 const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue one token per product with `relkit-agent init -product <id>` (CI env is RELKIT_UPLOAD_TOKEN)"

@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/sdk"
+	"firoyang.com/relkit/sdk"
 )
 
 func TestConformanceOfflineRecovery(t *testing.T) {

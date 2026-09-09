@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/publishproto"
-	"cnb.cool/shichao402/relkit/internal/stage"
-	"cnb.cool/shichao402/relkit/internal/stagedput"
+	"firoyang.com/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/stage"
+	"firoyang.com/relkit/internal/stagedput"
 )
 
 func TestMultipartStagedUploadAndPublish(t *testing.T) {

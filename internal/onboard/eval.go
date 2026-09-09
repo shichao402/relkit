@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/config"
+	"firoyang.com/relkit/internal/config"
 )
 
 type EvalOptions struct {

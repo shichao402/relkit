@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/publishproto"
 )
 
 func TestCASCapabilityRejectsExpiredAndTamperedTickets(t *testing.T) {

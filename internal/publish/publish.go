@@ -12,16 +12,16 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/backends"
-	"cnb.cool/shichao402/relkit/internal/browse"
-	"cnb.cool/shichao402/relkit/internal/chain"
-	"cnb.cool/shichao402/relkit/internal/changelog"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/envelope"
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/stage"
-	"cnb.cool/shichao402/relkit/internal/webmeta"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/backends"
+	"firoyang.com/relkit/internal/browse"
+	"firoyang.com/relkit/internal/chain"
+	"firoyang.com/relkit/internal/changelog"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/envelope"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/stage"
+	"firoyang.com/relkit/internal/webmeta"
 )
 
 type Error struct {

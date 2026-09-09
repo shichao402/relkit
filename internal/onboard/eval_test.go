@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/jsonio"
-	"cnb.cool/shichao402/relkit/internal/onboard"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/jsonio"
+	"firoyang.com/relkit/internal/onboard"
 )
 
 func TestValidateChecklistRejectsCycle(t *testing.T) {

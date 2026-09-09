@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/envelope"
-	"cnb.cool/shichao402/relkit/internal/keys"
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/testutil"
+	"firoyang.com/relkit/internal/envelope"
+	"firoyang.com/relkit/internal/keys"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/testutil"
 )
 
 type signatureKeysFixture struct {

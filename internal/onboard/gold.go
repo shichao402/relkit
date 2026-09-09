@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"cnb.cool/shichao402/relkit/internal/backends"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/simulate"
-	"cnb.cool/shichao402/relkit/internal/verify"
+	"firoyang.com/relkit/internal/backends"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/simulate"
+	"firoyang.com/relkit/internal/verify"
 )
 
 // credentialsElsewhere marks a step that can only run where the publish

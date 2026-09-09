@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/jsonio"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/jsonio"
 )
 
 const (

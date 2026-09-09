@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"cnb.cool/shichao402/relkit/internal/model"
+	"firoyang.com/relkit/internal/model"
 )
 
 const (

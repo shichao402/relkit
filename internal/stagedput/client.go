@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/humansize"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/humansize"
+	"firoyang.com/relkit/internal/publishproto"
 )
 
 const (

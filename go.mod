@@ -1,4 +1,4 @@
-module cnb.cool/shichao402/relkit
+module firoyang.com/relkit
 
 go 1.26.3
 

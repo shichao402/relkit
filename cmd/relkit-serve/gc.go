@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/webmeta"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/webmeta"
 )
 
 const (

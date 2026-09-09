@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"cnb.cool/shichao402/relkit/internal/jsonio"
-	"cnb.cool/shichao402/relkit/internal/keys"
-	"cnb.cool/shichao402/relkit/internal/model"
+	"firoyang.com/relkit/internal/jsonio"
+	"firoyang.com/relkit/internal/keys"
+	"firoyang.com/relkit/internal/model"
 )
 
 // ProductPolicy is the repository-owned, portable part of relkit

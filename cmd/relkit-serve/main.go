@@ -45,8 +45,8 @@ import (
 	"syscall"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/publishproto"
 )
 
 const tokenEnv = "RELKIT_SERVE_TOKEN"

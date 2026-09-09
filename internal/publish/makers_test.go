@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/backends"
-	"cnb.cool/shichao402/relkit/internal/config"
+	"firoyang.com/relkit/internal/backends"
+	"firoyang.com/relkit/internal/config"
 )
 
 type typeOnlyBackend struct {

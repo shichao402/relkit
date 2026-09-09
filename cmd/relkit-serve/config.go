@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/model"
+	"firoyang.com/relkit/internal/model"
 )
 
 // ConfigName is looked for next to the binary and in /etc when -config is

@@ -17,7 +17,7 @@ echo "-- tools --"
 if have relkit; then
   echo "OK  relkit: $(relkit --version 2>/dev/null || relkit version 2>/dev/null || echo present)"
 else
-  echo "MISSING  relkit (go install cnb.cool/shichao402/relkit/cmd/relkit@latest)"
+    echo "MISSING  relkit (download https://github.com/shichao402/relkit/releases or go build ./cmd/relkit)"
 fi
 if have relkit-serve; then
   echo "OK  relkit-serve: $(relkit-serve -version 2>/dev/null || echo present)"

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/publishproto"
 	"google.golang.org/protobuf/proto"
 )
 

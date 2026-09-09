@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/backends"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/model"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/backends"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/model"
 )
 
 type casMem struct {

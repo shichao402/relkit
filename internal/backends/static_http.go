@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/httpx"
+	"firoyang.com/relkit/internal/httpx"
 )
 
 type staticHTTPBackend struct {

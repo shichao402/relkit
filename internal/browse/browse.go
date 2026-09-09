@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"cnb.cool/shichao402/relkit/internal/webmeta"
+	"firoyang.com/relkit/internal/webmeta"
 )
 
 const SchemaCatalog = "relkit.browse-catalog/1"

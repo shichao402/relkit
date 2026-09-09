@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/model"
+	"firoyang.com/relkit/internal/model"
 )
 
 type memStore struct {

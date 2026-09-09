@@ -17,14 +17,14 @@ import (
 	"strings"
 	"testing"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/chain"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/envelope"
-	"cnb.cool/shichao402/relkit/internal/jsonio"
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/testutil"
-	"cnb.cool/shichao402/relkit/internal/webmeta"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/chain"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/envelope"
+	"firoyang.com/relkit/internal/jsonio"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/testutil"
+	"firoyang.com/relkit/internal/webmeta"
 )
 
 func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {

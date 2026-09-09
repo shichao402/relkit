@@ -9,7 +9,7 @@ import (
 	"path"
 	"sort"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
 )
 
 const (

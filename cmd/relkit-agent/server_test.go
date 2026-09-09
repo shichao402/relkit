@@ -14,11 +14,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/keys"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
-	"cnb.cool/shichao402/relkit/internal/stage"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/keys"
+	"firoyang.com/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/stage"
 )
 
 func TestAgentStagedAndPublishDryRun(t *testing.T) {

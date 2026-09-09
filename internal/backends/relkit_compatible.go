@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/httpx"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/httpx"
+	"firoyang.com/relkit/internal/publishproto"
 )
 
 const (

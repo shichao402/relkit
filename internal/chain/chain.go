@@ -3,7 +3,7 @@ package chain
 import (
 	"sort"
 
-	"cnb.cool/shichao402/relkit/internal/model"
+	"firoyang.com/relkit/internal/model"
 )
 
 func SelectNextTarget(index *model.IndexDocument, currentCode int) *model.VersionNode {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"html/template"
 
-	"cnb.cool/shichao402/relkit/internal/webmeta"
+	"firoyang.com/relkit/internal/webmeta"
 )
 
 //go:embed templates/*.html

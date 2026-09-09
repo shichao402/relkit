@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/config"
+	"firoyang.com/relkit/internal/config"
 )
 
 func TestStaticHTTPIsReadOnly(t *testing.T) {

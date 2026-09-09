@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	relkitconfig "cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/model"
+	relkitconfig "firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/model"
 )
 
 const defaultProductRootPrefix = "/srv/relkit"

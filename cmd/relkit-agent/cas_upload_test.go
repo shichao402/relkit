@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/model"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/model"
+	"firoyang.com/relkit/internal/publishproto"
 )
 
 func TestCASCredentialsUploadAndSkip(t *testing.T) {

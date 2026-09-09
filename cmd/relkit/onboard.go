@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/onboard"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/onboard"
 )
 
 func cmdOnboard(args []string, configPath string) error {

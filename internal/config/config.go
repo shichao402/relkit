@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/envelope"
-	"cnb.cool/shichao402/relkit/internal/jsonio"
-	"cnb.cool/shichao402/relkit/internal/keys"
-	"cnb.cool/shichao402/relkit/internal/model"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/envelope"
+	"firoyang.com/relkit/internal/jsonio"
+	"firoyang.com/relkit/internal/keys"
+	"firoyang.com/relkit/internal/model"
 )
 
 const ConfigName = "relkit.json"

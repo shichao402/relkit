@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/sdk"
+	"firoyang.com/relkit/sdk"
 )
 
 func TestCheckAttachesRecoveryWhenRemoteFails(t *testing.T) {

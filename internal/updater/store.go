@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	updaterv1 "cnb.cool/shichao402/relkit/api/updater/v1"
-	"cnb.cool/shichao402/relkit/sdk"
+	updaterv1 "firoyang.com/relkit/api/updater/v1"
+	"firoyang.com/relkit/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

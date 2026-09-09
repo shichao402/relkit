@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	rupv2 "cnb.cool/shichao402/relkit/api/rup/v2"
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/envelope"
-	"cnb.cool/shichao402/relkit/internal/stage"
+	rupv2 "firoyang.com/relkit/api/rup/v2"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/envelope"
+	"firoyang.com/relkit/internal/stage"
 )
 
 type agentFileConfig struct {

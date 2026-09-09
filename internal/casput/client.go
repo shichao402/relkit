@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"cnb.cool/shichao402/relkit/internal/config"
-	"cnb.cool/shichao402/relkit/internal/httpx"
-	"cnb.cool/shichao402/relkit/internal/publishproto"
-	"cnb.cool/shichao402/relkit/internal/stage"
-	"cnb.cool/shichao402/relkit/internal/stagedput"
+	"firoyang.com/relkit/internal/config"
+	"firoyang.com/relkit/internal/httpx"
+	"firoyang.com/relkit/internal/publishproto"
+	"firoyang.com/relkit/internal/stage"
+	"firoyang.com/relkit/internal/stagedput"
 )
 
 type Options struct {

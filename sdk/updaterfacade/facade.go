@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	updaterv1 "cnb.cool/shichao402/relkit/api/updater/v1"
-	"cnb.cool/shichao402/relkit/internal/updater"
+	updaterv1 "firoyang.com/relkit/api/updater/v1"
+	"firoyang.com/relkit/internal/updater"
 )
 
 // Glue locates and runs the sidecar. Hosts may inject a fake in tests.

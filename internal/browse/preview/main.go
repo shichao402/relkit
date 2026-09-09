@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"cnb.cool/shichao402/relkit/internal/browse"
+	"firoyang.com/relkit/internal/browse"
 )
 
 func main() {

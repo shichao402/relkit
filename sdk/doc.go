@@ -1,8 +1,10 @@
 // Package sdk is the official Go client for RUP v2 (protobuf wire format).
 //
-// Install:
+// Install: sparse-checkout GitHub via scripts/relkit_consume.py, then
 //
-//	go get cnb.cool/shichao402/relkit/sdk@latest
+//	replace firoyang.com/relkit => ./third_party/relkit
+//
+// Do not go get firoyang.com/relkit (no vanity / GOPROXY path).
 //
 // Agent onboarding (first read when wiring a host): see AGENT-QUICKSTART.md
 // in this directory, and docs/agent/README.md at the repo root for the

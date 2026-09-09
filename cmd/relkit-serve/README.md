@@ -1,8 +1,8 @@
 # relkit-serve
 
-> 本目录是 [`cnb.cool/shichao402/relkit`](https://cnb.cool/shichao402/relkit) 仓库的一部分（`cmd/relkit-serve`），与发布 CLI 同仓。部署脚本在仓库根的 `deploy/`。
+> 本目录是 [`firoyang.com/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-serve`），与发布 CLI 同仓。部署脚本在仓库根的 `deploy/`。
 
-一个静态文件服务，用来托管 [RUP](https://cnb.cool/shichao402/relkit/blob/main/SPEC.md) 发布树。单个静态链接的可执行文件，无运行时依赖。
+一个静态文件服务，用来托管 [RUP](https://github.com/shichao402/relkit/blob/main/SPEC.md) 发布树。单个静态链接的可执行文件，无运行时依赖。
 
 **角色：** 这是内网数据面的一种实现——匿名 GET 已经写好的文件。发布控制面是 `relkit-agent`（持钥、写盘或写 COS）。新产品不要把 serve 的 PUT 当成另一套发布协议。
 

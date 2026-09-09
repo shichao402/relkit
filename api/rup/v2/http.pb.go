@@ -137,9 +137,9 @@ const file_rup_v2_http_proto_rawDesc = "" +
 	"\aversion\x18\x02 \x01(\tR\aversion\"5\n" +
 	"\x05Error\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessageB}\n" +
+	"\amessage\x18\x02 \x01(\tR\amessageBv\n" +
 	"\n" +
-	"com.rup.v2B\tHttpProtoP\x01Z+cnb.cool/shichao402/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
+	"com.rup.v2B\tHttpProtoP\x01Z$firoyang.com/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
 
 var (
 	file_rup_v2_http_proto_rawDescOnce sync.Once

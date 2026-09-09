@@ -4306,8 +4306,8 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x19SESSION_PHASE_RELAUNCHING\x10\x04\x12!\n" +
 	"\x1dSESSION_PHASE_NEEDS_ATTENTION\x10\x05\x12\x1b\n" +
 	"\x17SESSION_PHASE_COMPLETED\x10\x06\x12\x1d\n" +
-	"\x19SESSION_PHASE_ROLLED_BACK\x10\aB\xc0\x01\n" +
-	"\x15com.relkit.updater.v1B\fUpdaterProtoP\x01Z3cnb.cool/shichao402/relkit/api/updater/v1;updaterv1\xa2\x02\x03RUX\xaa\x02\x11Relkit.Updater.V1\xca\x02\x11Relkit\\Updater\\V1\xe2\x02\x1dRelkit\\Updater\\V1\\GPBMetadata\xea\x02\x13Relkit::Updater::V1b\x06proto3"
+	"\x19SESSION_PHASE_ROLLED_BACK\x10\aB\xb9\x01\n" +
+	"\x15com.relkit.updater.v1B\fUpdaterProtoP\x01Z,firoyang.com/relkit/api/updater/v1;updaterv1\xa2\x02\x03RUX\xaa\x02\x11Relkit.Updater.V1\xca\x02\x11Relkit\\Updater\\V1\xe2\x02\x1dRelkit\\Updater\\V1\\GPBMetadata\xea\x02\x13Relkit::Updater::V1b\x06proto3"
 
 var (
 	file_updater_v1_updater_proto_rawDescOnce sync.Once
