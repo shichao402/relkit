@@ -166,7 +166,6 @@ func Check(w http.ResponseWriter, r *http.Request, server Window, serverVersion 
 	decision.ServerCommit = IdentityCommit()
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Upgrade", "relkit-publish/"+strconv.Itoa(server.Min))
 	w.WriteHeader(http.StatusUpgradeRequired)
 	_ = json.NewEncoder(w).Encode(decision)
 	return false

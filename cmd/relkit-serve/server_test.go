@@ -209,8 +209,8 @@ func TestPublishPreflight(t *testing.T) {
 	if resp.StatusCode != http.StatusUpgradeRequired {
 		t.Fatalf("old protocol status = %d, want 426", resp.StatusCode)
 	}
-	if got := resp.Header.Get("Upgrade"); got != "relkit-publish/2" {
-		t.Errorf("Upgrade = %q, want relkit-publish/2", got)
+	if got := resp.Header.Get("Upgrade"); got != "" {
+		t.Errorf("HTTP/2-illegal Upgrade header = %q", got)
 	}
 
 	resp = request("99")
