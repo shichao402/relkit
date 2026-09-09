@@ -119,7 +119,7 @@ flowchart TB
 | 外网落地 | Makers（HTML 不进 COS） | 外网没有这台 GET 服务，也就没有这页 |
 | 内网落地 | 数据面 `browse/`，更新域名 GET `/`（无文件则短 stub，不现算门户） | `/-/admin`（今 `/-/p/`、`?files=1` 一并收进来） |
 | 容量 | 静态站 / CDN / Makers | 这一台自托管进程 |
-| 以后 | 还是 dump，换 sink 即可 | 长成 relkit 后台（产品、token、GC、日志） |
+| 以后 | 还是 dump，换 sink 即可 | 长成 relkit 后台（产品、token、GC、日志）；外网今天没这页，见 [ROADMAP](../ROADMAP.md#操作面板从本机盘长成发布管理) |
 
 实现时（本文审过再动代码）：
 

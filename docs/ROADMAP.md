@@ -52,3 +52,12 @@
 - **不做**：Makers KV / Blob 热路径 `+1`；为计数开 `edge-functions/`；腾讯分析 / 灯塔；自建 Redis 或计数 API；把实时次数写进 `catalog.json`。
 - **边缘函数**：继续留给无状态改写（鉴权、跳转、geo、功能开关）。KV 只当偶尔更新的配置盘，不当账本。
 - **落点（规划）**：`internal/browse` 生成的 HTML 嵌入 51.la；契约 README 写明。内网数据面同一份 dump 会带上脚本；精确下载次数仍以 serve 面板已有计数为准，不在此重复造账本。
+
+## 操作面板：从本机盘长成发布管理
+
+- **状态**：意向。内网 `/-/admin` 已有（ADR 0006）；外网发布机按设计不跑 `relkit-serve`，因此没有这页。
+- **现网差**：外网 ingest 是 COS，CVM 上只有 agent（`publish.firoyang.com` → `127.0.0.1:8787`）。没有 serve 是合法的——数据面不在这台盘上，不必为了「看起来对称」硬装一个。代价是运营看不到现算门户：产品卡片、文件树、下载计数、以后想加的撤回 / GC / token 面，外网发布 presently 只能靠 COS 控制台、browse dump 和 SSH。内网 `update.devcloud.woa.com` 才有完整面板。
+- **目标**：面板继续进化成 relkit 后台（产品、发布、token、GC、日志），而且**外网 COS 上的发布也要管得到**，不要把「后台」锁死在 `relkit-serve` 扫本机目录这一种实现上。拓扑里「以后长成 relkit 后台」就是这条，不是给内网再画一张更好看的首页。
+- **还没拍（落地前再写 ADR）**：面板进程跟谁住（外网 CVM 加一个只做操作面的 serve / 独立后台 / agent 旁路）、它怎么读 COS 而不把 CAS 正文经 agent 转发、鉴权是否仍是 ADR 0006 那套「这台实例的运营账户」。签发 / 吊销上传 token 继续只走 SSH + 本机 `init`，不要做成公网管理 API。
+- **不做（现阶段）**：为了有面板，把外网数据面从 COS 迁回本机盘；把 `/-/admin` 当对外目录；在 agent 上再开一套未鉴权的浏览页。
+- **落点（规划）**：`cmd/relkit-serve` 现算面板是起点；进化时改这里并更新 [publish-topology §5](design/publish-topology.md)。
