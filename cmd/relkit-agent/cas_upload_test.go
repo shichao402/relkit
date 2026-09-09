@@ -105,6 +105,62 @@ func TestPublisherHandshakeGuardsEveryWriteRoute(t *testing.T) {
 }
 
 // Operators can lower the floor to ride out a publisher rollout.
+func TestPublisherHandshakeRejectsTooNew(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	if fx.cfg.MinPublishProtocol != publishproto.Min || fx.cfg.MaxPublishProtocol != publishproto.Max {
+		t.Fatalf("window=%d-%d", fx.cfg.MinPublishProtocol, fx.cfg.MaxPublishProtocol)
+	}
+	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(`{"product":"demo","blobs":[{"sha256":"`+strings.Repeat("a", 64)+`","size":1}]}`))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(publishproto.ProtocolHeader, "99")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUpgradeRequired {
+		t.Fatalf("status=%d, want 426", resp.StatusCode)
+	}
+	var doc struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Error != publishproto.ErrTooNew {
+		t.Fatalf("error=%q", doc.Error)
+	}
+}
+
+func TestPublisherPreflightRequiresProductToken(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+publishproto.AgentPreflightPath, strings.NewReader(`{"product":"demo"}`))
+	req.Header.Set("Content-Type", "application/json")
+	publishproto.Apply(req.Header)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, fx.ts.URL+publishproto.AgentPreflightPath, strings.NewReader(`{"product":"demo"}`))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	req.Header.Set("Content-Type", "application/json")
+	publishproto.Apply(req.Header)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestPublisherHandshakeCanBeDisabled(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{})
 	fx.cfg.MinPublishProtocol = 0

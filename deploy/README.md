@@ -21,10 +21,10 @@
 ```bash
 python deploy/relkit.py build --serve --agent --os linux --arch amd64
 python deploy/relkit.py upgrade --host update.devcloud.woa.com --plan --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
-python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --restart --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
+python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
 ```
 
-`--plan` 只读并打印脱敏探测结果。`--apply` 在目标机 `/var/backups/relkit/<utc>/` 备份后改文件；没有 `--restart` 则不切进程。失败会从该备份回滚。
+`--plan` 只读并打印脱敏探测结果、本机 HEAD 与协议窗口。`--apply` 默认从当前干净 HEAD 构建 linux/amd64 的 agent+serve，在目标机 `/var/backups/relkit/<utc>/` 备份后换文件并重启。`--stage-only` 只写盘不重启，不得称为升级完成。`--unsafe-from-dist` 才使用已有 `dist/`，并持续告警。失败会从该备份回滚；onboard check 失败同样回滚。
 
 upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
 
@@ -32,9 +32,9 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 现网数据面是 `update.devcloud.woa.com:8080`，与控制面共用主机名但不共用端口，也不经 nginx。后续可给数据面绑定独立 DNS，届时同时替换 `baseUrl` 与 `uploadUrl`。
 
-`upgrade` 上传的是 `dist/` 里已构建好的二进制，**不会**替你重新编译；改完代码要先跑上面的 `build` 再 `upgrade`，否则装上去的还是旧版本。
+`upgrade` 默认从当前 HEAD 构建；改完代码直接 `--apply` 即可。只有 `--unsafe-from-dist` 才会把盘上已有的 `dist/` 送上去。
 
-agent 的写端点要求 publisher 握手（`X-Relkit-Publish-Protocol`），默认门槛等于该 build 的 `publishproto.Current`。**升级 agent 后必须同步重建各消费仓库检入的 relkit CLI**，否则它们会收到 426 `publisher_upgrade_required`。需要滚动放行时在 `relkit-agent.json` 里临时下调 `minPublishProtocol`（设 0 关闭）。
+agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../docs/adr/0009-publisher-protocol-negotiation.md)）。升级 agent 后必须用同一 release 的 publisher。滚动放行时可临时下调 `minPublishProtocol`（设 0 关闭）。
 
 目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 

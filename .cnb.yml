@@ -21,7 +21,7 @@ main:
         - name: deploy python tests
           script: |
             apt-get update && apt-get install -y python3
-            python3 -m unittest deploy/test_relkit.py
+            python3 -m unittest deploy/test_relkit.py scripts/test_consume.py
     - name: node-sdk
       docker:
         image: node:22
@@ -40,22 +40,8 @@ main:
       docker:
         image: golang:1.26
       stages:
-        - name: build publisher binaries
-          script: |
-            set -eu
-            mkdir -p dist
-            version="${CNB_BRANCH#v}"
-            for pair in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
-              os="${pair%/*}"
-              arch="${pair#*/}"
-              out="dist/relkit-${os}-${arch}"
-              if [ "$os" = windows ]; then out="${out}.exe"; fi
-              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-                go build -trimpath -ldflags "-s -w -X main.version=${version}" \
-                -o "$out" ./cmd/relkit
-            done
-        - name: build serve binaries
-          script: python3 deploy/relkit.py build --serve --version "${CNB_BRANCH#v}" --out dist
+        - name: build release binaries
+          script: python3 deploy/relkit.py build --serve --agent --cli --version "${CNB_BRANCH#v}" --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu
@@ -74,7 +60,9 @@ main:
             ## Binaries
 
             - `relkit-*` — publisher CLI (`stage` / `publish` / …)
+            - `relkit-agent-*` — CI publish agent
             - `relkit-serve-*` — self-hosted RUP download + authenticated PUT
+            - `manifest.json` — commit, protocol window, SHA-256 of each binary
 
             Install the server on Linux with systemd:
 

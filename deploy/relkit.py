@@ -43,6 +43,7 @@ from relkit_ops import (  # noqa: E402
     loopback_base,
     migrate_agent_config,
     migrate_profile,
+    parse_exec_binary,
     parse_exec_config,
     parse_listen_port,
     parse_requirements,
@@ -153,15 +154,20 @@ def run(
     return completed
 
 
+def git_identity() -> dict[str, str]:
+    head = run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, check=False, capture=True)
+    commit = (head.stdout or "").strip() or "unknown"
+    dirty_out = run(["git", "status", "--porcelain"], cwd=REPO_ROOT, check=False, capture=True)
+    dirty = bool((dirty_out.stdout or "").strip())
+    return {"commit": commit, "dirty": "true" if dirty else "false"}
+
+
 def git_stamp(version: str) -> str:
-    completed = run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=REPO_ROOT,
-        check=False,
-        capture=True,
-    )
-    commit = (completed.stdout or "").strip() or "unknown"
-    return f"{version}+{commit}"
+    ident = git_identity()
+    stamp = f"{version}+{ident['commit'][:12]}"
+    if ident["dirty"] == "true":
+        stamp += "-dirty"
+    return stamp
 
 
 def cmd_build(args: argparse.Namespace) -> None:
@@ -184,6 +190,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         ("linux", "amd64"),
         ("linux", "arm64"),
         ("windows", "amd64"),
+        ("darwin", "amd64"),
         ("darwin", "arm64"),
     ]
     if args.os:
@@ -198,6 +205,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         "cli": ("./cmd/relkit", "relkit"),
     }
     step(f"build {stamp}")
+    built: list[dict[str, Any]] = []
     for kind in targets:
         pkg, prefix = pkgs[kind]
         ldflags = f"-s -w -X main.version={stamp}"
@@ -217,7 +225,28 @@ def cmd_build(args: argparse.Namespace) -> None:
                 cwd=REPO_ROOT,
                 env=env,
             )
+            built.append({"component": kind, "os": os_name, "arch": arch, "path": dest.name, "sha256": file_sha256(dest)})
+    ident = git_identity()
+    manifest = {
+        "schema": "relkit.release/1",
+        "version": stamp,
+        "commit": ident["commit"],
+        "dirty": ident["dirty"] == "true",
+        "minProtocol": 2,
+        "maxProtocol": 2,
+        "builtAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "artifacts": built,
+    }
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"output in {out_dir}")
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def must_root() -> None:
@@ -622,8 +651,9 @@ def probe_local() -> dict[str, Any]:
             entry["config"] = redact_value(cfg)
             entry["configRawOk"] = True
         bin_name = "relkit-serve" if kind == "serve" else "relkit-agent"
-        which = shutil.which(bin_name) or f"/usr/local/bin/{bin_name}"
-        ver = run([which, "-version"], check=False, capture=True)
+        bin_path = parse_exec_binary(exec_start) or shutil.which(bin_name) or f"/usr/local/bin/{bin_name}"
+        ver = run([bin_path, "-version"], check=False, capture=True)
+        entry["binary"] = bin_path
         entry["version"] = (ver.stdout or ver.stderr or "").strip()
         probe[kind] = entry
     agent_cfg_path = probe.get("agent", {}).get("configPath")
@@ -764,7 +794,7 @@ def apply_agent_upgrade(
             )
             print(redact_text((check.stdout or check.stderr or "").strip()))
             if check.returncode != 0:
-                notes.append(f"onboard check {name} failed (see output; not rolling back)")
+                raise Fail(f"onboard check {name} failed")
             else:
                 notes.append(f"onboard check {name} ok")
     else:
@@ -945,13 +975,20 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
             print(f"profile {name}:", notes or ["no changes"])
         except ValueError as exc:
             die(f"profile {name}: {exc}")
+    ident = git_identity()
+    print("source:", json.dumps({"commit": ident["commit"], "dirty": ident["dirty"], "protocol": "2-2"}, indent=2))
+    if ident["dirty"] == "true" and args.apply and not args.allow_dirty:
+        die("refusing to upgrade from a dirty HEAD; commit or pass --allow-dirty")
     if args.plan:
-        print("\nplan only; no files changed. Re-run with --apply --restart to execute.")
+        print("\nplan only; no files changed. Re-run with --apply to build, ship, and restart.")
         return
+    restart = not args.stage_only
+    if not restart:
+        print("WARNING: --stage-only updates files but does not restart; upgrade is not complete")
     spec = {
         "upgradeServe": not args.agent_only,
         "upgradeAgent": not args.serve_only,
-        "restart": bool(args.restart),
+        "restart": restart,
         "prefix": args.prefix,
         "user": args.user,
         "serveListenAddr": args.serve_listen_addr,
@@ -960,6 +997,19 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
     }
     uploads: list[Path] = []
+    if not args.unsafe_from_dist:
+        step("building linux/amd64 agent+serve from HEAD")
+        cmd_build(
+            argparse.Namespace(
+                serve=spec["upgradeServe"],
+                agent=spec["upgradeAgent"],
+                cli=False,
+                version=args.version,
+                out="dist",
+                os="linux",
+                arch="amd64",
+            )
+        )
     if spec["upgradeServe"]:
         serve_bin = Path(args.serve_binary)
         if not serve_bin.is_absolute():
@@ -1009,8 +1059,8 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     if apply.returncode != 0:
         print(redact_text(apply.stderr or ""), file=sys.stderr)
         die("remote apply failed")
-    if not args.restart:
-        print("apply finished without --restart; systemd still runs the previous process")
+    if not restart:
+        print("apply finished as stage-only; systemd still runs the previous process")
 
 
 def cmd_token(args: argparse.Namespace) -> None:
@@ -1113,7 +1163,11 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--host", required=True)
     upgrade.add_argument("--plan", action="store_true")
     upgrade.add_argument("--apply", action="store_true")
-    upgrade.add_argument("--restart", action="store_true")
+    upgrade.add_argument("--restart", action="store_true", help="deprecated: apply already restarts unless --stage-only")
+    upgrade.add_argument("--stage-only", action="store_true", help="write files but do not restart; not a completed upgrade")
+    upgrade.add_argument("--allow-dirty", action="store_true")
+    upgrade.add_argument("--unsafe-from-dist", action="store_true", help="ship existing dist/ binaries instead of building HEAD")
+    upgrade.add_argument("--version", default="0.2.1")
     upgrade.add_argument("--serve-binary", default="dist/relkit-serve-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")
     upgrade.add_argument(

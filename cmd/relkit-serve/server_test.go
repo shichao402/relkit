@@ -213,6 +213,12 @@ func TestPublishPreflight(t *testing.T) {
 		t.Errorf("Upgrade = %q, want relkit-publish/2", got)
 	}
 
+	resp = request("99")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUpgradeRequired {
+		t.Fatalf("future protocol status = %d, want 426", resp.StatusCode)
+	}
+
 	resp = request(strconv.Itoa(publishproto.Current))
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()

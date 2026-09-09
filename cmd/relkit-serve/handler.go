@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -37,6 +38,11 @@ func (c *config) handler() http.Handler {
 			return
 		}
 		w.Write(body)
+	})
+	mux.HandleFunc("/-/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(publishproto.Identity(version))
 	})
 	mux.HandleFunc(publishproto.PreflightPath, c.servePublishPreflight)
 	mux.HandleFunc(casUploadsPath, c.serveCASMint)

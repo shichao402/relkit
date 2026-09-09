@@ -64,6 +64,7 @@ class ListenTests(unittest.TestCase):
             ops.parse_exec_config(raw),
             "/etc/relkit-serve/relkit-serve.json",
         )
+        self.assertEqual(ops.parse_exec_binary(raw), "/usr/local/bin/relkit-serve")
 
 
 class UnitRenderTests(unittest.TestCase):

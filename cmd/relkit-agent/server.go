@@ -47,6 +47,7 @@ type FileConfig struct {
 	UploadTTL          string                   `json:"uploadTTL,omitempty"`
 	StateDir           string                   `json:"stateDir,omitempty"`
 	MinPublishProtocol *int                     `json:"minPublishProtocol,omitempty"`
+	MaxPublishProtocol *int                     `json:"maxPublishProtocol,omitempty"`
 	Products           map[string]ProductConfig `json:"products"`
 }
 
@@ -84,6 +85,7 @@ type Config struct {
 	UploadTTL          time.Duration
 	StateDir           string
 	MinPublishProtocol int
+	MaxPublishProtocol int
 	Products           map[string]ProductConfig
 	ConfigPath         string
 }
@@ -107,14 +109,19 @@ func LoadConfig(path string) (*Config, error) {
 		MaxPartConcurrency: 16,
 		UploadTTL:          24 * time.Hour,
 		StateDir:           raw.StateDir,
-		MinPublishProtocol: publishproto.Current,
+		MinPublishProtocol: publishproto.Min,
+		MaxPublishProtocol: publishproto.Max,
 		Products:           raw.Products,
 		ConfigPath:         path,
 	}
-	// Default to the contract this build speaks. An operator can lower it to
-	// ride out a publisher rollout, or set 0 to disable the handshake.
+	// Default to the contract this build speaks. An operator can lower Min to
+	// ride out a publisher rollout, or set 0 to disable the handshake. Max
+	// rejects publishers that speak a future contract this build does not.
 	if raw.MinPublishProtocol != nil {
 		cfg.MinPublishProtocol = *raw.MinPublishProtocol
+	}
+	if raw.MaxPublishProtocol != nil {
+		cfg.MaxPublishProtocol = *raw.MaxPublishProtocol
 	}
 	if raw.MaxFiles > 0 {
 		cfg.MaxFiles = raw.MaxFiles
@@ -289,6 +296,8 @@ func NewServer(cfg *Config) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/-/health", s.handleHealth)
+	mux.HandleFunc("/-/version", s.handleVersion)
+	mux.HandleFunc(publishproto.AgentPreflightPath, s.handlePublishPreflight)
 	mux.HandleFunc("/v1/drop/", s.handleDrop)
 	mux.HandleFunc("/v1/cas/credentials", s.handleCASCredentials)
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
@@ -343,7 +352,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version})
+	writeJSON(w, http.StatusOK, publishproto.Identity(version))
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, publishproto.Identity(version))
 }
 
 func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {

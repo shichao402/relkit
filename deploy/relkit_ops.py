@@ -326,6 +326,18 @@ def extract_export(name: str, text: str) -> Optional[str]:
     return None
 
 
+def parse_exec_binary(exec_start: str) -> Optional[str]:
+    """First argv of a systemd ExecStart value — the live binary, not PATH."""
+    text = exec_start
+    if "argv[]=" in text:
+        text = text.split("argv[]=", 1)[1]
+        text = text.split(";", 1)[0]
+    parts = text.split()
+    if not parts:
+        return None
+    return parts[0].rstrip(";")
+
+
 def parse_exec_config(exec_start: str, flag: str = "-config") -> Optional[str]:
     """Pull the path after -config from a systemd ExecStart value."""
     text = exec_start

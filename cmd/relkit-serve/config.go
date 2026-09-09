@@ -103,6 +103,7 @@ type ProductConfig struct {
 // every PUT to advertise at least that publish protocol.
 type PublishConfig struct {
 	MinProtocol int `json:"minProtocol"`
+	MaxProtocol int `json:"maxProtocol,omitempty"`
 }
 
 func (s *SiteConfig) product(id string) *ProductConfig {

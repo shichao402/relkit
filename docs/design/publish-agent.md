@@ -4,9 +4,9 @@
 title: Publish Agent
 category: design
 created: 2026-08-12
-updated: 2026-09-07
+updated: 2026-09-09
 status: approved
-related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md
+related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md, docs/adr/0009-publisher-protocol-negotiation.md
 ---
 
 ## 1. 决议
@@ -120,11 +120,13 @@ agent 只向 **ingest 后端**索取请求描述：
 
 #### publisher 握手（凭据文档能演进的前提）
 
-凭据文档是**机器可读结构**，字段改名就会让老 publisher 读出空值。因此每个发往 agent 写端点的请求都必须带 `X-Relkit-Publish-Protocol`（与 `X-Relkit-Version` 一起，后者仅供诊断）。agent 在**鉴权之后**校验，低于本机 `minPublishProtocol`（默认等于本 build 的 `publishproto.Current`）一律 `426` + `publisher_upgrade_required`。
+凭据文档是**机器可读结构**，字段改名就会让老 publisher 读出空值。每个发往写端点的请求必须带 `X-Relkit-Publish-Protocol`、可选的 min/max 窗口，以及诊断用的 `X-Relkit-Version`。只带协议号视为退化窗口 `[n, n]`。agent 与 serve 在**鉴权之后**取交集；过旧 `publisher_upgrade_required`，过新 `publisher_too_new`，都是 426。详见 [ADR 0009](../adr/0009-publisher-protocol-negotiation.md)。
 
-这不是可选的加固。`requests[]` 取代 `putUrl` 后，一个仍在读 `putUrl` 的 publisher 会拿到空串，把它当相对 URL 解析到 agent origin 根，发出 `PUT /`——鉴权、token、URL 全都"正确"，只有路径是错的，排查成本极高。握手把这类漂移变成一条明确的升级提示。
+`requests[]` 取代 `putUrl` 后，仍读 `putUrl` 的 publisher 会拿到空串，解析成 `PUT /`。握手把这类漂移变成升级提示，而不是一条被截断的 exit 2。
 
-推论：**消费方 CI 检入的 relkit 二进制是契约的一部分。** 升级 agent 时必须同步重建各消费仓库的 publisher，或让其 CI 每次从固定 ref 构建；只升级发布机不算升级完成。运维需要滚动放行时可临时下调 `minPublishProtocol`，设 0 关闭握手。
+推论：**消费方 CI 的 relkit 是契约的一部分。** 升级 agent 必须同步同一 release 的 publisher。滚动放行可临时下调 `minPublishProtocol`；设 0 关闭握手。禁止用裸 IP、代理改写或 agent 转发 CAS 正文来「绕过」错误 path。
+
+agent preflight：`POST /v1/publish/preflight`（产品 token）。serve preflight：`POST /-/publish/preflight`（运营方 Bearer）。能力 URL 的最终 PUT 不带协议头。
 
 #### Promote 与 Materialize
 

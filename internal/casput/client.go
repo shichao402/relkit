@@ -73,6 +73,13 @@ func Put(ctx context.Context, opts Options) (*Result, error) {
 	if opts.Root == "" || opts.Product == "" || opts.Version == "" || opts.URL == "" || opts.Token == "" {
 		return nil, fmt.Errorf("root, product, version, url, and token are required")
 	}
+	client := opts.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Hour}
+	}
+	if err := publishproto.PreflightAgent(ctx, client, opts.URL, opts.Token, opts.Product); err != nil {
+		return nil, err
+	}
 	staged, err := stage.LoadStaged(opts.Root, opts.Version)
 	if err != nil {
 		return nil, err
@@ -82,10 +89,6 @@ func Put(ctx context.Context, opts Options) (*Result, error) {
 	}
 	if mismatches := stage.VerifyStagedHashes(&config.Config{Root: opts.Root}, staged); len(mismatches) > 0 {
 		return nil, fmt.Errorf("staging tree no longer matches staged.pb:\n  %s", strings.Join(mismatches, "\n  "))
-	}
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Hour}
 	}
 	request := credentialRequest{Product: opts.Product}
 	paths := make(map[string]string, len(staged.Artifacts))
@@ -151,6 +154,9 @@ func fetchCredentials(ctx context.Context, client *http.Client, opts Options, in
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusUpgradeRequired {
+		return nil, publishproto.Explain(resp.StatusCode, data)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("POST cas/credentials HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}

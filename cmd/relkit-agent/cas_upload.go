@@ -48,11 +48,15 @@ func (s *Server) handleCASCredentials(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if req.Product == "" || len(req.Blobs) == 0 {
-		http.Error(w, "product and blobs required", http.StatusBadRequest)
+	if req.Product == "" {
+		http.Error(w, "product is required", http.StatusBadRequest)
 		return
 	}
 	if !s.requireAuthFor(w, r, req.Product) {
+		return
+	}
+	if len(req.Blobs) == 0 {
+		http.Error(w, "product and blobs required", http.StatusBadRequest)
 		return
 	}
 	if _, ok := s.cfg.Products[req.Product]; !ok {

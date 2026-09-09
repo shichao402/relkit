@@ -76,8 +76,7 @@ func TestRelkitCompatiblePreflightReportsRequiredUpgrade(t *testing.T) {
 	defer srv.Close()
 
 	err := testRelkitBackend(srv.URL).Preflight()
-	if err == nil || !strings.Contains(err.Error(), "publish protocol 3 is required") ||
-		!strings.Contains(err.Error(), "upgrade relkit") {
+	if err == nil || !strings.Contains(err.Error(), "publisher_upgrade_required") {
 		t.Fatalf("Preflight error = %v", err)
 	}
 }

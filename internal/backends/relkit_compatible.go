@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -175,22 +174,28 @@ func (b *relkitCompatibleBackend) Preflight() error {
 	var response struct {
 		OK          bool   `json:"ok"`
 		MinProtocol int    `json:"minProtocol"`
+		MaxProtocol int    `json:"maxProtocol"`
 		Error       string `json:"error"`
 		Message     string `json:"message"`
 	}
 	_ = json.Unmarshal(body, &response)
 	if status >= 200 && status < 300 {
-		if response.MinProtocol > publishproto.Current {
+		if response.Error == publishproto.ErrTooNew {
 			return Error{Message: fmt.Sprintf(
-				"backend %q requires publish protocol %d, but this relkit supports %d; upgrade relkit",
-				b.Name(), response.MinProtocol, publishproto.Current)}
+				"backend %q rejected this publisher as too new (server window %d-%d)",
+				b.Name(), response.MinProtocol, response.MaxProtocol)}
+		}
+		if response.MinProtocol > publishproto.Max {
+			return Error{Message: fmt.Sprintf(
+				"backend %q requires publish protocol %d, but this relkit supports %d-%d; upgrade relkit",
+				b.Name(), response.MinProtocol, publishproto.Min, publishproto.Max)}
 		}
 		return nil
 	}
-	if status == http.StatusUpgradeRequired || response.Error == "publisher_upgrade_required" {
-		return Error{Message: fmt.Sprintf(
-			"backend %q rejected this publisher: publish protocol %d is required, this relkit supports %d; upgrade relkit",
-			b.Name(), response.MinProtocol, publishproto.Current)}
+	if status == http.StatusUpgradeRequired || response.Error == publishproto.ErrUpgradeRequired || response.Error == publishproto.ErrTooNew {
+		if err := publishproto.Explain(status, body); err != nil {
+			return Error{Message: fmt.Sprintf("backend %q: %v", b.Name(), err)}
+		}
 	}
 	detail := strings.TrimSpace(response.Message)
 	if detail == "" {
@@ -285,10 +290,15 @@ func (b *relkitCompatibleBackend) token() (string, error) {
 }
 
 func publisherHeaders() map[string]string {
-	return map[string]string{
-		publishproto.ProtocolHeader: strconv.Itoa(publishproto.Current),
-		publishproto.VersionHeader:  publishproto.PublisherVersion,
+	h := make(http.Header)
+	publishproto.Apply(h)
+	out := map[string]string{}
+	for key, values := range h {
+		if len(values) > 0 {
+			out[key] = values[0]
+		}
 	}
+	return out
 }
 
 func minDuration(a, b time.Duration) time.Duration {

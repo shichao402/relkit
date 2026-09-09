@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"cnb.cool/shichao402/relkit/internal/model"
+	"cnb.cool/shichao402/relkit/internal/publishproto"
 )
 
 const tokenEnv = "RELKIT_SERVE_TOKEN"
@@ -77,6 +78,7 @@ type config struct {
 	stats              *downloadStats
 	admin              *adminAuth
 	minPublishProtocol int
+	maxPublishProtocol int
 }
 
 func main() {
@@ -258,6 +260,11 @@ func runServer() {
 		cfg.site = fileCfg.Site
 		if fileCfg.Publish != nil {
 			cfg.minPublishProtocol = fileCfg.Publish.MinProtocol
+			if fileCfg.Publish.MaxProtocol > 0 {
+				cfg.maxPublishProtocol = fileCfg.Publish.MaxProtocol
+			} else if fileCfg.Publish.MinProtocol > 0 {
+				cfg.maxPublishProtocol = publishproto.Max
+			}
 		}
 	}
 	defer cfg.stats.stop()

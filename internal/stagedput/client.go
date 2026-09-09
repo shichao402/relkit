@@ -69,10 +69,6 @@ func Put(ctx context.Context, opts Options) (*Result, error) {
 	if info.IsDir() {
 		return nil, fmt.Errorf("%s is a directory", opts.File)
 	}
-	sum, err := hashFile(opts.File)
-	if err != nil {
-		return nil, err
-	}
 	client := opts.HTTPClient
 	if client == nil {
 		concurrency := opts.Concurrency
@@ -86,6 +82,13 @@ func Put(ctx context.Context, opts Options) (*Result, error) {
 				MaxConnsPerHost:     concurrency + 2,
 			},
 		}
+	}
+	if err := publishproto.PreflightAgent(ctx, client, opts.URL, opts.Token, opts.Product); err != nil {
+		return nil, err
+	}
+	sum, err := hashFile(opts.File)
+	if err != nil {
+		return nil, err
 	}
 	c := &runner{opts: opts, base: base, client: client, bytes: info.Size(), sha256: sum}
 	if opts.Single {

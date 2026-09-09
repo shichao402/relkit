@@ -1,5 +1,7 @@
 # 内网 update.devcloud.woa.com 黄金路径验证（2026-09-04 / 09-07）
 
+> **归档。** 现网数据面是独立监听的 `relkit-compatible`（hostname:8080），不是表里的 `local`。后续决策见 [ADR 0008](../adr/0008-cas-data-plane-contract.md)、[ADR 0009](../adr/0009-publisher-protocol-negotiation.md)。
+
 > 后续决策见 [ADR 0008](../adr/0008-cas-data-plane-contract.md)。下文是当时现场记录，ingest 已从 `local` 改为 `relkit-compatible`。
 
 > 用户口头说的 `update.devops.woa.com` 无 DNS。现网与仓库文档统一为 `update.devcloud.woa.com`（`9.134.240.235:36000`）。
