@@ -652,9 +652,14 @@ def probe_local() -> dict[str, Any]:
             entry["configRawOk"] = True
         bin_name = "relkit-serve" if kind == "serve" else "relkit-agent"
         bin_path = parse_exec_binary(exec_start) or shutil.which(bin_name) or f"/usr/local/bin/{bin_name}"
-        ver = run([bin_path, "-version"], check=False, capture=True)
         entry["binary"] = bin_path
-        entry["version"] = (ver.stdout or ver.stderr or "").strip()
+        present = Path(bin_path).is_file()
+        entry["present"] = present
+        if present:
+            ver = run([bin_path, "-version"], check=False, capture=True)
+            entry["version"] = (ver.stdout or ver.stderr or "").strip()
+        else:
+            entry["version"] = ""
         probe[kind] = entry
     agent_cfg_path = probe.get("agent", {}).get("configPath")
     products_dir = Path("/etc/relkit-agent/products")
