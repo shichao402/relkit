@@ -79,6 +79,16 @@ class LockTests(unittest.TestCase):
             "other",
         )
 
+    def test_cnb_token_injected(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"CNB_TOKEN": "secret"}):
+            self.assertEqual(
+                subject.inject_cnb_token("https://cnb.cool/org/relkit.git"),
+                "https://cnb:secret@cnb.cool/org/relkit.git",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

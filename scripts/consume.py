@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """Canonical consumer sync for relkit.
 
-Host projects keep a lock file and a thin shim. This script — from the resolved
-commit — owns sparse paths, root-file materialization, and CLI builds.
+Host projects keep ``scripts/relkit.lock.json`` and a copy of
+``scripts/host/relkit_consume.py`` (often still named ``ensure_relkit_sparse.py``).
+This script — from the resolved commit — owns sparse paths, root-file
+materialization, CLI / ``relkit-updater`` builds, and CNB token injection.
 """
 
 from __future__ import annotations
@@ -27,10 +29,12 @@ DEFAULT_REF = "main"
 LOCK_SCHEMA = "relkit.consume/1"
 TOOLCHAIN_DIR_NAME = ".toolchain"
 
-# Cone paths: Dart client SDK + Go sources needed to build cmd/relkit + this script.
+# Cone paths: every language SDK + Go sources needed to build cmd/relkit,
+# cmd/relkit-updater, and this script. `sdk` is taken whole: SvnMergeTool needs
+# `sdk/dart`, Dec imports `sdk` and the frozen `sdk/apply`, and splitting the
+# cone per host is what ADR-007 exists to prevent.
 SPARSE_CONE_DIRS = (
-    "sdk/dart",
-    "sdk/updaterfacade",
+    "sdk",
     "cmd/relkit",
     "cmd/relkit-apply",
     "cmd/relkit-updater",
@@ -153,6 +157,18 @@ def lock_ref(lock: dict[str, Any], override: str) -> str:
     return str(lock.get("channel") or os.environ.get("RELKIT_REF") or DEFAULT_REF)
 
 
+def inject_cnb_token(url: str) -> str:
+    """Dec / CNB CI: inject CNB_TOKEN into plain https://cnb.cool/ git URLs."""
+    token = (os.environ.get("CNB_TOKEN") or "").strip()
+    if not token:
+        return url
+    prefix = "https://cnb.cool/"
+    host = url.split("://", 1)[-1].split("/", 1)[0]
+    if url.startswith(prefix) and "@" not in host:
+        return f"https://cnb:{token}@cnb.cool/" + url[len(prefix) :]
+    return url
+
+
 def lock_urls(lock: dict[str, Any], extra: Sequence[str]) -> list[str]:
     raw: list[str] = []
     value = lock.get("url")
@@ -164,7 +180,7 @@ def lock_urls(lock: dict[str, Any], extra: Sequence[str]) -> list[str]:
     env = os.environ.get("RELKIT_URL") or ""
     if env:
         raw.append(env)
-    return resolve_urls(raw)
+    return [inject_cnb_token(item) for item in resolve_urls(raw)]
 
 
 def get_project_root() -> Path:
@@ -804,11 +820,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         args = create_parser().parse_args(argv)
         project_root = Path(args.project_root).resolve() if args.project_root else Path.cwd()
         lock: dict[str, Any] = {}
-        if args.lock:
-            lock = load_lock(Path(args.lock))
+        lock_path = Path(args.lock) if args.lock else project_root / "scripts" / "relkit.lock.json"
+        if lock_path.is_file():
+            lock = load_lock(lock_path)
         ref = lock_ref(lock, args.ref or os.environ.get("RELKIT_REF", ""))
         urls = lock_urls(lock, args.url or [])
         protocol = lock.get("protocol") if isinstance(lock.get("protocol"), dict) else {}
+        updater_ipc = (
+            lock.get("updaterIpc") if isinstance(lock.get("updaterIpc"), dict) else {}
+        )
         logger.info("========== relkit consume 开始 ==========")
         logger.info(f"urls={' '.join(urls)} ref={ref}")
 
@@ -843,8 +863,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             "ref": ref,
             "minProtocol": int(protocol.get("min") or 2),
             "maxProtocol": int(protocol.get("max") or 2),
-            "updaterIpcMin": 1,
-            "updaterIpcMax": 1,
+            "updaterIpcMin": int(updater_ipc.get("min") or 1),
+            "updaterIpcMax": int(updater_ipc.get("max") or 1),
         }
         logger.info(f"resolved SHA={head}")
         if args.resolved_out:
@@ -864,7 +884,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.success("relkit sparse 就绪")
         return 0
     except Exception as error:
-        logger.error(f"ensure_relkit_sparse 失败: {error}")
+        logger.error(f"relkit consume 失败: {error}")
         logger.error(traceback.format_exc())
         logger.failed(str(error))
         return 1

@@ -9,7 +9,7 @@
 
 1. 探测宿主语言。
 2. 打开该语言 facade（Go `sdk/updaterfacade`，Dart `updater_facade.dart`，Node `updater_facade.ts`）。
-3. 把同 SHA 的 `relkit-updater` 打进产品包（`scripts/consume.py`）。
+3. 把同 SHA 的 `relkit-updater` 打进产品包。宿主侧只有两个文件：`scripts/relkit.lock.json`，和 [`scripts/host/relkit_consume.py`](../../scripts/host/relkit_consume.py) 的**逐字节副本** `scripts/relkit_consume.py`（同名、不改、不再包 `.bat` / `.sh` / 旧名，便于按哈希比对更新）。cone / 编 CLI / sidecar 只执行 **该 SHA 上的** `scripts/consume.py`，禁止在产品仓复制 `SPARSE_CONE_DIRS`。
 4. 宿主只做：何时检查、UI、是否退出进程。
 
 ## 当前已登记 SDK

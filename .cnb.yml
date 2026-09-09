@@ -33,7 +33,7 @@ main:
         - name: deploy python tests
           script: |
             apt-get update && apt-get install -y python3
-            python3 -m unittest deploy/test_relkit.py scripts/test_consume.py
+            python3 -m unittest deploy/test_relkit.py scripts/test_consume.py scripts/test_relkit_consume.py
     - name: node-sdk
       docker:
         image: node:22
