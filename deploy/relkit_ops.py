@@ -291,6 +291,36 @@ def migrate_agent_config(agent_cfg: dict[str, Any]) -> tuple[dict[str, Any], lis
     return cfg, notes
 
 
+def missing_upgrade_targets(
+    probe: dict[str, Any], *, want_serve: bool, want_agent: bool
+) -> list[str]:
+    """Components an upgrade would touch that the host does not actually run.
+
+    A host may legitimately run only one of the two (the public publisher has no
+    relkit-serve; its data plane is COS). Returned strings say what is missing
+    and how to proceed.
+    """
+    flags = {"serve": "--agent-only", "agent": "--serve-only"}
+    missing: list[str] = []
+    for kind, wanted in (("serve", want_serve), ("agent", want_agent)):
+        if not wanted:
+            continue
+        entry = probe.get(kind) or {}
+        unit = entry.get("unit") or {}
+        reasons: list[str] = []
+        if not unit.get("FragmentPath"):
+            reasons.append("no systemd unit")
+        if not entry.get("present"):
+            reasons.append(f"no binary at {entry.get('binary') or 'unknown path'}")
+        if not reasons:
+            continue
+        missing.append(
+            f"relkit-{kind} ({', '.join(reasons)}); pass {flags[kind]} to skip it, "
+            f"or run 'install {kind}' to add it"
+        )
+    return missing
+
+
 def redact_value(obj: Any, key: Optional[str] = None) -> Any:
     if key is not None and key in SECRET_KEYS:
         return "<redacted>"

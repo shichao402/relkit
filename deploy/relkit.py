@@ -43,6 +43,7 @@ from relkit_ops import (  # noqa: E402
     loopback_base,
     migrate_agent_config,
     migrate_profile,
+    missing_upgrade_targets,
     parse_exec_binary,
     parse_exec_config,
     parse_listen_port,
@@ -961,8 +962,13 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     )
     probe = load_json_object(probe_out.stdout or "{}")
     print(json.dumps(redact_value(probe), ensure_ascii=False, indent=2))
+    want_serve = not args.agent_only
+    want_agent = not args.serve_only
+    missing = missing_upgrade_targets(probe, want_serve=want_serve, want_agent=want_agent)
+    if missing:
+        die(f"{host} does not run " + "; ".join(missing))
     serve_cfg = (probe.get("serve") or {}).get("config") or {}
-    if isinstance(serve_cfg, dict):
+    if want_serve and isinstance(serve_cfg, dict):
         _, grace = ensure_cas_grace(serve_cfg)
         print("serve migrate notes:", grace or ["addr/dir preserved"])
     public = args.public_base_url
@@ -991,8 +997,8 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     if not restart:
         print("WARNING: --stage-only updates files but does not restart; upgrade is not complete")
     spec = {
-        "upgradeServe": not args.agent_only,
-        "upgradeAgent": not args.serve_only,
+        "upgradeServe": want_serve,
+        "upgradeAgent": want_agent,
         "restart": restart,
         "prefix": args.prefix,
         "user": args.user,

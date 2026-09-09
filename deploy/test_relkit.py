@@ -200,6 +200,69 @@ class MigrateTests(unittest.TestCase):
         self.assertTrue(notes)
 
 
+class MissingTargetTests(unittest.TestCase):
+    AGENT_ONLY_HOST = {
+        "serve": {
+            "unit": {"FragmentPath": "", "ActiveState": "inactive"},
+            "binary": "/usr/local/bin/relkit-serve",
+            "present": False,
+        },
+        "agent": {
+            "unit": {"FragmentPath": "/etc/systemd/system/relkit-agent.service"},
+            "binary": "/usr/local/bin/relkit-agent",
+            "present": True,
+        },
+    }
+
+    def test_agent_only_host_is_fine_when_serve_is_skipped(self):
+        self.assertEqual(
+            ops.missing_upgrade_targets(
+                self.AGENT_ONLY_HOST, want_serve=False, want_agent=True
+            ),
+            [],
+        )
+
+    def test_agent_only_host_reports_serve_instead_of_crashing(self):
+        missing = ops.missing_upgrade_targets(
+            self.AGENT_ONLY_HOST, want_serve=True, want_agent=True
+        )
+        self.assertEqual(len(missing), 1)
+        self.assertIn("relkit-serve", missing[0])
+        self.assertIn("no systemd unit", missing[0])
+        self.assertIn("/usr/local/bin/relkit-serve", missing[0])
+        self.assertIn("--agent-only", missing[0])
+
+    def test_host_running_both_has_nothing_missing(self):
+        probe = {
+            "serve": {
+                "unit": {"FragmentPath": "/etc/systemd/system/relkit-serve.service"},
+                "binary": "/usr/local/bin/relkit-serve",
+                "present": True,
+            },
+            "agent": {
+                "unit": {"FragmentPath": "/etc/systemd/system/relkit-agent.service"},
+                "binary": "/usr/local/bin/relkit-agent",
+                "present": True,
+            },
+        }
+        self.assertEqual(
+            ops.missing_upgrade_targets(probe, want_serve=True, want_agent=True), []
+        )
+
+    def test_unit_without_binary_still_reports(self):
+        probe = {
+            "serve": {
+                "unit": {"FragmentPath": "/etc/systemd/system/relkit-serve.service"},
+                "binary": "/usr/local/bin/relkit-serve",
+                "present": False,
+            }
+        }
+        missing = ops.missing_upgrade_targets(probe, want_serve=True, want_agent=False)
+        self.assertEqual(len(missing), 1)
+        self.assertIn("no binary at /usr/local/bin/relkit-serve", missing[0])
+        self.assertNotIn("no systemd unit", missing[0])
+
+
 class TokenPermTests(unittest.TestCase):
     def test_0600_ok_0640_rejected(self):
         self.assertTrue(ops.token_mode_ok(0o600))
