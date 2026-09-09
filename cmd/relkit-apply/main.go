@@ -17,6 +17,7 @@ import (
 )
 
 func main() {
+	fmt.Fprintln(os.Stderr, "relkit-apply is frozen; new hosts should ship relkit-updater (ADR 0010)")
 	os.Exit(run(os.Args[1:]))
 }
 

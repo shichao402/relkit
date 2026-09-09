@@ -1,0 +1,4 @@
+{
+  "reject": ["/etc/passwd", "../x", "..", "foo/../bar", "CON"],
+  "accept": ["app.zip", "relkit-updater.exe"]
+}

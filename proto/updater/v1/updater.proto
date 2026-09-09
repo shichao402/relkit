@@ -1,0 +1,423 @@
+syntax = "proto3";
+
+package relkit.updater.v1;
+
+option go_package = "cnb.cool/shichao402/relkit/api/updater/v1;updaterv1";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// IPC window for this schema. Facade generators embed these as compile-time
+// constants. Products MUST NOT declare a different window in ClientProfile.
+//
+// Current: [1, 1]
+// Framing: 4-byte big-endian length + protobuf bytes on stdout.
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_NETWORK = 1;
+  ERROR_CODE_SIGNATURE = 2;
+  ERROR_CODE_ROLLBACK_REJECTED = 3;
+  ERROR_CODE_SELECTOR_NO_MATCH = 4;
+  ERROR_CODE_DISK = 5;
+  ERROR_CODE_PERMISSION_DENIED = 6;
+  ERROR_CODE_OCCUPIED = 7;
+  ERROR_CODE_PROTOCOL_MISMATCH = 8;
+  ERROR_CODE_UPDATER_TOO_OLD = 9;
+  ERROR_CODE_UPDATER_TOO_NEW = 10;
+  ERROR_CODE_PLAN_TAMPERED = 11;
+  ERROR_CODE_PLAN_EXPIRED = 12;
+  ERROR_CODE_PLAN_UNKNOWN = 13;
+  ERROR_CODE_PLAN_NOT_DOWNLOADED = 14;
+  ERROR_CODE_SKIP_DENIED = 15;
+  ERROR_CODE_PROFILE_INVALID = 16;
+  ERROR_CODE_CHANNEL_NOT_ALLOWED = 17;
+  ERROR_CODE_CANCELED = 18;
+  ERROR_CODE_SIDECAR_NOT_FOUND = 19;
+  ERROR_CODE_LAYOUT_UNSUPPORTED = 20;
+}
+
+enum LastResult {
+  LAST_RESULT_UNSPECIFIED = 0;
+  LAST_RESULT_UP_TO_DATE = 1;
+  LAST_RESULT_UPDATE_AVAILABLE = 2;
+  LAST_RESULT_FALLBACK_REQUIRED = 3;
+  LAST_RESULT_THROTTLED = 4;
+  LAST_RESULT_FAILED = 5;
+  LAST_RESULT_APPLIED = 6;
+}
+
+enum Layout {
+  LAYOUT_UNSPECIFIED = 0;
+  LAYOUT_WHOLE_ROOT = 1;
+  LAYOUT_VERSIONED_DIR = 2;
+  LAYOUT_FILE_SET = 3;
+}
+
+enum Operation {
+  OPERATION_UNSPECIFIED = 0;
+  OPERATION_CHECK = 1;
+  OPERATION_SKIP = 2;
+  OPERATION_DOWNLOAD = 3;
+  OPERATION_APPLY = 4;
+  OPERATION_STATUS = 5;
+  OPERATION_CLEANUP = 6;
+  OPERATION_CANCEL = 7;
+  OPERATION_SCHEDULER = 8;
+}
+
+enum SessionPhase {
+  SESSION_PHASE_UNSPECIFIED = 0;
+  SESSION_PHASE_WAITING_FOR_EXIT = 1;
+  SESSION_PHASE_COPYING = 2;
+  SESSION_PHASE_COMMITTING = 3;
+  SESSION_PHASE_RELAUNCHING = 4;
+  SESSION_PHASE_NEEDS_ATTENTION = 5;
+  SESSION_PHASE_COMPLETED = 6;
+  SESSION_PHASE_ROLLED_BACK = 7;
+}
+
+message TrustedKey {
+  string key_id = 1;
+  bytes public_key = 2; // raw 32-byte ed25519
+}
+
+message RecoveryLink {
+  string label = 1;
+  string url = 2;
+}
+
+message RecoveryHelp {
+  string message = 1;
+  repeated RecoveryLink links = 2;
+}
+
+message ClientProfile {
+  string product = 1;
+  repeated string allowed_channels = 2;
+  repeated string entry_urls = 3;
+  repeated string index_urls = 4;
+  repeated string fallback_urls = 5;
+  repeated TrustedKey trusted_keys = 6;
+  RecoveryHelp recovery = 7;
+}
+
+message FileSetEntry {
+  string dest_relpath = 1;
+  string artifact_name = 2;
+}
+
+message InstallSpec {
+  Layout layout = 1;
+  string install_root = 2;
+  string executable_relpath = 3;
+  string sidecar_relpath = 4;
+  repeated string preserve = 5;
+  int32 retain = 6; // 0 means current + previous
+  bool relaunch = 7;
+  repeated FileSetEntry file_set = 8;
+}
+
+message Runtime {
+  string channel = 1;
+  int64 current_code = 2;
+  map<string, string> client_selectors = 3;
+  string data_dir = 4;
+  InstallSpec install = 5;
+  string sidecar_path = 6; // empty = search order
+}
+
+message CheckPolicy {
+  google.protobuf.Duration after_success = 1;
+  google.protobuf.Duration after_failure = 2;
+}
+
+message SchedulerConfig {
+  bool check_on_start = 1;
+  bool force_on_start = 2;
+  CheckPolicy policy = 3;
+}
+
+message ClientHello {
+  uint32 ipc_min = 1;
+  uint32 ipc_max = 2;
+}
+
+message Capabilities {
+  uint32 ipc = 1;
+  repeated Operation operations = 2;
+  repeated Layout layouts = 3;
+  google.protobuf.Duration min_check_interval = 4;
+  google.protobuf.Duration plan_ttl = 5;
+  string engine_version = 6;
+}
+
+message CheckOp {
+  bool force = 1;
+  int64 exact_code = 2;
+  CheckPolicy policy = 3;
+}
+
+message SkipOp {
+  int64 code = 1;
+}
+
+message DownloadOp {
+  string plan_id = 1;
+}
+
+message ApplyOp {
+  string plan_id = 1;
+}
+
+message StatusOp {}
+
+message CleanupOp {}
+
+message CancelOp {}
+
+message UpdaterRequest {
+  ClientHello hello = 1;
+  ClientProfile profile = 2;
+  Runtime runtime = 3;
+  oneof op {
+    CheckOp check = 10;
+    SkipOp skip = 11;
+    DownloadOp download = 12;
+    ApplyOp apply = 13;
+    StatusOp status = 14;
+    CleanupOp cleanup = 15;
+    CancelOp cancel = 16;
+  }
+}
+
+message Error {
+  ErrorCode code = 1;
+  bool retryable = 2;
+  string message = 3;
+  repeated string attempts = 4;
+  RecoveryHelp recovery = 5;
+}
+
+message PriorReleaseNotes {
+  string version = 1;
+  int64 code = 2;
+  string notes = 3;
+  string notes_url = 4;
+}
+
+message ArtifactView {
+  string name = 1;
+  int64 size = 2;
+  bytes sha256 = 3;
+}
+
+message UpToDate {
+  int64 sequence = 1;
+  bool current_is_yanked = 2;
+}
+
+message UpdateAvailable {
+  string plan_id = 1;
+  string prompt_key = 2;
+  string version = 3;
+  int64 code = 4;
+  bool mandatory = 5;
+  int32 remaining_hops = 6;
+  int64 sequence = 7;
+  string release_notes_markdown = 8;
+  string release_notes_url = 9;
+  repeated PriorReleaseNotes prior_release_notes = 10;
+  repeated ArtifactView artifacts = 11;
+}
+
+message FallbackRequired {
+  string prompt_key = 1;
+  string manual_url = 2;
+  string message = 3;
+  bool mandatory = 4;
+  int64 sequence = 5;
+  int64 min_code = 6;
+  int64 max_code = 7;
+}
+
+message Throttled {
+  google.protobuf.Timestamp next_allowed_at = 1;
+}
+
+message Failed {
+  Error error = 1;
+}
+
+message CheckResult {
+  oneof kind {
+    UpToDate up_to_date = 1;
+    UpdateAvailable update_available = 2;
+    FallbackRequired fallback_required = 3;
+    Throttled throttled = 4;
+    Failed failed = 5;
+  }
+}
+
+message Downloaded {
+  string plan_id = 1;
+  int64 bytes = 2;
+}
+
+message DownloadResult {
+  oneof kind {
+    Downloaded downloaded = 1;
+    Failed failed = 2;
+  }
+}
+
+message ApplyAccepted {
+  string session_id = 1;
+  string plan_id = 2;
+  bool requires_host_exit = 3;
+}
+
+message ApplyResult {
+  oneof kind {
+    ApplyAccepted accepted = 1;
+    Failed failed = 2;
+  }
+}
+
+message Ok {}
+
+message Result {
+  oneof kind {
+    Ok ok = 1;
+    Failed failed = 2;
+  }
+}
+
+message SidecarInfo {
+  string path = 1;
+  uint32 ipc = 2;
+  string version = 3;
+}
+
+message SessionView {
+  string session_id = 1;
+  string plan_id = 2;
+  SessionPhase phase = 3;
+  google.protobuf.Timestamp started_at = 4;
+  Error error = 5;
+}
+
+message StatusSnapshot {
+  google.protobuf.Timestamp last_check_at = 1;
+  LastResult last_result = 2;
+  google.protobuf.Timestamp next_allowed_at = 3;
+  int64 last_seen_sequence = 4;
+  repeated int64 skipped_codes = 5;
+  SessionView active_session = 6;
+  SidecarInfo sidecar = 7;
+}
+
+message Progress {
+  int64 bytes_received = 1;
+  int64 bytes_total = 2;
+  int64 bytes_per_second = 3;
+}
+
+message ApplyProgress {
+  string session_id = 1;
+  SessionPhase phase = 2;
+}
+
+message Log {
+  string message = 1;
+}
+
+message UpdaterEvent {
+  oneof kind {
+    Capabilities capabilities = 1;
+    Progress progress = 2;
+    ApplyProgress apply_progress = 3;
+    Log log = 4;
+    CheckResult check = 10;
+    DownloadResult download = 11;
+    ApplyResult apply = 12;
+    Result result = 13;
+    StatusSnapshot status = 14;
+    Failed failed = 15;
+  }
+}
+
+message ArtifactTarget {
+  string name = 1;
+  map<string, string> selectors = 2;
+}
+
+message PlannedFile {
+  string name = 1;
+  int64 size = 2;
+  string sha256_hex = 3;
+  repeated string urls = 4;
+  string dest_relpath = 5;
+  string local_path = 6;
+  bool downloaded = 7;
+}
+
+message UpdatePlan {
+  string plan_id = 1;
+  string product = 2;
+  string channel = 3;
+  string version = 4;
+  int64 code = 5;
+  int64 sequence = 6;
+  bool mandatory = 7;
+  int32 remaining_hops = 8;
+  string release_notes_markdown = 9;
+  string release_notes_url = 10;
+  repeated PriorReleaseNotes prior_release_notes = 11;
+  repeated PlannedFile files = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp expires_at = 14;
+  bytes plan_hmac = 15;
+}
+
+message PersistedState {
+  google.protobuf.Timestamp last_check_at = 1;
+  LastResult last_result = 2;
+  int64 last_seen_sequence = 3;
+  int64 last_seen_directory_sequence = 4;
+  int64 last_seen_fallback_sequence = 5;
+  repeated int64 skipped_codes = 6;
+}
+
+message ApplySessionRecord {
+  string session_id = 1;
+  string plan_id = 2;
+  SessionPhase phase = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp heartbeat_at = 5;
+  string install_root = 6;
+  string staged_root = 7;
+  int64 target_code = 8;
+  string target_version = 9;
+  Error error = 10;
+  int32 pid = 11;
+  Layout layout = 12;
+  bool relaunch = 13;
+  string executable_relpath = 14;
+  repeated string preserve = 15;
+  int32 retain = 16;
+  repeated FileSetEntry file_set = 17;
+  string sidecar_relpath = 18;
+}
+
+message JournalEntry {
+  string dest_path = 1;
+  string backup_path = 2;
+  string source_path = 3;
+}
+
+message ApplyJournal {
+  string session_id = 1;
+  repeated JournalEntry entries = 2;
+  bool committed = 3;
+}

@@ -88,3 +88,4 @@ export {
   type UpdateCheckResult,
   type UpToDate,
 } from "./updater.js";
+export { Updater, ipcMin, ipcMax, ipcCurrent, defaultGlue } from "./updater_facade.js";

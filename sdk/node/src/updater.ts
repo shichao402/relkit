@@ -176,6 +176,7 @@ interface IndexCandidate {
 }
 
 /** Checks for, and downloads, updates for one (product, channel). */
+/** Frozen: new hosts must use updater_facade.ts + relkit-updater (ADR 0010). */
 export class RupUpdater {
   readonly product: string;
   readonly channel: string;

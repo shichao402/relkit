@@ -139,6 +139,7 @@ class FallbackRequired extends UpdateCheckResult {
 }
 
 /// Checks for, and downloads, updates for one (product, channel).
+/// Frozen: new hosts must use [Updater] in `updater_facade.dart` + relkit-updater (ADR 0010).
 class RupUpdater {
   RupUpdater({
     required this.product,

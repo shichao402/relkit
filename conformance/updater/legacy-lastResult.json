@@ -1,0 +1,15 @@
+{
+  "go": {
+    "available": "updateAvailable",
+    "fallback": "fallbackRequired",
+    "success": "upToDate",
+    "failure": "failed"
+  },
+  "dart": {
+    "up-to-date": "upToDate",
+    "error": "failed",
+    "no-artifact": "failed",
+    "update-available": "updateAvailable"
+  },
+  "unknown": "unspecified"
+}

@@ -10,6 +10,18 @@ main:
       stages:
         - name: go test
           script: go test ./...
+        - name: updater facade signatures
+          script: go run ./cmd/relkit-facade-gen .
+        - name: proto gen drift
+          script: |
+            if command -v buf >/dev/null 2>&1; then
+              (cd proto && buf generate)
+              git diff --exit-code -- api/updater sdk/dart/lib/src/gen/updater || {
+                echo "protobuf gen drift"; exit 1
+              }
+            else
+              echo "buf not installed; skip gen drift"
+            fi
         - name: serve lint and race
           script: |
             unformatted=$(gofmt -l ./cmd/relkit-serve)
@@ -31,6 +43,15 @@ main:
             cd sdk/node
             npm ci
             npm test
+    - name: dart-sdk
+      docker:
+        image: dart:3.6
+      stages:
+        - name: dart test
+          script: |
+            cd sdk/dart
+            dart pub get
+            dart test
   pull_request: *ci
 
 # tag_push 时 $CNB_BRANCH 为 tag 名（如 v0.2.0），不是分支名
@@ -41,7 +62,7 @@ main:
         image: golang:1.26
       stages:
         - name: build release binaries
-          script: python3 deploy/relkit.py build --serve --agent --cli --version "${CNB_BRANCH#v}" --out dist
+          script: python3 deploy/relkit.py build --serve --agent --cli --updater --version "${CNB_BRANCH#v}" --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu
@@ -59,6 +80,7 @@ main:
             cat > RELEASE_BODY.md <<'EOF'
             ## Binaries
 
+            - `relkit-updater-*` — host sidecar (check/download/apply)
             - `relkit-*` — publisher CLI (`stage` / `publish` / …)
             - `relkit-agent-*` — CI publish agent
             - `relkit-serve-*` — self-hosted RUP download + authenticated PUT

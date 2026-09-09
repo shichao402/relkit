@@ -184,6 +184,8 @@ def cmd_build(args: argparse.Namespace) -> None:
         targets.append("agent")
     if args.cli:
         targets.append("cli")
+    if getattr(args, "updater", False):
+        targets.append("updater")
     if not targets:
         targets = ["serve", "agent"]
     stamp = git_stamp(args.version)
@@ -204,6 +206,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         "serve": ("./cmd/relkit-serve", "relkit-serve"),
         "agent": ("./cmd/relkit-agent", "relkit-agent"),
         "cli": ("./cmd/relkit", "relkit"),
+        "updater": ("./cmd/relkit-updater", "relkit-updater"),
     }
     step(f"build {stamp}")
     built: list[dict[str, Any]] = []
@@ -1146,6 +1149,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--serve", action="store_true")
     build.add_argument("--agent", action="store_true")
     build.add_argument("--cli", action="store_true")
+    build.add_argument("--updater", action="store_true")
     build.add_argument("--version", default="0.2.1")
     build.add_argument("--out", default="dist")
     build.add_argument("--os")

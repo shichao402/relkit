@@ -1,3 +1,5 @@
+// Package apply replaces a single file. Frozen: hosts should use
+// relkit-updater fileSet/wholeRoot/versionedDir (ADR 0010).
 package apply
 
 import (

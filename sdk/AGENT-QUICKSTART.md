@@ -1,5 +1,7 @@
 # Go SDK 开箱（Agent）
 
+> **2026-09 起新接入请用** [`updaterfacade`](updaterfacade/) + `relkit-updater`（[ADR 0010](../docs/adr/0010-single-updater-engine.md)）。下文冻结中的完整 `sdk.Updater` 仅供迁移桥。
+
 面向要在 **Go 进程**里接入 RUP 检查/下载的 Agent。  
 协议细节见上游 SPEC；发版见 `relkit agent-guide`。本文只保证「依赖装上 → check/download 跑通」。
 

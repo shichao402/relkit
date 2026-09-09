@@ -2,11 +2,14 @@ version: v2
 modules:
   - path: .
     name: buf.build/shichao402/rup
+deps:
+  - buf.build/protocolbuffers/wellknowntypes
 lint:
   use:
     - STANDARD
   except:
     - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
 breaking:
   use:
     - FILE

@@ -1,33 +1,26 @@
 # Client SDKs
 
-This directory holds **language SDKs** for consuming RUP updates. Publishing /
-serving stay in `cmd/relkit`, `cmd/relkit-serve`, and `cmd/relkit-agent`.
+This directory holds **language SDKs** for consuming RUP updates.
 
-| Path | Language | Module / package | Agent onboarding |
-|------|----------|------------------|------------------|
-| [`./`](.) (Go sources at this level) | Go | `cnb.cool/shichao402/relkit/sdk` | [`AGENT-QUICKSTART.md`](AGENT-QUICKSTART.md) |
-| [`dart/`](dart/) | Dart | package `rup_client` | [`dart/AGENT-QUICKSTART.md`](dart/AGENT-QUICKSTART.md) |
-| [`node/`](node/) | Node / TypeScript | package `rup-client` | [`node/AGENT-QUICKSTART.md`](node/AGENT-QUICKSTART.md) |
+**Canonical updater path (ADR 0010):** spawn `relkit-updater` through the generated facade.
 
-## Go ↔ Dart ↔ Node alignment
+| Language | Facade | Sidecar IPC |
+|----------|--------|-------------|
+| Go | [`updaterfacade`](updaterfacade/) | `relkit.updater.v1` |
+| Dart | [`dart/lib/src/updater_facade.dart`](dart/lib/src/updater_facade.dart) | same |
+| Node | [`node/src/updater_facade.ts`](node/src/updater_facade.ts) | same |
 
-| Capability | Dart | Go | Node |
-|---|---|---|---|
-| Index check + envelope verify | yes | yes | yes |
-| Fallback (§12.6) | yes | yes | yes |
-| `entryUrls` → directory bootstrap (§16) | yes | yes | yes |
-| State store + throttle (§12.2/12.4) | yes | yes | yes |
-| Source learning (§12.7) | yes | yes | yes |
-| Range resume / parallel chunks | yes | yes | yes |
-| Progress callback | yes | yes | yes |
-| Scheduler | yes | yes | yes |
-| Apply: single-binary replace | n/a (dir swap) | `sdk/apply` | n/a (host) |
-| Apply: portable directory swap / DMG | yes | **not aligned** (host or Dart) | n/a (host) |
+Legacy `RupUpdater` / `sdk.Updater` implementations are **frozen** and will be removed after host migration. Do not add features there.
 
-Go files stay at `sdk/*.go` so the existing module path does not break
-(`go get cnb.cool/shichao402/relkit/sdk`). Dart is nested under `sdk/dart/`,
-Node under `sdk/node/`.
+Signatures: [`../conformance/updater/facade-signatures.txt`](../conformance/updater/facade-signatures.txt)
 
-Greenfield Agent entry: [`../docs/agent/README.md`](../docs/agent/README.md).
-Publish topology: [`../docs/design/update-ingress-cos.md`](../docs/design/update-ingress-cos.md),
-[`../docs/design/publish-agent.md`](../docs/design/publish-agent.md).
+Open:
+
+```
+opened = Updater.open(profile, runtime)  // failed -> close update UI
+u.check(force: userInitiated)
+u.download(planId)
+u.apply(planId)  // if requiresHostExit, exit
+```
+
+IPC window is a compile-time constant on the facade (`ipcMin`/`ipcMax` = 1), not a product config field.

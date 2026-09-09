@@ -1,0 +1,7 @@
+{
+  "cases": [
+    {"afterSuccess": "30m", "expectAtLeast": "5m", "why": "half hour must not floor to zero"},
+    {"afterSuccess": "0s", "expect": "5m", "why": "zero clamps to minCheckInterval"},
+    {"afterSuccess": "1h", "afterFailure": "1s", "expectFailure": "5m"}
+  ]
+}

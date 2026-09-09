@@ -30,13 +30,16 @@ TOOLCHAIN_DIR_NAME = ".toolchain"
 # Cone paths: Dart client SDK + Go sources needed to build cmd/relkit + this script.
 SPARSE_CONE_DIRS = (
     "sdk/dart",
+    "sdk/updaterfacade",
     "cmd/relkit",
     "cmd/relkit-apply",
+    "cmd/relkit-updater",
     "internal",
     "api",
     "embed",
     "version",
     "scripts",
+    "proto/updater",
 )
 
 # Do not rely on cone mode implicitly retaining repository-root files. The
@@ -510,6 +513,33 @@ def build_cli(
                 f"relkit-apply 就绪: {apply_out} ({apply_out.stat().st_size} bytes)"
             )
             built.append(apply_out)
+
+        updater_name = "relkit-updater.exe" if goos == "windows" else "relkit-updater"
+        updater_out = project_root / "tools" / "bin" / updater_name
+        logger.info(f"go build relkit-updater ({goos}/{goarch}) → {updater_out}")
+        run(
+            logger,
+            [
+                go_bin,
+                "build",
+                "-trimpath",
+                "-ldflags",
+                "-s -w",
+                "-o",
+                str(updater_out),
+                "./cmd/relkit-updater",
+            ],
+            cwd=dest,
+            timeout_seconds=600,
+            env=env,
+        )
+        if updater_out.is_file() and goos != "windows":
+            updater_out.chmod(updater_out.stat().st_mode | 0o111)
+        if updater_out.is_file():
+            logger.info(
+                f"relkit-updater 就绪: {updater_out} ({updater_out.stat().st_size} bytes)"
+            )
+            built.append(updater_out)
     return built
 
 
@@ -813,6 +843,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             "ref": ref,
             "minProtocol": int(protocol.get("min") or 2),
             "maxProtocol": int(protocol.get("max") or 2),
+            "updaterIpcMin": 1,
+            "updaterIpcMax": 1,
         }
         logger.info(f"resolved SHA={head}")
         if args.resolved_out:

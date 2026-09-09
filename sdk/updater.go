@@ -20,6 +20,8 @@ import (
 type TrustedKeys map[string]ed25519.PublicKey
 
 // Updater checks for and downloads RUP v2 updates.
+//
+// Frozen: new hosts must use sdk/updaterfacade + relkit-updater (ADR 0010).
 type Updater struct {
 	Product         string
 	Channel         string

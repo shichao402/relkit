@@ -17,3 +17,4 @@ try {
 
 Write-Host "generated Go  -> $Root\api"
 Write-Host "generated Dart -> $Root\sdk\dart\lib\src\gen"
+& go run "$Root\cmd\relkit-facade-gen" "$Root"
