@@ -29,7 +29,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 |---|---|---|
 | nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
 | relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
-| relkit-serve | `127.0.0.1:8080` | 内网完整 `relkit-compatible` 数据面：能力 PUT / Bearer 写操作 / 匿名 GET；操作面板在 `/-/` |
+| relkit-serve | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只把 `/-/admin`、`/-/p/` 当操作面壳，本机空目录不是 COS 数据面 |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / BrowseSink 节点 |
 
 同机可以是一个 nginx、两个 `server_name`（CI 的 `/v1/*` → 8787，客户端 GET → 8080 或读盘）。内网 CI 打的是该箱**内网 IP:443** 上的名字，不是回环 hostname。
@@ -116,10 +116,10 @@ flowchart TB
 | 谁看 | 装包的人、书签、内网同事打开更新域名 | 运营 / 开发，知道这台箱 |
 | 是什么 | 发布时写好的静态 HTML | 请求时扫盘画出来的门户 |
 | 代码 | `internal/browse` dump | `cmd/relkit-serve/ui.go` |
-| 外网落地 | Makers（HTML 不进 COS） | 外网没有这台 GET 服务，也就没有这页 |
+| 外网落地 | Makers（HTML 不进 COS） | `publish.firoyang.com/-/admin`；当前只扫本机空目录，尚不能管理 COS |
 | 内网落地 | 数据面 `browse/`，更新域名 GET `/`（无文件则短 stub，不现算门户） | `/-/admin`（今 `/-/p/`、`?files=1` 一并收进来） |
 | 容量 | 静态站 / CDN / Makers | 这一台自托管进程 |
-| 以后 | 还是 dump，换 sink 即可 | 长成 relkit 后台（产品、token、GC、日志）；外网今天没这页，见 [ROADMAP](../ROADMAP.md#操作面板从本机盘长成发布管理) |
+| 以后 | 还是 dump，换 sink 即可 | 长成能管本机与 COS 的 relkit 后台（产品、token、GC、日志），见 [ROADMAP](../ROADMAP.md#操作面板从本机盘长成发布管理) |
 
 实现时（本文审过再动代码）：
 
@@ -140,7 +140,7 @@ flowchart TB
 
 ## 7. 现网落地（对照，实现前）
 
-外网 CVM（`publish.firoyang.com:443` → `127.0.0.1:8787`）已按上表运行。内网同一切面，本机 origin 先 `:80`：
+外网 CVM 已运行 agent（默认入口 → `127.0.0.1:8787`）与 serve 操作面壳（仅 `/-/admin`、`/-/p/` → `127.0.0.1:8080`）；serve 的 `/srv/releases` 不是 COS 数据面。配置见 `deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
 
 - nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余请求 → serve 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 serve 自己鉴权
 - 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变

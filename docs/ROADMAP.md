@@ -55,9 +55,9 @@
 
 ## 操作面板：从本机盘长成发布管理
 
-- **状态**：意向。内网 `/-/admin` 已有（ADR 0006）；外网发布机按设计不跑 `relkit-serve`，因此没有这页。
-- **现网差**：外网 ingest 是 COS，CVM 上只有 agent（`publish.firoyang.com` → `127.0.0.1:8787`）。没有 serve 是合法的——数据面不在这台盘上，不必为了「看起来对称」硬装一个。代价是运营看不到现算门户：产品卡片、文件树、下载计数、以后想加的撤回 / GC / token 面，外网发布 presently 只能靠 COS 控制台、browse dump 和 SSH。内网 `update.devcloud.woa.com` 才有完整面板。
+- **状态**：后台壳已部署，COS 管理未实现。内网 `/-/admin` 管本机数据面（ADR 0006）；外网 `publish.firoyang.com/-/admin` 已接到只监听 loopback 的 `relkit-serve`。
+- **现网差**：外网 ingest 仍是 COS。CVM 上的 serve 只管理 `/srv/releases` 空目录，**看不到 COS 发布树**；它先提供受鉴权的后台进程与稳定 URL，不是假装已经恢复了发布管理。外网发布目前仍需 COS 控制台、browse dump 和 SSH；Dec 发版仍走 agent → COS，不经过 serve。
 - **目标**：面板继续进化成 relkit 后台（产品、发布、token、GC、日志），而且**外网 COS 上的发布也要管得到**，不要把「后台」锁死在 `relkit-serve` 扫本机目录这一种实现上。拓扑里「以后长成 relkit 后台」就是这条，不是给内网再画一张更好看的首页。
-- **还没拍（落地前再写 ADR）**：面板进程跟谁住（外网 CVM 加一个只做操作面的 serve / 独立后台 / agent 旁路）、它怎么读 COS 而不把 CAS 正文经 agent 转发、鉴权是否仍是 ADR 0006 那套「这台实例的运营账户」。签发 / 吊销上传 token 继续只走 SSH + 本机 `init`，不要做成公网管理 API。
+- **还没拍（落地前再写 ADR）**：现有外网 serve 如何读 COS 而不把 CAS 正文经 agent 转发、COS 与本机统计怎么统一、鉴权是否继续复用 ADR 0006 的实例运营账户。签发 / 吊销上传 token 继续只走 SSH + 本机 `init`，不要做成公网管理 API。
 - **不做（现阶段）**：为了有面板，把外网数据面从 COS 迁回本机盘；把 `/-/admin` 当对外目录；在 agent 上再开一套未鉴权的浏览页。
 - **落点（规划）**：`cmd/relkit-serve` 现算面板是起点；进化时改这里并更新 [publish-topology §5](design/publish-topology.md)。
