@@ -3,10 +3,10 @@ package publish
 import (
 	"fmt"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/backends"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/model"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/backends"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 // sweepOrphanCAS deletes cas/{sha256} blobs that this product just dropped

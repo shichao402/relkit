@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"firoyang.com/relkit/internal/chain"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/testutil"
+	"go.firoyang.com/relkit/internal/chain"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/testutil"
 )
 
 type versionSelectFixture struct {

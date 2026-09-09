@@ -16,13 +16,13 @@ import (
 	"sync"
 	"time"
 
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/directory"
-	"firoyang.com/relkit/internal/humansize"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/publish"
-	"firoyang.com/relkit/internal/publishproto"
-	"firoyang.com/relkit/internal/stage"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/directory"
+	"go.firoyang.com/relkit/internal/humansize"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/publish"
+	"go.firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/stage"
 )
 
 const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue one token per product with `relkit-agent init -product <id>` (CI env is RELKIT_UPLOAD_TOKEN)"

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/webmeta"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/webmeta"
 )
 
 func selectors(pairs map[string]string) []*rupv2.Selector {

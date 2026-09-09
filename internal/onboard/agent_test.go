@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/internal/keys"
-	"firoyang.com/relkit/internal/onboard"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/keys"
+	"go.firoyang.com/relkit/internal/onboard"
 )
 
 func TestAgentChecklistRemoteMatch(t *testing.T) {

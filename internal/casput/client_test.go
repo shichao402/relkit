@@ -15,9 +15,9 @@ import (
 	"strings"
 	"testing"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/stage"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/stage"
 )
 
 func TestPutUploadsCASAndThinStaged(t *testing.T) {

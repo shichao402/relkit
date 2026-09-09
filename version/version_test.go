@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"firoyang.com/relkit/version"
+	"go.firoyang.com/relkit/version"
 )
 
 func TestParseAndBump(t *testing.T) {

@@ -3,7 +3,7 @@ package updater
 import (
 	"time"
 
-	updaterv1 "firoyang.com/relkit/api/updater/v1"
+	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

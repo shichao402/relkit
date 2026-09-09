@@ -3,7 +3,7 @@ package selectors
 import (
 	"sort"
 
-	"firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 type DuplicateSelectors struct {

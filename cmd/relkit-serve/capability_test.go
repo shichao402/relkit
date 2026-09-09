@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 func TestCASCapabilityRejectsExpiredAndTamperedTickets(t *testing.T) {

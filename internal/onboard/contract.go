@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/jsonio"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/jsonio"
 )
 
 const (

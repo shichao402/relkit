@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"firoyang.com/relkit/sdk/apply"
+	"go.firoyang.com/relkit/sdk/apply"
 )
 
 func TestReplaceFileAndCleanup(t *testing.T) {

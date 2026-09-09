@@ -17,14 +17,14 @@ Dart 同级 SDK：[`dart/AGENT-QUICKSTART.md`](dart/AGENT-QUICKSTART.md)
 
 ## G1. 安装
 
-不要 `go get firoyang.com/relkit`。模块路径是逻辑名 `firoyang.com/relkit`，源码从 GitHub 用 `scripts/relkit_consume.py` + lock 拉进 `third_party/relkit`：
+不要 `go get go.firoyang.com/relkit`。模块路径是逻辑名 `go.firoyang.com/relkit`，源码从 GitHub 用 `scripts/relkit_consume.py` + lock 拉进 `third_party/relkit`：
 
 ```go
-require firoyang.com/relkit v0.0.0
-replace firoyang.com/relkit => ./third_party/relkit
+require go.firoyang.com/relkit v0.0.0
+replace go.firoyang.com/relkit => ./third_party/relkit
 ```
 
-然后 import `firoyang.com/relkit/sdk` 或 `firoyang.com/relkit/sdk/updaterfacade`。
+然后 import `go.firoyang.com/relkit/sdk` 或 `go.firoyang.com/relkit/sdk/updaterfacade`。
 
 ## G2. 最小可运行片段
 
@@ -39,7 +39,7 @@ import (
 	"fmt"
 	"os"
 
-	"firoyang.com/relkit/sdk"
+	"go.firoyang.com/relkit/sdk"
 )
 
 func CheckOnce(ctx context.Context) error {

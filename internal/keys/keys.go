@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 const (

@@ -14,11 +14,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/keys"
-	"firoyang.com/relkit/internal/publishproto"
-	"firoyang.com/relkit/internal/stage"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/keys"
+	"go.firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/stage"
 )
 
 func TestAgentStagedAndPublishDryRun(t *testing.T) {

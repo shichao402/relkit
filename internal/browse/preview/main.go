@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"firoyang.com/relkit/internal/browse"
+	"go.firoyang.com/relkit/internal/browse"
 )
 
 func main() {

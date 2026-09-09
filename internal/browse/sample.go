@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"firoyang.com/relkit/internal/webmeta"
+	"go.firoyang.com/relkit/internal/webmeta"
 )
 
 // WriteSampleDump renders the browse templates with fake catalog data so a

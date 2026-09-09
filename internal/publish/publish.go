@@ -12,16 +12,16 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/backends"
-	"firoyang.com/relkit/internal/browse"
-	"firoyang.com/relkit/internal/chain"
-	"firoyang.com/relkit/internal/changelog"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/stage"
-	"firoyang.com/relkit/internal/webmeta"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/backends"
+	"go.firoyang.com/relkit/internal/browse"
+	"go.firoyang.com/relkit/internal/chain"
+	"go.firoyang.com/relkit/internal/changelog"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/stage"
+	"go.firoyang.com/relkit/internal/webmeta"
 )
 
 type Error struct {

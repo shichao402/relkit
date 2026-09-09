@@ -3,10 +3,10 @@ package publish
 import (
 	"fmt"
 
-	"firoyang.com/relkit/internal/backends"
-	"firoyang.com/relkit/internal/browse"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/makers"
+	"go.firoyang.com/relkit/internal/backends"
+	"go.firoyang.com/relkit/internal/browse"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/makers"
 )
 
 // BrowseSink deploys the human-facing dump. Protocol clients never read it.

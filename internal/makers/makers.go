@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"firoyang.com/relkit/internal/backends"
-	"firoyang.com/relkit/internal/browse"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/httpx"
+	"go.firoyang.com/relkit/internal/backends"
+	"go.firoyang.com/relkit/internal/browse"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/httpx"
 )
 
 const (

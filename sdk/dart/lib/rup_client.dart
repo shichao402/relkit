@@ -52,4 +52,5 @@ export 'src/scheduler.dart';
 export 'src/selectors.dart';
 export 'src/state.dart';
 export 'src/updater.dart';
-export 'src/updater_facade.dart';
+export 'src/updater_facade.dart'
+    show Glue, DefaultGlue, OpenResult, Updater, ipcMin, ipcMax, ipcCurrent;

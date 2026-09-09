@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"firoyang.com/relkit/internal/onboard"
+	"go.firoyang.com/relkit/internal/onboard"
 )
 
 func runAgentOnboard(out io.Writer, args []string) error {

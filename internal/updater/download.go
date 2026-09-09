@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	updaterv1 "firoyang.com/relkit/api/updater/v1"
-	"firoyang.com/relkit/sdk"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	"go.firoyang.com/relkit/sdk"
 )
 
 func (e *Engine) handleDownload(ctx context.Context, req *updaterv1.UpdaterRequest, op *updaterv1.DownloadOp, st store) error {

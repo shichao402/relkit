@@ -2,9 +2,9 @@
 //
 // Install: sparse-checkout GitHub via scripts/relkit_consume.py, then
 //
-//	replace firoyang.com/relkit => ./third_party/relkit
+//	replace go.firoyang.com/relkit => ./third_party/relkit
 //
-// Do not go get firoyang.com/relkit (no vanity / GOPROXY path).
+// Do not go get go.firoyang.com/relkit (no vanity / GOPROXY path).
 //
 // Agent onboarding (first read when wiring a host): see AGENT-QUICKSTART.md
 // in this directory, and docs/agent/README.md at the repo root for the

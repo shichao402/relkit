@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/internal/keys"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/testutil"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/keys"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/testutil"
 )
 
 type signatureKeysFixture struct {

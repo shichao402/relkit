@@ -1,6 +1,6 @@
 package updater
 
-import updaterv1 "firoyang.com/relkit/api/updater/v1"
+import updaterv1 "go.firoyang.com/relkit/api/updater/v1"
 
 // MapLegacyLastResult maps on-disk SDK strings onto LastResult.
 //

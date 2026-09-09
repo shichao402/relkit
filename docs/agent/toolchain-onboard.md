@@ -9,7 +9,7 @@
 relkit --version
 ```
 
-失败则先安装（任选）：从 [Releases](https://github.com/shichao402/relkit/releases) 下载二进制并加入 PATH，或 clone 后 `go build -o relkit ./cmd/relkit`。不要 `go install firoyang.com/relkit/...`（模块名没有网络解析）。
+失败则先安装（任选）：从 [Releases](https://github.com/shichao402/relkit/releases) 下载二进制并加入 PATH，或 clone 后 `go build -o relkit ./cmd/relkit`。不要 `go install go.firoyang.com/relkit/...`（模块名没有网络解析）。
 
 自托管分发时再编 serve：`go build -o relkit-serve ./cmd/relkit-serve`。
 
@@ -79,7 +79,7 @@ relkit verify --deep                # 对真实 HTTP 后端有意义
 2. 构建产物 → `relkit stage`（会写出 `release-policy.json`）→ 上传 staged → 发布机 `publish`
 3. **私钥、COS 密钥不进 CI、不进 staged 包。** 仓库 `relkit.json` 只给 stage 抽策略；机器侧 `publishTo` / 密钥 env 名在 `/etc/relkit-agent/products/<id>.json`
 4. **禁止**把完整 `relkit.json` scp/覆盖到 `/srv/relkit/<id>/`。agent 不读产品根那份；覆盖只会冲掉本机密钥引用
-5. 宿主仓若 sparse / vendor relkit：clone **`https://github.com/shichao402/relkit.git`**，默认跟 **`main`**。只有要冻结某次发版才 `--ref` **完整 SHA**（短 SHA 多数 remote 拒绝 `git fetch`）。Go 模块路径仍是 `firoyang.com/relkit`，那不是 git URL
+5. 宿主仓若 sparse / vendor relkit：clone **`https://github.com/shichao402/relkit.git`**，默认跟 **`main`**。只有要冻结某次发版才 `--ref` **完整 SHA**（短 SHA 多数 remote 拒绝 `git fetch`）。Go 模块路径仍是 `go.firoyang.com/relkit`，那不是 git URL
 6. 发版排障与红线：改读 `relkit agent-guide`，不要复制粘贴过期命令
 7. **产物哈希要稳**：不要把每次不同的 `BuildTime` / 随机 seed 打进二进制。relkit 只认 sha256；哈希漂了，agent CAS 跳过上传和客户端跳过下载都打不中
 8. **发布 CAS 不用宿主再实现**：agent 返回绝对 URL `requests[]`；客户端只执行请求，不实现 STS / SigV4 / `sign`

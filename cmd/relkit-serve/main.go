@@ -45,8 +45,8 @@ import (
 	"syscall"
 	"time"
 
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 const tokenEnv = "RELKIT_SERVE_TOKEN"

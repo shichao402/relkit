@@ -27,7 +27,7 @@
 relkit --version
 ```
 
-正式工具是 Go 单二进制（模块 `firoyang.com/relkit`，仓 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)）。安装任选其一：从 [Releases](https://github.com/shichao402/relkit/releases) 下载对应平台二进制并放进 PATH，或 clone 后 `go build -o relkit ./cmd/relkit`。不要 `go install firoyang.com/relkit/...`。
+正式工具是 Go 单二进制（模块 `go.firoyang.com/relkit`，仓 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)）。安装任选其一：从 [Releases](https://github.com/shichao402/relkit/releases) 下载对应平台二进制并放进 PATH，或 clone 后 `go build -o relkit ./cmd/relkit`。不要 `go install go.firoyang.com/relkit/...`。
 
 `relkit --version` 失败就说明工具在当前环境不可用。此时：
 

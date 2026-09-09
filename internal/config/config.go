@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/internal/jsonio"
-	"firoyang.com/relkit/internal/keys"
-	"firoyang.com/relkit/internal/model"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/jsonio"
+	"go.firoyang.com/relkit/internal/keys"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 const ConfigName = "relkit.json"

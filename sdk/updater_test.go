@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/sdk"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/sdk"
 )
 
 func TestCheckAndDownload(t *testing.T) {

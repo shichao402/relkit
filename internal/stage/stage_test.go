@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/config"
 )
 
 func TestRunWritesNormalizedReleasePolicy(t *testing.T) {

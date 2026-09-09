@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/config"
 )
 
 type EvalOptions struct {

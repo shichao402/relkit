@@ -174,9 +174,9 @@ const file_rup_v2_keys_proto_rawDesc = "" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x15\n" +
 	"\x06key_id\x18\x02 \x01(\tR\x05keyId\x12\x10\n" +
 	"\x03alg\x18\x03 \x01(\tR\x03alg\x12\x12\n" +
-	"\x04seed\x18\x04 \x01(\fR\x04seedBv\n" +
+	"\x04seed\x18\x04 \x01(\fR\x04seedBy\n" +
 	"\n" +
-	"com.rup.v2B\tKeysProtoP\x01Z$firoyang.com/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
+	"com.rup.v2B\tKeysProtoP\x01Z'go.firoyang.com/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
 
 var (
 	file_rup_v2_keys_proto_rawDescOnce sync.Once

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"firoyang.com/relkit/internal/backends"
-	"firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/backends"
+	"go.firoyang.com/relkit/internal/config"
 )
 
 type typeOnlyBackend struct {

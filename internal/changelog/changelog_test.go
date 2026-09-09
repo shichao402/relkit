@@ -3,7 +3,7 @@ package changelog
 import (
 	"testing"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
 )
 
 func TestExtractSection(t *testing.T) {

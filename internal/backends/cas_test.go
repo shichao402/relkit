@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 type memStore struct {

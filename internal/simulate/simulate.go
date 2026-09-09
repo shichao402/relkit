@@ -7,14 +7,14 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/backends"
-	"firoyang.com/relkit/internal/chain"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/internal/httpx"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/stage"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/backends"
+	"go.firoyang.com/relkit/internal/chain"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/httpx"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/stage"
 )
 
 type Error struct {

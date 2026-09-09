@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 // ConfigName is looked for next to the binary and in /etc when -config is

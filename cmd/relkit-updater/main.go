@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/signal"
 
-	updaterv1 "firoyang.com/relkit/api/updater/v1"
-	"firoyang.com/relkit/internal/updater"
+	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	"go.firoyang.com/relkit/internal/updater"
 )
 
 // Overridden at release via -ldflags "-X main.version=...".

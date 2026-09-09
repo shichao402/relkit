@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/httpx"
-	"firoyang.com/relkit/internal/publishproto"
-	"firoyang.com/relkit/internal/stage"
-	"firoyang.com/relkit/internal/stagedput"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/httpx"
+	"go.firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/stage"
+	"go.firoyang.com/relkit/internal/stagedput"
 )
 
 type Options struct {

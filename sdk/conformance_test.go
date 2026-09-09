@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/testutil"
-	"firoyang.com/relkit/sdk"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/testutil"
+	"go.firoyang.com/relkit/sdk"
 )
 
 func TestVersionSelectConformanceDelegated(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/httpx"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/httpx"
 )
 
 type Error struct {

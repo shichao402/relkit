@@ -16,7 +16,7 @@
 
 | 语言 | 包 | 开箱 |
 |------|-----|------|
-| Go | `firoyang.com/relkit/sdk/updaterfacade` | 本文 + ADR 0010 |
+| Go | `go.firoyang.com/relkit/sdk/updaterfacade` | 本文 + ADR 0010 |
 | Dart | `rup_client` `Updater.open` | 同上 |
 | Node | `rup-client` `Updater.open` | 同上 |
 

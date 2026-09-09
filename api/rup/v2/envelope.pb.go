@@ -159,9 +159,9 @@ const file_rup_v2_envelope_proto_rawDesc = "" +
 	"\apayload\x18\x02 \x01(\fR\apayload\x121\n" +
 	"\n" +
 	"signatures\x18\x03 \x03(\v2\x11.rup.v2.SignatureR\n" +
-	"signaturesBz\n" +
+	"signaturesB}\n" +
 	"\n" +
-	"com.rup.v2B\rEnvelopeProtoP\x01Z$firoyang.com/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
+	"com.rup.v2B\rEnvelopeProtoP\x01Z'go.firoyang.com/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
 
 var (
 	file_rup_v2_envelope_proto_rawDescOnce sync.Once

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/webmeta"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/webmeta"
 )
 
 const (

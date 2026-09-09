@@ -29,7 +29,7 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 
 ## 安装
 
-主仓是 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)。Go 模块名是逻辑路径 `firoyang.com/relkit`，**没有** vanity 解析，不要 `go get` / `go install` 该模块。
+主仓是 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)。Go 模块名是逻辑路径 `go.firoyang.com/relkit`，**没有** vanity 解析，不要 `go get` / `go install` 该模块。
 
 从 [Releases](https://github.com/shichao402/relkit/releases) 下载对应平台二进制，或 clone 后本地构建：
 
@@ -45,8 +45,8 @@ python deploy/relkit.py build --serve --agent
 宿主产品仓用 `scripts/relkit.lock.json` + `scripts/relkit_consume.py` 从 GitHub 拉同一 SHA，并：
 
 ```go
-require firoyang.com/relkit v0.0.0
-replace firoyang.com/relkit => ./third_party/relkit
+require go.firoyang.com/relkit v0.0.0
+replace go.firoyang.com/relkit => ./third_party/relkit
 ```
 
 ## relkit（发布 CLI）
@@ -157,12 +157,12 @@ sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-a
 
 | | |
 |--|--|
-| Go | `sdk/*.go` → consume + `replace firoyang.com/relkit => ./third_party/relkit` · [`sdk/AGENT-QUICKSTART.md`](sdk/AGENT-QUICKSTART.md) |
+| Go | `sdk/*.go` → consume + `replace go.firoyang.com/relkit => ./third_party/relkit` · [`sdk/AGENT-QUICKSTART.md`](sdk/AGENT-QUICKSTART.md) |
 | Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/AGENT-QUICKSTART.md`](sdk/dart/AGENT-QUICKSTART.md) |
 | Node | `sdk/node`（package `rup-client`）· [`sdk/node/AGENT-QUICKSTART.md`](sdk/node/AGENT-QUICKSTART.md) |
 
 ```go
-import "firoyang.com/relkit/sdk"
+import "go.firoyang.com/relkit/sdk"
 
 u := &sdk.Updater{
     Product: "myapp", Channel: "stable", CurrentCode: 100,

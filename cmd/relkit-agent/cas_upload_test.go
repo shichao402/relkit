@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 func TestCASCredentialsUploadAndSkip(t *testing.T) {

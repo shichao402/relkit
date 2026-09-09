@@ -1,4 +1,4 @@
-module firoyang.com/relkit
+module go.firoyang.com/relkit
 
 go 1.26.3
 

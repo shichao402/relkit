@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"firoyang.com/relkit/internal/httpx"
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/httpx"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 const (

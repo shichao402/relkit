@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"firoyang.com/relkit/internal/humansize"
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/humansize"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 const (

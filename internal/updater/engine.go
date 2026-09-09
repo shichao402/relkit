@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	updaterv1 "firoyang.com/relkit/api/updater/v1"
-	"firoyang.com/relkit/sdk"
+	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	"go.firoyang.com/relkit/sdk"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

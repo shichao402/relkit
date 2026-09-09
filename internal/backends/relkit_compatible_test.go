@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 func testRelkitBackend(serverURL string) *relkitCompatibleBackend {

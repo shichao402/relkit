@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"testing"
 
-	"firoyang.com/relkit/sdk"
+	"go.firoyang.com/relkit/sdk"
 )
 
 func TestConformanceOfflineRecovery(t *testing.T) {

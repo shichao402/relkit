@@ -1,7 +1,6 @@
 /// Generated host facade (relkit.updater.v1). Do not hand-edit the method set.
 library;
 
-import 'dart:async';
 import 'dart:core' hide Error;
 import 'dart:io';
 import 'dart:typed_data';
@@ -119,7 +118,6 @@ class Updater {
     glue ??= DefaultGlue();
     try {
       final bin = await glue.locate(runtime);
-      final u = Updater._(profile, runtime, glue, bin, Capabilities(ipc: ipcCurrent));
       Capabilities? caps;
       Error? err;
       await for (final ev in glue.run(bin, ['-capabilities'], Uint8List(0))) {
@@ -156,11 +154,12 @@ class Updater {
     return _glue.run(_bin, const <String>[], _frame(req));
   }
 
+  /// protobuf.dart reserves `check` on GeneratedMessage, so the field is `check_10`.
   Future<CheckResult> check({bool force = false, int exactCode = 0, CheckPolicy? policy}) async {
     final req = UpdaterRequest()
-      ..check = CheckOp(force: force, exactCode: Int64(exactCode), policy: policy);
+      ..check_10 = CheckOp(force: force, exactCode: Int64(exactCode), policy: policy);
     await for (final ev in _call(req)) {
-      if (ev.hasCheck()) return ev.check;
+      if (ev.hasCheck_10()) return ev.check_10;
       if (ev.hasFailed()) {
         return CheckResult()..failed = ev.failed;
       }

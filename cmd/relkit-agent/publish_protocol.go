@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 func (s *Server) publishWindow() publishproto.Window {

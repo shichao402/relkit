@@ -9,11 +9,11 @@ import (
 	"sort"
 	"time"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/chain"
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/internal/model"
-	"firoyang.com/relkit/internal/selectors"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/chain"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/selectors"
 )
 
 // TrustedKeys maps keyId -> raw 32-byte ed25519 public key.

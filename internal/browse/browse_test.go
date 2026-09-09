@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"firoyang.com/relkit/internal/webmeta"
+	"go.firoyang.com/relkit/internal/webmeta"
 )
 
 func TestApplyPublishMergesChannels(t *testing.T) {

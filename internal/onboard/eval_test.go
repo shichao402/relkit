@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/jsonio"
-	"firoyang.com/relkit/internal/onboard"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/jsonio"
+	"go.firoyang.com/relkit/internal/onboard"
 )
 
 func TestValidateChecklistRejectsCycle(t *testing.T) {

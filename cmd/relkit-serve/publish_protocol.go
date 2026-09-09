@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"firoyang.com/relkit/internal/publishproto"
+	"go.firoyang.com/relkit/internal/publishproto"
 )
 
 func (c *config) publishWindow() publishproto.Window {

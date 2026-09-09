@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/envelope"
-	"firoyang.com/relkit/internal/stage"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/stage"
 )
 
 type agentFileConfig struct {

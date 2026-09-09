@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"firoyang.com/relkit/internal/backends"
-	"firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/simulate"
-	"firoyang.com/relkit/internal/verify"
+	"go.firoyang.com/relkit/internal/backends"
+	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/simulate"
+	"go.firoyang.com/relkit/internal/verify"
 )
 
 // credentialsElsewhere marks a step that can only run where the publish

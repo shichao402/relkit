@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	rupv2 "firoyang.com/relkit/api/rup/v2"
-	"firoyang.com/relkit/internal/webmeta"
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/webmeta"
 )
 
 // productPathPrefix is under /-/ for the same reason the health endpoint is:

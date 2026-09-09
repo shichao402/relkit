@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	relkitconfig "firoyang.com/relkit/internal/config"
-	"firoyang.com/relkit/internal/model"
+	relkitconfig "go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 const defaultProductRootPrefix = "/srv/relkit"

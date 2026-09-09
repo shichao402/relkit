@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/model"
 )
 
 // CASRequest is one HTTP request the client must execute as written.

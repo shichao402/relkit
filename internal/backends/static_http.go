@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"firoyang.com/relkit/internal/httpx"
+	"go.firoyang.com/relkit/internal/httpx"
 )
 
 type staticHTTPBackend struct {

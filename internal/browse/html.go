@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"html/template"
 
-	"firoyang.com/relkit/internal/webmeta"
+	"go.firoyang.com/relkit/internal/webmeta"
 )
 
 //go:embed templates/*.html
