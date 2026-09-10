@@ -17,7 +17,6 @@ var pages = template.Must(template.New("browse").Funcs(template.FuncMap{
 	"bytes":     humanBytes,
 	"platform":  platformLabel,
 	"sliceDate": sliceDate,
-	"chanURL":   channelDownload,
 }).ParseFS(templateFS, "templates/*.html"))
 
 type crumb struct {
@@ -43,7 +42,7 @@ func RenderIndex(cat *Catalog) ([]byte, error) {
 	return render("index", pageData{
 		Title:   heading,
 		Heading: heading,
-		Sub:     "Download the build for your platform. Update clients use signed protocol files, not this page.",
+		Sub:     "Select a product to view downloads by platform. Update clients use signed protocol files, not this page.",
 		Index:   cat,
 	})
 }
@@ -71,15 +70,6 @@ func render(name string, data pageData) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func channelDownload(ch Channel) string {
-	for _, artifact := range ch.Artifacts {
-		if href := firstURL(artifact); href != "" {
-			return href
-		}
-	}
-	return ""
 }
 
 func firstURL(v any) string {

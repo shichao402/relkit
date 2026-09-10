@@ -30,10 +30,13 @@ func TestApplyPublishMergesChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(indexHTML)
-	for _, want := range []string{"Demo", "stable", "1.0.0", "dev", "1.1.0", "demo.html", "https://raw.example/demo.zip"} {
+	for _, want := range []string{"Demo", "stable", "1.0.0", "dev", "1.1.0", "demo.html"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index missing %q\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "https://raw.example/") || strings.Contains(body, ">Download<") {
+		t.Errorf("index must link to product pages instead of guessing a platform download\n%s", body)
 	}
 	if strings.Contains(body, ".pb") {
 		t.Errorf("human index must not use .pb as navigation\n%s", body)
