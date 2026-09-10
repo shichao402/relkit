@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import ANY, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -138,6 +139,18 @@ class RequiredCheckoutDirsTests(unittest.TestCase):
 
             self.assertEqual(logger.warnings, [])
             self.assertTrue((repo / ".git" / "info" / "sparse-checkout").is_file())
+
+
+class BuildCheckoutTests(unittest.TestCase):
+    def test_build_always_materializes_head_before_selecting_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with patch.object(subject, "materialize_head_archive") as materialize:
+                self.assertEqual(subject.build_cli(_Logger(), root, "go", []), [])
+            materialize.assert_called_once_with(
+                ANY,
+                subject.relkit_dir(root),
+            )
 
 
 class LockTests(unittest.TestCase):

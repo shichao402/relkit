@@ -451,6 +451,8 @@ def build_cli(
     targets: Sequence[str],
 ) -> list[Path]:
     dest = relkit_dir(project_root)
+    logger.info("materializing a build-complete relkit tree from HEAD")
+    materialize_head_archive(logger, dest)
     built: list[Path] = []
     for target in targets:
         if target == "host":
@@ -635,6 +637,26 @@ def missing_tracked_paths(dest: Path, relative: str) -> list[str]:
     return [name for name in names if not (dest / name).exists()]
 
 
+def materialize_head_archive(logger: Logger, dest: Path) -> None:
+    """Expand every tracked file from HEAD without sparse-index semantics."""
+    archive = dest.parent / ".relkit-head.tar"
+    try:
+        run(
+            logger,
+            ["git", "archive", "--format=tar", "-o", str(archive), "HEAD"],
+            cwd=dest,
+        )
+        with tarfile.open(archive, "r:") as tf:
+            if sys.version_info >= (3, 12):
+                tf.extractall(dest, filter="fully_trusted")
+            else:
+                # `filter` was added after the Python 3.8 floor. Git object
+                # names cannot contain absolute paths or `..` components.
+                tf.extractall(dest)
+    finally:
+        archive.unlink(missing_ok=True)
+
+
 def materialize_required_dirs(logger: Logger, dest: Path) -> None:
     """Give up on the cone rather than build from a half-checked-out tree.
 
@@ -672,22 +694,7 @@ def materialize_required_dirs(logger: Logger, dest: Path) -> None:
     # `sparse-checkout disable` and `checkout HEAD` while leaving skip-worktree
     # files absent. `git archive` reads the commit object directly and therefore
     # does not depend on that working-tree implementation.
-    archive = dest.parent / ".relkit-head.tar"
-    try:
-        run(
-            logger,
-            ["git", "archive", "--format=tar", "-o", str(archive), "HEAD"],
-            cwd=dest,
-        )
-        with tarfile.open(archive, "r:") as tf:
-            if sys.version_info >= (3, 12):
-                tf.extractall(dest, filter="fully_trusted")
-            else:
-                # `filter` was added after the Python 3.8 floor. Git object
-                # names cannot contain absolute paths or `..` components.
-                tf.extractall(dest)
-    finally:
-        archive.unlink(missing_ok=True)
+    materialize_head_archive(logger, dest)
 
     absent: list[str] = []
     for relative in REQUIRED_CHECKOUT_DIRS:
