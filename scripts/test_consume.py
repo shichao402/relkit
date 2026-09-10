@@ -19,6 +19,9 @@ class _Logger:
     def warn(self, message: str) -> None:
         self.warnings.append(message)
 
+    def info(self, message: str) -> None:
+        pass
+
 
 class RequiredRootFilesTests(unittest.TestCase):
     def test_restores_files_from_head_when_sparse_checkout_omits_them(self) -> None:
@@ -64,6 +67,70 @@ class RequiredRootFilesTests(unittest.TestCase):
             subject.materialize_required_root_files(logger, repo)
 
             self.assertEqual(logger.warnings, [])
+
+
+class RequiredCheckoutDirsTests(unittest.TestCase):
+    @staticmethod
+    def _repo(root: Path) -> None:
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.invalid"],
+            cwd=root,
+            check=True,
+        )
+        subprocess.run(["git", "config", "user.name", "test"], cwd=root, check=True)
+        for relative in subject.REQUIRED_CHECKOUT_DIRS:
+            target = root / relative / "probe.go"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("package probe\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=root, check=True)
+
+    def test_drops_the_cone_when_a_build_critical_dir_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            self._repo(repo)
+            subprocess.run(
+                ["git", "sparse-checkout", "set", "--cone", "cmd/relkit"],
+                cwd=repo,
+                check=True,
+            )
+            self.assertFalse((repo / "internal").is_dir())
+
+            logger = _Logger()
+            subject.materialize_required_dirs(logger, repo)
+
+            self.assertTrue(logger.warnings)
+            for relative in subject.REQUIRED_CHECKOUT_DIRS:
+                self.assertTrue((repo / relative / "probe.go").is_file(), relative)
+
+    def test_repairs_a_directory_left_without_its_files(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            self._repo(repo)
+            (repo / "internal" / "probe.go").unlink()
+
+            logger = _Logger()
+            subject.materialize_required_dirs(logger, repo)
+
+            self.assertTrue(logger.warnings)
+            self.assertTrue((repo / "internal" / "probe.go").is_file())
+
+    def test_keeps_a_complete_checkout_sparse(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            self._repo(repo)
+            subprocess.run(
+                ["git", "sparse-checkout", "set", "--cone", *subject.REQUIRED_CHECKOUT_DIRS],
+                cwd=repo,
+                check=True,
+            )
+
+            logger = _Logger()
+            subject.materialize_required_dirs(logger, repo)
+
+            self.assertEqual(logger.warnings, [])
+            self.assertTrue((repo / ".git" / "info" / "sparse-checkout").is_file())
 
 
 class LockTests(unittest.TestCase):

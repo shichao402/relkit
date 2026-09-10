@@ -50,6 +50,13 @@ SPARSE_CONE_DIRS = (
 # both files absent, so a later `go build` could not find the module.
 REQUIRED_ROOT_FILES = ("go.mod", "go.sum")
 
+# Same worker, SvnMergeTool build #116: the cone command was accepted but the
+# working tree came out with `cmd/relkit` and without `internal`/`version`, and
+# `go build` could only report every import as an unprovided module. These
+# directories have existed for as long as the CLI has, so their absence always
+# means an incomplete checkout rather than an old ref.
+REQUIRED_CHECKOUT_DIRS = ("cmd/relkit", "internal", "version")
+
 # LFS-tracked (and/or local) CLI artifacts under tools/bin/.
 # name → (GOOS, GOARCH, filename)
 CLI_TARGETS = {
@@ -575,6 +582,7 @@ def sync_from_url(
     )
     run(logger, ["git", "checkout", "--force", "FETCH_HEAD"], cwd=dest)
     materialize_required_root_files(logger, dest)
+    materialize_required_dirs(logger, dest)
 
 
 def materialize_required_root_files(logger: Logger, dest: Path) -> None:
@@ -614,6 +622,61 @@ def materialize_required_root_files(logger: Logger, dest: Path) -> None:
         raise RuntimeError(
             "sparse checkout is incomplete; missing required root files: "
             + ", ".join(absent)
+        )
+
+
+def missing_tracked_paths(dest: Path, relative: str) -> list[str]:
+    """Tracked paths under [relative] that HEAD has but the working tree lacks."""
+    out = subprocess.check_output(
+        ["git", "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", relative],
+        cwd=str(dest),
+    )
+    names = [name.decode("utf-8", "replace") for name in out.split(b"\0") if name]
+    return [name for name in names if not (dest / name).exists()]
+
+
+def materialize_required_dirs(logger: Logger, dest: Path) -> None:
+    """Give up on the cone rather than build from a half-checked-out tree.
+
+    Sparseness is a download optimization; a build-complete tree is the
+    contract. When a worker leaves build-critical files out, drop the cone
+    entirely and check the same commit out again. Compare against HEAD instead
+    of testing for directories: an unexpanded sparse directory looks present
+    and still fails the build.
+    """
+    missing: list[str] = []
+    for relative in REQUIRED_CHECKOUT_DIRS:
+        missing += missing_tracked_paths(dest, relative)
+    if not missing:
+        return
+
+    logger.warn(
+        f"sparse checkout omitted {len(missing)} build-critical files, "
+        "e.g. " + ", ".join(sorted(missing)[:5])
+    )
+    for label, command in (
+        ("git", ["git", "--version"]),
+        ("active cone", ["git", "sparse-checkout", "list"]),
+    ):
+        try:
+            out = subprocess.check_output(
+                command, cwd=str(dest), text=True, errors="replace"
+            )
+        except (subprocess.CalledProcessError, OSError):
+            out = "<command failed>"
+        logger.warn(f"{label}: " + " ".join(out.split()))
+
+    logger.warn("dropping the cone and checking the commit out in full")
+    run(logger, ["git", "sparse-checkout", "disable"], cwd=dest)
+    run(logger, ["git", "checkout", "--force", "HEAD"], cwd=dest)
+
+    absent: list[str] = []
+    for relative in REQUIRED_CHECKOUT_DIRS:
+        absent += missing_tracked_paths(dest, relative)
+    if absent:
+        raise RuntimeError(
+            "relkit checkout is incomplete even without a sparse cone; "
+            f"{len(absent)} files missing, e.g. " + ", ".join(sorted(absent)[:5])
         )
 
 
