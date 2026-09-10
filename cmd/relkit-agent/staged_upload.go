@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -423,6 +424,15 @@ func (s *Server) writeUploadRecord(rec *uploadRecord) error {
 		return err
 	}
 	dest := filepath.Join(dir, "session.json")
+	if err := os.Rename(tmpPath, dest); err == nil {
+		return nil
+	} else if runtime.GOOS != "windows" {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	// Windows os.Rename cannot replace an existing file. Mutations of a live
+	// upload are serialized by liveUpload.mu, so keep the remove fallback
+	// platform-specific instead of exposing a session.json gap on Unix.
 	_ = os.Remove(dest)
 	return os.Rename(tmpPath, dest)
 }
