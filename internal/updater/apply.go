@@ -64,7 +64,7 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 		StagedRoot:        filepath.Join(req.GetRuntime().GetDataDir(), "staging", plan.PlanId),
 		TargetCode:        plan.Code,
 		TargetVersion:     plan.Version,
-		Pid:               int32(os.Getpid()),
+		Pid:               int32(os.Getppid()),
 		Layout:            inst.Layout,
 		Relaunch:          inst.Relaunch,
 		ExecutableRelpath: inst.ExecutableRelpath,
@@ -76,8 +76,18 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 	if err := st.saveSession(sess); err != nil {
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, err.Error())
 	}
-	if inst.Layout == updaterv1.Layout_LAYOUT_VERSIONED_DIR {
-		_ = writeLegacyJSONSession(inst.InstallRoot, sess)
+	_ = writeCompatibilitySession(req.GetRuntime().GetDataDir(), sess)
+	launch := e.LaunchWorker
+	if launch == nil {
+		launch = launchApplyWorker
+	}
+	if err := launch(req.GetRuntime().GetDataDir(), sessionID, sess.StagedRoot); err != nil {
+		sess.Phase = updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
+		sess.Error = newError(updaterv1.ErrorCode_ERROR_CODE_DISK, true, err.Error(), nil)
+		sess.HeartbeatAt = timestamppb.Now()
+		_ = st.saveSession(sess)
+		_ = writeCompatibilitySession(req.GetRuntime().GetDataDir(), sess)
+		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, "failed to start apply worker: "+err.Error())
 	}
 	return e.emit(&updaterv1.UpdaterEvent{
 		Kind: &updaterv1.UpdaterEvent_Apply{Apply: &updaterv1.ApplyResult{
@@ -88,6 +98,31 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 			}},
 		}},
 	})
+}
+
+func launchApplyWorker(dataDir, sessionID, stagedRoot string) error {
+	current, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	workerDir := filepath.Join(stagedRoot, ".worker")
+	name := "relkit-updater"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	worker := filepath.Join(workerDir, name)
+	if err := copyFile(current, worker); err != nil {
+		return err
+	}
+	if err := os.Chmod(worker, 0o755); err != nil {
+		return err
+	}
+	cmd := exec.Command(worker, "--worker", sessionID, "--data-dir", dataDir)
+	cmd.Dir = workerDir
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 func (e *Engine) emitApplyFail(code updaterv1.ErrorCode, message string) error {
@@ -135,6 +170,14 @@ func writeLegacyJSONSession(installRoot string, sess *updaterv1.ApplySessionReco
 	return atomicWrite(filepath.Join(installRoot, JSONSessionName), append(raw, '\n'))
 }
 
+func writeCompatibilitySession(dataDir string, sess *updaterv1.ApplySessionRecord) error {
+	root := dataDir
+	if sess.Layout == updaterv1.Layout_LAYOUT_VERSIONED_DIR {
+		root = sess.InstallRoot
+	}
+	return writeLegacyJSONSession(root, sess)
+}
+
 // RunWorker applies a previously accepted session. It must be started from staging.
 func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	st := store{dataDir: dataDir}
@@ -151,9 +194,16 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		sess.HeartbeatAt = timestamppb.Now()
 		sess.Error = errp
 		_ = st.saveSession(sess)
-		if sess.Layout == updaterv1.Layout_LAYOUT_VERSIONED_DIR {
-			_ = writeLegacyJSONSession(sess.InstallRoot, sess)
-		}
+		_ = writeCompatibilitySession(dataDir, sess)
+	}
+	if err := waitForHostExit(int(sess.Pid), 5*time.Minute, func() {
+		setPhase(updaterv1.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, nil)
+	}); err != nil {
+		setPhase(
+			updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
+			newError(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil),
+		)
+		return err
 	}
 	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COPYING, nil)
 
@@ -191,6 +241,23 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		_ = cmd.Start()
 	}
 	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMPLETED, nil)
+	return nil
+}
+
+func waitForHostExit(pid int, timeout time.Duration, heartbeat func()) error {
+	if pid <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for processAlive(pid) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("host process %d did not exit within %s", pid, timeout)
+		}
+		if heartbeat != nil {
+			heartbeat()
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	return nil
 }
 

@@ -36,7 +36,6 @@ TOOLCHAIN_DIR_NAME = ".toolchain"
 SPARSE_CONE_DIRS = (
     "sdk",
     "cmd/relkit",
-    "cmd/relkit-apply",
     "cmd/relkit-updater",
     "internal",
     "api",
@@ -502,33 +501,6 @@ def build_cli(
             out.chmod(out.stat().st_mode | 0o111)
         logger.info(f"relkit CLI 就绪: {out} ({out.stat().st_size} bytes)")
         built.append(out)
-
-        apply_name = "relkit-apply.exe" if goos == "windows" else "relkit-apply"
-        apply_out = project_root / "tools" / "bin" / apply_name
-        logger.info(f"go build relkit-apply ({goos}/{goarch}) → {apply_out}")
-        run(
-            logger,
-            [
-                go_bin,
-                "build",
-                "-trimpath",
-                "-ldflags",
-                "-s -w",
-                "-o",
-                str(apply_out),
-                "./cmd/relkit-apply",
-            ],
-            cwd=dest,
-            timeout_seconds=600,
-            env=env,
-        )
-        if apply_out.is_file() and goos != "windows":
-            apply_out.chmod(apply_out.stat().st_mode | 0o111)
-        if apply_out.is_file():
-            logger.info(
-                f"relkit-apply 就绪: {apply_out} ({apply_out.stat().st_size} bytes)"
-            )
-            built.append(apply_out)
 
         updater_name = "relkit-updater.exe" if goos == "windows" else "relkit-updater"
         updater_out = project_root / "tools" / "bin" / updater_name

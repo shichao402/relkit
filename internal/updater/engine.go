@@ -17,6 +17,9 @@ type Engine struct {
 	Fetcher sdk.Fetcher
 	Now     func() timestamppb.Timestamp
 	Stdout  io.Writer
+	// LaunchWorker is injectable for tests. Production copies the running
+	// updater into staging and starts it independently of the host install tree.
+	LaunchWorker func(dataDir, sessionID, stagedRoot string) error
 }
 
 func (e *Engine) writer() io.Writer {
@@ -89,8 +92,8 @@ func validateOpen(profile *updaterv1.ClientProfile, runtime *updaterv1.Runtime) 
 	if len(profile.EntryUrls) == 0 && len(profile.IndexUrls) == 0 {
 		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "entryUrls or indexUrls required", nil)
 	}
-	if runtime.CurrentCode == 0 {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "currentCode must not be 0", nil)
+	if runtime.CurrentCode < 0 {
+		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "currentCode must not be negative", nil)
 	}
 	if runtime.Channel == "" {
 		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "channel required", nil)

@@ -11,6 +11,7 @@ import (
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestMapLegacyLastResult(t *testing.T) {
@@ -142,8 +143,88 @@ func TestProfileValidation(t *testing.T) {
 		Product: "p", IndexUrls: []string{"https://e.invalid/i"},
 		TrustedKeys: []*updaterv1.TrustedKey{{KeyId: "k", PublicKey: bytes.Repeat([]byte{1}, 32)}},
 	}, &updaterv1.Runtime{Channel: "dev", CurrentCode: 0, DataDir: "x"})
-	if err == nil || err.Code != updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID {
-		t.Fatalf("code 0: %v", err)
+	if err != nil {
+		t.Fatalf("code 0 is a valid pre-release baseline: %v", err)
+	}
+}
+
+func TestWaitForHostExit(t *testing.T) {
+	if err := waitForHostExit(0, time.Second, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForHostExit(os.Getpid(), time.Millisecond, nil); err == nil {
+		t.Fatal("live process must time out")
+	}
+}
+
+func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
+	dataDir := t.TempDir()
+	installRoot := t.TempDir()
+	artifact := filepath.Join(t.TempDir(), "app.zip")
+	if err := os.WriteFile(artifact, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := store{dataDir: dataDir}
+	key, err := st.planKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &updaterv1.UpdatePlan{
+		PlanId:    "plan-test",
+		Version:   "1.0.0",
+		Code:      1,
+		ExpiresAt: timestamppb.New(time.Now().Add(time.Hour)),
+		Files: []*updaterv1.PlannedFile{{
+			Name:       "app.zip",
+			Size:       7,
+			LocalPath:  artifact,
+			Downloaded: true,
+		}},
+	}
+	plan.PlanHmac = hmacPlan(key, plan)
+	if err := st.savePlan(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var launched bool
+	eng := &Engine{
+		Stdout: &stdout,
+		LaunchWorker: func(gotDataDir, sessionID, stagedRoot string) error {
+			launched = true
+			if gotDataDir != dataDir || sessionID == "" ||
+				stagedRoot != filepath.Join(dataDir, "staging", plan.PlanId) {
+				t.Fatalf("unexpected worker args: %q %q %q", gotDataDir, sessionID, stagedRoot)
+			}
+			return nil
+		},
+	}
+	req := &updaterv1.UpdaterRequest{
+		Runtime: &updaterv1.Runtime{
+			DataDir: dataDir,
+			Install: &updaterv1.InstallSpec{
+				Layout:      updaterv1.Layout_LAYOUT_VERSIONED_DIR,
+				InstallRoot: installRoot,
+			},
+		},
+	}
+	if err := eng.handleApply(
+		context.Background(),
+		req,
+		&updaterv1.ApplyOp{PlanId: plan.PlanId},
+		st,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !launched {
+		t.Fatal("apply accepted without starting worker")
+	}
+	ev := &updaterv1.UpdaterEvent{}
+	if err := ReadFrame(&stdout, ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.GetApply().GetAccepted() == nil {
+		t.Fatalf("expected accepted result, got %v", ev)
 	}
 }
 

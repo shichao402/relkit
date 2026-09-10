@@ -15,4 +15,8 @@ Run: `go test ./internal/updater ./cmd/relkit-facade-gen`
 
 ## apply/
 
-Layout success / rollback are Go tests in `internal/updater` (`TestFileSetRollback`, `TestVersionedDirAtomicActive`). Native Windows file locks and macOS `.app` swap must run on those OS runners; Linux tests do not substitute.
+Layout success / rollback are Go tests in `internal/updater`
+(`TestFileSetRollback`, `TestVersionedDirAtomicActive`). `TestHandleApplyStartsWorkerBeforeAccepting`
+locks the handoff boundary: an apply request cannot return `accepted` until an independent staging
+worker has started. Native Windows file locks and macOS `.app` swap must run on those OS runners;
+Linux tests do not substitute.
