@@ -666,9 +666,28 @@ def materialize_required_dirs(logger: Logger, dest: Path) -> None:
             out = "<command failed>"
         logger.warn(f"{label}: " + " ".join(out.split()))
 
-    logger.warn("dropping the cone and checking the commit out in full")
+    logger.warn("dropping the cone and materializing the full HEAD archive")
     run(logger, ["git", "sparse-checkout", "disable"], cwd=dest)
-    run(logger, ["git", "checkout", "--force", "HEAD"], cwd=dest)
+    # Old Git builds used by BlueShield can report success for both
+    # `sparse-checkout disable` and `checkout HEAD` while leaving skip-worktree
+    # files absent. `git archive` reads the commit object directly and therefore
+    # does not depend on that working-tree implementation.
+    archive = dest.parent / ".relkit-head.tar"
+    try:
+        run(
+            logger,
+            ["git", "archive", "--format=tar", "-o", str(archive), "HEAD"],
+            cwd=dest,
+        )
+        with tarfile.open(archive, "r:") as tf:
+            if sys.version_info >= (3, 12):
+                tf.extractall(dest, filter="fully_trusted")
+            else:
+                # `filter` was added after the Python 3.8 floor. Git object
+                # names cannot contain absolute paths or `..` components.
+                tf.extractall(dest)
+    finally:
+        archive.unlink(missing_ok=True)
 
     absent: list[str] = []
     for relative in REQUIRED_CHECKOUT_DIRS:
