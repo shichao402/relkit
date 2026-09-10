@@ -18,6 +18,8 @@
    **逐字节副本** `scripts/relkit_consume.py`。执行
    `python scripts/relkit_consume.py install --target host` 后再构建产品。
    禁止 clone relkit、现场安装 Go、从源码编 CLI/sidecar，或回退 PATH/LFS 中的旧二进制。
+   Python CA 链无法验证附件站点时，consumer 可改用系统 `curl` 的证书库重试；
+   仍保持 TLS 校验，禁止 `--insecure` 或未验证 SSL context。
 4. 宿主只做：何时检查、UI、是否退出进程。
 
 ## 当前已登记 SDK

@@ -112,6 +112,41 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def download_with_curl(url: str, destination: Path) -> None:
+    curl = shutil.which("curl.exe" if os.name == "nt" else "curl")
+    if not curl:
+        raise RuntimeError("system curl is unavailable")
+    scheme = "=https" if url.startswith("https://") else "=http"
+    try:
+        result = subprocess.run(
+            [
+                curl,
+                "--fail",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--proto",
+                scheme,
+                "--tlsv1.2",
+                "--output",
+                str(destination),
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("system curl timed out after 180s") from error
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"system curl failed ({result.returncode}): {result.stderr.strip()}"
+        )
+
+
 def download_artifact(root: Path, component: str, spec: dict[str, str]) -> Path:
     cache = root / ".relkit" / "artifacts"
     cache.mkdir(parents=True, exist_ok=True)
@@ -131,8 +166,19 @@ def download_artifact(root: Path, component: str, spec: dict[str, str]) -> Path:
                 headers={"User-Agent": "relkit-consume/2"},
                 method="GET",
             )
-            with urlopen(request, timeout=120) as response, temporary.open("wb") as out:
-                shutil.copyfileobj(response, out)
+            try:
+                with urlopen(request, timeout=120) as response, temporary.open(
+                    "wb"
+                ) as out:
+                    shutil.copyfileobj(response, out)
+            except (HTTPError, URLError, OSError, TimeoutError) as urllib_error:
+                temporary.unlink(missing_ok=True)
+                print(
+                    f"relkit consume: Python HTTPS failed ({urllib_error}); "
+                    "retrying with system curl",
+                    file=sys.stderr,
+                )
+                download_with_curl(spec["url"], temporary)
             actual = file_sha256(temporary)
             if actual != spec["sha256"]:
                 raise RuntimeError(

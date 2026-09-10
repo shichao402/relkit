@@ -10,6 +10,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).parent / "host"))
 import relkit_consume as subject
@@ -110,6 +111,43 @@ class InstallTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
+    def test_uses_system_curl_when_python_tls_fails(self) -> None:
+        payload = b"release artifact"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            spec = {
+                "url": "https://example.invalid/x",
+                "sha256": sha256(payload),
+            }
+
+            def fake_curl(_url, destination):
+                destination.write_bytes(payload)
+
+            with (
+                patch.object(subject, "urlopen", side_effect=URLError("bad CA")),
+                patch.object(subject, "download_with_curl", side_effect=fake_curl),
+            ):
+                installed = subject.download_artifact(root, "cli", spec)
+            self.assertEqual(installed.read_bytes(), payload)
+
+    def test_curl_keeps_tls_verification_enabled(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as raw,
+            patch.object(subject.shutil, "which", return_value="curl") as which,
+            patch.object(
+                subject.subprocess,
+                "run",
+                return_value=subject.subprocess.CompletedProcess([], 0, "", ""),
+            ) as run,
+        ):
+            subject.download_with_curl(
+                "https://example.invalid/x", Path(raw) / "artifact"
+            )
+        which.assert_called_once()
+        command = run.call_args.args[0]
+        self.assertIn("--tlsv1.2", command)
+        self.assertNotIn("--insecure", command)
+
     def test_hash_mismatch_never_enters_cache(self) -> None:
         class Response(io.BytesIO):
             def __enter__(self):
