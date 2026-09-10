@@ -13,8 +13,8 @@
 ## 决策
 
 1. relkit tag CI 一次性构建 CLI、updater 和 Dart SDK Release 附件。
-2. 宿主只接受 `relkit.consume/2` lock。lock 固定 Release、commit，以及每个附件的
-   绝对 URL 和 SHA-256。
+2. 宿主只接受 `relkit.consume/2` lock。lock 固定 Release、commit、consumer 脚本
+   SHA-256，以及每个附件的绝对 URL 和 SHA-256。
 3. `scripts/host/relkit_consume.py` 只下载、验哈希、原子安装和运行版本探针。
 4. 宿主不得 clone relkit、安装 Go、现场编译，或回退 PATH/LFS 中的二进制。
 5. `relkit.consume/1`、`scripts/consume.py` 及其参数直接删除，不提供兼容层。
