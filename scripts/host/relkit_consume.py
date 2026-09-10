@@ -1,270 +1,351 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Host-side bootstrap for relkit consume.
+"""Install immutable relkit release artifacts into a host repository.
 
-Copy this file verbatim to ``scripts/relkit_consume.py`` in the product repo —
-same name, byte-identical, no host-local wrapper or renamed alias, so a drift
-check (or a future relkit agent skill) can refresh it by comparing hashes.
-
-Everything variable lives in ``scripts/relkit.lock.json``. Sparse cones, TLS
-fallbacks, and ``go build`` live in the pinned SHA's ``scripts/consume.py``;
-never add them here.
-
-Chicken-egg: the first run has no ``third_party/relkit``, so the raw
-``consume.py`` is downloaded once to bootstrap. Afterwards the checked-out copy
-is used when it is already at the requested commit. A stale checkout is first
-run in sync-only mode, then the requested commit's script performs the real
-build. This ordering matters: the stale script may not know how to repair a
-checkout defect fixed by the requested commit (ADR-007).
+Copy this file byte-for-byte to ``scripts/relkit_consume.py`` in the host.
+All variable input is pinned by ``scripts/relkit.lock.json``. This consumer
+never clones relkit, installs Go, or builds source code.
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
+import platform
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import traceback
+import zipfile
 from pathlib import Path
 from typing import Any, Optional, Sequence
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-LOCK_SCHEMA = "relkit.consume/1"
-CONSUME_REL = "scripts/consume.py"
-REEXEC_ENV = "RELKIT_CONSUME_REEXEC"
+LOCK_SCHEMA = "relkit.consume/2"
+COMPONENTS = ("sdk-dart", "cli", "updater")
+TARGETS = (
+    "linux-amd64",
+    "linux-arm64",
+    "windows-amd64",
+    "darwin-amd64",
+    "darwin-arm64",
+)
+DOWNLOAD_ATTEMPTS = 3
 
 
 def force_utf8_stdio() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:
-            continue
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except (ValueError, OSError):
-            pass
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
 
 
 def host_root(script_file: Optional[Path] = None) -> Path:
-    here = (script_file or Path(__file__)).resolve()
-    return here.parent.parent
-
-
-def default_lock_path(root: Path) -> Path:
-    return root / "scripts" / "relkit.lock.json"
-
-
-def relkit_dir(root: Path) -> Path:
-    return root / "third_party" / "relkit"
-
-
-def argv_has_flag(argv: Sequence[str], name: str) -> bool:
-    prefix = name + "="
-    return any(item == name or item.startswith(prefix) for item in argv)
-
-
-def prepare_argv(argv: Sequence[str], root: Path, lock_file: Optional[Path]) -> list[str]:
-    out = list(argv)
-    if not argv_has_flag(out, "--project-root"):
-        out = ["--project-root", str(root), *out]
-    if lock_file is not None and lock_file.is_file() and not argv_has_flag(out, "--lock"):
-        out = ["--lock", str(lock_file), *out]
-    return out
+    return (script_file or Path(__file__)).resolve().parent.parent
 
 
 def load_lock(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise RuntimeError(f"{path} is not a JSON object")
-    schema = str(data.get("schema") or "")
-    if schema and schema != LOCK_SCHEMA:
-        raise RuntimeError(f"{path} schema {schema!r} is not {LOCK_SCHEMA}")
+    if data.get("schema") != LOCK_SCHEMA:
+        raise RuntimeError(
+            f"{path} must use schema {LOCK_SCHEMA!r}; source-build locks are unsupported"
+        )
+    release = str(data.get("release") or "").strip()
+    commit = str(data.get("commit") or "").strip()
+    if not release or not commit:
+        raise RuntimeError(f"{path} must pin non-empty release and commit")
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise RuntimeError(f"{path} must contain an artifacts object")
     return data
 
 
-def lock_ref(lock: dict[str, Any]) -> str:
-    override = (os.environ.get("RELKIT_REF") or "").strip()
-    if override:
-        return override
-    commit = str(lock.get("commit") or "").strip()
-    if commit:
-        return commit
-    return str(lock.get("channel") or "main")
+def host_target() -> str:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    os_name = {"windows": "windows", "linux": "linux", "darwin": "darwin"}.get(
+        system
+    )
+    if os_name is None:
+        raise RuntimeError(f"unsupported host OS: {system}")
+    arch = "arm64" if machine in ("arm64", "aarch64") else "amd64"
+    target = f"{os_name}-{arch}"
+    if target not in TARGETS:
+        raise RuntimeError(f"unsupported host target: {target}")
+    return target
 
 
-def lock_git_urls(lock: dict[str, Any]) -> list[str]:
-    raw: list[str] = []
-    value = lock.get("url")
-    if isinstance(value, list):
-        raw.extend(str(item) for item in value)
-    elif value:
-        raw.append(str(value))
-    env = (os.environ.get("RELKIT_URL") or "").strip()
-    if env:
-        raw.append(env)
-    if "https://github.com/shichao402/relkit.git" not in raw:
-        raw.append("https://github.com/shichao402/relkit.git")
-    return raw
+def artifact_spec(
+    lock: dict[str, Any], component: str, target: str
+) -> dict[str, str]:
+    artifacts = lock["artifacts"]
+    raw = artifacts.get(component)
+    if component != "sdk-dart":
+        raw = raw.get(target) if isinstance(raw, dict) else None
+    if not isinstance(raw, dict):
+        suffix = "" if component == "sdk-dart" else f" for {target}"
+        raise RuntimeError(f"lock has no {component} artifact{suffix}")
+    url = str(raw.get("url") or "").strip()
+    digest = str(raw.get("sha256") or "").strip().lower()
+    if not url.startswith(("https://", "http://")):
+        raise RuntimeError(f"{component} artifact URL must be absolute HTTP(S)")
+    if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+        raise RuntimeError(f"{component} artifact has invalid sha256")
+    return {"url": url, "sha256": digest}
 
 
-def strip_git_suffix(url: str) -> str:
-    text = url.rstrip("/")
-    if text.endswith(".git"):
-        text = text[:-4]
-    return text
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def raw_consume_urls(git_url: str, ref: str) -> list[str]:
-    """Best-effort raw file URLs for ``scripts/consume.py`` at ``ref``."""
-    base = strip_git_suffix(git_url)
-    path = CONSUME_REL
-    urls: list[str] = []
-    if "github.com/" in base:
-        rest = base.split("github.com/", 1)[1]
-        urls.append(f"https://raw.githubusercontent.com/{rest}/{ref}/{path}")
-        urls.append(f"https://cdn.jsdelivr.net/gh/{rest}@{ref}/{path}")
-    if "cnb.cool/" in base:
-        urls.append(f"{base}/-/git/raw/{ref}/{path}")
-    if "git.woa.com/" in base:
-        urls.append(f"{base}/raw/{ref}/{path}")
-    if not urls:
-        urls.append(f"{base}/{path}")
-    return urls
-
-
-def _auth_request(url: str) -> Request:
-    req = Request(url, method="GET")
-    token = (os.environ.get("CNB_TOKEN") or "").strip()
-    if token and "cnb.cool" in url:
-        req.add_header("Authorization", f"Bearer {token}")
-    return req
-
-
-def download_bytes(urls: Sequence[str]) -> bytes:
+def download_artifact(root: Path, component: str, spec: dict[str, str]) -> Path:
+    cache = root / ".relkit" / "artifacts"
+    cache.mkdir(parents=True, exist_ok=True)
+    destination = cache / spec["sha256"]
+    if destination.is_file() and file_sha256(destination) == spec["sha256"]:
+        print(f"relkit consume: cache hit {component} {spec['sha256'][:12]}")
+        return destination
+    destination.unlink(missing_ok=True)
     errors: list[str] = []
-    for url in urls:
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        temporary = destination.with_suffix(f".tmp-{os.getpid()}")
+        temporary.unlink(missing_ok=True)
         try:
-            with urlopen(_auth_request(url), timeout=60) as resp:
-                data = resp.read()
-            if b"def main(" in data and b"SPARSE_CONE_DIRS" in data:
-                return data
-            errors.append(f"{url}: not a consume.py")
-        except (URLError, OSError, TimeoutError) as error:
-            errors.append(f"{url}: {error}")
+            print(f"relkit consume: download {component} ({attempt}/{DOWNLOAD_ATTEMPTS})")
+            request = Request(
+                spec["url"],
+                headers={"User-Agent": "relkit-consume/2"},
+                method="GET",
+            )
+            with urlopen(request, timeout=120) as response, temporary.open("wb") as out:
+                shutil.copyfileobj(response, out)
+            actual = file_sha256(temporary)
+            if actual != spec["sha256"]:
+                raise RuntimeError(
+                    f"sha256 mismatch: expected {spec['sha256']}, got {actual}"
+                )
+            os.replace(temporary, destination)
+            return destination
+        except (HTTPError, URLError, OSError, TimeoutError, RuntimeError) as error:
+            temporary.unlink(missing_ok=True)
+            errors.append(str(error))
+            if attempt < DOWNLOAD_ATTEMPTS:
+                time.sleep(2**attempt)
     raise RuntimeError(
-        "cannot bootstrap relkit scripts/consume.py from lock URLs:\n"
-        + "\n".join(errors)
+        f"cannot download {component} from {spec['url']}:\n  - "
+        + "\n  - ".join(errors)
     )
 
 
-def checkout_head(root: Path) -> str:
-    checkout = relkit_dir(root)
-    if not (checkout / ".git").exists():
-        return ""
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(checkout),
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return ""
+def binary_destination(root: Path, component: str, target: str) -> Path:
+    windows = target.startswith("windows-")
+    if component == "cli":
+        if windows:
+            name = "relkit.exe"
+        elif target == "linux-amd64":
+            name = "relkit-linux-amd64"
+        else:
+            name = "relkit"
+    elif component == "updater":
+        name = "relkit-updater.exe" if windows else "relkit-updater"
+    else:
+        raise RuntimeError(f"{component} is not a binary component")
+    return root / "tools" / "bin" / name
 
 
-def sync_only_argv(argv: Sequence[str]) -> list[str]:
-    """Remove build requests so a stale consume script only updates checkout."""
-    out: list[str] = []
-    skip_value = False
-    for item in argv:
-        if skip_value:
-            skip_value = False
-            continue
-        if item == "--target":
-            skip_value = True
-            continue
-        if item.startswith("--target="):
-            continue
-        if item in ("--build-cli", "--build-cli-if-missing", "--sdk-only"):
-            continue
-        out.append(item)
-    return [*out, "--sdk-only"]
+def install_binary(
+    root: Path, component: str, target: str, artifact: Path, digest: str
+) -> Path:
+    destination = binary_destination(root, component, target)
+    if destination.is_file() and file_sha256(destination) == digest:
+        print(f"relkit consume: verified {destination.relative_to(root)}")
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + f".tmp-{os.getpid()}")
+    shutil.copyfile(artifact, temporary)
+    if not target.startswith("windows-"):
+        temporary.chmod(temporary.stat().st_mode | 0o755)
+    os.replace(temporary, destination)
+    if file_sha256(destination) != digest:
+        raise RuntimeError(f"installed binary hash drifted: {destination}")
+    print(f"relkit consume: installed {destination.relative_to(root)}")
+    return destination
 
 
-def select_consume_py(root: Path, lock: dict[str, Any], ref: str) -> Path:
-    override = (os.environ.get("RELKIT_CONSUME_PY") or "").strip()
-    if override:
-        path = Path(override)
-        if not path.is_file():
-            raise RuntimeError(f"RELKIT_CONSUME_PY is not a file: {path}")
-        return path
+def safe_extract_sdk(artifact: Path, destination: Path, digest: str) -> None:
+    marker = destination / ".relkit-artifact.json"
+    if marker.is_file():
+        try:
+            state = json.loads(marker.read_text(encoding="utf-8"))
+            if (
+                state.get("sha256") == digest
+                and (destination / "pubspec.yaml").is_file()
+                and (destination / "lib").is_dir()
+            ):
+                print("relkit consume: verified third_party/relkit/sdk/dart")
+                return
+        except (OSError, ValueError):
+            pass
 
-    local = relkit_dir(root) / CONSUME_REL
-    if local.is_file():
-        return local
-
-    urls: list[str] = []
-    for git_url in lock_git_urls(lock):
-        for item in raw_consume_urls(git_url, ref):
-            if item not in urls:
-                urls.append(item)
-    data = download_bytes(urls)
-    handle = tempfile.NamedTemporaryFile(
-        prefix="relkit-consume-",
-        suffix=".py",
-        delete=False,
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(
+        tempfile.mkdtemp(prefix=".dart-sdk-", dir=str(destination.parent))
     )
+    backup = destination.with_name(destination.name + ".relkit-old")
     try:
-        handle.write(data)
-        handle.close()
-        return Path(handle.name)
+        with zipfile.ZipFile(artifact) as archive:
+            root = temporary.resolve()
+            for member in archive.infolist():
+                target = (temporary / member.filename).resolve()
+                if target != root and root not in target.parents:
+                    raise RuntimeError(f"unsafe SDK archive path: {member.filename}")
+            archive.extractall(temporary)
+        if not (temporary / "pubspec.yaml").is_file() or not (temporary / "lib").is_dir():
+            raise RuntimeError("Dart SDK artifact lacks pubspec.yaml or lib/")
+        (temporary / ".relkit-artifact.json").write_text(
+            json.dumps({"schema": LOCK_SCHEMA, "sha256": digest}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if backup.exists():
+            shutil.rmtree(backup)
+        if destination.exists():
+            os.replace(destination, backup)
+        os.replace(temporary, destination)
+        if backup.exists():
+            shutil.rmtree(backup)
+        print("relkit consume: installed third_party/relkit/sdk/dart")
     except Exception:
-        handle.close()
-        Path(handle.name).unlink(missing_ok=True)
+        if not destination.exists() and backup.exists():
+            os.replace(backup, destination)
         raise
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+
+
+def verify_binary(path: Path, component: str) -> None:
+    result = subprocess.run(
+        [str(path), "--version"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{component} smoke test failed ({result.returncode}): "
+            f"{(result.stderr or result.stdout).strip()}"
+        )
+
+
+def check_installed(
+    root: Path, lock: dict[str, Any], component: str, target: str
+) -> None:
+    spec = artifact_spec(lock, component, target)
+    if component == "sdk-dart":
+        destination = root / "third_party" / "relkit" / "sdk" / "dart"
+        marker = destination / ".relkit-artifact.json"
+        state = json.loads(marker.read_text(encoding="utf-8"))
+        if state.get("sha256") != spec["sha256"]:
+            raise RuntimeError("installed Dart SDK does not match lock")
+        if not (destination / "pubspec.yaml").is_file():
+            raise RuntimeError("installed Dart SDK is incomplete")
+        return
+    destination = binary_destination(root, component, target)
+    if not destination.is_file() or file_sha256(destination) != spec["sha256"]:
+        raise RuntimeError(f"installed {component} does not match lock: {destination}")
+    verify_binary(destination, component)
+
+
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Install checksum-pinned relkit release artifacts"
+    )
+    parser.add_argument("command", choices=("install", "check"))
+    parser.add_argument("--lock", help="relkit.consume/2 lock JSON")
+    parser.add_argument("--project-root", help="host project root")
+    parser.add_argument("--target", default="host", choices=("host", *TARGETS))
+    parser.add_argument(
+        "--component",
+        action="append",
+        choices=COMPONENTS,
+        help="component to install/check; repeatable (default: all)",
+    )
+    parser.add_argument("--resolved-out", help="write resolved installation JSON")
+    return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     force_utf8_stdio()
-    args = list(sys.argv[1:] if argv is None else argv)
-    root = host_root()
-    lock_file = default_lock_path(root)
-    lock: dict[str, Any] = {}
-    if lock_file.is_file():
-        lock = load_lock(lock_file)
-    ref = lock_ref(lock)
-    forwarded = prepare_argv(args, root, lock_file if lock_file.is_file() else None)
-
-    checkout = relkit_dir(root) / CONSUME_REL
-    head = checkout_head(root)
-    if checkout.is_file() and head != ref and not os.environ.get(REEXEC_ENV):
+    try:
+        args = create_parser().parse_args(argv)
+        root = (
+            Path(args.project_root).resolve()
+            if args.project_root
+            else host_root()
+        )
+        lock_path = (
+            Path(args.lock).resolve()
+            if args.lock
+            else root / "scripts" / "relkit.lock.json"
+        )
+        lock = load_lock(lock_path)
+        target = host_target() if args.target == "host" else args.target
+        components = args.component or list(COMPONENTS)
+        resolved_artifacts: dict[str, str] = {}
+        for component in components:
+            spec = artifact_spec(lock, component, target)
+            resolved_artifacts[component] = spec["sha256"]
+            if args.command == "install":
+                artifact = download_artifact(root, component, spec)
+                if component == "sdk-dart":
+                    safe_extract_sdk(
+                        artifact,
+                        root / "third_party" / "relkit" / "sdk" / "dart",
+                        spec["sha256"],
+                    )
+                else:
+                    destination = install_binary(
+                        root, component, target, artifact, spec["sha256"]
+                    )
+                    verify_binary(destination, component)
+            check_installed(root, lock, component, target)
+        resolved = {
+            "schema": LOCK_SCHEMA,
+            "release": lock["release"],
+            "commit": lock["commit"],
+            "target": target,
+            "artifacts": resolved_artifacts,
+        }
+        if args.resolved_out:
+            output = Path(args.resolved_out)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(resolved, indent=2) + "\n", encoding="utf-8")
         print(
-            f"relkit consume: checkout HEAD={head or '<unknown>'} differs from "
-            f"requested ref={ref}; syncing without building first",
-            flush=True,
+            f"relkit consume: {args.command} complete "
+            f"release={lock['release']} target={target}"
         )
-        code = subprocess.call(
-            [sys.executable, str(checkout), *sync_only_argv(forwarded)]
-        )
-        if code != 0:
-            return code
-        if not checkout.is_file():
-            raise RuntimeError(f"sync did not materialize {checkout}")
-        print(
-            f"relkit consume: checkout synced; running requested build with "
-            f"the pinned {CONSUME_REL}",
-            flush=True,
-        )
-        env = {**os.environ, REEXEC_ENV: "1"}
-        return subprocess.call(
-            [sys.executable, str(checkout), *forwarded],
-            env=env,
-        )
-
-    consume = select_consume_py(root, lock, ref)
-    print(f"relkit consume bootstrap → {consume} ref={ref}", flush=True)
-    return subprocess.call([sys.executable, str(consume), *forwarded])
+        return 0
+    except Exception as error:
+        print(f"ERROR: relkit consume failed: {error}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

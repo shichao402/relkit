@@ -42,12 +42,10 @@ go build -o relkit-serve ./cmd/relkit-serve
 python deploy/relkit.py build --serve --agent
 ```
 
-宿主产品仓用 `scripts/relkit.lock.json` + `scripts/relkit_consume.py` 从 GitHub 拉同一 SHA，并：
-
-```go
-require go.firoyang.com/relkit v0.0.0
-replace go.firoyang.com/relkit => ./third_party/relkit
-```
+宿主产品仓使用 `relkit.consume/2` lock 钉住 Release、commit、每个附件 URL 和
+SHA-256，再由逐字节复制的 `scripts/relkit_consume.py install --target host`
+安装 SDK、CLI 与 updater。消费端不 clone 本仓、不安装 Go，也不从源码构建。
+lock 示例见 [`scripts/relkit.lock.example.json`](scripts/relkit.lock.example.json)。
 
 ## relkit（发布 CLI）
 

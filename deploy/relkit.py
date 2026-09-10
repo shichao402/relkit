@@ -20,6 +20,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -230,6 +231,42 @@ def cmd_build(args: argparse.Namespace) -> None:
                 env=env,
             )
             built.append({"component": kind, "os": os_name, "arch": arch, "path": dest.name, "sha256": file_sha256(dest)})
+    if getattr(args, "dart_sdk", False):
+        sdk_root = REPO_ROOT / "sdk" / "dart"
+        sdk_archive = out_dir / "relkit-sdk-dart.zip"
+        tracked = run(
+            ["git", "ls-files", "-z", "--", "sdk/dart"],
+            cwd=REPO_ROOT,
+            capture=True,
+        ).stdout
+        paths = [item for item in tracked.split("\0") if item]
+        if not paths:
+            die("sdk/dart has no tracked files")
+        with zipfile.ZipFile(
+            sdk_archive,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        ) as archive:
+            for relative in sorted(paths):
+                source = REPO_ROOT / relative
+                if source.is_file():
+                    info = zipfile.ZipInfo(
+                        source.relative_to(sdk_root).as_posix(),
+                        date_time=(1980, 1, 1, 0, 0, 0),
+                    )
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.external_attr = 0o100644 << 16
+                    archive.writestr(info, source.read_bytes(), compresslevel=9)
+        built.append(
+            {
+                "component": "sdk-dart",
+                "os": "any",
+                "arch": "any",
+                "path": sdk_archive.name,
+                "sha256": file_sha256(sdk_archive),
+            }
+        )
     ident = git_identity()
     manifest = {
         "schema": "relkit.release/1",
@@ -1150,6 +1187,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--agent", action="store_true")
     build.add_argument("--cli", action="store_true")
     build.add_argument("--updater", action="store_true")
+    build.add_argument("--dart-sdk", action="store_true")
     build.add_argument("--version", default="0.2.1")
     build.add_argument("--out", default="dist")
     build.add_argument("--os")

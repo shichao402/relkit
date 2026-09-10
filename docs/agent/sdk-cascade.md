@@ -5,13 +5,19 @@
 
 **唯一调用面**是生成的 `Updater` facade（ADR 0010 / `relkit.updater.v1`）。不要按语言各写一套 check/apply。Range、节流、skip、选路全部由 `relkit-updater` 引擎决定，**禁止**「以各 SDK 实现为准」。
 
-宿主仓安装 / 升级 cone：Dec 公开 skill **`relkit-host-consume`**（vault `relkit`，`public/global`）。产品仓只留 lock + 逐字节 `relkit_consume.py`。
+宿主仓安装 / 升级 Release 附件：产品仓只留 `relkit.consume/2` lock +
+逐字节 `relkit_consume.py`。lock 必须钉 Release、commit、附件 URL 与 SHA-256。
 
 ## 级联规则（给 Agent）
 
 1. 探测宿主语言。
 2. 打开该语言 facade（Go `sdk/updaterfacade`，Dart `updater_facade.dart`，Node `updater_facade.ts`）。
-3. 把同 SHA 的 `relkit-updater` 打进产品包。宿主侧只有两个文件：`scripts/relkit.lock.json`，和 [`scripts/host/relkit_consume.py`](../../scripts/host/relkit_consume.py) 的**逐字节副本** `scripts/relkit_consume.py`（同名、不改、不再包 `.bat` / `.sh` / 旧名，便于按哈希比对更新）。cone / 编 CLI / sidecar 只执行 **该 SHA 上的** `scripts/consume.py`，禁止在产品仓复制 `SPARSE_CONE_DIRS`。
+3. 把同一 Release 的 `relkit-updater` 打进产品包。宿主侧只有两个权威输入：
+   `scripts/relkit.lock.json`，和
+   [`scripts/host/relkit_consume.py`](../../scripts/host/relkit_consume.py) 的
+   **逐字节副本** `scripts/relkit_consume.py`。执行
+   `python scripts/relkit_consume.py install --target host` 后再构建产品。
+   禁止 clone relkit、现场安装 Go、从源码编 CLI/sidecar，或回退 PATH/LFS 中的旧二进制。
 4. 宿主只做：何时检查、UI、是否退出进程。
 
 ## 当前已登记 SDK

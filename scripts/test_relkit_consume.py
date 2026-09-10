@@ -1,143 +1,135 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
+import hashlib
+import io
 import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent / "host"))
-
 import relkit_consume as subject
 
 
-class ArgvTests(unittest.TestCase):
-    def test_injects_root_and_lock(self) -> None:
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sdk_zip() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("pubspec.yaml", "name: rup_client\n")
+        archive.writestr("lib/rup_client.dart", "library;\n")
+    return output.getvalue()
+
+
+def lock_for(url: str, sdk: bytes, binary: bytes) -> dict:
+    spec = lambda data: {"url": url, "sha256": sha256(data)}
+    return {
+        "schema": subject.LOCK_SCHEMA,
+        "release": "v1.2.3",
+        "commit": "a" * 40,
+        "artifacts": {
+            "sdk-dart": spec(sdk),
+            "cli": {"linux-amd64": spec(binary)},
+            "updater": {"linux-amd64": spec(binary)},
+        },
+    }
+
+
+class LockTests(unittest.TestCase):
+    def test_rejects_source_build_lock(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            lock = root / "scripts" / "relkit.lock.json"
-            lock.parent.mkdir()
-            lock.write_text("{}", encoding="utf-8")
-            out = subject.prepare_argv(["--sdk-only"], root, lock)
-            self.assertEqual(
-                out[:4],
-                ["--lock", str(lock), "--project-root", str(root)],
-            )
-            self.assertEqual(out[-1], "--sdk-only")
-
-    def test_does_not_duplicate_flags(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            lock = root / "scripts" / "relkit.lock.json"
-            lock.parent.mkdir()
-            lock.write_text("{}", encoding="utf-8")
-            out = subject.prepare_argv(
-                ["--project-root", "/x", "--lock", "/y", "--sdk-only"],
-                root,
-                lock,
-            )
-            self.assertEqual(out, ["--project-root", "/x", "--lock", "/y", "--sdk-only"])
-
-
-class RawUrlTests(unittest.TestCase):
-    def test_github_raw(self) -> None:
-        urls = subject.raw_consume_urls(
-            "https://github.com/shichao402/relkit.git",
-            "abc1234",
-        )
-        self.assertIn(
-            "https://raw.githubusercontent.com/shichao402/relkit/abc1234/scripts/consume.py",
-            urls,
-        )
-
-
-class SelectConsumeTests(unittest.TestCase):
-    def test_existing_checkout_wins_over_download(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            dest = root / "third_party" / "relkit" / "scripts"
-            dest.mkdir(parents=True)
-            consume = dest / "consume.py"
-            consume.write_text("local", encoding="utf-8")
-            with patch.object(subject, "download_bytes") as download:
-                self.assertEqual(subject.select_consume_py(root, {}, "main"), consume)
-            download.assert_not_called()
-
-    def test_bootstrap_downloads_when_no_checkout(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            with patch.object(subject, "download_bytes", return_value=b"downloaded"):
-                path = subject.select_consume_py(root, {}, "main")
-            self.assertEqual(path.read_bytes(), b"downloaded")
-
-    def test_env_override(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            path = Path(raw) / "consume.py"
-            path.write_text("x", encoding="utf-8")
-            with patch.dict(os.environ, {"RELKIT_CONSUME_PY": str(path)}):
-                self.assertEqual(
-                    subject.select_consume_py(Path(raw), {}, "main"),
-                    path,
-                )
-
-
-class StaleCheckoutTests(unittest.TestCase):
-    def test_sync_only_removes_every_build_request(self) -> None:
-        self.assertEqual(
-            subject.sync_only_argv(
-                [
-                    "--project-root",
-                    "/repo",
-                    "--build-cli",
-                    "--build-cli-if-missing",
-                    "--target",
-                    "host",
-                    "--target=linux-amd64",
-                ]
-            ),
-            ["--project-root", "/repo", "--sdk-only"],
-        )
-
-    def test_main_syncs_stale_checkout_before_requested_build(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            scripts = root / "scripts"
-            scripts.mkdir()
-            (scripts / "relkit.lock.json").write_text(
-                json.dumps(
-                    {
-                        "schema": subject.LOCK_SCHEMA,
-                        "commit": "new-commit",
-                    }
-                ),
+            path = Path(raw) / "lock.json"
+            path.write_text(
+                json.dumps({"schema": "relkit.consume/1", "commit": "a" * 40}),
                 encoding="utf-8",
             )
-            checkout = root / "third_party" / "relkit" / "scripts" / "consume.py"
-            checkout.parent.mkdir(parents=True)
-            checkout.write_text("# fixture\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "source-build locks"):
+                subject.load_lock(path)
+
+    def test_requires_pinned_artifact_hash(self) -> None:
+        lock = {
+            "schema": subject.LOCK_SCHEMA,
+            "release": "v1",
+            "commit": "a" * 40,
+            "artifacts": {"cli": {"linux-amd64": {"url": "https://x"}}},
+        }
+        with self.assertRaisesRegex(RuntimeError, "invalid sha256"):
+            subject.artifact_spec(lock, "cli", "linux-amd64")
+
+
+class InstallTests(unittest.TestCase):
+    def test_installs_sdk_and_binary_without_git_or_go(self) -> None:
+        sdk = sdk_zip()
+        binary = b"executable"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            lock = lock_for("https://example.invalid/artifact", sdk, binary)
+
+            def fake_download(_root, component, _spec):
+                path = root / f"{component}.artifact"
+                path.write_bytes(sdk if component == "sdk-dart" else binary)
+                return path
 
             with (
                 patch.object(subject, "host_root", return_value=root),
-                patch.object(subject, "checkout_head", return_value="old-commit"),
-                patch.object(subject.subprocess, "call", side_effect=[0, 0]) as call,
-                patch.dict(os.environ, {}, clear=True),
+                patch.object(subject, "host_target", return_value="linux-amd64"),
+                patch.object(subject, "load_lock", return_value=lock),
+                patch.object(subject, "download_artifact", side_effect=fake_download),
+                patch.object(subject, "verify_binary"),
             ):
-                self.assertEqual(
-                    subject.main(["--build-cli", "--target", "host"]),
-                    0,
+                self.assertEqual(subject.main(["install"]), 0)
+
+            self.assertTrue(
+                (root / "third_party/relkit/sdk/dart/pubspec.yaml").is_file()
+            )
+            self.assertEqual(
+                (root / "tools/bin/relkit-linux-amd64").read_bytes(), binary
+            )
+            self.assertEqual(
+                (root / "tools/bin/relkit-updater").read_bytes(), binary
+            )
+
+    def test_rejects_zip_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive_path = root / "bad.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("../escape", "bad")
+            with self.assertRaisesRegex(RuntimeError, "unsafe SDK archive"):
+                subject.safe_extract_sdk(
+                    archive_path,
+                    root / "third_party/relkit/sdk/dart",
+                    sha256(archive_path.read_bytes()),
                 )
 
-            first = call.call_args_list[0].args[0]
-            second = call.call_args_list[1].args[0]
-            self.assertIn("--sdk-only", first)
-            self.assertNotIn("--build-cli", first)
-            self.assertNotIn("--target", first)
-            self.assertIn("--build-cli", second)
-            self.assertIn("--target", second)
-            self.assertEqual(second[1], str(checkout))
+
+class DownloadTests(unittest.TestCase):
+    def test_hash_mismatch_never_enters_cache(self) -> None:
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            spec = {"url": "https://example.invalid/x", "sha256": "0" * 64}
+            with (
+                patch.object(
+                    subject, "urlopen", side_effect=lambda *_args, **_kwargs: Response(b"wrong")
+                ),
+                patch.object(subject.time, "sleep"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "sha256 mismatch"):
+                    subject.download_artifact(root, "cli", spec)
+            self.assertFalse((root / ".relkit/artifacts" / ("0" * 64)).exists())
 
 
 if __name__ == "__main__":

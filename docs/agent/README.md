@@ -82,7 +82,7 @@ Node SDK 开箱：[`../../sdk/node/AGENT-QUICKSTART.md`](../../sdk/node/AGENT-QU
 - [ ] `relkit.json` 含 `recovery.message` 与至少两个官方手动入口；已 `relkit onboard run repo.recovery-embed`
 - [ ] 宿主能在远程 check 失败时展示内嵌 `RecoveryHelp`（不经网络）
 - [ ] 后端只使用 `s3-compatible` / `relkit-compatible` / `static-http`；`casCredentials` 已从 profile 清除
-- [ ] 若 vendor/sparse relkit：从 GitHub clone、跟 `main`（冻结才用完整 SHA）
+- [ ] SDK/CLI/updater 由 `relkit.consume/2` lock 固定 Release、commit、URL 和 SHA-256；消费端没有源码构建路径
 - [ ] 发版产物不注入每次不同的 `BuildTime`（否则 CAS / 跳过下载打不中）
 
 SDK 侧（按语言）：

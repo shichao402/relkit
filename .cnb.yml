@@ -33,7 +33,7 @@ main:
         - name: deploy python tests
           script: |
             apt-get update && apt-get install -y python3
-            python3 -m unittest deploy/test_relkit.py scripts/test_consume.py scripts/test_relkit_consume.py
+            python3 -m unittest deploy/test_relkit.py scripts/test_relkit_consume.py
     - name: node-sdk
       docker:
         image: node:22
@@ -61,8 +61,8 @@ main:
       docker:
         image: golang:1.26
       stages:
-        - name: build release binaries
-          script: python3 deploy/relkit.py build --serve --agent --cli --updater --version "${CNB_BRANCH#v}" --out dist
+        - name: build release artifacts
+          script: python3 deploy/relkit.py build --serve --agent --cli --updater --dart-sdk --version "${CNB_BRANCH#v}" --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu
@@ -84,6 +84,7 @@ main:
             - `relkit-*` — publisher CLI (`stage` / `publish` / …)
             - `relkit-agent-*` — CI publish agent
             - `relkit-serve-*` — self-hosted RUP download + authenticated PUT
+            - `relkit-sdk-dart.zip` — immutable Dart consumer SDK
             - `manifest.json` — commit, protocol window, SHA-256 of each binary
 
             Install the server on Linux with systemd:

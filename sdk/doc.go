@@ -1,6 +1,7 @@
 // Package sdk is the official Go client for RUP v2 (protobuf wire format).
 //
-// Install: sparse-checkout GitHub via scripts/relkit_consume.py, then
+// Install the checksum-pinned SDK Release artifact with
+// scripts/relkit_consume.py, then
 //
 //	replace go.firoyang.com/relkit => ./third_party/relkit
 //
