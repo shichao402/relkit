@@ -108,7 +108,14 @@ class RequiredCheckoutDirsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             repo = Path(raw)
             self._repo(repo)
-            (repo / "internal" / "probe.go").unlink()
+            subprocess.run(
+                ["git", "sparse-checkout", "set", "--cone", "cmd/relkit"],
+                cwd=repo,
+                check=True,
+            )
+            # A sparse directory can exist as an empty placeholder; checking
+            # only is_dir() would mistake this for a build-complete checkout.
+            (repo / "internal").mkdir()
 
             logger = _Logger()
             subject.materialize_required_dirs(logger, repo)

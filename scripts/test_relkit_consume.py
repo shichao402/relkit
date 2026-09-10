@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -81,6 +82,62 @@ class SelectConsumeTests(unittest.TestCase):
                     subject.select_consume_py(Path(raw), {}, "main"),
                     path,
                 )
+
+
+class StaleCheckoutTests(unittest.TestCase):
+    def test_sync_only_removes_every_build_request(self) -> None:
+        self.assertEqual(
+            subject.sync_only_argv(
+                [
+                    "--project-root",
+                    "/repo",
+                    "--build-cli",
+                    "--build-cli-if-missing",
+                    "--target",
+                    "host",
+                    "--target=linux-amd64",
+                ]
+            ),
+            ["--project-root", "/repo", "--sdk-only"],
+        )
+
+    def test_main_syncs_stale_checkout_before_requested_build(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            (scripts / "relkit.lock.json").write_text(
+                json.dumps(
+                    {
+                        "schema": subject.LOCK_SCHEMA,
+                        "commit": "new-commit",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            checkout = root / "third_party" / "relkit" / "scripts" / "consume.py"
+            checkout.parent.mkdir(parents=True)
+            checkout.write_text("# fixture\n", encoding="utf-8")
+
+            with (
+                patch.object(subject, "host_root", return_value=root),
+                patch.object(subject, "checkout_head", return_value="old-commit"),
+                patch.object(subject.subprocess, "call", side_effect=[0, 0]) as call,
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                self.assertEqual(
+                    subject.main(["--build-cli", "--target", "host"]),
+                    0,
+                )
+
+            first = call.call_args_list[0].args[0]
+            second = call.call_args_list[1].args[0]
+            self.assertIn("--sdk-only", first)
+            self.assertNotIn("--build-cli", first)
+            self.assertNotIn("--target", first)
+            self.assertIn("--build-cli", second)
+            self.assertIn("--target", second)
+            self.assertEqual(second[1], str(checkout))
 
 
 if __name__ == "__main__":

@@ -12,15 +12,14 @@ never add them here.
 
 Chicken-egg: the first run has no ``third_party/relkit``, so the raw
 ``consume.py`` is downloaded once to bootstrap. Afterwards the checked-out copy
-is always the one that runs — ``raw.githubusercontent.com`` is unreachable on
-plenty of build networks, and the checkout is the artifact we can verify. When
-syncing moves the checkout to another commit, ``consume.py`` changed underneath
-us, so it is re-executed once to keep one SHA per run (ADR-007).
+is used when it is already at the requested commit. A stale checkout is first
+run in sync-only mode, then the requested commit's script performs the real
+build. This ordering matters: the stale script may not know how to repair a
+checkout defect fixed by the requested commit (ADR-007).
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -159,8 +158,38 @@ def download_bytes(urls: Sequence[str]) -> bytes:
     )
 
 
-def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def checkout_head(root: Path) -> str:
+    checkout = relkit_dir(root)
+    if not (checkout / ".git").exists():
+        return ""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(checkout),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def sync_only_argv(argv: Sequence[str]) -> list[str]:
+    """Remove build requests so a stale consume script only updates checkout."""
+    out: list[str] = []
+    skip_value = False
+    for item in argv:
+        if skip_value:
+            skip_value = False
+            continue
+        if item == "--target":
+            skip_value = True
+            continue
+        if item.startswith("--target="):
+            continue
+        if item in ("--build-cli", "--build-cli-if-missing", "--sdk-only"):
+            continue
+        out.append(item)
+    return [*out, "--sdk-only"]
 
 
 def select_consume_py(root: Path, lock: dict[str, Any], ref: str) -> Path:
@@ -205,28 +234,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if lock_file.is_file():
         lock = load_lock(lock_file)
     ref = lock_ref(lock)
-    consume = select_consume_py(root, lock, ref)
     forwarded = prepare_argv(args, root, lock_file if lock_file.is_file() else None)
-    print(f"relkit consume bootstrap → {consume} ref={ref}", flush=True)
 
     checkout = relkit_dir(root) / CONSUME_REL
-    before = digest(checkout) if checkout.is_file() else ""
-    code = subprocess.call([sys.executable, str(consume), *forwarded])
-    if code != 0 or os.environ.get(REEXEC_ENV):
-        return code
-    if not checkout.is_file() or digest(checkout) == before:
-        return code
+    head = checkout_head(root)
+    if checkout.is_file() and head != ref and not os.environ.get(REEXEC_ENV):
+        print(
+            f"relkit consume: checkout HEAD={head or '<unknown>'} differs from "
+            f"requested ref={ref}; syncing without building first",
+            flush=True,
+        )
+        code = subprocess.call(
+            [sys.executable, str(checkout), *sync_only_argv(forwarded)]
+        )
+        if code != 0:
+            return code
+        if not checkout.is_file():
+            raise RuntimeError(f"sync did not materialize {checkout}")
+        print(
+            f"relkit consume: checkout synced; running requested build with "
+            f"the pinned {CONSUME_REL}",
+            flush=True,
+        )
+        env = {**os.environ, REEXEC_ENV: "1"}
+        return subprocess.call(
+            [sys.executable, str(checkout), *forwarded],
+            env=env,
+        )
 
-    print(
-        f"relkit consume: {CONSUME_REL} changed with the checkout; "
-        "re-running it so the new cone and builds apply",
-        flush=True,
-    )
-    env = {**os.environ, REEXEC_ENV: "1"}
-    return subprocess.call(
-        [sys.executable, str(checkout), *forwarded],
-        env=env,
-    )
+    consume = select_consume_py(root, lock, ref)
+    print(f"relkit consume bootstrap → {consume} ref={ref}", flush=True)
+    return subprocess.call([sys.executable, str(consume), *forwarded])
 
 
 if __name__ == "__main__":
