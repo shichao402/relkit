@@ -8,7 +8,7 @@ import (
 )
 
 // relkit-facade-gen writes the locked method/result signature table.
-// The three language facades must contain every token in this table.
+// Every language facade must contain every token in this table.
 func main() {
 	root := "."
 	if len(os.Args) > 1 {
@@ -27,6 +27,7 @@ func main() {
 		filepath.Join(root, "sdk", "updaterfacade", "facade.go"),
 		filepath.Join(root, "sdk", "dart", "lib", "src", "updater_facade.dart"),
 		filepath.Join(root, "sdk", "node", "src", "updater_facade.ts"),
+		filepath.Join(root, "sdk", "rust", "src", "lib.rs"),
 	}
 	required := []string{
 		"check", "skip", "download", "apply", "status", "cleanup", "cancel",

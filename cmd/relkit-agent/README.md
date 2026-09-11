@@ -1,6 +1,6 @@
 # relkit-agent
 
-> 本目录是仓库的一部分（`cmd/relkit-agent`）。部署脚本在仓库根的 `deploy/`。本目录没有 `AGENT-GUIDE.md`；设计见 [`docs/design/publish-agent.md`](../../docs/design/publish-agent.md)。
+> 本目录是仓库的一部分（`cmd/relkit-agent`）。部署脚本在仓库根的 `deploy/`。产品仓运维入口是 `scripts/host/relkit_host.py`。设计见 [`docs/design/publish-agent.md`](../../docs/design/publish-agent.md)。
 
 发布控制面：CI 只 `relkit stage` 并上传 staged 树；本机持签名私钥与后端凭据执行 `publish.Run`。客户端永远不连 agent。
 
@@ -37,31 +37,17 @@
 
 产品根上的 `relkit.json` **不是**发布配置，agent 不会读它。`relkit stage` 写出的 policy 不含私钥、backends、`publishTo`；profile 不含公钥集与通道策略。
 
-`onboard check` 的 `agent.directory-match` 校验签名用的公钥也走同一条路径——取**最新** staged 版本的 `release-policy.json` 里的 `signing.publicKeys`。profile 按设计没有公钥集，产品根那份 `relkit.json` 又已被 `-migrate-profile` 改名，两者都不可当兜底：拿仓库里一份与线上发布无关的文件去判定 directory 可信，比报错更危险。所以这台机上**必须**至少留一个 staged 版本，`retainVersions` 清空 staged 会让这项检查失去依据。
+签名用的公钥取 staged 树 `release-policy.json` 的 `signing.publicKeys`。profile 没有公钥集。这台机上应至少留一个 staged 版本。
 
-## 运维命令
+## 运维
 
-```text
-relkit-agent -config /etc/relkit-agent/relkit-agent.json
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -list-products
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> [-root /srv/relkit/<id>]
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -remove
-relkit-agent onboard check -config /etc/relkit-agent/relkit-agent.json -product <id> [-json]
-```
+装机 / 换二进制：`python deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：产品仓 `python scripts/host/relkit_host.py agent add --execute`（重启另加 `--restart`）。`init` 是内部写配置接口，不是人用 CLI。
 
 证书续期与 agent 同机、不同进程：安装 `deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。
 
 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
-- `-product`：建 root（若尚未登记）、写入 map、**签发该产品 token**（打印一次 `RELKIT_UPLOAD_TOKEN`）。已登记但还没有产品 token 时只签发、并删掉 json 里的实例级字段。
-- `-token-only`：轮换该产品 token，不改 root / profile。
-- `-migrate-profile`：一次性工具。从已有 `<root>/relkit.json` 抽出机器侧字段写到 `products/<id>.json`，拒绝覆盖已有 profile，并把产品根那份改名为 `relkit.json.migrated`。
-- `-remove`：从 map 摘掉 id，并删除其 token 文件；磁盘上的树、密钥、profile 留下。
-- 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
-
-新产品：先 `-product`，再手写 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要往产品根塞发布凭据。
+新产品：产品仓 `relkit_host.py agent add --execute`，再在机上准备 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要往产品根塞发布凭据。
 
 改 `/etc/relkit-agent/env` 后必须 `systemctl restart`。COS / 产品上传 token / EdgeOne 是三套东西。root 跑 init 时 `products/` 必须 `0755`，`tokens/` 给服务用户可读（文件 0600、目录让 relkit 能读）。
 

@@ -3,6 +3,7 @@
   "release": "v0.3.0",
   "commit": "0000000000000000000000000000000000000000",
   "consumerSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hostScriptsSha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "protocol": {
     "min": 2,
     "max": 2
@@ -14,6 +15,10 @@
   "artifacts": {
     "sdk-dart": {
       "url": "https://github.com/shichao402/relkit/releases/download/v0.3.0/relkit-sdk-dart.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "sdk-rust": {
+      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.0/relkit-sdk-rust.zip",
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "cli": {

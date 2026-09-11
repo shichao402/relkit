@@ -2,9 +2,7 @@
 // (signing keys and COS credentials stay on the host).
 //
 //	relkit-agent [flags]                         run the server
-//	relkit-agent init -list-products             list products in the config
-//	relkit-agent init -product <id> [-root path] add a product and mint its upload token
-//	relkit-agent init -product <id> -remove      drop a product from the map
+//	relkit-agent init …                          internal: called by product relkit_host.py
 //	relkit-agent -version
 package main
 
@@ -30,13 +28,6 @@ func main() {
 func run(argv []string) int {
 	if len(argv) > 0 && argv[0] == "init" {
 		if err := runInit(os.Stdout, argv[1:]); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-	if len(argv) > 0 && argv[0] == "onboard" {
-		if err := runAgentOnboard(os.Stdout, argv[1:]); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}

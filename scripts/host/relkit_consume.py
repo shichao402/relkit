@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """Install immutable relkit release artifacts into a host repository.
 
-Copy this file byte-for-byte to ``scripts/relkit_consume.py`` in the host.
-All variable input is pinned by ``scripts/relkit.lock.json``. This consumer
-never clones relkit, installs Go, or builds source code.
+Copy the whole ``scripts/host/`` tree byte-for-byte into the product repo.
+``relkit_host.py install`` calls this file. All variable input is pinned by
+``scripts/relkit.lock.json``. This consumer never clones relkit, installs Go,
+or builds source code.
 """
 
 from __future__ import annotations
@@ -27,7 +28,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 LOCK_SCHEMA = "relkit.consume/2"
-COMPONENTS = ("sdk-dart", "cli", "updater")
+COMPONENTS = ("sdk-dart", "sdk-rust", "cli", "updater")
+DEFAULT_COMPONENTS = ("sdk-dart", "cli", "updater")
 TARGETS = (
     "linux-amd64",
     "linux-arm64",
@@ -90,10 +92,10 @@ def artifact_spec(
 ) -> dict[str, str]:
     artifacts = lock["artifacts"]
     raw = artifacts.get(component)
-    if component != "sdk-dart":
+    if not component.startswith("sdk-"):
         raw = raw.get(target) if isinstance(raw, dict) else None
     if not isinstance(raw, dict):
-        suffix = "" if component == "sdk-dart" else f" for {target}"
+        suffix = "" if component.startswith("sdk-") else f" for {target}"
         raise RuntimeError(f"lock has no {component} artifact{suffix}")
     url = str(raw.get("url") or "").strip()
     digest = str(raw.get("sha256") or "").strip().lower()
@@ -232,24 +234,37 @@ def install_binary(
     return destination
 
 
-def safe_extract_sdk(artifact: Path, destination: Path, digest: str) -> None:
+def sdk_complete(destination: Path, component: str) -> bool:
+    if component == "sdk-dart":
+        return (destination / "pubspec.yaml").is_file() and (destination / "lib").is_dir()
+    if component == "sdk-rust":
+        return (
+            (destination / "Cargo.toml").is_file()
+            and (destination / "src" / "lib.rs").is_file()
+            and (destination / "proto" / "updater" / "v1" / "updater.proto").is_file()
+        )
+    return False
+
+
+def safe_extract_sdk(
+    artifact: Path, destination: Path, digest: str, component: str = "sdk-dart"
+) -> None:
     marker = destination / ".relkit-artifact.json"
     if marker.is_file():
         try:
             state = json.loads(marker.read_text(encoding="utf-8"))
             if (
                 state.get("sha256") == digest
-                and (destination / "pubspec.yaml").is_file()
-                and (destination / "lib").is_dir()
+                and sdk_complete(destination, component)
             ):
-                print("relkit consume: verified third_party/relkit/sdk/dart")
+                print(f"relkit consume: verified third_party/relkit/sdk/{component[4:]}")
                 return
         except (OSError, ValueError):
             pass
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
-        tempfile.mkdtemp(prefix=".dart-sdk-", dir=str(destination.parent))
+        tempfile.mkdtemp(prefix=f".{component[4:]}-sdk-", dir=str(destination.parent))
     )
     backup = destination.with_name(destination.name + ".relkit-old")
     try:
@@ -260,8 +275,8 @@ def safe_extract_sdk(artifact: Path, destination: Path, digest: str) -> None:
                 if target != root and root not in target.parents:
                     raise RuntimeError(f"unsafe SDK archive path: {member.filename}")
             archive.extractall(temporary)
-        if not (temporary / "pubspec.yaml").is_file() or not (temporary / "lib").is_dir():
-            raise RuntimeError("Dart SDK artifact lacks pubspec.yaml or lib/")
+        if not sdk_complete(temporary, component):
+            raise RuntimeError(f"{component} artifact is incomplete")
         (temporary / ".relkit-artifact.json").write_text(
             json.dumps({"schema": LOCK_SCHEMA, "sha256": digest}, indent=2) + "\n",
             encoding="utf-8",
@@ -273,7 +288,7 @@ def safe_extract_sdk(artifact: Path, destination: Path, digest: str) -> None:
         os.replace(temporary, destination)
         if backup.exists():
             shutil.rmtree(backup)
-        print("relkit consume: installed third_party/relkit/sdk/dart")
+        print(f"relkit consume: installed third_party/relkit/sdk/{component[4:]}")
     except Exception:
         if not destination.exists() and backup.exists():
             os.replace(backup, destination)
@@ -304,14 +319,15 @@ def check_installed(
     root: Path, lock: dict[str, Any], component: str, target: str
 ) -> None:
     spec = artifact_spec(lock, component, target)
-    if component == "sdk-dart":
-        destination = root / "third_party" / "relkit" / "sdk" / "dart"
+    if component.startswith("sdk-"):
+        language = component[4:]
+        destination = root / "third_party" / "relkit" / "sdk" / language
         marker = destination / ".relkit-artifact.json"
         state = json.loads(marker.read_text(encoding="utf-8"))
         if state.get("sha256") != spec["sha256"]:
-            raise RuntimeError("installed Dart SDK does not match lock")
-        if not (destination / "pubspec.yaml").is_file():
-            raise RuntimeError("installed Dart SDK is incomplete")
+            raise RuntimeError(f"installed {component} does not match lock")
+        if not sdk_complete(destination, component):
+            raise RuntimeError(f"installed {component} is incomplete")
         return
     destination = binary_destination(root, component, target)
     if not destination.is_file() or file_sha256(destination) != spec["sha256"]:
@@ -353,18 +369,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         lock = load_lock(lock_path)
         target = host_target() if args.target == "host" else args.target
-        components = args.component or list(COMPONENTS)
+        components = args.component or list(DEFAULT_COMPONENTS)
         resolved_artifacts: dict[str, str] = {}
         for component in components:
             spec = artifact_spec(lock, component, target)
             resolved_artifacts[component] = spec["sha256"]
             if args.command == "install":
                 artifact = download_artifact(root, component, spec)
-                if component == "sdk-dart":
+                if component.startswith("sdk-"):
+                    language = component[4:]
                     safe_extract_sdk(
                         artifact,
-                        root / "third_party" / "relkit" / "sdk" / "dart",
+                        root / "third_party" / "relkit" / "sdk" / language,
                         spec["sha256"],
+                        component,
                     )
                 else:
                     destination = install_binary(

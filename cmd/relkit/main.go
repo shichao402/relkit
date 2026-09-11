@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	relkitembed "go.firoyang.com/relkit/embed"
 	"go.firoyang.com/relkit/internal/backends"
 	"go.firoyang.com/relkit/internal/config"
 	"go.firoyang.com/relkit/internal/directory"
@@ -94,12 +93,8 @@ func run(argv []string) (code int) {
 		err = cmdFallback(rest, configPath)
 	case "directory":
 		err = cmdDirectory(rest, configPath)
-	case "agent-guide":
-		err = cmdAgentGuide(rest)
 	case "backends":
 		err = cmdBackends(rest)
-	case "onboard":
-		err = cmdOnboard(rest, configPath)
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
@@ -696,14 +691,6 @@ func parseDirectoryServiceFlag(raw string) (directory.ServiceInput, error) {
 	return service, nil
 }
 
-func cmdAgentGuide(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("agent-guide takes no arguments")
-	}
-	_, err := os.Stdout.WriteString(relkitembed.AgentGuide)
-	return err
-}
-
 func cmdBackends(args []string) error {
 	if len(args) > 0 {
 		return fmt.Errorf("backends takes no arguments")
@@ -1008,8 +995,6 @@ Commands:
   cas-put
   fallback
   directory
-  agent-guide
   backends
-  onboard
 `)
 }

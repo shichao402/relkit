@@ -248,7 +248,7 @@ flowchart TB
 | 自建 relkit-serve 数据面 | `relkit-compatible` | **已实现**；`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`；内网 primary ingest |
 | 只读 HTTP / 外部已送达对象 | `static-http` | **已实现**；不可作 ingest |
 
-正式发布优先配置 `s3-compatible`。**禁止**手工打乱「产物 → manifest → 指针最后写」顺序冒充正式发布（见 AGENT-GUIDE）。
+正式发布优先配置 `s3-compatible`。**禁止**手工打乱「产物 → manifest → 指针最后写」顺序冒充正式发布。
 
 ## 7.1 删除旧后端前的部署顺序
 
@@ -382,7 +382,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 
 同桶再挂二级域名**不是**第二 backend。验证期第二 backend 曾是成都桶 `relkit-updates-cd-1251882798` / `raw2.firoyang.com`。2026-09-04 按单独指令拆除：仓库与发布机 profile 去掉 `cos2`，证书续期 `targets` 去掉 `raw2`，对象清空后由发布机凭据 `DeleteBucket`（MCP 禁止该 API）。已装 1.13.55 客户端内嵌的 `raw2` entryUrl 会失败，主入口 `raw.` 不受影响。免费证书 `aXOYfCx6` 未自动续期，可在 SSL 控制台删除。
 
-发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令：profile、systemd 单元、`relkit-agent onboard check` 都在目标机本地执行。
+发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令。产品侧用 `relkit_host.py`；换二进制用 `deploy/relkit.py upgrade`。
 
 凭据：`COS_SECRET_ID` / `COS_SECRET_KEY` 只进发布机环境（或 mise 私密配置），**禁止**写入仓库。
 
@@ -404,7 +404,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 - Directory 设计：[`bootstrap-directory.md`](bootstrap-directory.md)
 - 决策记录：[`../adr/0005-signed-bootstrap-directory.md`](../adr/0005-signed-bootstrap-directory.md)、[`../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md`](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)
 - 工具接口与后端表：[`CLI.md`](../../CLI.md) §6
-- 操作手册：[`embed/AGENT-GUIDE.md`](../../embed/AGENT-GUIDE.md)
+- 产品运维：`python scripts/host/relkit_host.py`
 - 给人看的索引站：[`sites/updates-index/README.md`](../../sites/updates-index/README.md)
 - 实装参数：本文 §10
 - 发布 agent（含内网）：[`publish-agent.md`](publish-agent.md)

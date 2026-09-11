@@ -16,35 +16,17 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 项目版本 SSOT 见 [`docs/adr/0004-project-version-ssot.md`](docs/adr/0004-project-version-ssot.md)：`VERSION.json` + `relkit version …`。  
 操作面板一次性引导凭据见 [`docs/adr/0006-admin-panel-bootstrap.md`](docs/adr/0006-admin-panel-bootstrap.md)。
 
-## Agent 开箱（接入项目时先读）
+## 产品开箱
 
-要从零给**另一个产品仓**接入发布工具 + 客户端 SDK，不要从 ADR 或运维手册开始，先读：
-
-**[`docs/agent/README.md`](docs/agent/README.md)**
-
-内含工具链清单、SDK 级联索引，以及只读探测脚本 `docs/agent/bootstrap.ps1` / `bootstrap.sh`。  
-各语言 SDK 自己的开箱文在包内：`sdk/AGENT-QUICKSTART.md`（Go）、`sdk/dart/AGENT-QUICKSTART.md`（Dart）、`sdk/node/AGENT-QUICKSTART.md`（Node）。
-
-日常**已接入后的发版**仍用：`relkit agent-guide` / `relkit-serve agent-guide`。
+给另一个产品仓接入时，复制 `scripts/host/`，跑 `python scripts/host/relkit_host.py`。Skill：[`skills/relkit-ops/SKILL.md`](skills/relkit-ops/SKILL.md)。空机装 systemd / 换二进制才用本仓 [`deploy/README.md`](deploy/README.md)。
 
 ## 安装
 
 主仓是 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)。Go 模块名是逻辑路径 `go.firoyang.com/relkit`，**没有** vanity 解析，不要 `go get` / `go install` 该模块。
 
-从 [Releases](https://github.com/shichao402/relkit/releases) 下载对应平台二进制，或 clone 后本地构建：
+本仓库开发者从 [Releases](https://github.com/shichao402/relkit/releases) 取二进制，或在本仓用 `python deploy/relkit.py build`。
 
-```bash
-git clone https://github.com/shichao402/relkit.git
-cd relkit
-go build -o relkit ./cmd/relkit
-go build -o relkit-serve ./cmd/relkit-serve
-# 或交叉编译 serve / agent：
-python deploy/relkit.py build --serve --agent
-```
-
-宿主产品仓使用 `relkit.consume/2` lock 钉住 Release、commit、每个附件 URL 和
-SHA-256，再由逐字节复制的 `scripts/relkit_consume.py install --target host`
-安装 SDK、CLI 与 updater。消费端不 clone 本仓、不安装 Go，也不从源码构建。
+宿主产品仓使用 `relkit.consume/2` lock 钉住 Release、commit、附件 URL、SHA-256 以及 `scripts/host/` 树哈希，再由 `python scripts/host/relkit_host.py install` 安装 SDK、CLI 与 updater。消费端不 clone 本仓、不安装 Go，也不从源码构建。
 lock 示例见 [`scripts/relkit.lock.example.json`](scripts/relkit.lock.example.json)。
 
 ## relkit（发布 CLI）
@@ -58,7 +40,6 @@ relkit inspect
 relkit simulate
 relkit verify
 relkit publish
-relkit agent-guide
 relkit backends
 ```
 
@@ -132,9 +113,7 @@ Linux + systemd：
 sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
 ```
 
-已有实例升级：`python deploy/relkit.py upgrade --host <Host> --plan` 然后 `--apply --restart`。细节见 [`deploy/README.md`](deploy/README.md)。
-
-运维手册：`relkit-serve agent-guide`（二进制内嵌），源文件在 [`cmd/relkit-serve/AGENT-GUIDE.md`](cmd/relkit-serve/AGENT-GUIDE.md)。设计说明见 [`cmd/relkit-serve/README.md`](cmd/relkit-serve/README.md)。
+已有实例升级：`python deploy/relkit.py upgrade --host <Host> --plan` 然后 `--apply`。细节见 [`deploy/README.md`](deploy/README.md)。产品 token 用产品仓 `relkit_host.py serve`。设计说明见 [`cmd/relkit-serve/README.md`](cmd/relkit-serve/README.md)。
 
 ## 设计与规范来源
 
@@ -142,12 +121,12 @@ sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-a
 |---|---|
 | 协议规范 | [`SPEC.md`](SPEC.md) |
 | 发布工具设计 | [`CLI.md`](CLI.md) |
-| Protobuf 结构 SSOT | [`proto/`](proto/)（Go / Dart：改完跑 `scripts/gen-proto.ps1`；Node：`cd sdk/node && npm run generate`） |
+| Protobuf 结构 SSOT | [`proto/`](proto/)（Go / Dart：改完跑 `scripts/gen-proto.ps1`；Node：`cd sdk/node && npm run generate`；Rust：构建时用 vendored protoc 生成） |
 | JSON Schema（辅助） | [`schema/`](schema/) |
 | 一致性夹具 | [`conformance/`](conformance/) |
-| 发布侧手册 | `relkit agent-guide`（源：[`embed/AGENT-GUIDE.md`](embed/AGENT-GUIDE.md)） |
+| 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`skills/relkit-ops/SKILL.md`](skills/relkit-ops/SKILL.md) |
 | 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |
-| 服务侧手册 | `relkit-serve agent-guide` |
+| 装机 / 换二进制 | [`deploy/README.md`](deploy/README.md) |
 
 ## 客户端 SDK
 
@@ -155,9 +134,10 @@ sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-a
 
 | | |
 |--|--|
-| Go | `sdk/*.go` → consume + `replace go.firoyang.com/relkit => ./third_party/relkit` · [`sdk/AGENT-QUICKSTART.md`](sdk/AGENT-QUICKSTART.md) |
-| Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/AGENT-QUICKSTART.md`](sdk/dart/AGENT-QUICKSTART.md) |
-| Node | `sdk/node`（package `rup-client`）· [`sdk/node/AGENT-QUICKSTART.md`](sdk/node/AGENT-QUICKSTART.md) |
+| Go | `sdk/*.go` → consume + `replace go.firoyang.com/relkit => ./third_party/relkit` · [`sdk/README.md`](sdk/README.md) |
+| Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/README.md`](sdk/dart/README.md) |
+| Node | `sdk/node`（package `rup-client`）· [`sdk/node/README.md`](sdk/node/README.md) |
+| Rust | `sdk/rust`（crate `relkit-updater`，供 Tauri 壳调用 sidecar）· [`sdk/rust/README.md`](sdk/rust/README.md) |
 
 ```go
 import "go.firoyang.com/relkit/sdk"
@@ -171,13 +151,14 @@ u := &sdk.Updater{
 result := u.Check(ctx)
 ```
 
-Dart：`rup_client`（git `path: sdk/dart`；级联见 [`docs/agent/sdk-cascade.md`](docs/agent/sdk-cascade.md)）。  
-Node：`rup-client`（`sdk/node`；同样走级联）。
+Dart：`rup_client`（git `path: sdk/dart`）。
+Node：`rup-client`（`sdk/node`）。
 
 ## 开发与测试
 
 ```bash
 go test ./...
+cargo test --manifest-path sdk/rust/Cargo.toml
 cd sdk/node && npm test
 ```
 

@@ -4,7 +4,7 @@ Official Node client SDK for RUP v2. Implements the client half of
 [`SPEC.md`](../../SPEC.md): discover a signed index, verify it, pick the next
 version, download and verify the artifact.
 
-Agent onboarding: [`AGENT-QUICKSTART.md`](AGENT-QUICKSTART.md).
+Host wiring: product-repo `python scripts/host/relkit_host.py`.
 
 ## Requirements
 
@@ -29,7 +29,7 @@ Agent onboarding: [`AGENT-QUICKSTART.md`](AGENT-QUICKSTART.md).
 | `src/scheduler.ts` | Start / periodic checks |
 
 No `apply/`. Installing the verified file is host-specific and deliberately out
-of scope; see AGENT-QUICKSTART §N4.
+of scope.
 
 ## Build and test
 

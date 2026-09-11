@@ -15,13 +15,7 @@
 // Usage:
 //
 //	relkit-serve [flags]                  run the server
-//	relkit-serve init [dir]               write a config skeleton, upload token, and panel bootstrap
-//	relkit-serve init -product <id>       add or rotate a product upload token
-//	relkit-serve init -product <id> -share-with <id>  attach to an existing token
-//	relkit-serve init -list-products      list the product upload tokens
-//	relkit-serve init -product <id> -remove   revoke one product
-//	relkit-serve init -reset-admin        issue a new panel bootstrap; existing operators are wiped
-//	relkit-serve agent-guide              print the deployment guide
+//	relkit-serve init [dir]               internal: write config; called by deploy/relkit.py and product relkit_host.py
 //	relkit-serve -version
 package main
 
@@ -29,7 +23,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -55,13 +48,6 @@ const tokenEnv = "RELKIT_SERVE_TOKEN"
 // Without it there is no way to tell which binary a box is actually running,
 // which is the first thing anyone asks when behaviour differs between hosts.
 var version = "dev"
-
-// The guide travels inside the binary so that it can never drift from the
-// build being run, and so that an agent on a fresh machine can read it without
-// network access or a checked-out repository.
-//
-//go:embed AGENT-GUIDE.md
-var agentGuide string
 
 type config struct {
 	root               *os.Root
@@ -89,9 +75,6 @@ func main() {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
-			return
-		case "agent-guide":
-			fmt.Print(agentGuide)
 			return
 		}
 	}
@@ -456,7 +439,7 @@ func runInit(out io.Writer, args []string) error {
 	}
 	fmt.Fprintf(out, "\nServing directory is %s; create it before starting.\n", *dir)
 	fmt.Fprintf(out, "Then: relkit-serve -config %s\n", configPath)
-	fmt.Fprintf(out, "Deployment steps and troubleshooting: relkit-serve agent-guide\n")
+	fmt.Fprintf(out, "Product token ops: product-repo python scripts/host/relkit_host.py serve\n")
 	return nil
 }
 

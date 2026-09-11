@@ -215,23 +215,21 @@ Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请
 - `nginx-intranet.example.conf`（内网 `update.devcloud.woa.com`：`/v1/` → agent `:8787`；`/` 仅作为旧签名 URL 的只读兼容入口。当前数据面直达独立监听的 serve）
 - `relkit-agent.service`
 - `Caddyfile.relkit-agent.example`（`publish.firoyang.com` → `127.0.0.1:8787`）
-- `python deploy/relkit.py`（`build` / `install` / `upgrade` / `token`）
+- `python deploy/relkit.py`（`build` / `install` / `upgrade`）
 
 DNS：`publish.firoyang.com` A → 发布机公网 IP。Agent 只听本机；TLS 由前面的反向代理终止。
 
 实装说明（2026-08）：发布机上已有 nginx 占用 `:80`，因此 HTTPS 用 **nginx + certbot** 反代 `127.0.0.1:8787`，而不是再起 Caddy。若主机是空机，仍可用 `deploy/Caddyfile.relkit-agent.example`。
 
-产品清单走本机 CLI，不要手改 `uploadTokens`。每个产品一张 token 文件：`tokens/<id>.token`，CI 环境变量名固定为 `RELKIT_UPLOAD_TOKEN`（值因仓库而异）。**禁止**实例级 `uploadTokenFile` / `RELKIT_AGENT_TOKEN`：配置或环境里出现即拒绝启动。一条 token 也不得挂多个 product id。
+产品清单不要手改 `uploadTokens`。每个产品一张 token 文件：`tokens/<id>.token`，CI 环境变量名固定为 `RELKIT_UPLOAD_TOKEN`。**禁止**实例级 `uploadTokenFile` / `RELKIT_AGENT_TOKEN`。产品增删走产品仓：
 
 ```text
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -list-products
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> [-root /srv/relkit/<id>]
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -migrate-profile
-relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -remove
+python scripts/host/relkit_host.py agent list
+python scripts/host/relkit_host.py agent add --execute
+python scripts/host/relkit_host.py agent remove --execute
 ```
 
-`-product` 会创建 root（若尚未登记）、把 id 写进 `products`，并 **签发该产品 token**（只打印一次明文）。已在 map 里但还没有产品 token 时，同样签发并删掉 json 里的实例级字段。列出只打 id、root、profile 路径和 token **文件路径**。`-remove` 从 map 摘掉 id 并删除其 token 文件，磁盘上的产品树、密钥和 profile 留下。改完后先把新 `RELKIT_UPLOAD_TOKEN` 交给该产品 CI，再 `systemctl restart relkit-agent`。
+机上 `init` 是内部写盘接口。改完后先把新 `RELKIT_UPLOAD_TOKEN` 交给该产品 CI，再 `--restart`。
 
 ### 5.1 删除旧后端前的部署顺序
 
@@ -246,10 +244,10 @@ relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -rem
 
 ## 6. Token 轮换
 
-1. `relkit-agent init -config /etc/relkit-agent/relkit-agent.json -product <id> -token-only`
-2. 把打印的 `RELKIT_UPLOAD_TOKEN` 写进 **该产品** 的 CI secret
-3. `systemctl restart relkit-agent`
-4. 旧 token 立即失效（无宽限期）
+1. 产品仓 `python scripts/host/relkit_host.py agent add --execute`（已有产品则走 serve/agent 的 rotate）
+2. 把项目 `.secrets` 里的 `RELKIT_UPLOAD_TOKEN` 写进该产品 CI secret
+3. 用户允许后再 `--restart`
+4. 旧 token 在重启后立即失效（无宽限期）
 
 不要轮换「整台机一把」。没有这种东西。
 

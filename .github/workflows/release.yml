@@ -21,14 +21,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
       - name: Test
         run: |
           go test ./...
-          python -m unittest deploy/test_relkit.py scripts/test_relkit_consume.py
+          cargo test --manifest-path sdk/rust/Cargo.toml
+          python -m unittest deploy/test_relkit.py scripts/test_relkit_consume.py scripts/test_relkit_host.py
       - name: Build immutable release artifacts
         run: >-
           python deploy/relkit.py build
-          --serve --agent --cli --updater --dart-sdk
+          --serve --agent --cli --updater --dart-sdk --rust-sdk
           --version "${GITHUB_REF_NAME#v}" --out dist
       - name: Write checksums
         working-directory: dist

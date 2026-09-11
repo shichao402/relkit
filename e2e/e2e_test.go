@@ -41,9 +41,6 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 		t.Fatalf("removed backend was listed:\n%s", backendsOut)
 	}
 
-	guideOut := runRelkit(t, exe, project, nil, 0, "agent-guide")
-	assertContains(t, guideOut, "RUP 发布操作手册")
-
 	runRelkit(t, exe, project, nil, 0, "init", "--product", "demoapp")
 	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
 	setPrivateKeyPath(t, project, "keys/k1.private.pb")

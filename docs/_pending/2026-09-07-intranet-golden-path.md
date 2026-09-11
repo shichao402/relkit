@@ -29,7 +29,7 @@
 - `-migrate-profile`：`/etc/relkit-agent/products/svn-auto-merge.json`（`local` → `/data/relkit-serve`，`https://update.devcloud.woa.com/`）
 - 产品根 `relkit.json` → `relkit.json.migrated`
 - 为 staged `0.2.0+112` 补上 `release-policy.json`
-- `relkit-agent onboard check`：全部 passed / N/A（local 无第二 entryUrl、无 COS 证书项属正常）
+- agent 健康：当时用清单检查；现改为产品仓 `relkit_host.py verify`
 - 因操作失误曾短暂暴露旧 upload token → 已轮换并重启；旧 token 失效
 - nginx：非 `/v1/` 的 PUT = 403
 - 2026-09-07：已吊销 `svn-auto-merge` 产品 token，并去掉运营方 `uploadTokenFile`；`relkit-serve` 只读，直连 PUT = **405**

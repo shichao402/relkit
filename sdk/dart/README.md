@@ -5,7 +5,7 @@ signed index → version chain → hash-verified download (optional apply helper
 
 **This directory (`relkit/sdk/dart`) is the source of truth.**  
 Go peer SDK: `../` (`go.firoyang.com/relkit/sdk`).  
-Agent onboarding: [`AGENT-QUICKSTART.md`](AGENT-QUICKSTART.md) · hub: [`../../docs/agent/README.md`](../../docs/agent/README.md).
+Host wiring: product-repo `python scripts/host/relkit_host.py`.
 
 Pure Dart (no Flutter SDK dependency).
 
@@ -120,4 +120,4 @@ switch (await updater.check()) {
 }
 ```
 
-See `example/check_update.dart` and `AGENT-QUICKSTART.md` for full host wiring.
+See `example/check_update.dart` for a check-flow sample.

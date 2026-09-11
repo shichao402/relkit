@@ -93,7 +93,8 @@ main:
             python3 deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64
             ```
 
-            Guides: `relkit agent-guide` · `relkit-serve agent-guide`
+            Product ops: copy `scripts/host/` and run `python scripts/host/relkit_host.py`.
+            Empty-machine install: `python3 deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64`
             EOF
         - name: create CNB Release
           type: git:release

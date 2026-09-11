@@ -15,7 +15,7 @@
 
 也可以纯当通用静态服务用 —— 把缓存前缀改成你自己的路径约定即可。只是它的差异化价值来自理解 RUP 的可变/不可变语义，见下文。
 
-**要部署它，读 [`AGENT-GUIDE.md`](AGENT-GUIDE.md)**，那是操作性知识的唯一来源。本文解释它为什么长这样。
+**要部署空机或换二进制，用 [`deploy/README.md`](../../deploy/README.md)。** 给已有实例加产品 token 用产品仓 `relkit_host.py serve`。本文解释 serve 为什么长这样。
 
 ---
 
@@ -72,19 +72,12 @@ sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-a
 | 命令 | 作用 |
 |---|---|
 | `relkit-serve` | 起服务 |
-| `relkit-serve init` | 生成配置骨架与运营方 token |
-| `relkit-serve init -product <id>` | 为该产品签发隔离上传 token（合并进已有配置） |
-| `relkit-serve init -product <id> -share-with <id>` | 把新产品挂到已有 token 上（不签发新秘密） |
-| `relkit-serve init -list-products` | 列出已放行的产品与 token 文件（不打明文） |
-| `relkit-serve init -product <id> -remove` | 吊销该产品的上传 token（重启后生效） |
-| `relkit-serve agent-guide` | 打印内嵌的部署运维手册 |
+| `relkit-serve init` | 内部接口：写配置 / 产品 token；由 deploy 与产品仓 `relkit_host.py` 调用 |
 | `relkit-serve -version` | 版本 |
-
-手册内嵌在二进制里，因此在一台刚装好的机器上不联网也能读到，且读到的一定与当前运行的构建配套。
 
 ## 配置
 
-字段与参数的完整对照表在 [`AGENT-GUIDE.md`](AGENT-GUIDE.md) §6，示例在 `deploy/relkit-serve.example.json`。要点：
+字段示例在 `deploy/relkit-serve.example.json`。要点：
 
 - 缺省按 `./relkit-serve.json`、`/etc/relkit-serve.json` 顺序查找，可用 `-config` 指定；**启动日志总会打印实际用了哪个文件**。
 - **未知字段一律报错。** 拼错键名而静默沿用默认值是最难查的一类配置故障 —— 服务照常启动、报告成功，行为却与配置文件写的不一样。

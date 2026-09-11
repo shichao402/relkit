@@ -62,7 +62,6 @@ staged 鈹€鈹€鈻?relkit publish 鈹€鈹€鈻?鈶?鏍￠獙鍙揪鎬�
 | `relkit yank` / `unyank` | 鏄?| 鎾ゅ洖 / 鍙栨秷鎾ゅ洖鏌愪釜鐗堟湰 |
 | `relkit min-supported` | 鏄?| 璁剧疆寮哄埗鏇存柊涓嬮檺 |
 | `relkit conformance` | 鍚?| 璺戜竴鑷存€х敤渚嬶紙鑷锛?|
-| `relkit agent-guide` | 鍚?| 杈撳嚭鍐呭祵鐨?`AGENT-GUIDE.md` |
 | `relkit backends` | 鍚?| 鍒楀嚭鏈鏋勫缓瀹為檯鏀寔鐨勫悗绔被鍨?|
 
 ---
@@ -222,14 +221,6 @@ relkit min-supported 120
 ### 4.7 `relkit conformance`
 
 璺?`conformance/` 涓嬬殑鍏ㄩ儴鐢ㄤ緥銆傚伐鍏疯嚜韬殑閫夎矾銆佸彲杈炬€с€侀€夋嫨鍣ㄣ€侀獙绛惧疄鐜?*蹇呴』**涓庣敤渚嬩竴鑷?鈥斺€?鍙戝竷渚у拰瀹㈡埛绔叡鐢ㄥ悓涓€濂楀垽瀹氾紝鑻ヤ袱杈圭悊瑙ｄ笉鍚岋紝鍙戝竷渚у氨浼氭斁琛屼竴涓鎴风瀹為檯澶勭悊涓嶄簡鐨?index銆?
-
-### 4.8 `relkit agent-guide`
-
-鎶?`AGENT-GUIDE.md` 鍘熸枃鎵撳嵃鍒?stdout銆?
-
-瀛樺湪鐨勭悊鐢憋細`AGENT-GUIDE.md` 鏄搷浣滄€х煡璇嗙殑 SSOT锛岃€岃皟鐢ㄥ畠鐨?skill 浼氳鎷疯繘鍚勪釜浣跨敤鏂归」鐩紝灞婃椂鎸囧悜鏈粨搴撶殑鐩稿璺緞灏辨柇浜嗐€傛妸鏂囨。闅忓彲鎵ц鏂囦欢涓€璧峰垎鍙戯紝浣?寮曠敤 SSOT"鍦ㄤ换浣曢」鐩噷閮芥垚绔嬶紝涓斾笉浜х敓浼氬悇鑷紓绉荤殑鍓湰銆?
-
-鍥犳鏋勫缓鏃?*蹇呴』**鎶?`AGENT-GUIDE.md` 鍘熸牱宓屽叆浜х墿锛?*绂佹**鍦ㄥ祵鍏ヨ繃绋嬩腑鏀瑰啓鍐呭銆?
 
 ---
 
@@ -517,7 +508,3 @@ testdata/conformance/       鍗忚澶瑰叿鍓湰锛堜笌鏈洰褰曞�
 ```
 
 `chain` / `selectors` / `envelope` 鏄鑼冩€ц涓虹殑鏉冨▉瀹炵幇锛宑onformance 娴嬭瘯鐩存帴鍔犺浇鏈洰褰曪紙鎴栦粨搴撳唴 `testdata/conformance`锛夌殑 JSON 澶瑰叿銆
-### relkit onboard
-
-relkit onboard check|next|run|ack ; relkit-agent onboard check -config PATH -product ID [-json]
-

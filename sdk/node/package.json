@@ -18,8 +18,7 @@
   "files": [
     "dist/src",
     "src",
-    "README.md",
-    "AGENT-QUICKSTART.md"
+    "README.md"
   ],
   "scripts": {
     "generate": "buf generate ../../proto",

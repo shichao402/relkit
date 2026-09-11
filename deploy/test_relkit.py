@@ -10,12 +10,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 DEPLOY = Path(__file__).resolve().parent
 sys.path.insert(0, str(DEPLOY))
 
 import relkit_ops as ops  # noqa: E402
+import relkit as deploy_cli  # noqa: E402
 
 
 class RequirementsTests(unittest.TestCase):
@@ -309,7 +311,8 @@ class CliParseTests(unittest.TestCase):
         self.assertIn("build", result.stdout)
         self.assertIn("install", result.stdout)
         self.assertIn("upgrade", result.stdout)
-        self.assertIn("token", result.stdout)
+        self.assertIn("upgrade", result.stdout)
+        self.assertNotRegex(result.stdout, r"(?m)^\s+token\s")
 
     def test_upgrade_requires_host(self):
         env = os.environ.copy()
@@ -327,6 +330,36 @@ class CliParseTests(unittest.TestCase):
         self.assertNotIn("%", probe)
         text = (DEPLOY / "requirements.txt").read_text(encoding="utf-8")
         self.assertEqual(ops.parse_requirements(text), [])
+
+    def test_rust_sdk_flag_and_deterministic_zip(self):
+        args = deploy_cli.build_parser().parse_args(["build", "--rust-sdk"])
+        self.assertTrue(args.rust_sdk)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "Cargo.toml"
+            source.write_text("[package]\nname='x'\n", encoding="utf-8")
+            first = root / "first.zip"
+            second = root / "second.zip"
+            entries = [(source, "Cargo.toml")]
+            deploy_cli.write_deterministic_zip(first, entries)
+            deploy_cli.write_deterministic_zip(second, entries)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+
+    def test_rust_sdk_archive_excludes_ignored_target(self):
+        ignore = (DEPLOY.parent / "sdk" / "rust" / ".gitignore").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("/target/", ignore.splitlines())
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "relkit-sdk-rust.zip"
+            deploy_cli.write_deterministic_zip(
+                archive_path, deploy_cli.rust_sdk_entries()
+            )
+            with zipfile.ZipFile(archive_path) as archive:
+                names = archive.namelist()
+        self.assertIn("Cargo.toml", names)
+        self.assertIn("proto/updater/v1/updater.proto", names)
+        self.assertFalse(any(name == "target" or name.startswith("target/") for name in names))
 
 
 class ExtractExportTests(unittest.TestCase):

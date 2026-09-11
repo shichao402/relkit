@@ -6,13 +6,12 @@
 
 | 子命令 | 用途 |
 |---|---|
-| `build` | 交叉编译 serve / agent（默认两者；`CGO_ENABLED=0`） |
+| `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`） |
 | `install serve` | 空机首装 systemd `relkit-serve` |
 | `install agent` | 空机首装 systemd `relkit-agent` |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |
-| `token` | 显式轮换运营方/产品 token（**不**绑在 upgrade 上） |
 
-禁止：用 example JSON 覆盖现网配置；把 token 或带 `sig=` 的 URL 打进聊天/工单；upgrade 默默 `--rotate-token`；跳过发布验证。
+禁止：用 example JSON 覆盖现网配置；把 token 或带 `sig=` 的 URL 打进聊天/工单；upgrade 默默 `--rotate-token`；跳过发布验证。产品 token 的签发/轮换/吊销不在本脚本，走产品仓 `relkit_host.py serve`。
 
 ## 黄金路径（升级已有内网机）
 
@@ -24,7 +23,7 @@ python deploy/relkit.py upgrade --host update.devcloud.woa.com --plan --serve-li
 python deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
 ```
 
-`--plan` 只读并打印脱敏探测结果、本机 HEAD 与协议窗口。`--apply` 默认从当前干净 HEAD 构建 linux/amd64 的 agent+serve，在目标机 `/var/backups/relkit/<utc>/` 备份后换文件并重启。`--stage-only` 只写盘不重启，不得称为升级完成。`--unsafe-from-dist` 才使用已有 `dist/`，并持续告警。失败会从该备份回滚；onboard check 失败同样回滚。
+`--plan` 只读并打印脱敏探测结果、本机 HEAD 与协议窗口。`--apply` 默认从当前干净 HEAD 构建 linux/amd64 的 agent+serve，在目标机 `/var/backups/relkit/<utc>/` 备份后换文件并重启。`--stage-only` 只写盘不重启，不得称为升级完成。`--unsafe-from-dist` 才使用已有 `dist/`，并持续告警。失败会从该备份回滚。
 
 upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
 
@@ -49,18 +48,14 @@ sudo python3 deploy/relkit.py install agent --binary ./dist/relkit-agent-linux-a
 
 已有实例且 `--addr`/`--dir` 与现网不一致时，`install serve` 拒绝执行（避免把 30341 / `/srv/releases` 写进内网机）。这时用 `upgrade`。
 
-## Token（两阶段）
-
-```bash
-python deploy/relkit.py token --host update.devcloud.woa.com --prepare
-# 把打印的 RELKIT_SERVE_TOKEN 交给所有 agent / 凭据库（只出现一次）
-python deploy/relkit.py token --host update.devcloud.woa.com --activate
-```
-
-`--activate` 才会 `systemctl restart`。产品隔离 token 加 `--product <id>`。
+产品仓注册/轮换/吊销上传 token：`python scripts/host/relkit_host.py serve …`（需要 `--execute`；重启另加 `--restart`）。
 
 ## 测试
 
 ```bash
 python -m unittest deploy/test_relkit.py
 ```
+
+Release 构建使用 `--rust-sdk` 生成 `relkit-sdk-rust.zip`。ZIP 的时间戳、权限和
+路径排序固定，并携带 canonical `proto/updater/v1/updater.proto`，因此消费仓在
+`third_party/relkit/sdk/rust` 可直接用 vendored protoc 重建 DTO。

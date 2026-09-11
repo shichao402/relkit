@@ -28,9 +28,18 @@ def sdk_zip() -> bytes:
     return output.getvalue()
 
 
-def lock_for(url: str, sdk: bytes, binary: bytes) -> dict:
+def rust_sdk_zip() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("Cargo.toml", "[package]\nname='relkit-updater'\n")
+        archive.writestr("src/lib.rs", "pub const IPC_MIN: u32 = 1;\n")
+        archive.writestr("proto/updater/v1/updater.proto", 'syntax = "proto3";\n')
+    return output.getvalue()
+
+
+def lock_for(url: str, sdk: bytes, binary: bytes, rust_sdk: bytes | None = None) -> dict:
     spec = lambda data: {"url": url, "sha256": sha256(data)}
-    return {
+    lock = {
         "schema": subject.LOCK_SCHEMA,
         "release": "v1.2.3",
         "commit": "a" * 40,
@@ -40,6 +49,9 @@ def lock_for(url: str, sdk: bytes, binary: bytes) -> dict:
             "updater": {"linux-amd64": spec(binary)},
         },
     }
+    if rust_sdk is not None:
+        lock["artifacts"]["sdk-rust"] = spec(rust_sdk)
+    return lock
 
 
 class LockTests(unittest.TestCase):
@@ -108,6 +120,40 @@ class InstallTests(unittest.TestCase):
                     root / "third_party/relkit/sdk/dart",
                     sha256(archive_path.read_bytes()),
                 )
+
+    def test_installs_rust_sdk_to_stable_path_with_proto(self) -> None:
+        sdk = rust_sdk_zip()
+        binary = b"executable"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            lock = lock_for("https://example.invalid/artifact", sdk_zip(), binary, sdk)
+
+            def fake_download(_root, component, _spec):
+                path = root / f"{component}.artifact"
+                path.write_bytes(sdk if component == "sdk-rust" else binary)
+                return path
+
+            with (
+                patch.object(subject, "host_target", return_value="linux-amd64"),
+                patch.object(subject, "load_lock", return_value=lock),
+                patch.object(subject, "download_artifact", side_effect=fake_download),
+            ):
+                self.assertEqual(
+                    subject.main(
+                        [
+                            "install",
+                            "--project-root",
+                            str(root),
+                            "--component",
+                            "sdk-rust",
+                        ]
+                    ),
+                    0,
+                )
+
+            installed = root / "third_party/relkit/sdk/rust"
+            self.assertTrue((installed / "Cargo.toml").is_file())
+            self.assertTrue((installed / "proto/updater/v1/updater.proto").is_file())
 
 
 class DownloadTests(unittest.TestCase):

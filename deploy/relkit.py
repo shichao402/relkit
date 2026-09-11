@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified relkit deploy CLI: bootstrap, build, install, upgrade, token.
+"""Unified relkit deploy CLI: build, empty-machine install, upgrade binaries.
 
 Stdlib only unless deploy/requirements.txt lists packages. In that case this
 file creates deploy/.venv, pip-installs, and re-execs itself.
@@ -172,6 +172,49 @@ def git_stamp(version: str) -> str:
     return stamp
 
 
+def release_source_paths(*prefixes: str) -> list[str]:
+    tracked = run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *prefixes],
+        cwd=REPO_ROOT,
+        capture=True,
+    ).stdout
+    return sorted(item for item in tracked.split("\0") if item)
+
+
+def write_deterministic_zip(
+    destination: Path, entries: Sequence[tuple[Path, str]]
+) -> None:
+    with zipfile.ZipFile(
+        destination,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    ) as archive:
+        for source, archive_name in sorted(entries, key=lambda item: item[1]):
+            info = zipfile.ZipInfo(
+                archive_name,
+                date_time=(1980, 1, 1, 0, 0, 0),
+            )
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, source.read_bytes(), compresslevel=9)
+
+
+def rust_sdk_entries() -> list[tuple[Path, str]]:
+    sdk_root = REPO_ROOT / "sdk" / "rust"
+    paths = release_source_paths("sdk/rust")
+    proto_path = REPO_ROOT / "proto" / "updater" / "v1" / "updater.proto"
+    if not paths or not proto_path.is_file():
+        raise Fail("sdk/rust or canonical updater proto is missing")
+    entries = [
+        (REPO_ROOT / relative, (REPO_ROOT / relative).relative_to(sdk_root).as_posix())
+        for relative in paths
+        if (REPO_ROOT / relative).is_file()
+    ]
+    entries.append((proto_path, "proto/updater/v1/updater.proto"))
+    return entries
+
+
 def cmd_build(args: argparse.Namespace) -> None:
     require_cmd("go")
     out_dir = Path(args.out)
@@ -187,7 +230,9 @@ def cmd_build(args: argparse.Namespace) -> None:
         targets.append("cli")
     if getattr(args, "updater", False):
         targets.append("updater")
-    if not targets:
+    if not targets and not (
+        getattr(args, "dart_sdk", False) or getattr(args, "rust_sdk", False)
+    ):
         targets = ["serve", "agent"]
     stamp = git_stamp(args.version)
     platforms = [
@@ -234,33 +279,32 @@ def cmd_build(args: argparse.Namespace) -> None:
     if getattr(args, "dart_sdk", False):
         sdk_root = REPO_ROOT / "sdk" / "dart"
         sdk_archive = out_dir / "relkit-sdk-dart.zip"
-        tracked = run(
-            ["git", "ls-files", "-z", "--", "sdk/dart"],
-            cwd=REPO_ROOT,
-            capture=True,
-        ).stdout
-        paths = [item for item in tracked.split("\0") if item]
+        paths = release_source_paths("sdk/dart")
         if not paths:
             die("sdk/dart has no tracked files")
-        with zipfile.ZipFile(
+        write_deterministic_zip(
             sdk_archive,
-            "w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=9,
-        ) as archive:
-            for relative in sorted(paths):
-                source = REPO_ROOT / relative
-                if source.is_file():
-                    info = zipfile.ZipInfo(
-                        source.relative_to(sdk_root).as_posix(),
-                        date_time=(1980, 1, 1, 0, 0, 0),
-                    )
-                    info.compress_type = zipfile.ZIP_DEFLATED
-                    info.external_attr = 0o100644 << 16
-                    archive.writestr(info, source.read_bytes(), compresslevel=9)
+            [
+                (REPO_ROOT / relative, (REPO_ROOT / relative).relative_to(sdk_root).as_posix())
+                for relative in paths
+                if (REPO_ROOT / relative).is_file()
+            ],
+        )
         built.append(
             {
                 "component": "sdk-dart",
+                "os": "any",
+                "arch": "any",
+                "path": sdk_archive.name,
+                "sha256": file_sha256(sdk_archive),
+            }
+        )
+    if getattr(args, "rust_sdk", False):
+        sdk_archive = out_dir / "relkit-sdk-rust.zip"
+        write_deterministic_zip(sdk_archive, rust_sdk_entries())
+        built.append(
+            {
+                "component": "sdk-rust",
                 "os": "any",
                 "arch": "any",
                 "path": sdk_archive.name,
@@ -650,7 +694,7 @@ def cmd_install_agent(args: argparse.Namespace) -> None:
     self_check_agent(str(cfg.get("addr") or "127.0.0.1:8787"))
     print(f"config {config_path}")
     print("next: EnvironmentFile=/etc/relkit-agent/env for RELKIT_SERVE_TOKEN / COS keys")
-    print("new product: relkit-agent init -config ... -product <id>")
+    print("new product: product-repo python scripts/host/relkit_host.py agent add --execute")
 
 
 def systemd_show(unit: str, *props: str) -> dict[str, str]:
@@ -821,28 +865,8 @@ def apply_agent_upgrade(
         run(["systemctl", "restart", "relkit-agent"])
         self_check_agent(str(cfg.get("addr") or "127.0.0.1:8787"))
         notes.append("agent restarted and health-checked")
-        for name, spec in (cfg.get("products") or {}).items():
-            if not isinstance(spec, dict):
-                continue
-            check = run(
-                [
-                    str(dest_bin),
-                    "onboard",
-                    "check",
-                    "-config",
-                    str(config_file),
-                    "-product",
-                    name,
-                    "-json",
-                ],
-                check=False,
-                capture=True,
-            )
-            print(redact_text((check.stdout or check.stderr or "").strip()))
-            if check.returncode != 0:
-                raise Fail(f"onboard check {name} failed")
-            else:
-                notes.append(f"onboard check {name} ok")
+        version = run([str(dest_bin), "-version"], capture=True)
+        notes.append((version.stdout or "").strip() or "relkit-agent version ok")
     else:
         notes.append("agent files updated; restart skipped")
     return notes
@@ -1114,70 +1138,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         print("apply finished as stage-only; systemd still runs the previous process")
 
 
-def cmd_token(args: argparse.Namespace) -> None:
-    if args.target == "local":
-        must_root()
-        if args.action == "prepare":
-            extra = ["-token-only"]
-            if args.product:
-                extra = ["-product", args.product, "-token-only"]
-            out = run(["relkit-serve", "init", "-out", args.config_dir, *extra], capture=True)
-            token = extract_export("RELKIT_SERVE_TOKEN", out.stdout or "") or extract_export(
-                "RELKIT_UPLOAD_TOKEN", out.stdout or ""
-            )
-            if not token:
-                die("init did not print a token")
-            print("Shown once. Deliver to publishers before --activate / restart.\n")
-            env_name = "RELKIT_UPLOAD_TOKEN" if args.product else "RELKIT_SERVE_TOKEN"
-            print(f"  export {env_name}='{token}'")
-            print("\nDo not restart yet.")
-            return
-        if args.action == "activate":
-            run(["systemctl", "restart", "relkit-serve"])
-            print("relkit-serve restarted; old operator/product token is now invalid")
-            return
-        die("pass --prepare or --activate")
-    host = args.host
-    if not host:
-        die("--host is required unless --local")
-    remote_python(host)
-    remote_dir = "/tmp/relkit-deploy"
-    run(ssh_argv(host, ["mkdir", "-p", remote_dir]))
-    scp_to(host, [DEPLOY_DIR / "relkit.py", DEPLOY_DIR / "relkit_ops.py"], remote_dir + "/")
-    if args.action == "prepare":
-        extra = ""
-        if args.product:
-            extra = f" -product {args.product}"
-        out = run(
-            ssh_argv(
-                host,
-                [
-                    "sudo",
-                    "relkit-serve",
-                    "init",
-                    "-out",
-                    args.config_dir,
-                    *([item for item in extra.split() if item] + ["-token-only"]),
-                ],
-            ),
-            capture=True,
-        )
-        print(redact_text(out.stdout or ""))
-        token = extract_export("RELKIT_SERVE_TOKEN", out.stdout or "") or extract_export(
-            "RELKIT_UPLOAD_TOKEN", out.stdout or ""
-        )
-        if token:
-            env_name = "RELKIT_UPLOAD_TOKEN" if args.product else "RELKIT_SERVE_TOKEN"
-            print("Shown once. Deliver before --activate.\n")
-            print(f"  export {env_name}='{token}'")
-        return
-    if args.action == "activate":
-        run(ssh_argv(host, ["sudo", "systemctl", "restart", "relkit-serve"]))
-        print("relkit-serve restarted on", host)
-        return
-    die("pass --prepare or --activate")
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="deploy/relkit.py", description="relkit deploy CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1188,6 +1148,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--cli", action="store_true")
     build.add_argument("--updater", action="store_true")
     build.add_argument("--dart-sdk", action="store_true")
+    build.add_argument("--rust-sdk", action="store_true")
     build.add_argument("--version", default="0.2.1")
     build.add_argument("--out", default="dist")
     build.add_argument("--os")
@@ -1237,14 +1198,6 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--serve-only", action="store_true")
     upgrade.add_argument("--agent-only", action="store_true")
 
-    token = sub.add_parser("token", help="explicit operator/product token rotate")
-    token.add_argument("--host")
-    token.add_argument("--local", dest="target", action="store_const", const="local")
-    token.add_argument("--prepare", dest="action", action="store_const", const="prepare")
-    token.add_argument("--activate", dest="action", action="store_const", const="activate")
-    token.add_argument("--product")
-    token.add_argument("--config-dir", default="/etc/relkit-serve")
-
     remote = sub.add_parser("remote", help=argparse.SUPPRESS)
     remote.add_argument("remote_cmd", choices=["probe", "apply"])
     remote.add_argument("--spec")
@@ -1266,12 +1219,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 cmd_install_agent(args)
         elif args.cmd == "upgrade":
             cmd_upgrade(args)
-        elif args.cmd == "token":
-            if not getattr(args, "action", None):
-                die("token requires --prepare or --activate")
-            if not getattr(args, "target", None):
-                args.target = "remote"
-            cmd_token(args)
         elif args.cmd == "remote":
             cmd_remote(args)
         else:
