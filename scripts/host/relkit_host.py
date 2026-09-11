@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 SCHEMA = "relkit.onboarding/1"
@@ -29,6 +31,8 @@ LOCAL_SCHEMA = "relkit.onboarding.local/1"
 LOCK_SCHEMA = "relkit.consume/2"
 DEFAULT_SERVE_DIR = "/etc/relkit-serve"
 DEFAULT_AGENT_CONFIG = "/etc/relkit-agent/relkit-agent.json"
+AGENT_ORIGIN_HOST = "update.devcloud.woa.com"
+AGENT_ORIGIN_NETLOC = "update.devcloud.woa.com:8080"
 GITHUB_REPO = os.environ.get("RELKIT_RELEASE_REPO", "shichao402/relkit")
 TOKEN_ENV = "RELKIT_UPLOAD_TOKEN"
 SECRET_NOTE = Path(".secrets") / "project" / "relkit-upload-token"
@@ -77,7 +81,7 @@ STEP_IDS = (
     "pack.ci",
 )
 
-REQUIRED_FOR_RELEASE = STEP_IDS[:-1]
+REQUIRED_FOR_RELEASE = STEP_IDS
 DECISION_STEPS = STEP_IDS[:8]
 ACTION_STEPS = STEP_IDS[8:]
 
@@ -115,12 +119,13 @@ def tree_sha256(directory: Path) -> str:
     for path in sorted(directory.rglob("*")):
         if not path.is_file():
             continue
-        if "__pycache__" in path.parts or path.suffix == ".pyc":
+        if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
             continue
         rel = path.relative_to(directory).as_posix().encode("utf-8")
         digest.update(rel)
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        # windows-2016 checkout 常是 CRLF；hash 按 LF 算，避免 lock drift。
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -152,12 +157,14 @@ def default_state(root: Path) -> dict[str, Any]:
         "steps": empty_steps(),
         "serve": {
             "sshHost": None,
+            "sshPort": None,
             "configDir": DEFAULT_SERVE_DIR,
             "shareWith": None,
             "remoteVersion": None,
         },
         "agent": {
             "sshHost": None,
+            "sshPort": None,
             "configPath": DEFAULT_AGENT_CONFIG,
             "remoteVersion": None,
         },
@@ -529,13 +536,29 @@ def parse_ssh_config(
     *,
     _seen: Optional[set[Path]] = None,
 ) -> tuple[list[str], list[str]]:
+    exact, patterns, _ports = parse_ssh_config_ports(config_path, _seen=_seen)
+    return exact, patterns
+
+
+def parse_ssh_config_ports(
+    config_path: Optional[Path] = None,
+    *,
+    _seen: Optional[set[Path]] = None,
+) -> tuple[list[str], list[str], list[tuple[list[str], int]]]:
+    """Host names plus the Port each Host block declares.
+
+    Ports usually live in an Include (devcloud writes Port 36000 there), so a
+    bare host name in onboarding state says nothing about the real port.
+    """
     path = (config_path or (Path.home() / ".ssh" / "config")).resolve()
     seen = _seen if _seen is not None else set()
     if path in seen or not path.is_file():
-        return [], []
+        return [], [], []
     seen.add(path)
     exact: list[str] = []
     patterns: list[str] = []
+    ports: list[tuple[list[str], int]] = []
+    current: list[str] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -544,28 +567,58 @@ def parse_ssh_config(
         if lower.startswith("include "):
             for item in stripped.split()[1:]:
                 nested = _expand_ssh_path(item)
-                more_exact, more_patterns = parse_ssh_config(nested, _seen=seen)
+                more_exact, more_patterns, more_ports = parse_ssh_config_ports(
+                    nested, _seen=seen
+                )
                 for name in more_exact:
                     if name not in exact:
                         exact.append(name)
                 for name in more_patterns:
                     if name not in patterns:
                         patterns.append(name)
+                ports.extend(more_ports)
+            continue
+        if lower.startswith("port ") and current:
+            try:
+                ports.append((list(current), int(stripped.split()[1])))
+            except (IndexError, ValueError):
+                pass
             continue
         if not lower.startswith("host "):
             continue
-        for token in stripped.split()[1:]:
+        current = stripped.split()[1:]
+        for token in current:
             if any(ch in token for ch in "*?!"):
                 if token not in patterns:
                     patterns.append(token)
             elif token not in exact:
                 exact.append(token)
-    return exact, patterns
+    return exact, patterns, ports
 
 
 def list_ssh_hosts(config_path: Optional[Path] = None) -> list[str]:
     exact, _patterns = parse_ssh_config(config_path)
     return exact
+
+
+def ssh_host_port(name: str, config_path: Optional[Path] = None) -> Optional[int]:
+    """Port ssh would pick for this Host, or None when the default 22 applies."""
+    if not name:
+        return None
+    _exact, _patterns, ports = parse_ssh_config_ports(config_path)
+    for tokens, port in ports:
+        for token in tokens:
+            if token == name or (
+                any(ch in token for ch in "*?") and fnmatch.fnmatch(name, token)
+            ):
+                return port
+    return None
+
+
+def ssh_target(host: str, port: Optional[int] = None) -> str:
+    """host:port for logs and errors; never guess silently between 22 and 36000."""
+    resolved = port if port is not None else ssh_host_port(host)
+    return f"{host}:{resolved}" if resolved else f"{host}:22 (ssh default)"
 
 
 def ssh_host_allowed(name: str, config_path: Optional[Path] = None) -> bool:
@@ -581,14 +634,29 @@ def ssh_host_allowed(name: str, config_path: Optional[Path] = None) -> bool:
 
 
 def ssh_host_recommend(config_path: Optional[Path] = None) -> str:
-    exact, patterns = parse_ssh_config(config_path)
+    exact, patterns, ports = parse_ssh_config_ports(config_path)
+
+    def with_port(name: str) -> str:
+        for tokens, port in ports:
+            if name in tokens:
+                return f"{name} (port {port})"
+        return name
+
     bits: list[str] = []
     if exact:
-        bits.append("candidates: " + ", ".join(exact))
+        bits.append("candidates: " + ", ".join(with_port(item) for item in exact))
     useful = [item for item in patterns if item != "*"]
     if useful:
-        bits.append("patterns: " + ", ".join(useful))
+        bits.append("patterns: " + ", ".join(with_port(item) for item in useful))
     return "; ".join(bits) if bits else "no Host entries in ~/.ssh/config"
+
+
+def ssh_argv(host: str, port: Optional[int]) -> list[str]:
+    argv = ["ssh", "-o", "BatchMode=yes"]
+    if port:
+        argv.extend(["-p", str(port)])
+    argv.append(host)
+    return argv
 
 
 def ssh_run(
@@ -596,10 +664,15 @@ def ssh_run(
     remote: Sequence[str],
     *,
     timeout: int = 60,
+    port: Optional[int] = None,
 ) -> subprocess.CompletedProcess[str]:
     if not host:
         raise Fail("SSH Host is required")
-    argv = ["ssh", "-o", "BatchMode=yes", host, "--", *remote]
+    resolved = port if port is not None else ssh_host_port(host)
+    target = ssh_target(host, resolved)
+    # ssh joins argv with spaces and the far side re-parses it, so an argument
+    # holding a space would silently split into extra words.
+    argv = [*ssh_argv(host, resolved), "--", *(shlex.quote(arg) for arg in remote)]
     try:
         result = subprocess.run(
             argv,
@@ -613,14 +686,134 @@ def ssh_run(
     except FileNotFoundError as error:
         raise Fail("ssh is not installed") from error
     except subprocess.TimeoutExpired as error:
-        raise Fail(f"SSH to {host} timed out") from error
+        raise Fail(f"SSH to {target} timed out") from error
     if result.returncode != 0:
         stderr = redact_text((result.stderr or result.stdout or "").strip())
         raise Fail(
-            f"SSH to {host} failed (exit {result.returncode}). "
+            f"SSH to {target} failed (exit {result.returncode}). "
             f"Stop. Do not switch credentials. {stderr}"
         )
     return result
+
+
+def ssh_write(
+    host: str,
+    remote_path: str,
+    data: bytes,
+    *,
+    timeout: int = 60,
+    port: Optional[int] = None,
+) -> None:
+    if not host:
+        raise Fail("SSH Host is required")
+    if not remote_path.startswith("/"):
+        raise Fail("remote path must be absolute")
+    resolved = port if port is not None else ssh_host_port(host)
+    target = ssh_target(host, resolved)
+    argv = [*ssh_argv(host, resolved), "--", "sudo", "tee", shlex.quote(remote_path)]
+    try:
+        result = subprocess.run(
+            argv,
+            input=data,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise Fail("ssh is not installed") from error
+    except subprocess.TimeoutExpired as error:
+        raise Fail(f"SSH to {target} timed out") from error
+    if result.returncode != 0:
+        stderr = redact_text((result.stderr or b"").decode("utf-8", "replace").strip())
+        raise Fail(
+            f"SSH write to {target} failed (exit {result.returncode}). "
+            f"Stop. Do not switch credentials. {stderr}"
+        )
+
+
+def ssh_path_exists(host: str, remote_path: str) -> bool:
+    if not remote_path.startswith("/"):
+        raise Fail("remote path must be absolute")
+    script = (
+        f"if sudo test -f {shlex.quote(remote_path)}; then echo exists; else echo missing; fi"
+    )
+    out = ssh_run(host, ["bash", "-lc", script]).stdout.strip().splitlines()
+    return bool(out) and out[-1] == "exists"
+
+
+def agent_profile_path(config_path: str, product: str) -> str:
+    return f"{Path(config_path).parent.as_posix()}/products/{product}.json"
+
+
+def rewrite_agent_backend_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.hostname != AGENT_ORIGIN_HOST:
+        return url
+    if parsed.scheme == "http" and parsed.port == 8080:
+        return url
+    return urlunparse(
+        ("http", AGENT_ORIGIN_NETLOC, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
+def apply_agent_backend_urls(backend: dict[str, Any]) -> None:
+    """Clients download via baseUrl; the agent uploads via origin uploadUrl."""
+    base = backend.get("baseUrl")
+    if not isinstance(base, str) or not base:
+        return
+    origin = rewrite_agent_backend_url(base)
+    upload = backend.get("uploadUrl")
+    if isinstance(upload, str) and upload:
+        backend["uploadUrl"] = rewrite_agent_backend_url(upload)
+    else:
+        backend["uploadUrl"] = origin
+
+
+def extract_publish_profile(machine: dict[str, Any]) -> dict[str, Any]:
+    signing = dict(machine.get("signing") or {})
+    profile_signing: dict[str, Any] = {
+        "keyId": signing.get("keyId"),
+        "privateKeyPath": signing.get("privateKeyPath"),
+    }
+    if signing.get("privateKeyEnv"):
+        profile_signing["privateKeyEnv"] = signing["privateKeyEnv"]
+    profile: dict[str, Any] = {
+        "product": machine.get("product"),
+        "signing": profile_signing,
+        "backends": machine.get("backends") or {},
+        "publishTo": list(machine.get("publishTo") or []),
+        "directory": machine.get("directory") or {},
+        "site": machine.get("site") or {},
+    }
+    return profile
+
+
+def machine_publish_config(root: Path, product: str, key_id: str, private_relpath: str) -> dict[str, Any]:
+    config_path = root / "relkit.json"
+    if not config_path.is_file():
+        raise Fail(f"missing {config_path}")
+    cfg = load_json(config_path)
+    backends = json.loads(json.dumps(cfg.get("backends") or {}))
+    if not backends:
+        raise Fail("relkit.json has no backends for the machine publish profile")
+    for backend in backends.values():
+        if isinstance(backend, dict):
+            apply_agent_backend_urls(backend)
+    signing = dict(cfg.get("signing") or {})
+    signing["keyId"] = key_id
+    signing["privateKeyPath"] = private_relpath
+    return {
+        "product": product,
+        "defaultChannel": cfg.get("defaultChannel") or "stable",
+        "channels": list(cfg.get("channels") or ["stable"]),
+        "codeStrategy": cfg.get("codeStrategy") or "version-build",
+        "retainVersions": cfg.get("retainVersions") or 1,
+        "backends": backends,
+        "publishTo": list(cfg.get("publishTo") or backends.keys()),
+        "directory": {"publishTo": list((cfg.get("directory") or {}).get("publishTo") or cfg.get("publishTo") or backends.keys())},
+        "signing": signing,
+        "site": cfg.get("site") or {},
+    }
 
 
 def parse_list_products(text: str) -> list[str]:
@@ -764,19 +957,154 @@ def cmd_status(root: Path, as_json: bool = False) -> int:
     return 1 if drift else 0
 
 
+def claim_remote_registration(
+    state: dict[str, Any],
+    step_id: str,
+    expected: Optional[str],
+    products: Sequence[str],
+    *,
+    note: str,
+    missing: str,
+    drift: list[str],
+) -> None:
+    """Remote listing is the evidence. A stale local status must not hide it."""
+    if not expected:
+        return
+    if expected in products:
+        set_step(state, step_id, "verified", expected, note)
+    elif state["steps"][step_id]["status"] != "unanswered":
+        drift.append(missing)
+        state["steps"][step_id]["status"] = "drift"
+
+
+def reconcile_signing_profile(
+    state: dict[str, Any],
+    host: str,
+    config_path: str,
+    product: str,
+    drift: list[str],
+) -> None:
+    """The machine publish profile names the key id; the key itself never leaves the host."""
+    profile = f"{Path(config_path).parent.as_posix()}/products/{product}.json"
+    try:
+        raw = ssh_run(host, ["sudo", "cat", profile]).stdout
+    except Fail:
+        return
+    try:
+        signing = (json.loads(raw) or {}).get("signing") or {}
+    except json.JSONDecodeError:
+        drift.append(f"{profile} is not JSON")
+        return
+    remote_key = str(signing.get("keyId") or "").strip()
+    if not remote_key:
+        drift.append(f"{profile} has no signing.keyId")
+        return
+    local_key = str(state["steps"]["signing.keys"].get("value") or "").strip()
+    if local_key and local_key != remote_key:
+        drift.append(f"{profile} signs with {remote_key}; local state says {local_key}")
+        state["steps"]["signing.keys"]["status"] = "drift"
+        return
+    set_step(state, "signing.keys", "verified", remote_key, "publish profile on agent host")
+
+
+def updater_sidecar_name() -> str:
+    return "relkit-updater.exe" if os.name == "nt" else "relkit-updater"
+
+
+def reconcile_sidecar_layout(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    pack = root / "scripts" / "build_desktop_release.mjs"
+    if not pack.is_file():
+        return
+    text = pack.read_text(encoding="utf-8")
+    if "relkit-updater" not in text or "tools/bin" not in text:
+        return
+    src = root / "tools" / "bin" / updater_sidecar_name()
+    if not src.is_file():
+        if state["steps"]["sidecar.layout"]["status"] not in ("unanswered",):
+            drift.append(f"missing consume sidecar {src.as_posix()}")
+            state["steps"]["sidecar.layout"]["status"] = "drift"
+        return
+    dest_dir = root / "dist" / "loom-editor-win"
+    note = "consume tools/bin; pack copies next to shell"
+    if dest_dir.is_dir():
+        dest = dest_dir / updater_sidecar_name()
+        if not dest.is_file():
+            drift.append(f"pack tree missing sidecar {dest.as_posix()}")
+            state["steps"]["sidecar.layout"]["status"] = "drift"
+            return
+        note = f"{dest.as_posix()} beside shell; consume source tools/bin"
+    set_step(state, "sidecar.layout", "verified", "next-to-shell", note)
+
+
+def reconcile_pack_ci(root: Path, state: dict[str, Any]) -> None:
+    if state["steps"]["pack.ci"]["status"] == "unanswered":
+        return
+    yaml_dev = root / "ci" / "build_dev.yaml"
+    yaml_stable = root / "ci" / "build_stable.yaml"
+    entry = root / "scripts" / "ci_release.mjs"
+    if not (yaml_dev.is_file() and yaml_stable.is_file() and entry.is_file()):
+        return
+    text = entry.read_text(encoding="utf-8")
+    if "relkit_host.py" not in text or "release" not in text:
+        return
+    set_step(
+        state,
+        "pack.ci",
+        "confirmed",
+        "ci/build_dev.yaml,ci/build_stable.yaml",
+        "BK-CI PAC; entry scripts/ci_release.mjs; CI holds agent token only",
+    )
+
+
+def reconcile_fake_stage(root: Path, state: dict[str, Any]) -> None:
+    if state["steps"]["fake.release"]["status"] == "unanswered":
+        return
+    staged = root / ".relkit" / "staged"
+    if not staged.is_dir():
+        return
+    preferred = str(state["steps"]["fake.release"].get("value") or "")
+    candidates = [
+        path.name
+        for path in sorted(staged.iterdir())
+        if path.is_dir() and (path / "staged.pb").is_file()
+    ]
+    if not candidates:
+        return
+    version = preferred if preferred in candidates else candidates[-1]
+    if (
+        state["steps"]["fake.release"]["status"] == "verified"
+        and preferred == version
+    ):
+        return
+    set_step(
+        state,
+        "fake.release",
+        "applied",
+        version,
+        "stage present; publish waits for pack.ci",
+    )
+
+
 def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, Any]:
     drift: list[str] = []
     unconfirmed: list[str] = []
+    via_ci = os.environ.get("RELKIT_RELEASE_VIA_CI") == "1"
     serve = state.get("serve") or {}
     host = serve.get("sshHost")
+    port = serve.get("sshPort") or ssh_host_port(host or "")
     config_dir = serve.get("configDir") or DEFAULT_SERVE_DIR
-    if host:
+    if via_ci:
+        # CI 构建机到不了发布机的 SSH 端口；真发走 agent HTTP + RELKIT_UPLOAD_TOKEN。
+        print("relkit: CI publish skips SSH probes to the serve/agent host")
+    elif host:
         try:
-            version = ssh_run(host, ["relkit-serve", "-version"]).stdout.strip()
+            version = ssh_run(host, ["relkit-serve", "-version"], port=port).stdout.strip()
             serve["remoteVersion"] = version
+            serve["sshPort"] = port
             listed = ssh_run(
                 host,
                 ["sudo", "relkit-serve", "init", "-out", str(config_dir), "-list-products"],
+                port=port,
             ).stdout
             products = parse_list_products(listed)
             expected = None
@@ -788,33 +1116,41 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
             local["evidence"]["serve.list-products"] = redact_text(listed)
             local["evidence"]["serve.version"] = version
             save_local(root, local)
-            registered = state["steps"]["serve.register"]["status"] in (
-                "applied",
-                "verified",
+            # Reaching the unit through this Host and config dir is the evidence.
+            set_step(state, "ssh.host", "verified", host, f"{ssh_target(host, port)} {version}")
+            set_step(state, "ssh.config_dir", "verified", str(config_dir), "unit answered here")
+            claim_remote_registration(
+                state,
+                "serve.register",
+                expected,
+                products,
+                note="listed on remote",
+                missing=f"serve {host} does not list {expected}; local state says registered",
+                drift=drift,
             )
-            if expected and registered and expected not in products:
-                drift.append(
-                    f"serve {host} does not list {expected}; local state says registered"
-                )
-                state["steps"]["serve.register"]["status"] = "drift"
-            elif expected and expected in products and registered:
-                state["steps"]["serve.register"]["status"] = "verified"
-                state["steps"]["serve.register"]["note"] = "listed on remote"
         except Fail as error:
             unconfirmed.append(str(error))
-    elif state["steps"]["serve.register"]["status"] in ("applied", "verified"):
+    elif not via_ci and state["steps"]["serve.register"]["status"] in (
+        "applied",
+        "verified",
+    ):
         unconfirmed.append("serve.register is applied but ssh.host is empty")
 
     agent = state.get("agent") or {}
     agent_host = agent.get("sshHost") or host
+    agent_port = agent.get("sshPort") or ssh_host_port(agent_host or "")
     config_path = agent.get("configPath") or DEFAULT_AGENT_CONFIG
-    if agent_host:
+    if agent_host and not via_ci:
         try:
-            version = ssh_run(agent_host, ["relkit-agent", "-version"]).stdout.strip()
+            version = ssh_run(
+                agent_host, ["relkit-agent", "-version"], port=agent_port
+            ).stdout.strip()
             agent["remoteVersion"] = version
+            agent["sshPort"] = agent_port
             listed = ssh_run(
                 agent_host,
                 ["sudo", "relkit-agent", "init", "-config", str(config_path), "-list-products"],
+                port=agent_port,
             ).stdout
             products = parse_agent_products(listed)
             local = load_local(root)
@@ -826,17 +1162,17 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
                 expected = product_id(state)
             except Fail:
                 expected = None
-            registered = state["steps"]["agent.register"]["status"] in (
-                "applied",
-                "verified",
+            claim_remote_registration(
+                state,
+                "agent.register",
+                expected,
+                products,
+                note="listed on remote",
+                missing=f"agent {agent_host} does not list {expected}; local state says registered",
+                drift=drift,
             )
-            if expected and registered and expected not in products:
-                drift.append(
-                    f"agent {agent_host} does not list {expected}; local state says registered"
-                )
-                state["steps"]["agent.register"]["status"] = "drift"
-            elif expected and expected in products and registered:
-                state["steps"]["agent.register"]["status"] = "verified"
+            if expected and expected in products:
+                reconcile_signing_profile(state, agent_host, config_path, expected, drift)
         except Fail as error:
             unconfirmed.append(str(error))
 
@@ -854,6 +1190,10 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
                 set_step(state, "consume.lock", "verified", lock.get("release"), "lock present")
         except (OSError, json.JSONDecodeError) as error:
             unconfirmed.append(f"cannot read lock: {error}")
+
+    reconcile_sidecar_layout(root, state, drift)
+    reconcile_pack_ci(root, state)
+    reconcile_fake_stage(root, state)
 
     if write:
         save_state(root, state)
@@ -931,7 +1271,15 @@ def cmd_onboard_set(
         if not ssh_host_allowed(value):
             raise Fail(f"{value} does not match ~/.ssh/config. {ssh_host_recommend()}")
         state["serve"]["sshHost"] = value
-        set_step(state, step_id, "confirmed", value, kept_note, mark_later_stale=True)
+        state["serve"]["sshPort"] = ssh_host_port(value)
+        set_step(
+            state,
+            step_id,
+            "confirmed",
+            value,
+            kept_note or ssh_target(value),
+            mark_later_stale=True,
+        )
     elif step_id == "ssh.config_dir":
         if not value:
             raise Fail("onboard set ssh.config_dir needs the live config directory")
@@ -1137,15 +1485,28 @@ def publish_protocol_window(root: Path) -> tuple[int, int]:
     return PUBLISH_PROTOCOL_FALLBACK, PUBLISH_PROTOCOL_FALLBACK
 
 
+def sanitize_upload_token(raw: str) -> str:
+    token = raw.replace("\ufeff", "").strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "'\"":
+        token = token[1:-1].strip()
+    return token.replace("\r", "").replace("\n", "").strip()
+
+
 def upload_token(root: Path, note: Path) -> str:
-    token = os.environ.get(TOKEN_ENV, "").strip()
+    token = sanitize_upload_token(os.environ.get(TOKEN_ENV, ""))
+    if "${{" in token or "secretKey" in token:
+        raise Fail(
+            f"{TOKEN_ENV} looks unsubstituted by the pipeline; "
+            "the CI GUI must inject the product agent Bearer"
+        )
     if token:
+        print(f"{TOKEN_ENV} length={len(token)}")
         return token
     path = root / note
     if path.is_file():
         found = extract_export(TOKEN_ENV, path.read_text(encoding="utf-8"))
         if found:
-            return found
+            return sanitize_upload_token(found)
     raise Fail(
         f"{TOKEN_ENV} is unset. CI injects it as a pipeline secret; "
         f"locally it lives in {str(note).replace(chr(92), '/')}"
@@ -1192,7 +1553,16 @@ def publish_via_agent(
     if text.strip():
         print(text.strip())
     if result.returncode != 0:
-        raise Fail("relkit cas-put failed")
+        detail = text.strip() or f"exit {result.returncode}"
+        raise Fail(
+            "relkit cas-put failed\n"
+            + detail
+            + (
+                f"\n{TOKEN_ENV} is not accepted as the agent Bearer for this product"
+                if "401" in detail
+                else ""
+            )
+        )
     staged_sha = re.search(r"sha256=([0-9a-f]{64})", text)
     if not staged_sha:
         raise Fail("cas-put did not report the staged sha256")
@@ -1226,6 +1596,18 @@ def publish_via_agent(
     return 0
 
 
+def release_incomplete_steps(state: dict[str, Any], *, via_ci: bool = False) -> list[str]:
+    missing: list[str] = []
+    for step in REQUIRED_FOR_RELEASE:
+        status = state["steps"][step]["status"]
+        allowed = ("confirmed", "verified") if step in DECISION_STEPS else ("verified",)
+        if step == "pack.ci" and via_ci:
+            allowed = ("confirmed", "verified")
+        if status not in allowed:
+            missing.append(step)
+    return missing
+
+
 def cmd_release(root: Path, args: argparse.Namespace) -> int:
     state = load_state(root)
     report = reconcile(root, state, write=True)
@@ -1236,15 +1618,12 @@ def cmd_release(root: Path, args: argparse.Namespace) -> int:
             "release refused: cannot confirm remote state\n  "
             + "\n  ".join(report["unconfirmed"])
         )
-    missing = [
-        step
-        for step in REQUIRED_FOR_RELEASE
-        if state["steps"][step]["status"] != "verified"
-    ]
+    via_ci = os.environ.get("RELKIT_RELEASE_VIA_CI") == "1"
+    missing = release_incomplete_steps(state, via_ci=via_ci)
     if missing:
-        raise Fail("release refused: unverified steps: " + ", ".join(missing))
+        raise Fail("release refused: incomplete steps: " + ", ".join(missing))
     binary = relkit_bin(root)
-    version_argv = [str(binary), "version"]
+    version_argv = [str(binary), "version", "get"]
     current = subprocess.run(
         version_argv,
         cwd=str(root),
@@ -1261,6 +1640,11 @@ def cmd_release(root: Path, args: argparse.Namespace) -> int:
     print(f"version {version}")
     agent = agent_base_url(root)
     if agent:
+        if args.execute and not via_ci:
+            raise Fail(
+                "agent publish is CI-only; scripts/ci_release.mjs must set "
+                "RELKIT_RELEASE_VIA_CI=1"
+            )
         return publish_via_agent(
             root,
             binary,
@@ -1314,6 +1698,29 @@ def cmd_release(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fake_verify(root: Path, version: Optional[str]) -> int:
+    binary = relkit_bin(root)
+    resolved = version
+    if not resolved:
+        current = run_relkit(root, binary, ["version", "get"])
+        resolved = (current.stdout or "").strip().splitlines()[-1]
+    staged = root / ".relkit" / "staged" / resolved
+    if not (staged / "staged.pb").is_file():
+        raise Fail(f"missing staged tree for {resolved}")
+    run_relkit(root, binary, ["simulate", "--with-staged", resolved, "--from", "all"])
+    state = load_state(root)
+    set_step(
+        state,
+        "fake.release",
+        "verified",
+        resolved,
+        "stage+simulate verified; publish remains CI-only",
+    )
+    save_state(root, state)
+    print(f"verified fake.release={resolved}")
+    return 0
+
+
 def chown_serve_product_token(host: str, config_dir: str, product: str) -> None:
     token_path = str(Path(config_dir) / "tokens" / f"{product}.token").replace("\\", "/")
     ssh_run(host, ["sudo", "chown", "relkit:relkit", token_path])
@@ -1358,7 +1765,7 @@ def cmd_serve_add(root: Path, args: argparse.Namespace) -> int:
     ]
     if share_with:
         remote.extend(["-share-with", share_with])
-    print(f"SSH {host} (config {config_dir}) product {product}")
+    print(f"SSH {ssh_target(host)} (config {config_dir}) product {product}")
     result = ssh_run(host, remote)
     stdout = result.stdout or ""
     token = extract_export(TOKEN_ENV, stdout) or extract_export("RELKIT_SERVE_TOKEN", stdout)
@@ -1373,9 +1780,10 @@ def cmd_serve_add(root: Path, args: argparse.Namespace) -> int:
     chown_serve_product_token(host, config_dir, product)
     state["product"] = product
     state["serve"]["sshHost"] = host
+    state["serve"]["sshPort"] = ssh_host_port(host)
     state["serve"]["configDir"] = config_dir
     state["serve"]["shareWith"] = share_with
-    set_step(state, "ssh.host", "verified", host)
+    set_step(state, "ssh.host", "verified", host, ssh_target(host))
     set_step(state, "ssh.config_dir", "verified", config_dir)
     set_step(state, "product.id", "verified", product)
     set_step(
@@ -1557,11 +1965,68 @@ def cmd_agent_add(root: Path, args: argparse.Namespace) -> int:
         write_secret(root, token, note=AGENT_SECRET_NOTE)
         print(f"agent token written to {AGENT_SECRET_NOTE.as_posix()} (plaintext not printed)")
     state["agent"]["sshHost"] = host
+    state["agent"]["sshPort"] = ssh_host_port(host)
     state["agent"]["configPath"] = config_path
     set_step(state, "agent.register", "applied", product)
     save_state(root, state)
     if args.restart:
         ssh_run(host, ["sudo", "systemctl", "restart", "relkit-agent"])
+        print("relkit-agent restarted")
+    else:
+        print("not restarted; pass --restart after the user allows it")
+    return 0
+
+
+def cmd_agent_provision(root: Path, args: argparse.Namespace) -> int:
+    require_execute(args, "agent provision")
+    state = load_state(root)
+    product = args.product or product_id(state)
+    host_name = args.host or (state.get("agent") or {}).get("sshHost") or (state.get("serve") or {}).get("sshHost")
+    config_path = args.config or (state.get("agent") or {}).get("configPath") or DEFAULT_AGENT_CONFIG
+    product_root = args.root_path or f"/srv/relkit/{product}"
+    if not host_name:
+        raise Fail("pass --host")
+    key_id = str(state["steps"]["signing.keys"].get("value") or "k1")
+    private_rel = f".relkit-keys/{key_id}.private.pb"
+    private_local = root / private_rel
+    if not private_local.is_file():
+        raise Fail(f"missing {private_rel}; generate keys on this repo first")
+    machine = machine_publish_config(root, product, key_id, private_rel)
+    profile_path = agent_profile_path(str(config_path), product)
+    if ssh_path_exists(host_name, profile_path):
+        ssh_write(host_name, profile_path, dump_json(extract_publish_profile(machine)).encode("utf-8"))
+        ssh_run(host_name, ["sudo", "chmod", "644", profile_path])
+        ssh_run(host_name, ["sudo", "chown", "relkit:relkit", profile_path])
+        print(f"updated {profile_path}")
+    else:
+        keys_dir = f"{product_root}/.relkit-keys"
+        remote_json = f"{product_root}/relkit.json"
+        remote_private = f"{product_root}/{private_rel}"
+        ssh_run(host_name, ["sudo", "mkdir", "-p", keys_dir])
+        ssh_write(host_name, remote_json, dump_json(machine).encode("utf-8"))
+        ssh_write(host_name, remote_private, private_local.read_bytes())
+        ssh_run(host_name, ["sudo", "chmod", "640", remote_json])
+        ssh_run(host_name, ["sudo", "chmod", "600", remote_private])
+        ssh_run(host_name, ["sudo", "chown", "-R", "relkit:relkit", product_root])
+        result = ssh_run(
+            host_name,
+            [
+                "sudo",
+                "relkit-agent",
+                "init",
+                "-config",
+                str(config_path),
+                "-product",
+                product,
+                "-migrate-profile",
+            ],
+        )
+        print(redact_text(result.stdout or "").strip())
+        print(f"wrote {private_rel} under {product_root} (bytes not printed)")
+    set_step(state, "signing.keys", "applied", key_id, "agent profile migrated")
+    save_state(root, state)
+    if args.restart:
+        ssh_run(host_name, ["sudo", "systemctl", "restart", "relkit-agent"])
         print("relkit-agent restarted")
     else:
         print("not restarted; pass --restart after the user allows it")
@@ -1655,9 +2120,10 @@ def routing_help() -> str:
   onboard explain|set|reset
   install
   upgrade vX.Y.Z
+  fake verify [--version X.Y.Z+N]
   release [--execute]
   serve list|add|restart|rotate|remove
-  agent list|add|restart|remove
+  agent list|add|provision|restart|remove
   keys gen
   status [--json]
   verify [--all]
@@ -1701,6 +2167,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("install", help="install lock-pinned artifacts via relkit_consume.py")
     upgrade = sub.add_parser("upgrade", help="rewrite lock to a GitHub release and install")
     upgrade.add_argument("release")
+
+    fake = sub.add_parser("fake", help="verify staged release wiring without publishing")
+    fake_sub = fake.add_subparsers(dest="fake_cmd", required=True)
+    fake_verify = fake_sub.add_parser("verify")
+    fake_verify.add_argument("--version")
 
     release = sub.add_parser("release", help="publish if onboard is verified and there is no drift")
     release.add_argument("--execute", action="store_true")
@@ -1748,6 +2219,13 @@ def build_parser() -> argparse.ArgumentParser:
     agent_add.add_argument("--root-path")
     agent_add.add_argument("--execute", action="store_true")
     agent_add.add_argument("--restart", action="store_true")
+    agent_prov = agent_sub.add_parser("provision")
+    agent_prov.add_argument("--product")
+    agent_prov.add_argument("--host")
+    agent_prov.add_argument("--config")
+    agent_prov.add_argument("--root-path")
+    agent_prov.add_argument("--execute", action="store_true")
+    agent_prov.add_argument("--restart", action="store_true")
     agent_rm = agent_sub.add_parser("remove")
     agent_rm.add_argument("--product")
     agent_rm.add_argument("--host")
@@ -1802,6 +2280,8 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
         return cmd_install(root, [])
     if args.cmd == "upgrade":
         return cmd_upgrade(root, args.release)
+    if args.cmd == "fake":
+        return cmd_fake_verify(root, args.version)
     if args.cmd == "release":
         return cmd_release(root, args)
     if args.cmd == "serve":
@@ -1821,6 +2301,8 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
             return cmd_agent_restart(root, args)
         if args.agent_cmd == "add":
             return cmd_agent_add(root, args)
+        if args.agent_cmd == "provision":
+            return cmd_agent_provision(root, args)
         return cmd_agent_remove(root, args)
     if args.cmd == "keys":
         return cmd_keys_gen(root, args)

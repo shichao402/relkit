@@ -194,6 +194,49 @@ class DownloadTests(unittest.TestCase):
         self.assertIn("--tlsv1.2", command)
         self.assertNotIn("--insecure", command)
 
+    def test_certificate_failure_allows_checksum_guarded_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            destination = Path(raw) / "artifact"
+
+            def python_download(_url: str, path: Path, *, verify: bool) -> None:
+                if verify:
+                    raise subject.CertificateVerificationError("expired CA")
+                path.write_bytes(b"pinned")
+
+            with (
+                patch.object(subject, "download_with_python", side_effect=python_download),
+                patch.object(
+                    subject,
+                    "download_with_curl",
+                    side_effect=RuntimeError("curl unavailable"),
+                ),
+            ):
+                subject.fetch_url("https://example.invalid/artifact", destination)
+
+            self.assertEqual(destination.read_bytes(), b"pinned")
+
+    def test_network_failure_never_allows_insecure_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            destination = Path(raw) / "artifact"
+            calls: list[bool] = []
+
+            def python_download(_url: str, _path: Path, *, verify: bool) -> None:
+                calls.append(verify)
+                raise TimeoutError("network timeout")
+
+            with (
+                patch.object(subject, "download_with_python", side_effect=python_download),
+                patch.object(
+                    subject,
+                    "download_with_curl",
+                    side_effect=RuntimeError("network unreachable"),
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "refusing insecure fallback"):
+                    subject.fetch_url("https://example.invalid/artifact", destination)
+
+            self.assertEqual(calls, [True])
+
     def test_hash_mismatch_never_enters_cache(self) -> None:
         class Response(io.BytesIO):
             def __enter__(self):

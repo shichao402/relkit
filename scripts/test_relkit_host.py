@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import subprocess
 import sys
 import tempfile
@@ -258,7 +259,258 @@ class UpgradeManifestTests(unittest.TestCase):
             self.assertEqual(lock["release"], "v0.3.3")
 
 
+class AgentProvisionTests(unittest.TestCase):
+    def test_rewrites_public_https_to_agent_origin(self) -> None:
+        self.assertEqual(
+            host.rewrite_agent_backend_url("https://update.devcloud.woa.com/"),
+            "http://update.devcloud.woa.com:8080/",
+        )
+
+    def test_machine_config_injects_private_key_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "loom",
+                        "backends": {
+                            "intranet": {
+                                "type": "relkit-compatible",
+                                "baseUrl": "https://update.devcloud.woa.com/",
+                                "uploadUrl": "https://update.devcloud.woa.com/",
+                            }
+                        },
+                        "publishTo": ["intranet"],
+                        "signing": {"keyId": "k1"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cfg = host.machine_publish_config(root, "loom", "k1", ".relkit-keys/k1.private.pb")
+            self.assertEqual(cfg["signing"]["privateKeyPath"], ".relkit-keys/k1.private.pb")
+            self.assertEqual(
+                cfg["backends"]["intranet"]["baseUrl"],
+                "https://update.devcloud.woa.com/",
+            )
+            self.assertEqual(
+                cfg["backends"]["intranet"]["uploadUrl"],
+                "http://update.devcloud.woa.com:8080/",
+            )
+            profile = host.extract_publish_profile(cfg)
+            self.assertEqual(profile["signing"]["keyId"], "k1")
+            self.assertEqual(
+                profile["backends"]["intranet"]["uploadUrl"],
+                "http://update.devcloud.woa.com:8080/",
+            )
+
+    def test_provision_refuses_without_execute(self) -> None:
+        args = host.build_parser().parse_args(["agent", "provision"])
+        with self.assertRaisesRegex(host.Fail, "without --execute"):
+            host.cmd_agent_provision(Path("."), args)
+
+
+class SshQuotingTests(unittest.TestCase):
+    def test_arguments_with_spaces_survive_the_far_side_shell(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with patch("subprocess.run", return_value=completed) as runner:
+            host.ssh_run("box", ["bash", "-lc", "rm -rf /srv/a /srv/b"])
+        argv = runner.call_args.args[0]
+        self.assertEqual(argv[-1], "'rm -rf /srv/a /srv/b'")
+        self.assertEqual(argv[-3:-1], ["bash", "-lc"])
+
+    def test_plain_arguments_are_not_rewritten(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with patch("subprocess.run", return_value=completed) as runner:
+            host.ssh_run("box", ["sudo", "systemctl", "restart", "relkit-agent"])
+        self.assertEqual(
+            runner.call_args.args[0][-4:],
+            ["sudo", "systemctl", "restart", "relkit-agent"],
+        )
+
+
+class RemoteClaimTests(unittest.TestCase):
+    def claim(self, status: str, products: list[str]) -> tuple[dict[str, Any], list[str]]:
+        with tempfile.TemporaryDirectory() as raw:
+            state = host.default_state(Path(raw))
+        state["steps"]["serve.register"]["status"] = status
+        state["steps"]["serve.register"]["value"] = "loom"
+        drift: list[str] = []
+        host.claim_remote_registration(
+            state,
+            "serve.register",
+            "loom",
+            products,
+            note="listed on remote",
+            missing="serve does not list loom",
+            drift=drift,
+        )
+        return state["steps"]["serve.register"], drift
+
+    def test_stale_local_does_not_hide_remote_evidence(self) -> None:
+        step, drift = self.claim("stale", ["loom"])
+        self.assertEqual(step["status"], "verified")
+        self.assertEqual(drift, [])
+
+    def test_missing_remote_is_drift(self) -> None:
+        step, drift = self.claim("verified", ["svn-auto-merge"])
+        self.assertEqual(step["status"], "drift")
+        self.assertEqual(drift, ["serve does not list loom"])
+
+    def test_unanswered_without_remote_stays_quiet(self) -> None:
+        step, drift = self.claim("unanswered", [])
+        self.assertEqual(step["status"], "unanswered")
+        self.assertEqual(drift, [])
+
+
+class SigningProfileTests(unittest.TestCase):
+    def state_with_key(self, key_id: str) -> dict[str, Any]:
+        with tempfile.TemporaryDirectory() as raw:
+            state = host.default_state(Path(raw))
+        state["steps"]["signing.keys"]["status"] = "stale"
+        state["steps"]["signing.keys"]["value"] = key_id
+        return state
+
+    def test_matching_key_id_verifies(self) -> None:
+        state = self.state_with_key("k1")
+        drift: list[str] = []
+        completed = subprocess.CompletedProcess([], 0, '{"signing": {"keyId": "k1"}}', "")
+        with patch("relkit_host.ssh_run", return_value=completed) as runner:
+            host.reconcile_signing_profile(
+                state, "box", "/etc/relkit-agent/relkit-agent.json", "loom", drift
+            )
+        runner.assert_called_once_with(
+            "box", ["sudo", "cat", "/etc/relkit-agent/products/loom.json"]
+        )
+        self.assertEqual(state["steps"]["signing.keys"]["status"], "verified")
+        self.assertEqual(drift, [])
+
+    def test_key_id_mismatch_is_drift(self) -> None:
+        state = self.state_with_key("k1")
+        drift: list[str] = []
+        completed = subprocess.CompletedProcess([], 0, '{"signing": {"keyId": "k9"}}', "")
+        with patch("relkit_host.ssh_run", return_value=completed):
+            host.reconcile_signing_profile(
+                state, "box", "/etc/relkit-agent/relkit-agent.json", "loom", drift
+            )
+        self.assertEqual(state["steps"]["signing.keys"]["status"], "drift")
+        self.assertEqual(len(drift), 1)
+
+
+class SidecarLayoutTests(unittest.TestCase):
+    def test_next_to_shell_verifies(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            state["steps"]["sidecar.layout"]["status"] = "stale"
+            (root / "scripts").mkdir()
+            (root / "scripts" / "build_desktop_release.mjs").write_text(
+                "cpSync(path.join(root, 'tools/bin/relkit-updater.exe'), dest)\n",
+                encoding="utf-8",
+            )
+            bin_dir = root / "tools" / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / host.updater_sidecar_name()).write_bytes(b"sidecar")
+            dest = root / "dist" / "loom-editor-win"
+            dest.mkdir(parents=True)
+            (dest / host.updater_sidecar_name()).write_bytes(b"sidecar")
+            drift: list[str] = []
+            host.reconcile_sidecar_layout(root, state, drift)
+            self.assertEqual(state["steps"]["sidecar.layout"]["status"], "verified")
+            self.assertEqual(drift, [])
+
+    def test_pack_tree_without_sidecar_is_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            state["steps"]["sidecar.layout"]["status"] = "applied"
+            (root / "scripts").mkdir()
+            (root / "scripts" / "build_desktop_release.mjs").write_text(
+                "tools/bin relkit-updater\n",
+                encoding="utf-8",
+            )
+            bin_dir = root / "tools" / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / host.updater_sidecar_name()).write_bytes(b"sidecar")
+            (root / "dist" / "loom-editor-win").mkdir(parents=True)
+            drift: list[str] = []
+            host.reconcile_sidecar_layout(root, state, drift)
+            self.assertEqual(state["steps"]["sidecar.layout"]["status"], "drift")
+            self.assertEqual(len(drift), 1)
+
+
+class FakeStageTests(unittest.TestCase):
+    def test_staged_tree_restores_applied_not_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            state["steps"]["fake.release"]["status"] = "stale"
+            state["steps"]["fake.release"]["value"] = "0.2.2+0"
+            tree = root / ".relkit" / "staged" / "0.2.2+0"
+            tree.mkdir(parents=True)
+            (tree / "staged.pb").write_bytes(b"x")
+            host.reconcile_fake_stage(root, state)
+            self.assertEqual(state["steps"]["fake.release"]["status"], "applied")
+            self.assertEqual(state["steps"]["fake.release"]["value"], "0.2.2+0")
+
+    def test_staged_tree_does_not_downgrade_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            state["steps"]["fake.release"] = {
+                "status": "verified",
+                "value": "0.2.2+0",
+                "note": "simulate passed",
+            }
+            tree = root / ".relkit" / "staged" / "0.2.2+0"
+            tree.mkdir(parents=True)
+            (tree / "staged.pb").write_bytes(b"x")
+            host.reconcile_fake_stage(root, state)
+            self.assertEqual(state["steps"]["fake.release"]["status"], "verified")
+            self.assertEqual(state["steps"]["fake.release"]["note"], "simulate passed")
+
+
 class ReconcileTests(unittest.TestCase):
+    def test_release_accepts_confirmed_decisions_but_requires_verified_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            state = host.default_state(Path(raw))
+        for step in host.DECISION_STEPS:
+            host.set_step(state, step, "confirmed", "x")
+        for step in host.ACTION_STEPS:
+            host.set_step(state, step, "verified", "x")
+        self.assertEqual(host.release_incomplete_steps(state), [])
+        state["steps"]["fake.release"]["status"] = "applied"
+        self.assertEqual(host.release_incomplete_steps(state), ["fake.release"])
+        state["steps"]["pack.ci"]["status"] = "confirmed"
+        self.assertIn("pack.ci", host.release_incomplete_steps(state))
+        state["steps"]["fake.release"]["status"] = "verified"
+        self.assertEqual(host.release_incomplete_steps(state, via_ci=True), [])
+
+    def test_agent_execute_is_ci_only(self) -> None:
+        source = inspect.getsource(host.cmd_release)
+        self.assertIn("RELKIT_RELEASE_VIA_CI", source)
+        self.assertIn("agent publish is CI-only", source)
+
+    def test_fake_verify_runs_simulate_and_marks_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            host.save_state(root, state)
+            staged = root / ".relkit" / "staged" / "1.2.3+4"
+            staged.mkdir(parents=True)
+            (staged / "staged.pb").write_bytes(b"x")
+            with (
+                patch("relkit_host.relkit_bin", return_value=Path("relkit")),
+                patch("relkit_host.run_relkit") as run,
+            ):
+                self.assertEqual(host.cmd_fake_verify(root, "1.2.3+4"), 0)
+            run.assert_called_once_with(
+                root,
+                Path("relkit"),
+                ["simulate", "--with-staged", "1.2.3+4", "--from", "all"],
+            )
+            state = host.load_state(root)
+            self.assertEqual(state["steps"]["fake.release"]["status"], "verified")
+
     def test_release_refuses_drift(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -338,6 +590,75 @@ class ReconcileTests(unittest.TestCase):
         source = inspect.getsource(host.cmd_serve_add)
         self.assertNotIn("json.dumps", source)
         self.assertNotIn("uploadTokens", source)
+
+    def test_release_reads_version_via_get(self) -> None:
+        import inspect
+
+        source = inspect.getsource(host.cmd_release)
+        self.assertIn('"version", "get"', source)
+        self.assertNotIn('[str(binary), "version"]', source)
+
+
+class SshPortTests(unittest.TestCase):
+    def write_config(self, root: Path) -> Path:
+        included = root / "devcloud_config"
+        included.write_text(
+            "Host *.devcloud.woa.com\n    User root\n    Port 36000\n",
+            encoding="utf-8",
+        )
+        path = root / "config"
+        path.write_text(
+            f"Host *.devcloud.woa.com\nInclude {included.as_posix()}\n"
+            "Host cvm-gz\n    HostName 10.0.0.1\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_port_comes_from_the_included_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = self.write_config(Path(raw))
+            self.assertEqual(
+                host.ssh_host_port("update.devcloud.woa.com", path), 36000
+            )
+            self.assertIsNone(host.ssh_host_port("cvm-gz", path))
+
+    def test_target_spells_out_the_port(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = self.write_config(Path(raw))
+            lookup = host.ssh_host_port
+            with patch(
+                "relkit_host.ssh_host_port",
+                side_effect=lambda name, config_path=path: lookup(name, config_path),
+            ):
+                self.assertEqual(
+                    host.ssh_target("update.devcloud.woa.com"),
+                    "update.devcloud.woa.com:36000",
+                )
+                self.assertEqual(host.ssh_target("cvm-gz"), "cvm-gz:22 (ssh default)")
+
+    def test_ssh_run_passes_the_port_and_names_it_on_failure(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with patch("subprocess.run", return_value=completed) as runner:
+            host.ssh_run("update.devcloud.woa.com", ["true"], port=36000)
+        self.assertEqual(runner.call_args.args[0][:6], [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-p",
+            "36000",
+            "update.devcloud.woa.com",
+        ])
+        fake = subprocess.CompletedProcess(
+            args=["ssh"], returncode=255, stdout="", stderr="Connection refused"
+        )
+        with patch("relkit_host.subprocess.run", return_value=fake):
+            with self.assertRaisesRegex(host.Fail, r"update\.devcloud\.woa\.com:36000"):
+                host.ssh_run("update.devcloud.woa.com", ["true"], port=36000)
+
+    def test_recommendation_shows_the_port(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = self.write_config(Path(raw))
+            self.assertIn("*.devcloud.woa.com (port 36000)", host.ssh_host_recommend(path))
 
 
 class SshHostParseTests(unittest.TestCase):

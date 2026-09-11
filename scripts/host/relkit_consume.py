@@ -16,6 +16,7 @@ import json
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,10 @@ TARGETS = (
     "darwin-arm64",
 )
 DOWNLOAD_ATTEMPTS = 3
+
+
+class CertificateVerificationError(RuntimeError):
+    """A strict HTTPS transport failed specifically on certificate validation."""
 
 
 def force_utf8_stdio() -> None:
@@ -114,26 +119,54 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download_with_curl(url: str, destination: Path) -> None:
+def download_with_python(url: str, destination: Path, *, verify: bool) -> None:
+    request = Request(
+        url,
+        headers={"User-Agent": "relkit-consume/2"},
+        method="GET",
+    )
+    context = (
+        ssl.create_default_context() if verify else ssl._create_unverified_context()
+    )
+    try:
+        with urlopen(request, timeout=120, context=context) as response, destination.open(
+            "wb"
+        ) as out:
+            shutil.copyfileobj(response, out)
+    except URLError as error:
+        if verify and isinstance(error.reason, ssl.SSLCertVerificationError):
+            raise CertificateVerificationError(str(error.reason)) from error
+        raise
+    except ssl.SSLCertVerificationError as error:
+        if verify:
+            raise CertificateVerificationError(str(error)) from error
+        raise
+
+
+def download_with_curl(
+    url: str, destination: Path, *, extra_args: Sequence[str] = ()
+) -> None:
     curl = shutil.which("curl.exe" if os.name == "nt" else "curl")
     if not curl:
         raise RuntimeError("system curl is unavailable")
     scheme = "=https" if url.startswith("https://") else "=http"
+    command = [
+        curl,
+        "--fail",
+        "--location",
+        "--silent",
+        "--show-error",
+        "--proto",
+        scheme,
+        "--tlsv1.2",
+        *list(extra_args),
+        "--output",
+        str(destination),
+        url,
+    ]
     try:
         result = subprocess.run(
-            [
-                curl,
-                "--fail",
-                "--location",
-                "--silent",
-                "--show-error",
-                "--proto",
-                scheme,
-                "--tlsv1.2",
-                "--output",
-                str(destination),
-                url,
-            ],
+            command,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -144,9 +177,68 @@ def download_with_curl(url: str, destination: Path) -> None:
     except subprocess.TimeoutExpired as error:
         raise RuntimeError("system curl timed out after 180s") from error
     if result.returncode != 0:
+        if "--insecure" not in extra_args and result.returncode == 60:
+            raise CertificateVerificationError(result.stderr.strip())
         raise RuntimeError(
             f"system curl failed ({result.returncode}): {result.stderr.strip()}"
         )
+
+
+def fetch_url(url: str, destination: Path) -> None:
+    # Strict TLS is always attempted first. Only a positively identified
+    # certificate-validation failure may fall back to an unverified transport.
+    # The caller immediately rejects the bytes unless they match the lock SHA-256.
+    strict_methods: list[tuple[str, Any]] = [
+        ("Python HTTPS", lambda: download_with_python(url, destination, verify=True)),
+        ("system curl", lambda: download_with_curl(url, destination)),
+    ]
+    strict_errors: list[str] = []
+    certificate_failed = False
+    for label, download in strict_methods:
+        destination.unlink(missing_ok=True)
+        try:
+            download()
+            return
+        except CertificateVerificationError as error:
+            certificate_failed = True
+            print(f"relkit consume: {label} certificate failed ({error})", file=sys.stderr)
+            strict_errors.append(f"{label}: certificate verification failed: {error}")
+        except (HTTPError, URLError, OSError, TimeoutError, RuntimeError) as error:
+            print(f"relkit consume: {label} failed ({error})", file=sys.stderr)
+            strict_errors.append(f"{label}: {error}")
+
+    if not certificate_failed:
+        raise RuntimeError(
+            "strict transports failed without a certificate verification error; "
+            "refusing insecure fallback: "
+            + "; ".join(strict_errors)
+        )
+
+    fallback_methods: list[tuple[str, Any]] = [
+        (
+            "Python HTTPS without TLS verify",
+            lambda: download_with_python(url, destination, verify=False),
+        ),
+        (
+            "system curl --insecure",
+            lambda: download_with_curl(url, destination, extra_args=("--insecure",)),
+        ),
+    ]
+    fallback_errors: list[str] = []
+    for label, download in fallback_methods:
+        destination.unlink(missing_ok=True)
+        try:
+            download()
+            print(
+                "relkit consume: certificate-only fallback via "
+                f"{label}; downloaded bytes must still match lock sha256",
+                file=sys.stderr,
+            )
+            return
+        except (HTTPError, URLError, OSError, TimeoutError, RuntimeError) as error:
+            print(f"relkit consume: {label} failed ({error})", file=sys.stderr)
+            fallback_errors.append(f"{label}: {error}")
+    raise RuntimeError("; ".join([*strict_errors, *fallback_errors]))
 
 
 def download_artifact(root: Path, component: str, spec: dict[str, str]) -> Path:
@@ -163,24 +255,7 @@ def download_artifact(root: Path, component: str, spec: dict[str, str]) -> Path:
         temporary.unlink(missing_ok=True)
         try:
             print(f"relkit consume: download {component} ({attempt}/{DOWNLOAD_ATTEMPTS})")
-            request = Request(
-                spec["url"],
-                headers={"User-Agent": "relkit-consume/2"},
-                method="GET",
-            )
-            try:
-                with urlopen(request, timeout=120) as response, temporary.open(
-                    "wb"
-                ) as out:
-                    shutil.copyfileobj(response, out)
-            except (HTTPError, URLError, OSError, TimeoutError) as urllib_error:
-                temporary.unlink(missing_ok=True)
-                print(
-                    f"relkit consume: Python HTTPS failed ({urllib_error}); "
-                    "retrying with system curl",
-                    file=sys.stderr,
-                )
-                download_with_curl(spec["url"], temporary)
+            fetch_url(spec["url"], temporary)
             actual = file_sha256(temporary)
             if actual != spec["sha256"]:
                 raise RuntimeError(
