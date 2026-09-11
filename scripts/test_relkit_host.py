@@ -201,6 +201,63 @@ class SshGuardTests(unittest.TestCase):
         self.assertEqual(host.parse_list_products(text), ["svn-auto-merge", "loom"])
 
 
+class UpgradeManifestTests(unittest.TestCase):
+    def test_commit_comes_from_release_manifest_not_github_api(self) -> None:
+        commit = "9a3af017b3a3f7ab2f47e3843b9b5297c2775ac1"
+        with patch(
+            "relkit_host.http_get",
+            return_value=json.dumps({"schema": "relkit.release/1", "commit": commit}),
+        ) as getter:
+            self.assertEqual(
+                host.release_commit_from_manifest("https://example.invalid/v0.3.3"),
+                commit,
+            )
+        getter.assert_called_once_with("https://example.invalid/v0.3.3/manifest.json")
+
+    def test_missing_manifest_commit_is_fatal(self) -> None:
+        with patch("relkit_host.http_get", return_value=json.dumps({"commit": ""})):
+            with self.assertRaisesRegex(host.Fail, "refusing to keep the previous lock commit"):
+                host.release_commit_from_manifest("https://example.invalid/v0.3.3")
+
+    def test_upgrade_does_not_call_github_api(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            lock_path = root / "scripts" / "relkit.lock.json"
+            lock_path.parent.mkdir(parents=True)
+            lock_path.write_text(
+                json.dumps(
+                    {
+                        "schema": host.LOCK_SCHEMA,
+                        "release": "v0.3.2",
+                        "commit": "4" * 40,
+                        "artifacts": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            host_dir = root / "scripts" / "host"
+            host_dir.mkdir()
+            (host_dir / "relkit_consume.py").write_text("#\n", encoding="utf-8")
+            commit = "9a3af017b3a3f7ab2f47e3843b9b5297c2775ac1"
+
+            def fake_get(url: str) -> str:
+                if url.endswith("/manifest.json"):
+                    return json.dumps({"commit": commit})
+                if url.endswith("/SHA256SUMS"):
+                    return ""
+                raise host.Fail(f"unexpected GET {url}")
+
+            with (
+                patch("relkit_host.host_scripts_dir", return_value=host_dir),
+                patch("relkit_host.http_get", side_effect=fake_get),
+                patch("relkit_host.cmd_install", return_value=0),
+            ):
+                self.assertEqual(host.cmd_upgrade(root, "v0.3.3"), 0)
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            self.assertEqual(lock["commit"], commit)
+            self.assertEqual(lock["release"], "v0.3.3")
+
+
 class ReconcileTests(unittest.TestCase):
     def test_release_refuses_drift(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

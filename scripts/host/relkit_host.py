@@ -1023,14 +1023,15 @@ def cmd_upgrade(root: Path, release: str) -> int:
     if lock.get("schema") != LOCK_SCHEMA:
         raise Fail(f"{lock_path} must use {LOCK_SCHEMA}")
     base = f"https://github.com/{GITHUB_REPO}/releases/download/{release}"
+    # Commit 只从同目录的 immutable 附件读。不要打 api.github.com：
+    # 匿名 REST 每小时 60 次，和 Releases 下载不共用配额。
+    commit = release_commit_from_manifest(base)
     sums_text = http_get(f"{base}/SHA256SUMS")
     sums = parse_sha256sums(sums_text)
-    commit = github_tag_commit(release)
     artifacts = lock.setdefault("artifacts", {})
     rewrite_lock_artifacts(artifacts, base, sums)
     lock["release"] = release
-    if commit:
-        lock["commit"] = commit
+    lock["commit"] = commit
     consume_script = host_scripts_dir() / "relkit_consume.py"
     if consume_script.is_file():
         lock["consumerSha256"] = hashlib.sha256(consume_script.read_bytes()).hexdigest()
@@ -1058,25 +1059,19 @@ def parse_sha256sums(text: str) -> dict[str, str]:
     return mapping
 
 
-def github_tag_commit(tag: str) -> Optional[str]:
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/git/ref/tags/{tag}"
+def release_commit_from_manifest(base: str) -> str:
+    """Read the build commit from release manifest.json (CDN), never the REST API."""
+    raw = http_get(f"{base}/manifest.json")
     try:
-        payload = json.loads(http_get(url))
-    except Fail:
-        return None
-    obj = payload.get("object") or {}
-    sha = obj.get("sha")
-    kind = obj.get("type")
-    if kind == "tag" and sha:
-        try:
-            peeled = json.loads(
-                http_get(f"https://api.github.com/repos/{GITHUB_REPO}/git/tags/{sha}")
-            )
-        except Fail:
-            return str(sha)
-        inner = (peeled.get("object") or {}).get("sha")
-        return str(inner) if inner else str(sha)
-    return str(sha) if sha else None
+        manifest = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise Fail(f"{base}/manifest.json is not JSON: {error}") from error
+    commit = str(manifest.get("commit") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise Fail(
+            f"{base}/manifest.json must pin a 40-char commit; refusing to keep the previous lock commit"
+        )
+    return commit
 
 
 def rewrite_lock_artifacts(artifacts: dict[str, Any], base: str, sums: dict[str, str]) -> None:
