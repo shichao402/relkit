@@ -18,11 +18,14 @@ class TreeHashTests(unittest.TestCase):
     def test_stable_for_same_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            (root / "a.py").write_text("x\n", encoding="utf-8")
+            (root / "relkit_consume.py").write_text("x\n", encoding="utf-8")
+            (root / "relkit_host.py").write_text("host\n", encoding="utf-8")
             first = host.tree_sha256(root)
             second = host.tree_sha256(root)
             self.assertEqual(first, second)
-            (root / "a.py").write_text("y\n", encoding="utf-8")
+            (root / "README.local").write_text("ignored\n", encoding="utf-8")
+            self.assertEqual(first, host.tree_sha256(root))
+            (root / "relkit_consume.py").write_text("y\n", encoding="utf-8")
             self.assertNotEqual(first, host.tree_sha256(root))
 
 
@@ -243,9 +246,15 @@ class UpgradeManifestTests(unittest.TestCase):
 
             def fake_get(url: str) -> str:
                 if url.endswith("/manifest.json"):
-                    return json.dumps({"commit": commit})
+                    return json.dumps(
+                        {
+                            "commit": commit,
+                            "hostScriptsSha256": "a" * 64,
+                            "consumerSha256": "b" * 64,
+                        }
+                    )
                 if url.endswith("/SHA256SUMS"):
-                    return ""
+                    return f"{'c' * 64}  relkit-host-scripts.zip\n"
                 raise host.Fail(f"unexpected GET {url}")
 
             with (
@@ -257,6 +266,45 @@ class UpgradeManifestTests(unittest.TestCase):
             lock = json.loads(lock_path.read_text(encoding="utf-8"))
             self.assertEqual(lock["commit"], commit)
             self.assertEqual(lock["release"], "v0.3.3")
+            self.assertEqual(lock["hostScriptsSha256"], "a" * 64)
+            self.assertEqual(lock["consumerSha256"], "b" * 64)
+            self.assertEqual(
+                lock["artifacts"]["host-scripts"]["sha256"],
+                "c" * 64,
+            )
+
+
+class InstallGateTests(unittest.TestCase):
+    def test_successful_install_leaves_verified_lock_state(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host_dir = root / "scripts" / "host"
+            host_dir.mkdir(parents=True)
+            (host_dir / "relkit_consume.py").write_text("# consume\n", encoding="utf-8")
+            (host_dir / "relkit_host.py").write_text("# host\n", encoding="utf-8")
+            (host_dir / "README.local").write_text("not executable\n", encoding="utf-8")
+            lock_path = root / "scripts" / "relkit.lock.json"
+            lock_path.write_text(
+                json.dumps(
+                    {
+                        "schema": host.LOCK_SCHEMA,
+                        "release": "v1.2.3",
+                        "commit": "a" * 40,
+                        "hostScriptsSha256": host.tree_sha256(host_dir),
+                        "artifacts": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            consume = type("Consume", (), {"main": staticmethod(lambda _argv: 0)})
+            with (
+                patch("relkit_host.import_consume", return_value=consume),
+                patch("relkit_host.consume_components", return_value=[]),
+            ):
+                self.assertEqual(host.cmd_install(root, []), 0)
+            state = host.load_state(root)
+            self.assertEqual(state["steps"]["consume.lock"]["status"], "verified")
+            self.assertEqual(state["steps"]["consume.lock"]["value"], "v1.2.3")
 
 
 class AgentProvisionTests(unittest.TestCase):
@@ -303,10 +351,85 @@ class AgentProvisionTests(unittest.TestCase):
                 "http://update.devcloud.woa.com:8080/",
             )
 
+    def test_profile_keeps_only_the_makers_token_env_from_site(self) -> None:
+        machine = {
+            "product": "loom",
+            "signing": {"keyId": "k1", "privateKeyPath": ".relkit-keys/k1.private.pb"},
+            "backends": {"intranet": {"type": "relkit-compatible"}},
+            "publishTo": ["intranet"],
+            "directory": {
+                "publishTo": ["intranet"],
+                "entryUrls": ["https://policy-only.invalid/directory.json"],
+            },
+            "site": {
+                "title": "Loom",
+                "description": "blurb",
+                "homepage": "https://example.invalid",
+            },
+        }
+        profile = host.extract_publish_profile(machine)
+        self.assertNotIn("site", profile)
+        self.assertEqual(profile["directory"], {"publishTo": ["intranet"]})
+
+        machine["site"]["makers"] = {"tokenEnv": "MAKERS_TOKEN", "projectId": "x"}
+        profile = host.extract_publish_profile(machine)
+        self.assertEqual(profile["site"], {"makers": {"tokenEnv": "MAKERS_TOKEN"}})
+
     def test_provision_refuses_without_execute(self) -> None:
         args = host.build_parser().parse_args(["agent", "provision"])
         with self.assertRaisesRegex(host.Fail, "without --execute"):
             host.cmd_agent_provision(Path("."), args)
+
+    def test_provision_reads_profile_back_and_marks_signing_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / ".relkit-keys").mkdir()
+            (root / ".relkit-keys" / "k1.private.pb").write_bytes(b"private")
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "loom",
+                        "signing": {"keyId": "k1"},
+                        "backends": {
+                            "intranet": {
+                                "type": "relkit-compatible",
+                                "baseUrl": "https://example.invalid/",
+                                "tokenEnv": "RELKIT_UPLOAD_TOKEN",
+                            }
+                        },
+                        "publishTo": ["intranet"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "product.id", "confirmed", "loom", "test")
+            host.set_step(state, "signing.keys", "stale", "k1", "test")
+            host.save_state(root, state)
+
+            written: dict[str, bytes] = {}
+
+            def fake_write(_host, path, data):
+                written[path] = data
+
+            def fake_ssh(_host, command, **_kwargs):
+                stdout = ""
+                if command[:2] == ["sudo", "cat"]:
+                    stdout = written[command[2]].decode("utf-8")
+                return subprocess.CompletedProcess(command, 0, stdout, "")
+
+            args = host.build_parser().parse_args(
+                ["agent", "provision", "--host", "box", "--execute"]
+            )
+            with (
+                patch("relkit_host.ssh_path_exists", return_value=True),
+                patch("relkit_host.ssh_write", side_effect=fake_write),
+                patch("relkit_host.ssh_run", side_effect=fake_ssh),
+            ):
+                self.assertEqual(host.cmd_agent_provision(root, args), 0)
+
+            saved = host.load_state(root)
+            self.assertEqual(saved["steps"]["signing.keys"]["status"], "verified")
 
 
 class SshQuotingTests(unittest.TestCase):
@@ -375,8 +498,10 @@ class SigningProfileTests(unittest.TestCase):
         drift: list[str] = []
         completed = subprocess.CompletedProcess([], 0, '{"signing": {"keyId": "k1"}}', "")
         with patch("relkit_host.ssh_run", return_value=completed) as runner:
-            host.reconcile_signing_profile(
-                state, "box", "/etc/relkit-agent/relkit-agent.json", "loom", drift
+            self.assertTrue(
+                host.reconcile_signing_profile(
+                    state, "box", "/etc/relkit-agent/relkit-agent.json", "loom", drift
+                )
             )
         runner.assert_called_once_with(
             "box", ["sudo", "cat", "/etc/relkit-agent/products/loom.json"]
@@ -389,8 +514,10 @@ class SigningProfileTests(unittest.TestCase):
         drift: list[str] = []
         completed = subprocess.CompletedProcess([], 0, '{"signing": {"keyId": "k9"}}', "")
         with patch("relkit_host.ssh_run", return_value=completed):
-            host.reconcile_signing_profile(
-                state, "box", "/etc/relkit-agent/relkit-agent.json", "loom", drift
+            self.assertFalse(
+                host.reconcile_signing_profile(
+                    state, "box", "/etc/relkit-agent/relkit-agent.json", "loom", drift
+                )
             )
         self.assertEqual(state["steps"]["signing.keys"]["status"], "drift")
         self.assertEqual(len(drift), 1)
@@ -590,6 +717,13 @@ class ReconcileTests(unittest.TestCase):
         source = inspect.getsource(host.cmd_serve_add)
         self.assertNotIn("json.dumps", source)
         self.assertNotIn("uploadTokens", source)
+
+    def test_agent_add_forwards_share_with(self) -> None:
+        import inspect
+
+        source = inspect.getsource(host.cmd_agent_add)
+        self.assertIn("-share-with", source)
+        self.assertIn("share-with does not print a token", source)
 
     def test_release_reads_version_via_get(self) -> None:
         import inspect

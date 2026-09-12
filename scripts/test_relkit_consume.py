@@ -37,6 +37,14 @@ def rust_sdk_zip() -> bytes:
     return output.getvalue()
 
 
+def host_scripts_zip() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("relkit_consume.py", "# consume\n")
+        archive.writestr("relkit_host.py", "# host\n")
+    return output.getvalue()
+
+
 def lock_for(url: str, sdk: bytes, binary: bytes, rust_sdk: bytes | None = None) -> dict:
     spec = lambda data: {"url": url, "sha256": sha256(data)}
     lock = {
@@ -120,6 +128,93 @@ class InstallTests(unittest.TestCase):
                     root / "third_party/relkit/sdk/dart",
                     sha256(archive_path.read_bytes()),
                 )
+
+    def test_install_self_repairs_host_scripts_before_other_components(self) -> None:
+        scripts = host_scripts_zip()
+        sdk = sdk_zip()
+        binary = b"executable"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host_dir = root / "scripts" / "host"
+            host_dir.mkdir(parents=True)
+            (host_dir / "relkit_consume.py").write_text("# stale\n", encoding="utf-8")
+            (host_dir / "relkit_host.py").write_text("# stale\n", encoding="utf-8")
+
+            expected_dir = root / "expected"
+            expected_dir.mkdir()
+            (expected_dir / "relkit_consume.py").write_text("# consume\n", encoding="utf-8")
+            (expected_dir / "relkit_host.py").write_text("# host\n", encoding="utf-8")
+            lock = lock_for("https://example.invalid/artifact", sdk, binary)
+            lock["hostScriptsSha256"] = subject.host_scripts_tree_sha256(expected_dir)
+            lock["artifacts"]["host-scripts"] = {
+                "url": "https://example.invalid/host-scripts",
+                "sha256": sha256(scripts),
+            }
+
+            def fake_download(_root, component, _spec):
+                path = root / f"{component}.artifact"
+                if component == "host-scripts":
+                    path.write_bytes(scripts)
+                elif component == "sdk-dart":
+                    path.write_bytes(sdk)
+                else:
+                    path.write_bytes(binary)
+                return path
+
+            with (
+                patch.object(subject, "host_target", return_value="linux-amd64"),
+                patch.object(subject, "load_lock", return_value=lock),
+                patch.object(subject, "download_artifact", side_effect=fake_download),
+                patch.object(subject, "verify_binary"),
+            ):
+                self.assertEqual(
+                    subject.main(["install", "--project-root", str(root)]),
+                    0,
+                )
+
+            self.assertEqual(
+                subject.host_scripts_tree_sha256(host_dir),
+                lock["hostScriptsSha256"],
+            )
+
+    def test_host_script_update_rolls_back_when_second_replace_fails(self) -> None:
+        scripts = host_scripts_zip()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            artifact = root / "host-scripts.zip"
+            artifact.write_bytes(scripts)
+            destination = root / "scripts" / "host"
+            destination.mkdir(parents=True)
+            old = {
+                "relkit_consume.py": b"# old consume\n",
+                "relkit_host.py": b"# old host\n",
+            }
+            for name, data in old.items():
+                (destination / name).write_bytes(data)
+
+            expected_dir = root / "expected"
+            expected_dir.mkdir()
+            (expected_dir / "relkit_consume.py").write_text("# consume\n", encoding="utf-8")
+            (expected_dir / "relkit_host.py").write_text("# host\n", encoding="utf-8")
+            expected = subject.host_scripts_tree_sha256(expected_dir)
+            real_replace = subject.os.replace
+            failed = False
+
+            def flaky_replace(source, target):
+                nonlocal failed
+                if Path(target).name == "relkit_host.py" and not failed:
+                    failed = True
+                    raise PermissionError("locked")
+                return real_replace(source, target)
+
+            with (
+                patch.object(subject.os, "replace", side_effect=flaky_replace),
+                self.assertRaises(PermissionError),
+            ):
+                subject.safe_extract_host_scripts(artifact, destination, expected)
+
+            for name, data in old.items():
+                self.assertEqual((destination / name).read_bytes(), data)
 
     def test_installs_rust_sdk_to_stable_path_with_proto(self) -> None:
         sdk = rust_sdk_zip()

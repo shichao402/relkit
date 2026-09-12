@@ -345,6 +345,19 @@ class CliParseTests(unittest.TestCase):
             deploy_cli.write_deterministic_zip(second, entries)
             self.assertEqual(first.read_bytes(), second.read_bytes())
 
+    def test_host_scripts_archive_has_stable_tree_hash(self):
+        args = deploy_cli.build_parser().parse_args(["build", "--host-scripts"])
+        self.assertTrue(args.host_scripts)
+        entries = deploy_cli.host_script_entries()
+        self.assertEqual(
+            [name for _, name in entries],
+            ["relkit_consume.py", "relkit_host.py"],
+        )
+        first = deploy_cli.host_scripts_tree_sha256(entries)
+        second = deploy_cli.host_scripts_tree_sha256(entries)
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 64)
+
     def test_rust_sdk_archive_excludes_ignored_target(self):
         ignore = (DEPLOY.parent / "sdk" / "rust" / ".gitignore").read_text(
             encoding="utf-8"

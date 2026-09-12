@@ -30,7 +30,7 @@ jobs:
       - name: Build immutable release artifacts
         run: >-
           python deploy/relkit.py build
-          --serve --agent --cli --updater --dart-sdk --rust-sdk
+          --serve --agent --cli --updater --dart-sdk --rust-sdk --host-scripts
           --version "${GITHUB_REF_NAME#v}" --out dist
       - name: Write checksums
         working-directory: dist

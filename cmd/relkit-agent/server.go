@@ -25,7 +25,7 @@ import (
 	"go.firoyang.com/relkit/internal/stage"
 )
 
-const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue one token per product with `relkit-agent init -product <id>` (CI env is RELKIT_UPLOAD_TOKEN)"
+const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue a product token with `relkit-agent init -product <id>` (share a family with -share-with; CI env is RELKIT_UPLOAD_TOKEN)"
 
 type ProductConfig struct {
 	Root    string `json:"root"`
@@ -51,8 +51,9 @@ type FileConfig struct {
 	Products           map[string]ProductConfig `json:"products"`
 }
 
-// UploadTokenEntry is a product-scoped publisher credential. One file, one
-// product. Sharing a file across products is refused at load time.
+// UploadTokenEntry is a publisher credential. One file maps to one or more
+// product ids (family share-with). Two entries must not point at the same
+// file or the same secret bytes.
 type UploadTokenEntry struct {
 	File     string   `json:"file"`
 	Products []string `json:"products"`
@@ -222,11 +223,18 @@ func (e UploadTokenEntry) validate() error {
 	if strings.TrimSpace(e.File) == "" {
 		return fmt.Errorf("file is required")
 	}
-	if len(e.Products) != 1 {
-		return fmt.Errorf("products must list exactly one id (got %v); do not share a token across products", e.Products)
+	if len(e.Products) == 0 {
+		return fmt.Errorf("products must list at least one id")
 	}
-	if err := model.CheckIdentifier(e.Products[0], "product"); err != nil {
-		return err
+	seen := map[string]bool{}
+	for _, id := range e.Products {
+		if err := model.CheckIdentifier(id, "product"); err != nil {
+			return err
+		}
+		if seen[id] {
+			return fmt.Errorf("duplicate product %q in entry", id)
+		}
+		seen[id] = true
 	}
 	return nil
 }
@@ -246,11 +254,13 @@ func loadProductTokens(configPath string, raw *FileConfig) ([]credential, error)
 		if err := entry.validate(); err != nil {
 			return nil, fmt.Errorf("uploadTokens[%d]: %w", i, err)
 		}
-		product := entry.Products[0]
-		if seenProduct[product] {
-			return nil, fmt.Errorf("uploadTokens[%d]: duplicate product %q", i, product)
+		products := append([]string(nil), entry.Products...)
+		for _, product := range products {
+			if seenProduct[product] {
+				return nil, fmt.Errorf("uploadTokens[%d]: duplicate product %q", i, product)
+			}
+			seenProduct[product] = true
 		}
-		seenProduct[product] = true
 		path := entry.File
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(filepath.Dir(configPath), path)
@@ -270,10 +280,10 @@ func loadProductTokens(configPath string, raw *FileConfig) ([]credential, error)
 		hash := hashToken(token)
 		key := hex.EncodeToString(hash)
 		if seenHash[key] {
-			return nil, fmt.Errorf("uploadTokens[%d]: duplicate token hash (products must not share a secret)", i)
+			return nil, fmt.Errorf("uploadTokens[%d]: duplicate token hash (share via one uploadTokens entry, not two files)", i)
 		}
 		seenHash[key] = true
-		creds = append(creds, credential{hash: hash, products: []string{product}})
+		creds = append(creds, credential{hash: hash, products: products})
 	}
 	return creds, nil
 }

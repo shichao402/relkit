@@ -215,6 +215,28 @@ def rust_sdk_entries() -> list[tuple[Path, str]]:
     return entries
 
 
+def host_script_entries() -> list[tuple[Path, str]]:
+    host_root = REPO_ROOT / "scripts" / "host"
+    names = ("relkit_consume.py", "relkit_host.py")
+    entries = [(host_root / name, name) for name in names]
+    missing = [str(path) for path, _ in entries if not path.is_file()]
+    if missing:
+        raise Fail("host scripts are missing: " + ", ".join(missing))
+    return entries
+
+
+def host_scripts_tree_sha256(entries: Sequence[tuple[Path, str]]) -> str:
+    digest = hashlib.sha256()
+    for source, archive_name in sorted(entries, key=lambda item: item[1]):
+        digest.update(archive_name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(
+            source.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        )
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def cmd_build(args: argparse.Namespace) -> None:
     require_cmd("go")
     out_dir = Path(args.out)
@@ -231,7 +253,9 @@ def cmd_build(args: argparse.Namespace) -> None:
     if getattr(args, "updater", False):
         targets.append("updater")
     if not targets and not (
-        getattr(args, "dart_sdk", False) or getattr(args, "rust_sdk", False)
+        getattr(args, "dart_sdk", False)
+        or getattr(args, "rust_sdk", False)
+        or getattr(args, "host_scripts", False)
     ):
         targets = ["serve", "agent"]
     stamp = git_stamp(args.version)
@@ -311,6 +335,21 @@ def cmd_build(args: argparse.Namespace) -> None:
                 "sha256": file_sha256(sdk_archive),
             }
         )
+    host_tree_hash = ""
+    if getattr(args, "host_scripts", False):
+        entries = host_script_entries()
+        scripts_archive = out_dir / "relkit-host-scripts.zip"
+        write_deterministic_zip(scripts_archive, entries)
+        host_tree_hash = host_scripts_tree_sha256(entries)
+        built.append(
+            {
+                "component": "host-scripts",
+                "os": "any",
+                "arch": "any",
+                "path": scripts_archive.name,
+                "sha256": file_sha256(scripts_archive),
+            }
+        )
     ident = git_identity()
     manifest = {
         "schema": "relkit.release/1",
@@ -322,6 +361,11 @@ def cmd_build(args: argparse.Namespace) -> None:
         "builtAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "artifacts": built,
     }
+    if host_tree_hash:
+        manifest["hostScriptsSha256"] = host_tree_hash
+        manifest["consumerSha256"] = file_sha256(
+            REPO_ROOT / "scripts" / "host" / "relkit_consume.py"
+        )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"output in {out_dir}")
 
@@ -1149,6 +1193,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--updater", action="store_true")
     build.add_argument("--dart-sdk", action="store_true")
     build.add_argument("--rust-sdk", action="store_true")
+    build.add_argument("--host-scripts", action="store_true")
     build.add_argument("--version", default="0.2.1")
     build.add_argument("--out", default="dist")
     build.add_argument("--os")

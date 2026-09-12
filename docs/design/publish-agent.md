@@ -221,11 +221,16 @@ DNS：`publish.firoyang.com` A → 发布机公网 IP。Agent 只听本机；TLS
 
 实装说明（2026-08）：发布机上已有 nginx 占用 `:80`，因此 HTTPS 用 **nginx + certbot** 反代 `127.0.0.1:8787`，而不是再起 Caddy。若主机是空机，仍可用 `deploy/Caddyfile.relkit-agent.example`。
 
-产品清单不要手改 `uploadTokens`。每个产品一张 token 文件：`tokens/<id>.token`，CI 环境变量名固定为 `RELKIT_UPLOAD_TOKEN`。**禁止**实例级 `uploadTokenFile` / `RELKIT_AGENT_TOKEN`。产品增删走产品仓：
+产品清单不要手改 `uploadTokens`。默认每个产品一张 token 文件：
+`tokens/<id>.token`；同一发布方管理的产品可显式 `--share-with <existing-id>`，
+让一条 token 条目授权多个产品。CI 环境变量名固定为
+`RELKIT_UPLOAD_TOKEN`。**禁止**实例级 `uploadTokenFile` /
+`RELKIT_AGENT_TOKEN`。产品增删走产品仓：
 
 ```text
 python scripts/host/relkit_host.py agent list
 python scripts/host/relkit_host.py agent add --execute
+python scripts/host/relkit_host.py agent add --share-with <existing-id> --execute
 python scripts/host/relkit_host.py agent remove --execute
 ```
 

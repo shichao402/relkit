@@ -116,13 +116,11 @@ def host_scripts_dir(script_file: Optional[Path] = None) -> Path:
 
 def tree_sha256(directory: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(directory.rglob("*")):
+    for name in ("relkit_consume.py", "relkit_host.py"):
+        path = directory / name
         if not path.is_file():
-            continue
-        if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
-            continue
-        rel = path.relative_to(directory).as_posix().encode("utf-8")
-        digest.update(rel)
+            raise Fail(f"scripts/host is missing {name}")
+        digest.update(name.encode("utf-8"))
         digest.update(b"\0")
         # windows-2016 checkout 常是 CRLF；hash 按 LF 算，避免 lock drift。
         digest.update(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
@@ -777,14 +775,24 @@ def extract_publish_profile(machine: dict[str, Any]) -> dict[str, Any]:
     }
     if signing.get("privateKeyEnv"):
         profile_signing["privateKeyEnv"] = signing["privateKeyEnv"]
+    # Site blurbs travel in the staged release-policy.json. A profile carries
+    # only the Makers token env name; anything else here is an unknown field
+    # the agent refuses to parse.
+    profile_site: dict[str, Any] = {}
+    token_env = ((machine.get("site") or {}).get("makers") or {}).get("tokenEnv")
+    if token_env:
+        profile_site["makers"] = {"tokenEnv": token_env}
     profile: dict[str, Any] = {
         "product": machine.get("product"),
         "signing": profile_signing,
         "backends": machine.get("backends") or {},
         "publishTo": list(machine.get("publishTo") or []),
-        "directory": machine.get("directory") or {},
-        "site": machine.get("site") or {},
     }
+    directory_publish_to = (machine.get("directory") or {}).get("publishTo")
+    if directory_publish_to:
+        profile["directory"] = {"publishTo": list(directory_publish_to)}
+    if profile_site:
+        profile["site"] = profile_site
     return profile
 
 
@@ -983,28 +991,37 @@ def reconcile_signing_profile(
     config_path: str,
     product: str,
     drift: list[str],
-) -> None:
+    expected: Optional[dict[str, Any]] = None,
+) -> bool:
     """The machine publish profile names the key id; the key itself never leaves the host."""
     profile = f"{Path(config_path).parent.as_posix()}/products/{product}.json"
     try:
         raw = ssh_run(host, ["sudo", "cat", profile]).stdout
     except Fail:
-        return
+        return False
     try:
-        signing = (json.loads(raw) or {}).get("signing") or {}
+        profile_data = json.loads(raw)
     except json.JSONDecodeError:
         drift.append(f"{profile} is not JSON")
-        return
+        return False
+    if not isinstance(profile_data, dict):
+        drift.append(f"{profile} is not a JSON object")
+        return False
+    if expected is not None and profile_data != expected:
+        drift.append(f"{profile} does not match the provisioned publish profile")
+        return False
+    signing = profile_data.get("signing") or {}
     remote_key = str(signing.get("keyId") or "").strip()
     if not remote_key:
         drift.append(f"{profile} has no signing.keyId")
-        return
+        return False
     local_key = str(state["steps"]["signing.keys"].get("value") or "").strip()
     if local_key and local_key != remote_key:
         drift.append(f"{profile} signs with {remote_key}; local state says {local_key}")
         state["steps"]["signing.keys"]["status"] = "drift"
-        return
+        return False
     set_step(state, "signing.keys", "verified", remote_key, "publish profile on agent host")
+    return True
 
 
 def updater_sidecar_name() -> str:
@@ -1182,9 +1199,11 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
             lock = load_json(lock_path)
             if lock.get("schema") != LOCK_SCHEMA:
                 drift.append(f"{lock_path} is not {LOCK_SCHEMA}")
-            pinned = str(lock.get("hostScriptsSha256") or "")
-            actual = tree_sha256(host_scripts_dir())
-            if pinned and pinned != actual:
+            pinned = str(lock.get("hostScriptsSha256") or "").lower()
+            actual = tree_sha256(root / "scripts" / "host")
+            if not re.fullmatch(r"[0-9a-f]{64}", pinned):
+                drift.append("lock has no valid hostScriptsSha256")
+            elif pinned != actual:
                 drift.append("scripts/host tree does not match lock hostScriptsSha256")
             else:
                 set_step(state, "consume.lock", "verified", lock.get("release"), "lock present")
@@ -1347,6 +1366,23 @@ def consume_components(root: Path) -> list[str]:
     return components
 
 
+def require_host_scripts_match_lock(root: Path) -> dict[str, Any]:
+    lock_path = root / "scripts" / "relkit.lock.json"
+    if not lock_path.is_file():
+        raise Fail(f"missing {lock_path}")
+    lock = load_json(lock_path)
+    if lock.get("schema") != LOCK_SCHEMA:
+        raise Fail(f"{lock_path} must use {LOCK_SCHEMA}")
+    expected = str(lock.get("hostScriptsSha256") or "").lower()
+    actual = tree_sha256(root / "scripts" / "host")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected) or expected != actual:
+        raise Fail(
+            "scripts/host does not match relkit.lock.json after install; "
+            "do not start the product build"
+        )
+    return lock
+
+
 def cmd_install(root: Path, consume_argv: Sequence[str]) -> int:
     consume = import_consume()
     extra = list(consume_argv)
@@ -1355,8 +1391,9 @@ def cmd_install(root: Path, consume_argv: Sequence[str]) -> int:
             extra.extend(["--component", component])
     code = consume.main(["install", "--project-root", str(root), *extra])
     if code == 0:
+        lock = require_host_scripts_match_lock(root)
         state = load_state(root)
-        set_step(state, "consume.lock", "applied", None, "install complete")
+        set_step(state, "consume.lock", "verified", lock.get("release"), "lock installed")
         save_state(root, state)
     return code
 
@@ -1373,17 +1410,24 @@ def cmd_upgrade(root: Path, release: str) -> int:
     base = f"https://github.com/{GITHUB_REPO}/releases/download/{release}"
     # Commit 只从同目录的 immutable 附件读。不要打 api.github.com：
     # 匿名 REST 每小时 60 次，和 Releases 下载不共用配额。
-    commit = release_commit_from_manifest(base)
+    manifest = release_manifest(base)
+    commit = release_commit(manifest, base)
+    host_tree_hash = str(manifest.get("hostScriptsSha256") or "").strip().lower()
+    consumer_hash = str(manifest.get("consumerSha256") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", host_tree_hash):
+        raise Fail(f"{base}/manifest.json has no valid hostScriptsSha256")
+    if not re.fullmatch(r"[0-9a-f]{64}", consumer_hash):
+        raise Fail(f"{base}/manifest.json has no valid consumerSha256")
     sums_text = http_get(f"{base}/SHA256SUMS")
     sums = parse_sha256sums(sums_text)
+    if "relkit-host-scripts.zip" not in sums:
+        raise Fail("SHA256SUMS has no relkit-host-scripts.zip")
     artifacts = lock.setdefault("artifacts", {})
     rewrite_lock_artifacts(artifacts, base, sums)
     lock["release"] = release
     lock["commit"] = commit
-    consume_script = host_scripts_dir() / "relkit_consume.py"
-    if consume_script.is_file():
-        lock["consumerSha256"] = hashlib.sha256(consume_script.read_bytes()).hexdigest()
-    lock["hostScriptsSha256"] = tree_sha256(host_scripts_dir())
+    lock["consumerSha256"] = consumer_hash
+    lock["hostScriptsSha256"] = host_tree_hash
     lock_path.write_text(dump_json(lock), encoding="utf-8")
     print(f"updated {lock_path} to {release}")
     return cmd_install(root, [])
@@ -1407,13 +1451,19 @@ def parse_sha256sums(text: str) -> dict[str, str]:
     return mapping
 
 
-def release_commit_from_manifest(base: str) -> str:
-    """Read the build commit from release manifest.json (CDN), never the REST API."""
+def release_manifest(base: str) -> dict[str, Any]:
+    """Read immutable build metadata from the release CDN, never the REST API."""
     raw = http_get(f"{base}/manifest.json")
     try:
         manifest = json.loads(raw)
     except json.JSONDecodeError as error:
         raise Fail(f"{base}/manifest.json is not JSON: {error}") from error
+    if not isinstance(manifest, dict):
+        raise Fail(f"{base}/manifest.json is not a JSON object")
+    return manifest
+
+
+def release_commit(manifest: dict[str, Any], base: str) -> str:
     commit = str(manifest.get("commit") or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise Fail(
@@ -1422,7 +1472,18 @@ def release_commit_from_manifest(base: str) -> str:
     return commit
 
 
+def release_commit_from_manifest(base: str) -> str:
+    """Compatibility helper used by callers that only need the commit."""
+    return release_commit(release_manifest(base), base)
+
+
 def rewrite_lock_artifacts(artifacts: dict[str, Any], base: str, sums: dict[str, str]) -> None:
+    host_scripts = "relkit-host-scripts.zip"
+    if host_scripts in sums:
+        artifacts["host-scripts"] = {
+            "url": f"{base}/{host_scripts}",
+            "sha256": sums[host_scripts],
+        }
     dart = "relkit-sdk-dart.zip"
     if dart in sums:
         artifacts["sdk-dart"] = {"url": f"{base}/{dart}", "sha256": sums[dart]}
@@ -1947,6 +2008,7 @@ def cmd_agent_add(root: Path, args: argparse.Namespace) -> int:
     config_path = args.config or (state.get("agent") or {}).get("configPath") or DEFAULT_AGENT_CONFIG
     if not host:
         raise Fail("pass --host")
+    share_with = args.share_with or (state.get("serve") or {}).get("shareWith")
     remote = [
         "sudo",
         "relkit-agent",
@@ -1956,6 +2018,8 @@ def cmd_agent_add(root: Path, args: argparse.Namespace) -> int:
         "-product",
         product,
     ]
+    if share_with:
+        remote.extend(["-share-with", share_with])
     if args.root_path:
         remote.extend(["-root", args.root_path])
     result = ssh_run(host, remote)
@@ -1964,6 +2028,8 @@ def cmd_agent_add(root: Path, args: argparse.Namespace) -> int:
     if token:
         write_secret(root, token, note=AGENT_SECRET_NOTE)
         print(f"agent token written to {AGENT_SECRET_NOTE.as_posix()} (plaintext not printed)")
+    elif share_with:
+        print("share-with does not print a token")
     state["agent"]["sshHost"] = host
     state["agent"]["sshPort"] = ssh_host_port(host)
     state["agent"]["configPath"] = config_path
@@ -1992,9 +2058,10 @@ def cmd_agent_provision(root: Path, args: argparse.Namespace) -> int:
     if not private_local.is_file():
         raise Fail(f"missing {private_rel}; generate keys on this repo first")
     machine = machine_publish_config(root, product, key_id, private_rel)
+    publish_profile = extract_publish_profile(machine)
     profile_path = agent_profile_path(str(config_path), product)
     if ssh_path_exists(host_name, profile_path):
-        ssh_write(host_name, profile_path, dump_json(extract_publish_profile(machine)).encode("utf-8"))
+        ssh_write(host_name, profile_path, dump_json(publish_profile).encode("utf-8"))
         ssh_run(host_name, ["sudo", "chmod", "644", profile_path])
         ssh_run(host_name, ["sudo", "chown", "relkit:relkit", profile_path])
         print(f"updated {profile_path}")
@@ -2023,7 +2090,17 @@ def cmd_agent_provision(root: Path, args: argparse.Namespace) -> int:
         )
         print(redact_text(result.stdout or "").strip())
         print(f"wrote {private_rel} under {product_root} (bytes not printed)")
-    set_step(state, "signing.keys", "applied", key_id, "agent profile migrated")
+    drift: list[str] = []
+    if not reconcile_signing_profile(
+        state,
+        host_name,
+        config_path,
+        product,
+        drift,
+        expected=publish_profile,
+    ):
+        detail = "\n  ".join(drift) if drift else "cannot read the remote profile back"
+        raise Fail("agent provision wrote a profile but could not verify it:\n  " + detail)
     save_state(root, state)
     if args.restart:
         ssh_run(host_name, ["sudo", "systemctl", "restart", "relkit-agent"])
@@ -2217,6 +2294,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent_add.add_argument("--host")
     agent_add.add_argument("--config")
     agent_add.add_argument("--root-path")
+    agent_add.add_argument("--share-with")
     agent_add.add_argument("--execute", action="store_true")
     agent_add.add_argument("--restart", action="store_true")
     agent_prov = agent_sub.add_parser("provision")

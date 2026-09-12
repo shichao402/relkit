@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import ssl
 import subprocess
@@ -29,8 +30,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 LOCK_SCHEMA = "relkit.consume/2"
-COMPONENTS = ("sdk-dart", "sdk-rust", "cli", "updater")
+COMPONENTS = ("host-scripts", "sdk-dart", "sdk-rust", "cli", "updater")
 DEFAULT_COMPONENTS = ("sdk-dart", "cli", "updater")
+PORTABLE_COMPONENTS = ("host-scripts", "sdk-dart", "sdk-rust")
 TARGETS = (
     "linux-amd64",
     "linux-arm64",
@@ -97,10 +99,10 @@ def artifact_spec(
 ) -> dict[str, str]:
     artifacts = lock["artifacts"]
     raw = artifacts.get(component)
-    if not component.startswith("sdk-"):
+    if component not in PORTABLE_COMPONENTS:
         raw = raw.get(target) if isinstance(raw, dict) else None
     if not isinstance(raw, dict):
-        suffix = "" if component.startswith("sdk-") else f" for {target}"
+        suffix = "" if component in PORTABLE_COMPONENTS else f" for {target}"
         raise RuntimeError(f"lock has no {component} artifact{suffix}")
     url = str(raw.get("url") or "").strip()
     digest = str(raw.get("sha256") or "").strip().lower()
@@ -321,6 +323,85 @@ def sdk_complete(destination: Path, component: str) -> bool:
     return False
 
 
+def host_scripts_tree_sha256(directory: Path) -> str:
+    digest = hashlib.sha256()
+    for name in ("relkit_consume.py", "relkit_host.py"):
+        path = directory / name
+        if not path.is_file():
+            raise RuntimeError(f"host scripts artifact is missing {name}")
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(
+            path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        )
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def safe_extract_host_scripts(
+    artifact: Path, destination: Path, expected_tree_hash: str
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(
+        tempfile.mkdtemp(prefix=".host-scripts-", dir=str(destination.parent))
+    )
+    try:
+        with zipfile.ZipFile(artifact) as archive:
+            names = sorted(
+                item.filename for item in archive.infolist() if not item.is_dir()
+            )
+            if names != ["relkit_consume.py", "relkit_host.py"]:
+                raise RuntimeError(
+                    "host scripts artifact must contain exactly "
+                    "relkit_consume.py and relkit_host.py"
+                )
+            archive.extractall(temporary)
+        actual = host_scripts_tree_sha256(temporary)
+        if actual != expected_tree_hash:
+            raise RuntimeError(
+                "host scripts tree hash mismatch: "
+                f"expected {expected_tree_hash}, got {actual}"
+            )
+        destination.mkdir(parents=True, exist_ok=True)
+        previous: dict[str, tuple[bytes, int] | None] = {}
+        replaced: list[str] = []
+        for name in ("relkit_consume.py", "relkit_host.py"):
+            path = destination / name
+            previous[name] = (
+                (path.read_bytes(), path.stat().st_mode) if path.is_file() else None
+            )
+        try:
+            for name in ("relkit_consume.py", "relkit_host.py"):
+                os.replace(temporary / name, destination / name)
+                replaced.append(name)
+            if host_scripts_tree_sha256(destination) != expected_tree_hash:
+                raise RuntimeError("installed host scripts hash drifted")
+        except Exception as install_error:
+            rollback_errors: list[str] = []
+            for name in reversed(replaced):
+                path = destination / name
+                prior = previous[name]
+                try:
+                    if prior is None:
+                        path.unlink(missing_ok=True)
+                        continue
+                    restore = temporary / f".restore-{name}"
+                    restore.write_bytes(prior[0])
+                    restore.chmod(prior[1])
+                    os.replace(restore, path)
+                except OSError as rollback_error:
+                    rollback_errors.append(f"{name}: {rollback_error}")
+            if rollback_errors:
+                raise RuntimeError(
+                    f"host scripts install failed ({install_error}); "
+                    "rollback also failed: " + "; ".join(rollback_errors)
+                ) from install_error
+            raise
+        print("relkit consume: installed scripts/host")
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
 def safe_extract_sdk(
     artifact: Path, destination: Path, digest: str, component: str = "sdk-dart"
 ) -> None:
@@ -394,6 +475,14 @@ def check_installed(
     root: Path, lock: dict[str, Any], component: str, target: str
 ) -> None:
     spec = artifact_spec(lock, component, target)
+    if component == "host-scripts":
+        expected = str(lock.get("hostScriptsSha256") or "").lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise RuntimeError("lock has no valid hostScriptsSha256")
+        actual = host_scripts_tree_sha256(root / "scripts" / "host")
+        if actual != expected:
+            raise RuntimeError("installed scripts/host does not match lock")
+        return
     if component.startswith("sdk-"):
         language = component[4:]
         destination = root / "third_party" / "relkit" / "sdk" / language
@@ -445,13 +534,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         lock = load_lock(lock_path)
         target = host_target() if args.target == "host" else args.target
         components = args.component or list(DEFAULT_COMPONENTS)
+        if "host-scripts" in lock["artifacts"] and "host-scripts" not in components:
+            components.insert(0, "host-scripts")
         resolved_artifacts: dict[str, str] = {}
         for component in components:
             spec = artifact_spec(lock, component, target)
             resolved_artifacts[component] = spec["sha256"]
             if args.command == "install":
                 artifact = download_artifact(root, component, spec)
-                if component.startswith("sdk-"):
+                if component == "host-scripts":
+                    expected = str(lock.get("hostScriptsSha256") or "").lower()
+                    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                        raise RuntimeError("lock has no valid hostScriptsSha256")
+                    safe_extract_host_scripts(
+                        artifact,
+                        root / "scripts" / "host",
+                        expected,
+                    )
+                elif component.startswith("sdk-"):
                     language = component[4:]
                     safe_extract_sdk(
                         artifact,

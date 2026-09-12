@@ -15,7 +15,7 @@
 | `/srv/relkit/<id>/` | 产品树根：私钥文件、`.relkit/staged/<version>/` |
 | `/var/lib/relkit-agent` | 幂等回放等状态 |
 
-**没有**实例级 `/etc/relkit-agent/token`，也 **没有** `RELKIT_AGENT_TOKEN`。配置里出现 `uploadToken` / `uploadTokenFile`、或进程环境里出现 `RELKIT_AGENT_TOKEN`，agent **拒绝启动**。一条 token 文件不得挂多个 product id（启动失败）。
+**没有**实例级 `/etc/relkit-agent/token`，也 **没有** `RELKIT_AGENT_TOKEN`。配置里出现 `uploadToken` / `uploadTokenFile`、或进程环境里出现 `RELKIT_AGENT_TOKEN`，agent **拒绝启动**。默认一条 token 文件对应一个 product id；家族产品可用 `init -product <id> -share-with <existing>` 把多个 id 挂到**同一份** token 文件（一条 `uploadTokens` 条目）。两份文件不得写同一段 secret（启动失败）。路径仍按请求里的 product id 隔离：Bearer 对但产品不在该条目的 `products` 里是 **403**。
 
 `products.<id>.root` 永远是产品根；不以 JSON 文档里的路径为准。
 
@@ -41,7 +41,7 @@
 
 ## 运维
 
-装机 / 换二进制：`python deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：产品仓 `python scripts/host/relkit_host.py agent add --execute`（重启另加 `--restart`）。`init` 是内部写配置接口，不是人用 CLI。
+装机 / 换二进制：`python deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：产品仓 `python scripts/host/relkit_host.py agent add --execute`；共用既有发布凭据时显式加 `--share-with <existing-id>`（重启另加 `--restart`）。`init` 是内部写配置接口，不是人用 CLI。
 
 证书续期与 agent 同机、不同进程：安装 `deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。
 

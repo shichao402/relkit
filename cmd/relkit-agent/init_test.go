@@ -132,6 +132,111 @@ func TestInitAddAndRemoveProduct(t *testing.T) {
 	}
 }
 
+func TestInitShareProductReusesTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	rootA := filepath.Join(dir, "suite-a")
+	rootB := filepath.Join(dir, "suite-b")
+	path := writeAgentCfg(t, dir, FileConfig{
+		Addr:     "127.0.0.1:9",
+		Products: map[string]ProductConfig{},
+	})
+	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "suite-a", "-root", rootA}); err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(dir, "tokens", "suite-a.token")
+	before, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := runInit(&buf, []string{"-config", path, "-product", "suite-b", "-share-with", "suite-a", "-root", rootB}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "export RELKIT_UPLOAD_TOKEN=") {
+		t.Fatalf("sharing must not print a new token:\n%s", out)
+	}
+	if !strings.Contains(out, "shared") {
+		t.Fatalf("expected a shared-token explanation, got:\n%s", out)
+	}
+	after, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("sharing must not rotate the existing token file")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tokens", "suite-b.token")); !os.IsNotExist(err) {
+		t.Fatalf("sharing should not create a second token file: %v", err)
+	}
+
+	cfg, err := loadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.UploadTokens) != 1 {
+		t.Fatalf("uploadTokens = %+v", cfg.UploadTokens)
+	}
+	got := cfg.UploadTokens[0].Products
+	if len(got) != 2 || got[0] != "suite-a" || got[1] != "suite-b" {
+		t.Errorf("products = %v, want [suite-a suite-b]", got)
+	}
+	if _, err := LoadConfig(path); err != nil {
+		t.Fatalf("agent should start with a shared token: %v", err)
+	}
+
+	unknownRoot := filepath.Join(dir, "suite-c")
+	if err := runInit(bytes.NewBuffer(nil), []string{
+		"-config", path,
+		"-product", "suite-c",
+		"-share-with", "missing",
+		"-root", unknownRoot,
+	}); err == nil {
+		t.Fatal("sharing with an unknown product should fail")
+	}
+	if _, err := os.Stat(unknownRoot); !os.IsNotExist(err) {
+		t.Fatalf("unknown share target must not create a product root: %v", err)
+	}
+}
+
+func TestInitShareConvertsExclusiveToken(t *testing.T) {
+	dir := t.TempDir()
+	rootA := filepath.Join(dir, "suite-a")
+	rootB := filepath.Join(dir, "suite-b")
+	path := writeAgentCfg(t, dir, FileConfig{
+		Products: map[string]ProductConfig{},
+	})
+	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "suite-a", "-root", rootA}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "suite-b", "-root", rootB}); err != nil {
+		t.Fatal(err)
+	}
+	exclusive := filepath.Join(dir, "tokens", "suite-b.token")
+	if _, err := os.Stat(exclusive); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := runInit(&buf, []string{"-config", path, "-product", "suite-b", "-share-with", "suite-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(exclusive); !os.IsNotExist(err) {
+		t.Fatalf("exclusive token file should be deleted: %v", err)
+	}
+	cfg, err := loadFileConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.UploadTokens) != 1 || len(cfg.UploadTokens[0].Products) != 2 {
+		t.Fatalf("uploadTokens = %+v", cfg.UploadTokens)
+	}
+	if cfg.Products["suite-b"].Root != rootB {
+		t.Fatalf("convert must keep product root: %+v", cfg.Products)
+	}
+}
+
 func TestInitRemoveLastProduct(t *testing.T) {
 	dir := t.TempDir()
 	path := writeAgentCfg(t, dir, FileConfig{
@@ -198,6 +303,11 @@ func TestInitFlagCombos(t *testing.T) {
 		{"-config", path},
 		{"-config", path, "-product", "bad id"},
 		{"-config", path, "-product", "missing", "-remove"},
+		{"-config", path, "-share-with", "dec"},
+		{"-config", path, "-product", "dec", "-share-with", "dec"},
+		{"-config", path, "-product", "dec", "-remove", "-share-with", "other"},
+		{"-config", path, "-product", "dec", "-token-only", "-share-with", "other"},
+		{"-config", path, "-list-products", "-share-with", "dec"},
 	}
 	for _, args := range cases {
 		if err := runInit(bytes.NewBuffer(nil), args); err == nil {
@@ -334,7 +444,7 @@ func TestLoadConfigRejectsInstanceToken(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsSharedProductToken(t *testing.T) {
+func TestLoadConfigAcceptsSharedProductToken(t *testing.T) {
 	dir := t.TempDir()
 	tokenPath := filepath.Join(dir, "tokens", "shared.token")
 	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
@@ -352,8 +462,66 @@ func TestLoadConfigRejectsSharedProductToken(t *testing.T) {
 			"cronkit": {Root: dir},
 		},
 	})
-	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "exactly one") {
-		t.Fatalf("want shared-token refusal, got %v", err)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("shared token should load: %v", err)
+	}
+	if len(cfg.credentials) != 1 {
+		t.Fatalf("credentials = %d", len(cfg.credentials))
+	}
+	if !cfg.credentials[0].allows("dec") || !cfg.credentials[0].allows("cronkit") {
+		t.Fatalf("shared credential missing products: %+v", cfg.credentials[0].products)
+	}
+	if cfg.credentials[0].allows("other") {
+		t.Fatal("shared credential must not allow an unlisted product")
+	}
+
+	before, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotate bytes.Buffer
+	if err := runInit(
+		&rotate,
+		[]string{"-config", path, "-product", "cronkit", "-token-only"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rotate.String(), "dec, cronkit") ||
+		!strings.Contains(rotate.String(), "All of their publishers") {
+		t.Fatalf("shared rotation must name its blast radius:\n%s", rotate.String())
+	}
+	rotated, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rotated) == string(before) {
+		t.Fatal("shared rotation did not replace the token")
+	}
+}
+
+func TestLoadConfigRejectsDuplicateTokenHashAcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "tokens"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.token", "b.token"} {
+		if err := os.WriteFile(filepath.Join(dir, "tokens", name), []byte("same\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := writeAgentCfg(t, dir, FileConfig{
+		UploadTokens: []UploadTokenEntry{
+			{File: "tokens/a.token", Products: []string{"dec"}},
+			{File: "tokens/b.token", Products: []string{"cronkit"}},
+		},
+		Products: map[string]ProductConfig{
+			"dec":     {Root: dir},
+			"cronkit": {Root: dir},
+		},
+	})
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "duplicate token hash") {
+		t.Fatalf("want duplicate hash refusal, got %v", err)
 	}
 }
 
