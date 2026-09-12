@@ -206,7 +206,7 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	assertContains(t, rollback, "not greater than the highest existing code")
 	assertContains(t, rollback, "--allow-backfill")
 
-	stagedArtifact := filepath.Join(project, ".relkit", "staged", "1.5.0+150", "artifacts", "demoapp-1.5.0-win-x64.zip")
+	stagedArtifact := filepath.Join(project, ".relkit", "cache", "staged", "1.5.0+150", "artifacts", "demoapp-1.5.0-win-x64.zip")
 	file, err := os.OpenFile(stagedArtifact, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
