@@ -44,11 +44,10 @@ GITIGNORE_RELKIT = (
     ".relkit-keys/*.private.pb",
 )
 PUBLISH_PROTOCOL_FALLBACK = 2
-UPDATER_PROCESS_VALUES = ("rust-shell", "node", "dart", "go", "other")
+UPDATER_PROCESS_VALUES = ("rust", "node", "dart", "go", "other")
 UPDATER_PROCESS_EXPLAIN = (
     "谁调用 Updater.open。只记封闭词，不要另写决策备忘。"
-    " rust-shell：壳拥有更新生命周期，WebView 只走产品仓窄桥；relkit 到 sidecar 阶段才补 Rust facade。"
-    " node/dart/go：该语言进程直连 sidecar；壳若只画 UI 选 node。"
+    " rust/node/dart/go：该语言进程直连 sidecar。"
     " other：先口头说明再记。"
     " 开工窄桥的时机是 sidecar.layout 已定、fake.release 之前。"
 )
@@ -358,7 +357,9 @@ def detect_stack(root: Path) -> dict[str, Any]:
         kind.append("go")
     updater = None
     if rust and node:
-        updater = "choose rust-shell (shell owns Updater.open) or node (shell is UI-only)"
+        updater = "choose rust or node (which process calls Updater.open)"
+    elif rust:
+        updater = "rust"
     elif node:
         updater = "node"
     elif dart:
@@ -826,28 +827,30 @@ def machine_publish_config(root: Path, product: str, key_id: str, private_relpat
 
 def parse_list_products(text: str) -> list[str]:
     products: list[str] = []
-    in_tokens = False
+    in_list = False
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("uploadTokens"):
-            in_tokens = True
+        if stripped.startswith("uploadTokens") or stripped.startswith("products"):
+            in_list = True
             continue
-        if stripped.startswith("products") and not stripped.startswith("uploadTokens"):
-            in_tokens = False
-            continue
-        if not in_tokens:
+        if not in_list:
             continue
         if not stripped or stripped.lower().endswith("none"):
             continue
         first = stripped.split()[0]
+        if first in ("config", "operator"):
+            continue
         for item in first.split(","):
             if item and item not in products:
                 products.append(item)
     if not products:
-        for match in re.finditer(r"^\s+([A-Za-z0-9._-]+)\s+\S+", text, re.M):
-            name = match.group(1)
-            if name not in ("config", "uploadTokens", "products") and name not in products:
-                products.append(name)
+        for match in re.finditer(r"^\s+([A-Za-z0-9._,-]+)\s+\S+", text, re.M):
+            blob = match.group(1)
+            if blob in ("config", "uploadTokens", "products", "operator"):
+                continue
+            for item in blob.split(","):
+                if item and item not in products:
+                    products.append(item)
     return products
 
 
@@ -1782,8 +1785,30 @@ def cmd_fake_verify(root: Path, version: Optional[str]) -> int:
     return 0
 
 
-def chown_serve_product_token(host: str, config_dir: str, product: str) -> None:
-    token_path = str(Path(config_dir) / "tokens" / f"{product}.token").replace("\\", "/")
+def serve_token_path(
+    config_dir: str, product: str, share_with: Optional[str] = None
+) -> str:
+    """On-disk token after init. -share-with keeps the existing owner's file."""
+    owner = (share_with or product or "").strip()
+    if not owner:
+        raise Fail("token owner product id is required")
+    return str(Path(config_dir) / "tokens" / f"{owner}.token").replace("\\", "/")
+
+
+def agent_token_path(product: str, share_with: Optional[str] = None) -> str:
+    owner = (share_with or product or "").strip()
+    if not owner:
+        raise Fail("token owner product id is required")
+    return "/etc/relkit-agent/tokens/" + owner + ".token"
+
+
+def chown_serve_product_token(
+    host: str,
+    config_dir: str,
+    product: str,
+    share_with: Optional[str] = None,
+) -> None:
+    token_path = serve_token_path(config_dir, product, share_with)
     ssh_run(host, ["sudo", "chown", "relkit:relkit", token_path])
     ssh_run(host, ["sudo", "chmod", "0600", token_path])
     print(f"chown relkit:relkit {token_path}")
@@ -1838,7 +1863,7 @@ def cmd_serve_add(root: Path, args: argparse.Namespace) -> int:
         print("share-with does not print a token")
     else:
         raise Fail("init did not print a token; not guessing")
-    chown_serve_product_token(host, config_dir, product)
+    chown_serve_product_token(host, config_dir, product, share_with)
     state["product"] = product
     state["serve"]["sshHost"] = host
     state["serve"]["sshPort"] = ssh_host_port(host)
@@ -1878,8 +1903,9 @@ def cmd_serve_restart(root: Path, args: argparse.Namespace) -> int:
     except Fail:
         product = state["steps"]["serve.register"].get("value")
     config_dir = (state.get("serve") or {}).get("configDir") or DEFAULT_SERVE_DIR
+    share_with = (state.get("serve") or {}).get("shareWith")
     if product:
-        chown_serve_product_token(host, str(config_dir), str(product))
+        chown_serve_product_token(host, str(config_dir), str(product), share_with)
     ssh_run(host, ["sudo", "systemctl", "reset-failed", "relkit-serve"])
     ssh_run(host, ["sudo", "systemctl", "restart", "relkit-serve"])
     if product:
@@ -1904,7 +1930,10 @@ def cmd_agent_restart(root: Path, args: argparse.Namespace) -> int:
             product = state["steps"]["agent.register"].get("value")
     if product:
         root_dir = args.root_path or f"/srv/relkit/{product}"
-        token_path = "/etc/relkit-agent/tokens/" + str(product) + ".token"
+        share_with = (state.get("serve") or {}).get("shareWith") or getattr(
+            args, "share_with", None
+        )
+        token_path = agent_token_path(str(product), share_with)
         ssh_run(host, ["sudo", "chown", "-R", "relkit:relkit", str(root_dir)])
         ssh_run(host, ["sudo", "chown", "relkit:relkit", token_path])
         print(f"chown relkit:relkit {root_dir} and {token_path}")
