@@ -12,6 +12,7 @@ description: >
 - **产品仓**：只跑 `python scripts/host/relkit_host.py`（无参数只分流，不替你确认）。子命令、闸门、drift 以该脚本 `--help` / `onboard explain` / `status` 为准。
 - **relkit 仓且要换箱子上的二进制**：`python deploy/relkit.py` 的 `build` / `install` / `upgrade`。空机首装不是产品开箱的一步。
 - 判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
+- `sidecar.layout` 只验证 lock 安装的 `tools/bin/relkit-updater`；可选 `sidecar.packScript` 仅校验打包脚本接线，实际产物归 `pack.ci` / artifacts。
 - 开箱状态只在产品仓 `.relkit/onboarding.json`。`status` 会覆盖
   `.relkit/cache/onboarding.md`（gitignore 投影），本地证据写入
   `.relkit/cache/onboarding.local.json`。`.relkit/cache/` 全部不提交；不要把产品状态写进

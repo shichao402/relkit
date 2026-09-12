@@ -1034,28 +1034,50 @@ def updater_sidecar_name() -> str:
 
 
 def reconcile_sidecar_layout(root: Path, state: dict[str, Any], drift: list[str]) -> None:
-    pack = root / "scripts" / "build_desktop_release.mjs"
-    if not pack.is_file():
-        return
-    text = pack.read_text(encoding="utf-8")
-    if "relkit-updater" not in text or "tools/bin" not in text:
-        return
     src = root / "tools" / "bin" / updater_sidecar_name()
     if not src.is_file():
-        if state["steps"]["sidecar.layout"]["status"] not in ("unanswered",):
-            drift.append(f"missing consume sidecar {src.as_posix()}")
-            state["steps"]["sidecar.layout"]["status"] = "drift"
         return
-    dest_dir = root / "dist" / "loom-editor-win"
-    note = "consume tools/bin; pack copies next to shell"
-    if dest_dir.is_dir():
-        dest = dest_dir / updater_sidecar_name()
-        if not dest.is_file():
-            drift.append(f"pack tree missing sidecar {dest.as_posix()}")
+
+    config_path = root / "relkit.json"
+    if config_path.is_file():
+        try:
+            config = load_json(config_path)
+        except (OSError, json.JSONDecodeError, TypeError) as error:
+            drift.append(f"cannot read relkit.json sidecar config: {error}")
             state["steps"]["sidecar.layout"]["status"] = "drift"
             return
-        note = f"{dest.as_posix()} beside shell; consume source tools/bin"
-    set_step(state, "sidecar.layout", "verified", "next-to-shell", note)
+        sidecar = config.get("sidecar") or {}
+        if not isinstance(sidecar, dict):
+            drift.append("relkit.json sidecar must be an object")
+            state["steps"]["sidecar.layout"]["status"] = "drift"
+            return
+        pack_script = sidecar.get("packScript")
+        if pack_script is not None:
+            if not isinstance(pack_script, str) or not pack_script.strip():
+                drift.append("relkit.json sidecar.packScript must be a non-empty string")
+                state["steps"]["sidecar.layout"]["status"] = "drift"
+                return
+            pack = root / pack_script
+            if not pack.is_file():
+                drift.append(f"sidecar.packScript is missing: {pack.as_posix()}")
+                state["steps"]["sidecar.layout"]["status"] = "drift"
+                return
+            text = pack.read_text(encoding="utf-8")
+            if "relkit-updater" not in text or "tools/bin" not in text:
+                drift.append(
+                    "sidecar.packScript must reference relkit-updater and tools/bin: "
+                    f"{pack.as_posix()}"
+                )
+                state["steps"]["sidecar.layout"]["status"] = "drift"
+                return
+
+    set_step(
+        state,
+        "sidecar.layout",
+        "verified",
+        "tools/bin",
+        f"lock-pinned updater present: {src.as_posix()}",
+    )
 
 
 def reconcile_pack_ci(root: Path, state: dict[str, Any]) -> None:

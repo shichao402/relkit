@@ -541,45 +541,68 @@ class SigningProfileTests(unittest.TestCase):
 
 
 class SidecarLayoutTests(unittest.TestCase):
-    def test_next_to_shell_verifies(self) -> None:
+    def test_lock_pinned_updater_verifies_without_pack_script(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             state = host.default_state(root)
             state["steps"]["sidecar.layout"]["status"] = "stale"
-            (root / "scripts").mkdir()
-            (root / "scripts" / "build_desktop_release.mjs").write_text(
-                "cpSync(path.join(root, 'tools/bin/relkit-updater.exe'), dest)\n",
-                encoding="utf-8",
-            )
             bin_dir = root / "tools" / "bin"
             bin_dir.mkdir(parents=True)
             (bin_dir / host.updater_sidecar_name()).write_bytes(b"sidecar")
-            dest = root / "dist" / "loom-editor-win"
-            dest.mkdir(parents=True)
-            (dest / host.updater_sidecar_name()).write_bytes(b"sidecar")
             drift: list[str] = []
             host.reconcile_sidecar_layout(root, state, drift)
             self.assertEqual(state["steps"]["sidecar.layout"]["status"], "verified")
+            self.assertEqual(state["steps"]["sidecar.layout"]["value"], "tools/bin")
             self.assertEqual(drift, [])
 
-    def test_pack_tree_without_sidecar_is_drift(self) -> None:
+    def test_loom_mjs_pack_script_is_optional_and_generic(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             state = host.default_state(root)
-            state["steps"]["sidecar.layout"]["status"] = "applied"
             (root / "scripts").mkdir()
             (root / "scripts" / "build_desktop_release.mjs").write_text(
                 "tools/bin relkit-updater\n",
                 encoding="utf-8",
             )
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {"sidecar": {"packScript": "scripts/build_desktop_release.mjs"}}
+                ),
+                encoding="utf-8",
+            )
             bin_dir = root / "tools" / "bin"
             bin_dir.mkdir(parents=True)
             (bin_dir / host.updater_sidecar_name()).write_bytes(b"sidecar")
-            (root / "dist" / "loom-editor-win").mkdir(parents=True)
+            drift: list[str] = []
+            host.reconcile_sidecar_layout(root, state, drift)
+            self.assertEqual(state["steps"]["sidecar.layout"]["status"], "verified")
+            self.assertEqual(drift, [])
+
+    def test_missing_updater_stays_unverified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            state["steps"]["sidecar.layout"]["status"] = "stale"
+            drift: list[str] = []
+            host.reconcile_sidecar_layout(root, state, drift)
+            self.assertEqual(state["steps"]["sidecar.layout"]["status"], "stale")
+            self.assertEqual(drift, [])
+
+    def test_missing_configured_pack_script_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            (root / "relkit.json").write_text(
+                json.dumps({"sidecar": {"packScript": "scripts/missing.py"}}),
+                encoding="utf-8",
+            )
+            bin_dir = root / "tools" / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / host.updater_sidecar_name()).write_bytes(b"sidecar")
             drift: list[str] = []
             host.reconcile_sidecar_layout(root, state, drift)
             self.assertEqual(state["steps"]["sidecar.layout"]["status"], "drift")
-            self.assertEqual(len(drift), 1)
+            self.assertIn("sidecar.packScript is missing", drift[0])
 
 
 class FakeStageTests(unittest.TestCase):
