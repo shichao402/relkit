@@ -26,7 +26,7 @@ flowchart TB
     subgraph CI["CI runner（CNB 容器，无密钥）"]
         direction TB
         stageProc("relkit stage")
-        stagedTree["staged 树<br/>.relkit/staged/&lt;ver&gt;/<br/>staged.pb<br/>release-policy.json<br/>artifacts/"]
+        stagedTree["staged 树<br/>.relkit/cache/staged/&lt;ver&gt;/<br/>staged.pb<br/>release-policy.json<br/>artifacts/"]
         tarball["staged.tar.gz<br/>（内存 / 临时文件）"]
         ciToken["RELKIT_UPLOAD_TOKEN<br/>该产品 CI secret"]
         stageProc -- "3 创建" --> stagedTree
@@ -42,7 +42,7 @@ flowchart TB
         profile["/etc/relkit-agent/products/&lt;id&gt;.json<br/>publish profile<br/>私钥引用 / backends / publishTo / makers.tokenEnv"]
         prodRoot["/srv/relkit/&lt;id&gt;/<br/>产品树根"]
         privKey["/srv/relkit/&lt;id&gt;/.relkit-keys/*.private.pb<br/>ed25519 私钥"]
-        landed["/srv/relkit/&lt;id&gt;/.relkit/staged/&lt;ver&gt;/<br/>解包后的 staged 树"]
+        landed["/srv/relkit/&lt;id&gt;/.relkit/cache/staged/&lt;ver&gt;/<br/>解包后的 staged 树"]
         state["/var/lib/relkit-agent/<br/>staged/&lt;p&gt;/&lt;v&gt;.sha256<br/>idempotency/*.json"]
         stale["/srv/relkit/&lt;id&gt;/relkit.json.migrated<br/>遗留副本，不再被读"]
         merged["合并后的发布配置<br/>（内存，不落盘）"]
@@ -123,7 +123,7 @@ sequenceDiagram
     CI->>CI: relkit stage 读仓库 relkit.json
     CI->>CI: 创建 staged.pb + release-policy.json + artifacts/
     CI->>Agent: PUT /v1/staged/{p}/{v}（tar.gz + Bearer）
-    Agent->>FS: 解包到 .relkit/staged/<ver>/
+    Agent->>FS: 解包到 .relkit/cache/staged/<ver>/
     Agent->>Agent: 校验 policy.product == 路由 product
     Agent->>FS: 记 tar sha256 到 stateDir
     CI->>Agent: POST /v1/publish（带 stagedSha256）
@@ -142,7 +142,7 @@ sequenceDiagram
 | 路径 | 所属机器 | 谁创建 | 谁更新 | 谁读 | 何时读 |
 |---|---|---|---|---|---|
 | `<repo>/relkit.json` | 开发机 / CI checkout | 人 | 人（PR） | `relkit stage` | 阶段 C 开头 |
-| `.relkit/staged/<ver>/release-policy.json` | CI → 随包搬到发布机 | `relkit stage` | 每次发版重建 | agent | publish 时 |
+| `.relkit/cache/staged/<ver>/release-policy.json` | CI → 随包搬到发布机 | `relkit stage` | 每次发版重建 | agent | publish 时 |
 | `/etc/relkit-agent/relkit-agent.json` | 发布机 | `deploy/relkit.py install agent` | `init -product` | agent | 启动时 |
 | `/etc/relkit-agent/products/<id>.json` | 发布机 | `init -migrate-profile` 或手写 | 人（换 backend / keyId） | agent | publish 时 |
 | `/etc/relkit-agent/tokens/<id>.token` | 发布机 | `init -product` | `-token-only` | agent | 启动时 |

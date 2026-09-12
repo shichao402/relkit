@@ -17,7 +17,7 @@ import (
 	"go.firoyang.com/relkit/internal/selectors"
 )
 
-const stagingRoot = ".relkit/staged"
+const stagingRoot = ".relkit/cache/staged"
 const releasePolicyName = "release-policy.json"
 
 var reservedKeys = map[string]struct{}{

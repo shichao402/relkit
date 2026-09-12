@@ -351,7 +351,9 @@ class DownloadTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "sha256 mismatch"):
                     subject.download_artifact(root, "cli", spec)
-            self.assertFalse((root / ".relkit/artifacts" / ("0" * 64)).exists())
+            self.assertFalse(
+                (root / ".relkit/cache/artifacts" / ("0" * 64)).exists()
+            )
 
 
 if __name__ == "__main__":

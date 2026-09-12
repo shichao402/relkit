@@ -244,7 +244,7 @@ def fetch_url(url: str, destination: Path) -> None:
 
 
 def download_artifact(root: Path, component: str, spec: dict[str, str]) -> Path:
-    cache = root / ".relkit" / "artifacts"
+    cache = root / ".relkit" / "cache" / "artifacts"
     cache.mkdir(parents=True, exist_ok=True)
     destination = cache / spec["sha256"]
     if destination.is_file() and file_sha256(destination) == spec["sha256"]:

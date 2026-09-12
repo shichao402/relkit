@@ -8,7 +8,7 @@ RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管�
 | `relkit-agent` | `cmd/relkit-agent` | CI 交 staged 树；本机持钥写入数据面 |
 | `relkit-serve` | `cmd/relkit-serve` | Range 下载 + CAS 能力上传 + 孤儿 GC |
 
-当前版本：`0.2.0`（RUP **protobuf v2** 线格式）
+当前版本：`0.3.8`（RUP **protobuf v2** 线格式）
 
 曾用过其它语言做过原型；发布工具正式实现就是本仓库的 Go CLI。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。  
 CLI 与 serve 合并决策见 [`docs/adr/0002-one-repo-cli-and-serve.md`](docs/adr/0002-one-repo-cli-and-serve.md)。  
@@ -59,6 +59,9 @@ relkit verify --deep
 ```
 
 `stage` / `publish` 省略版本参数时读 `VERSION.json`；默认 `codeStrategy` 为 `version-build`（code = `+build`）。
+临时发布树统一位于 `.relkit/cache/staged/<version>/`；消费附件缓存位于
+`.relkit/cache/artifacts/`。产品仓在 `.relkit/` 下只应提交
+`onboarding.json`，`.relkit/cache/` 必须忽略。
 
 ### 更新日志（changelog）
 

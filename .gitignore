@@ -1,5 +1,4 @@
-.relkit/*
-!.relkit/onboarding.json
+.relkit/cache/
 dist/
 deploy/.venv/
 tmp/

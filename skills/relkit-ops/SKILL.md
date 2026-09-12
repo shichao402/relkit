@@ -12,9 +12,20 @@ description: >
 - **产品仓**：只跑 `python scripts/host/relkit_host.py`（无参数只分流，不替你确认）。子命令、闸门、drift 以该脚本 `--help` / `onboard explain` / `status` 为准。
 - **relkit 仓且要换箱子上的二进制**：`python deploy/relkit.py` 的 `build` / `install` / `upgrade`。空机首装不是产品开箱的一步。
 - 判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
-- 开箱状态只在产品仓 `.relkit/onboarding.json`。`status` 会覆盖同目录 `onboarding.md`（gitignore 投影）。不要写进 skill cache / `docs/`。重置：`onboard reset --yes`。
+- 开箱状态只在产品仓 `.relkit/onboarding.json`。`status` 会覆盖
+  `.relkit/cache/onboarding.md`（gitignore 投影），本地证据写入
+  `.relkit/cache/onboarding.local.json`。`.relkit/cache/` 全部不提交；不要把产品状态写进
+  skill cache / `docs/`。重置：`onboard reset --yes`。
 
 Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
+
+## 开箱前环境检查
+
+在 `onboard start` 或问 `product.id` 之前：先 `status`，并读现有接线，判断 **fresh / upgrade / cleanup-then-continue**。不要把已有产品当成绿地。
+
+至少看：`relkit.json`（`backends` 类型、`http-put`/`local` 残留、signing、directory URL）、`VERSION.json`（以及是否还留 `VERSION.yaml`）、`scripts/relkit.lock.json`、`.relkit/onboarding.json`、serve/agent 是否已登记、token 文件名、`scripts/host` 树哈希 vs lock、`tools/bin`、调用 `Updater.open` 的 sidecar 路径。
+
+陈旧后端类型、孤儿 token 文件名等：先列出清理项并等人选，再写配置。子命令与闸门以 `status` / `onboard explain` 为准。
 
 ## 配置类决策（`ssh.host` 等同理）
 

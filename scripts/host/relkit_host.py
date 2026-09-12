@@ -38,9 +38,7 @@ TOKEN_ENV = "RELKIT_UPLOAD_TOKEN"
 SECRET_NOTE = Path(".secrets") / "project" / "relkit-upload-token"
 AGENT_SECRET_NOTE = Path(".secrets") / "project" / "relkit-agent-upload-token"
 GITIGNORE_RELKIT = (
-    ".relkit/onboarding.local.json",
-    ".relkit/onboarding.md",
-    ".relkit/artifacts/",
+    ".relkit/cache/",
     ".relkit-keys/*.private.pb",
 )
 PUBLISH_PROTOCOL_FALLBACK = 2
@@ -135,12 +133,16 @@ def state_path(root: Path) -> Path:
     return relkit_dir(root) / "onboarding.json"
 
 
+def cache_dir(root: Path) -> Path:
+    return relkit_dir(root) / "cache"
+
+
 def projection_path(root: Path) -> Path:
-    return relkit_dir(root) / "onboarding.md"
+    return cache_dir(root) / "onboarding.md"
 
 
 def local_path(root: Path) -> Path:
-    return relkit_dir(root) / "onboarding.local.json"
+    return cache_dir(root) / "onboarding.local.json"
 
 
 def empty_steps() -> dict[str, Any]:
@@ -235,7 +237,7 @@ def render_onboarding_md(state: dict[str, Any]) -> str:
 
 
 def write_onboarding_md(root: Path, state: dict[str, Any]) -> None:
-    relkit_dir(root).mkdir(parents=True, exist_ok=True)
+    cache_dir(root).mkdir(parents=True, exist_ok=True)
     projection_path(root).write_text(render_onboarding_md(state), encoding="utf-8")
 
 
@@ -257,7 +259,7 @@ def load_local(root: Path) -> dict[str, Any]:
 
 
 def save_local(root: Path, data: dict[str, Any]) -> None:
-    relkit_dir(root).mkdir(parents=True, exist_ok=True)
+    cache_dir(root).mkdir(parents=True, exist_ok=True)
     local_path(root).write_text(dump_json(data), encoding="utf-8")
 
 
@@ -1079,7 +1081,7 @@ def reconcile_pack_ci(root: Path, state: dict[str, Any]) -> None:
 def reconcile_fake_stage(root: Path, state: dict[str, Any]) -> None:
     if state["steps"]["fake.release"]["status"] == "unanswered":
         return
-    staged = root / ".relkit" / "staged"
+    staged = cache_dir(root) / "staged"
     if not staged.is_dir():
         return
     preferred = str(state["steps"]["fake.release"].get("value") or "")
@@ -1587,7 +1589,7 @@ def publish_via_agent(
     execute: bool,
 ) -> int:
     """CI 侧发布：传 CAS + 瘦 staged 树，再让发布机持钥写 index。"""
-    staged = root / ".relkit" / "staged" / version
+    staged = cache_dir(root) / "staged" / version
     if not staged.is_dir():
         raise Fail(f"no staged tree for {version}; run relkit stage first ({staged})")
     publish = url.rstrip("/") + "/publish"
@@ -1768,7 +1770,7 @@ def cmd_fake_verify(root: Path, version: Optional[str]) -> int:
     if not resolved:
         current = run_relkit(root, binary, ["version", "get"])
         resolved = (current.stdout or "").strip().splitlines()[-1]
-    staged = root / ".relkit" / "staged" / resolved
+    staged = cache_dir(root) / "staged" / resolved
     if not (staged / "staged.pb").is_file():
         raise Fail(f"missing staged tree for {resolved}")
     run_relkit(root, binary, ["simulate", "--with-staged", resolved, "--from", "all"])

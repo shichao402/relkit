@@ -23,7 +23,7 @@
 
 ```
               鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 绾湰鍦帮紝绂荤嚎锛屽彲閲嶅 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
-浜х墿鏂囦欢 鈹€鈹€鈻? relkit stage  鈹€鈹€鈻? .relkit/staged/<version>/
+浜х墿鏂囦欢 鈹€鈹€鈻? relkit stage  鈹€鈹€鈻? .relkit/cache/staged/<version>/
                                     staged.pb     鈫?鏈夊搱甯?澶у皬/鐗堟湰锛屾病鏈変换浣?URL
                                     artifacts/鈥?    鈫?浜х墿鍓湰
               鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
@@ -129,7 +129,7 @@ relkit stage 1.5.0 \
 3. `filename` 閫氳繃 SPEC.md 搂14.4 鐨勫畨鍏ㄦ鏌ワ紱
 4. 浜х墿鏂囦欢瀛樺湪涓斿彲璇伙紝璁＄畻骞惰褰?`sha256` 涓?`size`銆?
 
-浜х墿榛樿**鎷疯礉**鍒?`.relkit/staged/<version>/artifacts/`銆傘€屽浐鍖栥€嶆槸杩欎竴姝ョ殑鏍稿績璇箟锛屾嫹璐濊 staged 鐩綍鑷冻锛屼箣鍚庢簮鐩綍琚竻鐞嗘垨閲嶆柊鏋勫缓閮戒笉褰卞搷鍙戝竷銆傚悓鐩樻椂鍙敤 `--link` 鏀逛负纭摼鎺ヤ互鐪佺┖闂淬€?
+浜х墿榛樿**鎷疯礉**鍒?`.relkit/cache/staged/<version>/artifacts/`銆傘€屽浐鍖栥€嶆槸杩欎竴姝ョ殑鏍稿績璇箟锛屾嫹璐濊 staged 鐩綍鑷冻锛屼箣鍚庢簮鐩綍琚竻鐞嗘垨閲嶆柊鏋勫缓閮戒笉褰卞搷鍙戝竷銆傚悓鐩樻椂鍙敤 `--link` 鏀逛负纭摼鎺ヤ互鐪佺┖闂淬€?
 
 `.relkit/` **搴旇**鍔犲叆 `.gitignore`銆?
 
@@ -455,7 +455,7 @@ CI **不持**签名私钥，也 **不持**长期 COS 写密钥。Runner 可在 `
       --min-from "${MIN_FROM}" \
       --add dist/app-win-x64.zip   os=windows,arch=x64 \
       --add dist/app-mac-arm64.zip os=macos,arch=arm64
-    tar -C ".relkit/staged/${VERSION}" -czf staged.tar.gz .
+    tar -C ".relkit/cache/staged/${VERSION}" -czf staged.tar.gz .
 
 - name: Publish via agent
   env:

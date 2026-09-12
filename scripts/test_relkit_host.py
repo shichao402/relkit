@@ -48,9 +48,12 @@ class StateTests(unittest.TestCase):
             self.assertEqual(state["steps"]["repo.root"]["status"], "verified")
             self.assertEqual(state["steps"]["product.id"]["status"], "unanswered")
             ignore = (root / ".gitignore").read_text(encoding="utf-8")
-            self.assertIn(".relkit/onboarding.local.json", ignore)
-            self.assertIn(".relkit/onboarding.md", ignore)
+            self.assertIn(".relkit/cache/", ignore)
             self.assertTrue(host.projection_path(root).is_file())
+            self.assertEqual(
+                host.projection_path(root),
+                root / ".relkit/cache/onboarding.md",
+            )
 
     def test_interactive_requires_human_answer_and_can_resume(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -586,7 +589,7 @@ class FakeStageTests(unittest.TestCase):
             state = host.default_state(root)
             state["steps"]["fake.release"]["status"] = "stale"
             state["steps"]["fake.release"]["value"] = "0.2.2+0"
-            tree = root / ".relkit" / "staged" / "0.2.2+0"
+            tree = root / ".relkit" / "cache" / "staged" / "0.2.2+0"
             tree.mkdir(parents=True)
             (tree / "staged.pb").write_bytes(b"x")
             host.reconcile_fake_stage(root, state)
@@ -602,7 +605,7 @@ class FakeStageTests(unittest.TestCase):
                 "value": "0.2.2+0",
                 "note": "simulate passed",
             }
-            tree = root / ".relkit" / "staged" / "0.2.2+0"
+            tree = root / ".relkit" / "cache" / "staged" / "0.2.2+0"
             tree.mkdir(parents=True)
             (tree / "staged.pb").write_bytes(b"x")
             host.reconcile_fake_stage(root, state)
@@ -636,7 +639,7 @@ class ReconcileTests(unittest.TestCase):
             root = Path(raw)
             state = host.default_state(root)
             host.save_state(root, state)
-            staged = root / ".relkit" / "staged" / "1.2.3+4"
+            staged = root / ".relkit" / "cache" / "staged" / "1.2.3+4"
             staged.mkdir(parents=True)
             (staged / "staged.pb").write_bytes(b"x")
             with (
@@ -691,7 +694,7 @@ class ReconcileTests(unittest.TestCase):
                 json.dumps({"product": "demo", "agent": {"url": "http://agent/v1/"}}),
                 encoding="utf-8",
             )
-            staged = root / ".relkit" / "staged" / "1.0.0+1"
+            staged = root / ".relkit" / "cache" / "staged" / "1.0.0+1"
             staged.mkdir(parents=True)
             self.assertEqual(host.agent_base_url(root), "http://agent/v1/")
             lines: list[str] = []

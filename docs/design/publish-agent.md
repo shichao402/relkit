@@ -40,7 +40,7 @@ CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯�
 agent 只需要清单与策略，不需要产物副本：
 
 ```text
-.relkit/staged/<version>/
+.relkit/cache/staged/<version>/
   staged.pb              # 版本、code、产物清单与哈希
   release-policy.json    # 仓库侧 portable 策略
 ```
