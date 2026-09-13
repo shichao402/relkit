@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import inspect
+import re
 import subprocess
 import sys
 import tempfile
@@ -1071,6 +1072,15 @@ class RetrospectTests(unittest.TestCase):
 
     def test_installed_host_scripts_do_not_leave_tracked_bytecode(self) -> None:
         self.assertIn("__pycache__/", host.GITIGNORE_RELKIT)
+
+    def test_remote_sudo_uses_absolute_binaries(self) -> None:
+        # sudoers secure_path omits /usr/local/bin, so a bare name is not found.
+        source = inspect.getsource(host)
+        self.assertIsNone(
+            re.search(r'"sudo",\s*"relkit-(?:serve|agent)"', source)
+        )
+        self.assertEqual(host.SERVE_BIN, "/usr/local/bin/relkit-serve")
+        self.assertEqual(host.AGENT_BIN, "/usr/local/bin/relkit-agent")
 
     def test_retrospect_contract_has_matching_step_keys(self) -> None:
         self.assertEqual(set(host.STEP_IDS), set(host.EXPLAIN_TEXTS))
