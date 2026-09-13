@@ -37,6 +37,16 @@ def rust_sdk_zip() -> bytes:
     return output.getvalue()
 
 
+def go_sdk_zip() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("go.mod", "module go.firoyang.com/relkit\n")
+        archive.writestr("go.sum", "")
+        archive.writestr("sdk/updater.go", "package sdk\n")
+        archive.writestr("api/updater/v1/updater.pb.go", "package updaterv1\n")
+    return output.getvalue()
+
+
 def host_scripts_zip() -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
@@ -115,6 +125,57 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(
                 (root / "tools/bin/relkit-updater").read_bytes(), binary
             )
+
+    def test_go_sdk_lands_at_the_module_root(self) -> None:
+        archive = go_sdk_zip()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            artifact = root / "sdk-go.zip"
+            artifact.write_bytes(archive)
+            destination = subject.sdk_destination(root, "sdk-go")
+            self.assertEqual(destination, root / "third_party" / "relkit")
+            subject.safe_extract_sdk(
+                artifact, destination, sha256(archive), "sdk-go"
+            )
+            # The host's `replace` target must resolve to a buildable module.
+            self.assertTrue((destination / "go.mod").is_file())
+            self.assertTrue((destination / "sdk" / "updater.go").is_file())
+            self.assertTrue(
+                (destination / "api" / "updater" / "v1" / "updater.pb.go").is_file()
+            )
+
+    def test_go_sdk_install_keeps_sibling_sdk_artifacts(self) -> None:
+        archive = go_sdk_zip()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            artifact = root / "sdk-go.zip"
+            artifact.write_bytes(archive)
+            destination = subject.sdk_destination(root, "sdk-go")
+            dart = destination / "sdk" / "dart"
+            dart.mkdir(parents=True)
+            (dart / "pubspec.yaml").write_text("name: rup_client\n", encoding="utf-8")
+            subject.safe_extract_sdk(
+                artifact, destination, sha256(archive), "sdk-go"
+            )
+            self.assertTrue((dart / "pubspec.yaml").is_file())
+            self.assertTrue((destination / "go.mod").is_file())
+
+    def test_incomplete_go_sdk_is_rejected(self) -> None:
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("go.mod", "module go.firoyang.com/relkit\n")
+        payload = output.getvalue()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            artifact = root / "sdk-go.zip"
+            artifact.write_bytes(payload)
+            with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                subject.safe_extract_sdk(
+                    artifact,
+                    subject.sdk_destination(root, "sdk-go"),
+                    sha256(payload),
+                    "sdk-go",
+                )
 
     def test_rejects_zip_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

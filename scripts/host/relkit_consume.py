@@ -30,9 +30,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 LOCK_SCHEMA = "relkit.consume/2"
-COMPONENTS = ("host-scripts", "sdk-dart", "sdk-rust", "cli", "updater")
+COMPONENTS = ("host-scripts", "sdk-dart", "sdk-go", "sdk-rust", "cli", "updater")
 DEFAULT_COMPONENTS = ("sdk-dart", "cli", "updater")
-PORTABLE_COMPONENTS = ("host-scripts", "sdk-dart", "sdk-rust")
+PORTABLE_COMPONENTS = ("host-scripts", "sdk-dart", "sdk-go", "sdk-rust")
 TARGETS = (
     "linux-amd64",
     "linux-arm64",
@@ -311,9 +311,34 @@ def install_binary(
     return destination
 
 
+def sdk_destination(root: Path, component: str) -> Path:
+    """Where an SDK artifact lands.
+
+    Go is the module itself, so it owns third_party/relkit and the host's
+    `replace go.firoyang.com/relkit => ./third_party/relkit` resolves against
+    it. The other SDKs are subdirectories of that module.
+    """
+    if component == "sdk-go":
+        return root / "third_party" / "relkit"
+    return root / "third_party" / "relkit" / "sdk" / component[4:]
+
+
+def preserved_sdk_subtrees(component: str) -> tuple[str, ...]:
+    """Sibling SDK artifacts that live inside the tree being replaced."""
+    if component == "sdk-go":
+        return ("sdk/dart", "sdk/node", "sdk/rust")
+    return ()
+
+
 def sdk_complete(destination: Path, component: str) -> bool:
     if component == "sdk-dart":
         return (destination / "pubspec.yaml").is_file() and (destination / "lib").is_dir()
+    if component == "sdk-go":
+        return (
+            (destination / "go.mod").is_file()
+            and (destination / "sdk").is_dir()
+            and (destination / "api" / "updater" / "v1").is_dir()
+        )
     if component == "sdk-rust":
         return (
             (destination / "Cargo.toml").is_file()
@@ -402,9 +427,32 @@ def safe_extract_host_scripts(
         shutil.rmtree(temporary, ignore_errors=True)
 
 
+def sdk_display(destination: Path) -> str:
+    parts = destination.parts
+    if "third_party" in parts:
+        return "/".join(parts[parts.index("third_party") :])
+    return destination.name
+
+
+def carry_preserved_subtrees(
+    destination: Path, staging: Path, component: str
+) -> None:
+    """Copy sibling SDK trees into the staging tree before it replaces the old one."""
+    for relative in preserved_sdk_subtrees(component):
+        existing = destination / relative
+        if not existing.is_dir():
+            continue
+        carried = staging / relative
+        if carried.exists():
+            shutil.rmtree(carried)
+        carried.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(existing, carried)
+
+
 def safe_extract_sdk(
     artifact: Path, destination: Path, digest: str, component: str = "sdk-dart"
 ) -> None:
+    label = sdk_display(destination)
     marker = destination / ".relkit-artifact.json"
     if marker.is_file():
         try:
@@ -413,7 +461,7 @@ def safe_extract_sdk(
                 state.get("sha256") == digest
                 and sdk_complete(destination, component)
             ):
-                print(f"relkit consume: verified third_party/relkit/sdk/{component[4:]}")
+                print(f"relkit consume: verified {label}")
                 return
         except (OSError, ValueError):
             pass
@@ -433,6 +481,7 @@ def safe_extract_sdk(
             archive.extractall(temporary)
         if not sdk_complete(temporary, component):
             raise RuntimeError(f"{component} artifact is incomplete")
+        carry_preserved_subtrees(destination, temporary, component)
         (temporary / ".relkit-artifact.json").write_text(
             json.dumps({"schema": LOCK_SCHEMA, "sha256": digest}, indent=2) + "\n",
             encoding="utf-8",
@@ -444,7 +493,7 @@ def safe_extract_sdk(
         os.replace(temporary, destination)
         if backup.exists():
             shutil.rmtree(backup)
-        print(f"relkit consume: installed third_party/relkit/sdk/{component[4:]}")
+        print(f"relkit consume: installed {label}")
     except Exception:
         if not destination.exists() and backup.exists():
             os.replace(backup, destination)
@@ -484,8 +533,7 @@ def check_installed(
             raise RuntimeError("installed scripts/host does not match lock")
         return
     if component.startswith("sdk-"):
-        language = component[4:]
-        destination = root / "third_party" / "relkit" / "sdk" / language
+        destination = sdk_destination(root, component)
         marker = destination / ".relkit-artifact.json"
         state = json.loads(marker.read_text(encoding="utf-8"))
         if state.get("sha256") != spec["sha256"]:
@@ -552,10 +600,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         expected,
                     )
                 elif component.startswith("sdk-"):
-                    language = component[4:]
                     safe_extract_sdk(
                         artifact,
-                        root / "third_party" / "relkit" / "sdk" / language,
+                        sdk_destination(root, component),
                         spec["sha256"],
                         component,
                     )

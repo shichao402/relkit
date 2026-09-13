@@ -453,6 +453,125 @@ class UpgradeManifestTests(unittest.TestCase):
             )
 
 
+    def test_upgrade_rewrites_a_consume_v1_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            lock_path = root / "scripts" / "relkit.lock.json"
+            lock_path.parent.mkdir(parents=True)
+            lock_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "relkit.consume/1",
+                        "url": "https://github.com/shichao402/relkit.git",
+                        "channel": "main",
+                        "commit": "6" * 40,
+                        "protocol": {"min": 2, "max": 2},
+                        "updaterIpc": {"min": 1, "max": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            commit = "b814972e839dbb5eaac9814728e0fe08258c5e2b"
+
+            with (
+                patch("relkit_host.http_get", side_effect=self.fake_release(commit)),
+                patch("relkit_host.cmd_install", return_value=0),
+            ):
+                self.assertEqual(host.cmd_upgrade(root, "v0.3.14"), 0)
+
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            self.assertEqual(lock["schema"], host.LOCK_SCHEMA)
+            self.assertEqual(lock["commit"], commit)
+            self.assertEqual(lock["protocol"], {"min": 2, "max": 2})
+            self.assertEqual(lock["updaterIpc"], {"min": 1, "max": 1})
+            self.assertEqual(lock["artifacts"]["sdk-go"]["sha256"], "d" * 64)
+            # Sparse-checkout keys must not survive into an immutable-release lock.
+            self.assertNotIn("url", lock)
+            self.assertNotIn("channel", lock)
+
+    def test_upgrade_creates_a_lock_when_the_repo_has_none(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            commit = "b814972e839dbb5eaac9814728e0fe08258c5e2b"
+            with (
+                patch("relkit_host.http_get", side_effect=self.fake_release(commit)),
+                patch("relkit_host.cmd_install", return_value=0),
+            ):
+                self.assertEqual(host.cmd_upgrade(root, "v0.3.14"), 0)
+            lock = json.loads(
+                (root / "scripts" / "relkit.lock.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(lock["schema"], host.LOCK_SCHEMA)
+            self.assertEqual(
+                lock["updaterIpc"],
+                {"min": host.UPDATER_IPC_FALLBACK, "max": host.UPDATER_IPC_FALLBACK},
+            )
+
+    def test_upgrade_takes_the_protocol_window_from_the_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            commit = "b814972e839dbb5eaac9814728e0fe08258c5e2b"
+            fake = self.fake_release(commit, min_protocol=2, max_protocol=3)
+            with (
+                patch("relkit_host.http_get", side_effect=fake),
+                patch("relkit_host.cmd_install", return_value=0),
+            ):
+                self.assertEqual(host.cmd_upgrade(root, "v0.3.14"), 0)
+            lock = json.loads(
+                (root / "scripts" / "relkit.lock.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(lock["protocol"], {"min": 2, "max": 3})
+
+    @staticmethod
+    def fake_release(commit: str, min_protocol: int = 2, max_protocol: int = 2):
+        def fake_get(url: str) -> str:
+            if url.endswith("/manifest.json"):
+                return json.dumps(
+                    {
+                        "commit": commit,
+                        "minProtocol": min_protocol,
+                        "maxProtocol": max_protocol,
+                        "hostScriptsSha256": "a" * 64,
+                        "consumerSha256": "b" * 64,
+                    }
+                )
+            if url.endswith("/SHA256SUMS"):
+                return (
+                    f"{'c' * 64}  relkit-host-scripts.zip\n"
+                    f"{'d' * 64}  relkit-sdk-go.zip\n"
+                )
+            raise host.Fail(f"unexpected GET {url}")
+
+        return fake_get
+
+
+class GoSdkWiringTests(unittest.TestCase):
+    def test_go_repo_installs_the_go_sdk_component(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "go.mod").write_text("module example.test\n", encoding="utf-8")
+            self.assertIn("sdk-go", host.consume_components(root))
+
+    def test_non_go_repo_does_not_install_the_go_sdk(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertNotIn("sdk-go", host.consume_components(Path(raw)))
+
+    def test_lock_pins_the_go_sdk_archive(self) -> None:
+        artifacts: dict = {}
+        host.rewrite_lock_artifacts(
+            artifacts,
+            "https://example.invalid/v0.3.14",
+            {"relkit-sdk-go.zip": "e" * 64},
+        )
+        self.assertEqual(
+            artifacts["sdk-go"],
+            {
+                "url": "https://example.invalid/v0.3.14/relkit-sdk-go.zip",
+                "sha256": "e" * 64,
+            },
+        )
+
+
 class InstallGateTests(unittest.TestCase):
     def test_successful_install_leaves_verified_lock_state(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -484,6 +603,49 @@ class InstallGateTests(unittest.TestCase):
             state = host.load_state(root)
             self.assertEqual(state["steps"]["consume.lock"]["status"], "verified")
             self.assertEqual(state["steps"]["consume.lock"]["value"], "v1.2.3")
+
+
+    def test_install_skips_sdk_components_absent_from_the_lock(self) -> None:
+        forwarded = self.install_with_lock_artifacts({"cli": {}, "updater": {}})
+        self.assertNotIn("sdk-go", forwarded)
+        self.assertIn("cli", forwarded)
+
+    def test_install_requests_the_go_sdk_once_the_lock_pins_it(self) -> None:
+        forwarded = self.install_with_lock_artifacts(
+            {"cli": {}, "updater": {}, "sdk-go": {}}
+        )
+        self.assertIn("sdk-go", forwarded)
+
+    @staticmethod
+    def install_with_lock_artifacts(artifacts: dict) -> list:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "go.mod").write_text("module example.test\n", encoding="utf-8")
+            host_dir = root / "scripts" / "host"
+            host_dir.mkdir(parents=True)
+            (host_dir / "relkit_consume.py").write_text("# consume\n", encoding="utf-8")
+            (host_dir / "relkit_host.py").write_text("# host\n", encoding="utf-8")
+            (root / "scripts" / "relkit.lock.json").write_text(
+                json.dumps(
+                    {
+                        "schema": host.LOCK_SCHEMA,
+                        "release": "v0.3.13",
+                        "commit": "a" * 40,
+                        "hostScriptsSha256": host.tree_sha256(host_dir),
+                        "artifacts": artifacts,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            seen: list[list[str]] = []
+            consume = type(
+                "Consume",
+                (),
+                {"main": staticmethod(lambda argv: seen.append(list(argv)) or 0)},
+            )
+            with patch("relkit_host.import_consume", return_value=consume):
+                assert host.cmd_install(root, []) == 0
+            return seen[0]
 
 
 class AgentProvisionTests(unittest.TestCase):

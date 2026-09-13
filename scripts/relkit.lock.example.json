@@ -21,6 +21,10 @@
       "url": "https://github.com/shichao402/relkit/releases/download/v0.3.0/relkit-sdk-dart.zip",
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
+    "sdk-go": {
+      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.0/relkit-sdk-go.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
     "sdk-rust": {
       "url": "https://github.com/shichao402/relkit/releases/download/v0.3.0/relkit-sdk-rust.zip",
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"

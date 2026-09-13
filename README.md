@@ -137,7 +137,7 @@ sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-a
 
 | | |
 |--|--|
-| Go | `sdk/*.go` → consume + `replace go.firoyang.com/relkit => ./third_party/relkit` · [`sdk/README.md`](sdk/README.md) |
+| Go | `relkit-sdk-go.zip` 附件装到 `third_party/relkit`（`go list -deps` 算出的可编译子集），配 `replace go.firoyang.com/relkit => ./third_party/relkit` · [`sdk/README.md`](sdk/README.md) |
 | Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/README.md`](sdk/dart/README.md) |
 | Node | `sdk/node`（package `rup-client`）· [`sdk/node/README.md`](sdk/node/README.md) |
 | Rust | `sdk/rust`（crate `relkit-updater`，供 Tauri 壳调用 sidecar）· [`sdk/rust/README.md`](sdk/rust/README.md) |

@@ -31,6 +31,9 @@ REQUIREMENTS = DEPLOY_DIR / "requirements.txt"
 VENV_DIR = DEPLOY_DIR / ".venv"
 BOOTSTRAP_ENV = "RELKIT_DEPLOY_BOOTSTRAPPED"
 MIN_PY = (3, 9)
+GO_MODULE_PATH = "go.firoyang.com/relkit"
+# Public entrypoints a Go host imports; everything else is pulled in by go list.
+GO_SDK_ENTRYPOINTS = ("./sdk", "./sdk/updaterfacade")
 
 # Ensure sibling imports work when copied to /tmp on a remote host.
 if str(DEPLOY_DIR) not in sys.path:
@@ -215,6 +218,49 @@ def rust_sdk_entries() -> list[tuple[Path, str]]:
     return entries
 
 
+def go_sdk_packages() -> list[str]:
+    """Module-internal packages a Go host needs, resolved by the compiler itself.
+
+    Asking `go list` keeps the artifact honest when sdk/ grows a dependency; a
+    hand-written directory list would only surface the gap at the host's build.
+    """
+    listed = run(
+        ["go", "list", "-deps", *GO_SDK_ENTRYPOINTS],
+        cwd=REPO_ROOT,
+        capture=True,
+    ).stdout
+    prefix = GO_MODULE_PATH + "/"
+    packages = {
+        line.strip()[len(prefix) :]
+        for line in listed.splitlines()
+        if line.strip().startswith(prefix)
+    }
+    if not packages:
+        raise Fail("go list resolved no relkit packages for the Go SDK artifact")
+    return sorted(packages)
+
+
+def go_sdk_entries() -> list[tuple[Path, str]]:
+    entries: list[tuple[Path, str]] = []
+    for name in ("go.mod", "go.sum"):
+        path = REPO_ROOT / name
+        if not path.is_file():
+            raise Fail(f"Go module is missing {name}")
+        entries.append((path, name))
+    for package in go_sdk_packages():
+        sources = [
+            item
+            for item in release_source_paths(package)
+            if item.endswith(".go")
+            and not item.endswith("_test.go")
+            and Path(item).parent.as_posix() == package
+        ]
+        if not sources:
+            raise Fail(f"Go SDK package {package} has no tracked sources")
+        entries.extend((REPO_ROOT / item, item) for item in sources)
+    return entries
+
+
 def host_script_entries() -> list[tuple[Path, str]]:
     host_root = REPO_ROOT / "scripts" / "host"
     names = ("relkit_consume.py", "relkit_host.py")
@@ -255,6 +301,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     if not targets and not (
         getattr(args, "dart_sdk", False)
         or getattr(args, "rust_sdk", False)
+        or getattr(args, "go_sdk", False)
         or getattr(args, "host_scripts", False)
     ):
         targets = ["serve", "agent"]
@@ -329,6 +376,18 @@ def cmd_build(args: argparse.Namespace) -> None:
         built.append(
             {
                 "component": "sdk-rust",
+                "os": "any",
+                "arch": "any",
+                "path": sdk_archive.name,
+                "sha256": file_sha256(sdk_archive),
+            }
+        )
+    if getattr(args, "go_sdk", False):
+        sdk_archive = out_dir / "relkit-sdk-go.zip"
+        write_deterministic_zip(sdk_archive, go_sdk_entries())
+        built.append(
+            {
+                "component": "sdk-go",
                 "os": "any",
                 "arch": "any",
                 "path": sdk_archive.name,
@@ -1193,6 +1252,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--updater", action="store_true")
     build.add_argument("--dart-sdk", action="store_true")
     build.add_argument("--rust-sdk", action="store_true")
+    build.add_argument("--go-sdk", action="store_true")
     build.add_argument("--host-scripts", action="store_true")
     build.add_argument("--version", default="0.2.1")
     build.add_argument("--out", default="dist")

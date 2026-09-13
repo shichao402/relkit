@@ -46,6 +46,7 @@ GITIGNORE_RELKIT = (
     ".relkit-keys/*.private.pb",
 )
 PUBLISH_PROTOCOL_FALLBACK = 2
+UPDATER_IPC_FALLBACK = 1
 UPDATER_PROCESS_VALUES = ("rust", "node", "dart", "go", "other")
 UPDATER_PROCESS_EXPLAIN = (
     "谁调用 Updater.open。只记封闭词，不要另写决策备忘。"
@@ -131,6 +132,8 @@ DIGESTED_ISSUE_CODES = frozenset(
         "onboard-answer-schema-invalid",
         "onboard-answer-revision-conflict",
         "onboard-answer-conflict",
+        "lock-v1-no-migration-path",
+        "v2-no-go-sdk-artifact",
     }
 )
 
@@ -2126,6 +2129,8 @@ def consume_components(root: Path) -> list[str]:
         components.insert(0, "sdk-dart")
     if "rust" in stack["languages"]:
         components.insert(0, "sdk-rust")
+    if "go" in stack["languages"]:
+        components.insert(0, "sdk-go")
     return components
 
 
@@ -2146,11 +2151,29 @@ def require_host_scripts_match_lock(root: Path) -> dict[str, Any]:
     return lock
 
 
+def lock_artifact_names(root: Path) -> set[str]:
+    """Artifact keys the lock pins, or an empty set when the lock is unusable."""
+    path = root / "scripts" / "relkit.lock.json"
+    if not path.is_file():
+        return set()
+    try:
+        artifacts = load_json(path).get("artifacts")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return set()
+    return set(artifacts) if isinstance(artifacts, dict) else set()
+
+
 def cmd_install(root: Path, consume_argv: Sequence[str]) -> int:
     consume = import_consume()
     extra = list(consume_argv)
     if not any(item == "--component" for item in extra):
+        pinned = lock_artifact_names(root)
         for component in consume_components(root):
+            # A release that predates an SDK attachment simply has nothing to
+            # install; the lock stays the single source of truth either way.
+            if component.startswith("sdk-") and pinned and component not in pinned:
+                print(f"relkit: {component} is not pinned by the lock; skipping")
+                continue
             extra.extend(["--component", component])
     code = consume.main(["install", "--project-root", str(root), *extra])
     if code == 0:
@@ -2161,15 +2184,68 @@ def cmd_install(root: Path, consume_argv: Sequence[str]) -> int:
     return code
 
 
+def int_window(raw: Any, fallback: int) -> dict[str, int]:
+    try:
+        minimum = int((raw or {}).get("min") or fallback)
+        maximum = int((raw or {}).get("max") or minimum)
+    except (AttributeError, TypeError, ValueError):
+        return {"min": fallback, "max": fallback}
+    return {"min": minimum, "max": maximum}
+
+
+def build_release_lock(
+    previous: dict[str, Any],
+    *,
+    release: str,
+    commit: str,
+    consumer_hash: str,
+    host_tree_hash: str,
+    manifest: dict[str, Any],
+    base: str,
+    sums: dict[str, str],
+) -> dict[str, Any]:
+    """Build a whole relkit.consume/2 lock out of one immutable release.
+
+    Constructing instead of patching is what lets a relkit.consume/1 repo run
+    upgrade directly: every pinned value is restated by the release, so the old
+    lock's shape is never a precondition. Only the updater IPC window carries
+    over, because no release attachment declares it.
+    """
+    artifacts: dict[str, Any] = {}
+    rewrite_lock_artifacts(artifacts, base, sums)
+    return {
+        "schema": LOCK_SCHEMA,
+        "release": release,
+        "commit": commit,
+        "consumerSha256": consumer_hash,
+        "hostScriptsSha256": host_tree_hash,
+        "protocol": int_window(
+            {
+                "min": manifest.get("minProtocol"),
+                "max": manifest.get("maxProtocol"),
+            },
+            PUBLISH_PROTOCOL_FALLBACK,
+        ),
+        "updaterIpc": int_window(previous.get("updaterIpc"), UPDATER_IPC_FALLBACK),
+        "artifacts": artifacts,
+    }
+
+
 def cmd_upgrade(root: Path, release: str) -> int:
     if not re.fullmatch(r"v\d+\.\d+\.\d+", release):
         raise Fail("upgrade expects vX.Y.Z")
     lock_path = root / "scripts" / "relkit.lock.json"
-    if not lock_path.is_file():
-        raise Fail(f"missing {lock_path}")
-    lock = load_json(lock_path)
-    if lock.get("schema") != LOCK_SCHEMA:
-        raise Fail(f"{lock_path} must use {LOCK_SCHEMA}")
+    previous: dict[str, Any] = {}
+    if lock_path.is_file():
+        try:
+            loaded = load_json(lock_path)
+        except (OSError, json.JSONDecodeError) as error:
+            raise Fail(
+                f"{lock_path} exists but is not readable JSON: {error}",
+                code="lock-unreadable",
+            ) from error
+        if isinstance(loaded, dict):
+            previous = loaded
     base = f"https://github.com/{GITHUB_REPO}/releases/download/{release}"
     # Commit 只从同目录的 immutable 附件读。不要打 api.github.com：
     # 匿名 REST 每小时 60 次，和 Releases 下载不共用配额。
@@ -2185,13 +2261,21 @@ def cmd_upgrade(root: Path, release: str) -> int:
     sums = parse_sha256sums(sums_text)
     if "relkit-host-scripts.zip" not in sums:
         raise Fail("SHA256SUMS has no relkit-host-scripts.zip")
-    artifacts = lock.setdefault("artifacts", {})
-    rewrite_lock_artifacts(artifacts, base, sums)
-    lock["release"] = release
-    lock["commit"] = commit
-    lock["consumerSha256"] = consumer_hash
-    lock["hostScriptsSha256"] = host_tree_hash
+    lock = build_release_lock(
+        previous,
+        release=release,
+        commit=commit,
+        consumer_hash=consumer_hash,
+        host_tree_hash=host_tree_hash,
+        manifest=manifest,
+        base=base,
+        sums=sums,
+    )
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(dump_json(lock), encoding="utf-8")
+    previous_schema = str(previous.get("schema") or "none")
+    if previous_schema != LOCK_SCHEMA:
+        print(f"rewrote {lock_path} from {previous_schema} to {LOCK_SCHEMA}")
     print(f"updated {lock_path} to {release}")
     return cmd_install(root, [])
 
@@ -2253,6 +2337,9 @@ def rewrite_lock_artifacts(artifacts: dict[str, Any], base: str, sums: dict[str,
     rust = "relkit-sdk-rust.zip"
     if rust in sums:
         artifacts["sdk-rust"] = {"url": f"{base}/{rust}", "sha256": sums[rust]}
+    go = "relkit-sdk-go.zip"
+    if go in sums:
+        artifacts["sdk-go"] = {"url": f"{base}/{go}", "sha256": sums[go]}
     cli = artifacts.setdefault("cli", {})
     updater = artifacts.setdefault("updater", {})
     mapping = {
@@ -3140,6 +3227,48 @@ def retrospect_report(root: Path) -> dict[str, Any]:
         "UPDATER_PROCESS_VALUES includes rust and excludes rust-shell",
         f"UPDATER_PROCESS_VALUES={list(UPDATER_PROCESS_VALUES)}",
         "rust" in UPDATER_PROCESS_VALUES and "rust-shell" not in UPDATER_PROCESS_VALUES,
+    )
+
+    upgrade_source = inspect.getsource(cmd_upgrade)
+    upgrade_builds_lock = (
+        "build_release_lock(" in upgrade_source
+        and "must use" not in upgrade_source
+    )
+    check(
+        "lock-bootstrap-from-release",
+        host_path,
+        "cmd_upgrade builds the whole lock from the release, so a v1 lock upgrades directly",
+        (
+            "upgrade constructs the lock from release metadata"
+            if upgrade_builds_lock
+            else "upgrade still requires the previous lock to already be relkit.consume/2"
+        ),
+        upgrade_builds_lock,
+    )
+
+    with tempfile.TemporaryDirectory() as raw:
+        probe = Path(raw)
+        (probe / "go.mod").write_text("module example.test\n", encoding="utf-8")
+        go_components = consume_components(probe)
+        check(
+            "go-sdk-component",
+            host_path,
+            "a Go host repo installs the sdk-go artifact",
+            f"consume_components={go_components}",
+            "sdk-go" in go_components,
+        )
+    probe_artifacts: dict[str, Any] = {}
+    rewrite_lock_artifacts(
+        probe_artifacts,
+        "https://example.test/download",
+        {"relkit-sdk-go.zip": "0" * 64},
+    )
+    check(
+        "go-sdk-lock-entry",
+        host_path,
+        "rewrite_lock_artifacts pins relkit-sdk-go.zip",
+        f"artifacts={sorted(probe_artifacts)}",
+        "sdk-go" in probe_artifacts,
     )
 
     sidecar_source = inspect.getsource(reconcile_sidecar_layout)
