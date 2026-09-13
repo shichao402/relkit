@@ -379,6 +379,36 @@ class StateTests(unittest.TestCase):
                 host.release_incomplete_steps(state, root=root), []
             )
 
+    def test_status_skips_remote_steps_for_direct_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "direct",
+                        "signing": {
+                            "keyId": "k1",
+                            "publicKeys": [{"keyId": "k1", "publicKeyBase64": "QQ=="}],
+                        },
+                        "backends": {"cos": {"type": "s3-compatible"}},
+                        "publishTo": ["cos"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "ssh.host", "stale", "cvm-gz")
+            host.set_step(state, "token.isolation", "stale", "exclusive")
+            host.save_state(root, state)
+            host.cmd_status(root)
+            saved = host.load_state(root)
+            self.assertEqual(saved["steps"]["ssh.host"]["status"], "skipped")
+            self.assertEqual(saved["steps"]["token.isolation"]["status"], "skipped")
+            self.assertEqual(saved["steps"]["serve.register"]["status"], "skipped")
+            self.assertEqual(saved["steps"]["signing.keys"]["value"], "k1")
+            self.assertEqual(saved["steps"]["signing.keys"]["status"], "verified")
+            self.assertNotEqual(host.next_unresolved_step(saved), "ssh.host")
+
     def test_recommendation_does_not_choose_backend(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

@@ -72,6 +72,7 @@ STATUSES = (
     "confirmed",
     "applied",
     "verified",
+    "skipped",
     "blocked",
     "stale",
     "drift",
@@ -692,10 +693,58 @@ def next_unresolved_step(state: dict[str, Any]) -> Optional[str]:
         (
             step
             for step in STEP_IDS
-            if state["steps"][step]["status"] in ("unanswered", "stale", "blocked", "drift")
+            if state["steps"][step]["status"]
+            in ("unanswered", "stale", "blocked", "drift")
         ),
         None,
     )
+
+
+def apply_topology_to_state(root: Path, state: dict[str, Any]) -> dict[str, Any]:
+    """Mark steps the configured publish path does not use.
+
+    Direct backends still leave historical ssh/token answers in the record;
+    skipping them is what keeps status from asking for a host that is no
+    longer on the release route.
+    """
+    evidence = decision_evidence(root, state)
+    applicable = evidence.get("applicable") or {}
+    for step, needed in applicable.items():
+        if needed or step not in STEP_IDS:
+            continue
+        current = state["steps"][step]
+        if current["status"] == "skipped":
+            continue
+        set_step(
+            state,
+            step,
+            "skipped",
+            current.get("value"),
+            "not on the configured publish route",
+        )
+    return evidence
+
+
+def reconcile_local_signing(root: Path, state: dict[str, Any]) -> None:
+    """Direct publishers keep the key id in relkit.json, not an agent profile."""
+    if state["steps"]["signing.keys"]["status"] in ("verified",):
+        return
+    path = root / "relkit.json"
+    if not path.is_file():
+        return
+    try:
+        signing = load_json(path).get("signing") or {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return
+    key_id = str(signing.get("keyId") or "").strip()
+    public_keys = signing.get("publicKeys")
+    if not key_id or not isinstance(public_keys, list) or not public_keys:
+        return
+    private = str(signing.get("privateKeyPath") or "").strip()
+    note = "relkit.json names the key id and public key"
+    if private:
+        note += f"; private key at {private}"
+    set_step(state, "signing.keys", "verified", key_id, note)
 
 
 def print_decision(root: Path, state: dict[str, Any], step_id: str) -> None:
@@ -1831,7 +1880,7 @@ def relkit_bin(root: Path, explicit: Optional[str] = None) -> Path:
 
 def cmd_status(root: Path, as_json: bool = False) -> int:
     state = load_state(root)
-    report = reconcile(root, state, write=False)
+    report = reconcile(root, state, write=True)
     if as_json:
         print(dump_json(report))
         return 0
@@ -2148,6 +2197,8 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
         except (OSError, json.JSONDecodeError) as error:
             unconfirmed.append(f"cannot read lock: {error}")
 
+    apply_topology_to_state(root, state)
+    reconcile_local_signing(root, state)
     reconcile_sidecar_layout(root, state, drift)
     reconcile_pack_ci(root, state)
     reconcile_fake_stage(root, state)
@@ -2880,9 +2931,9 @@ def release_incomplete_steps(
         if step == "ops.retrospect" and via_ci:
             continue
         status = state["steps"][step]["status"]
-        allowed = ("confirmed", "verified") if step in DECISION_STEPS else ("verified",)
+        allowed = ("confirmed", "verified", "skipped") if step in DECISION_STEPS else ("verified", "skipped")
         if step == "pack.ci" and via_ci:
-            allowed = ("confirmed", "verified")
+            allowed = ("confirmed", "verified", "skipped")
         if status not in allowed:
             missing.append(step)
     return missing
