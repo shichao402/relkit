@@ -32,6 +32,29 @@ class TreeHashTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def write_answer_batch(
+        self,
+        root: Path,
+        intent: str,
+        answers: dict[str, object],
+    ) -> Path:
+        batch = host.build_question_batch(root, host.load_state(root), intent)
+        path = root / ".relkit" / "cache" / "answers.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": host.ANSWER_BATCH_SCHEMA,
+                    "intent": intent,
+                    "revision": batch["revision"],
+                    "answers": answers,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return path
+
     def test_set_marks_later_stale(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -48,6 +71,7 @@ class StateTests(unittest.TestCase):
             self.assertEqual(host.cmd_onboard_start(root), 0)
             state = host.load_state(root)
             self.assertEqual(state["steps"]["repo.root"]["status"], "verified")
+            self.assertEqual(state["steps"]["env.inspect"]["status"], "verified")
             self.assertEqual(state["steps"]["product.id"]["status"], "unanswered")
             ignore = (root / ".gitignore").read_text(encoding="utf-8")
             self.assertIn(".relkit/cache/", ignore)
@@ -76,6 +100,111 @@ class StateTests(unittest.TestCase):
             self.assertEqual(state["steps"]["product.id"]["value"], root.name.lower())
             self.assertEqual(state["steps"]["updater.process"]["value"], "node")
             self.assertEqual(state["steps"]["channel.ssot"]["status"], "unanswered")
+
+    def test_questions_batch_all_human_decisions_after_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "package.json").write_text("{}\n", encoding="utf-8")
+            host.cmd_onboard_start(root)
+            batch = host.build_question_batch(root, host.load_state(root), "fresh")
+            self.assertEqual(batch["schema"], host.QUESTION_BATCH_SCHEMA)
+            self.assertEqual(
+                [item["id"] for item in batch["questions"]],
+                list(host.BATCH_DECISION_STEPS),
+            )
+            self.assertIn("inspection", batch)
+            self.assertEqual(
+                batch["answerShape"]["revision"], "<copy revision>"
+            )
+
+    def test_answer_batch_is_applied_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "package.json").write_text("{}\n", encoding="utf-8")
+            host.cmd_onboard_start(root)
+            path = self.write_answer_batch(
+                root,
+                "fresh",
+                {
+                    "product.id": "demo",
+                    "updater.process": "node",
+                    "channel.ssot": "VERSION.json",
+                    "backend.kind": "intranet-relkit-compatible",
+                    "ssh.host": "update.devcloud.woa.com",
+                    "ssh.config_dir": "/etc/relkit-serve",
+                    "token.isolation": "exclusive",
+                },
+            )
+            with patch("relkit_host.ssh_host_allowed", return_value=True):
+                self.assertEqual(
+                    host.cmd_onboard_apply(root, path.relative_to(root)), 0
+                )
+            state = host.load_state(root)
+            self.assertEqual(state["product"], "demo")
+            for step in host.BATCH_DECISION_STEPS:
+                self.assertEqual(state["steps"][step]["status"], "confirmed")
+
+    def test_answer_conflicts_reject_the_whole_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.cmd_onboard_start(root)
+            before = host.load_state(root)
+            path = self.write_answer_batch(
+                root,
+                "fresh",
+                {
+                    "product.id": "demo",
+                    "updater.process": "not-a-process",
+                    "channel.ssot": "VERSION.json",
+                    "backend.kind": "not-a-backend",
+                    "ssh.host": "missing-host",
+                    "ssh.config_dir": "/etc/relkit-serve",
+                    "token.isolation": "share-with:demo",
+                },
+            )
+            with self.assertRaises(host.Fail) as raised:
+                host.cmd_onboard_apply(root, path)
+            self.assertEqual(raised.exception.code, "onboard-answer-conflict")
+            self.assertIn("updater.process", str(raised.exception))
+            self.assertIn("backend.kind", str(raised.exception))
+            self.assertEqual(host.load_state(root), before)
+
+    def test_changed_facts_reject_stale_answer_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.cmd_onboard_start(root)
+            batch = host.build_question_batch(root, host.load_state(root), "fresh")
+            answers = root / "answers.json"
+            answers.write_text(
+                json.dumps(
+                    {
+                        "schema": host.ANSWER_BATCH_SCHEMA,
+                        "intent": "fresh",
+                        "revision": batch["revision"],
+                        "answers": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "VERSION.json").write_text("{}\n", encoding="utf-8")
+            with self.assertRaises(host.Fail) as raised:
+                host.cmd_onboard_apply(root, answers)
+            self.assertEqual(
+                raised.exception.code, "onboard-answer-revision-conflict"
+            )
+
+    def test_fresh_intent_rejects_existing_product(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                '{"product":"existing","backends":{}}\n', encoding="utf-8"
+            )
+            host.cmd_onboard_start(root)
+            with self.assertRaises(host.Fail) as raised:
+                host.build_question_batch(root, host.load_state(root), "fresh")
+            self.assertEqual(
+                raised.exception.code, "onboard-batch-intent-conflict"
+            )
 
     def test_recommendation_does_not_choose_backend(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -137,6 +266,7 @@ class StateTests(unittest.TestCase):
     def test_onboard_reset_requires_yes_and_deletes_relkit_dir(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
+            host.cmd_onboard_start(root)
             host.cmd_onboard_set(root, "product.id", "loom", None)
             self.assertTrue(host.relkit_dir(root).is_dir())
             with self.assertRaisesRegex(host.Fail, "--yes"):
@@ -170,9 +300,24 @@ class RoutingTests(unittest.TestCase):
     def test_routing_names_only_canonical_product_and_deploy_entries(self) -> None:
         text = host.routing_help()
         self.assertIn("relkit_host.py", text)
+        self.assertIn("onboard inspect|questions|apply", text)
         self.assertIn("python deploy/relkit.py build|install|upgrade", text)
         self.assertNotIn("scripts/relkit_host.py", text)
         self.assertNotIn("deploy/relkit.py serve", text)
+
+    def test_batch_question_and_apply_commands_parse(self) -> None:
+        parser = host.build_parser()
+        questions = parser.parse_args(
+            ["onboard", "questions", "--intent", "upgrade", "--json"]
+        )
+        self.assertEqual(questions.onboard_cmd, "questions")
+        self.assertEqual(questions.intent, "upgrade")
+        self.assertTrue(questions.json)
+        apply = parser.parse_args(
+            ["onboard", "apply", "--answers", ".relkit/cache/answers.json"]
+        )
+        self.assertEqual(apply.onboard_cmd, "apply")
+        self.assertEqual(apply.answers, ".relkit/cache/answers.json")
 
     def test_release_checksums_rewrite_rust_sdk_lock(self) -> None:
         artifacts: dict = {}
@@ -697,6 +842,8 @@ class RetrospectTests(unittest.TestCase):
             self.assertIn("已落地\n", text)
             self.assertIn("待办\n- 无", text)
             self.assertIn("跳过\n", text)
+            self.assertIn("本次遇到\n- 无", text)
+            self.assertIn("未消化\n- 无", text)
             self.assertIn("文件:", text)
             self.assertIn("期望:", text)
             self.assertIn("现状:", text)
@@ -735,10 +882,13 @@ class RetrospectTests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(host.cmd_retrospect(Path(raw), as_json=True), 0)
             report = json.loads(output.getvalue())
-        self.assertEqual(report["schema"], "relkit.retrospect/1")
+        self.assertEqual(report["schema"], "relkit.retrospect/2")
         self.assertIn("landed", report["groups"])
         self.assertIn("todo", report["groups"])
         self.assertIn("skipped", report["groups"])
+        self.assertIn("encountered", report["groups"])
+        self.assertIn("digested", report["groups"])
+        self.assertIn("undigested", report["groups"])
 
     def test_retrospect_rejects_skill_that_only_points_to_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -823,6 +973,26 @@ class ReconcileTests(unittest.TestCase):
             )
             state = host.load_state(root)
             self.assertEqual(state["steps"]["fake.release"]["status"], "verified")
+
+    def test_fake_verify_stages_dummy_when_tree_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.save_state(root, host.default_state(root))
+            with (
+                patch("relkit_host.relkit_bin", return_value=Path("relkit")),
+                patch("relkit_host.run_relkit") as run,
+            ):
+                self.assertEqual(host.cmd_fake_verify(root, "1.2.3+4"), 0)
+            argv_lists = [call.args[2] for call in run.call_args_list]
+            self.assertEqual(argv_lists[0][0], "stage")
+            self.assertEqual(argv_lists[0][1], "1.2.3+4")
+            self.assertEqual(
+                argv_lists[-1],
+                ["simulate", "--with-staged", "1.2.3+4", "--from", "all"],
+            )
+            self.assertTrue(
+                (root / ".relkit" / "cache" / "dummy-fake" / "dummy-windows-x64.zip").is_file()
+            )
 
     def test_release_refuses_drift(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1123,6 +1293,81 @@ class SshHostParseTests(unittest.TestCase):
             self.assertIn("*.devcloud.woa.com", patterns)
             self.assertTrue(host.ssh_host_allowed("update.devcloud.woa.com", path))
             self.assertFalse(host.ssh_host_allowed("git.woa.com", path))
+            inventory = host.ssh_inventory(root, path)
+            self.assertEqual(inventory["exact"], ["cvm-gz"])
+            self.assertIn("*.devcloud.woa.com", inventory["patterns"])
+
+    def test_include_glob_expands_files(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            parent = Path(raw)
+            conf_d = parent / "config.d"
+            conf_d.mkdir()
+            (conf_d / "devcloud").write_text("Host box.devcloud.woa.com\n", encoding="utf-8")
+            paths = host._ssh_include_paths(str(conf_d / "*"))
+            self.assertEqual([item.name for item in paths], ["devcloud"])
+
+
+class InspectAndJournalTests(unittest.TestCase):
+    def test_http_put_blocks_inspect(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "backends": {"dev": {"type": "http-put"}},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(host.Fail) as raised:
+                host.cmd_onboard_inspect(root)
+            self.assertEqual(raised.exception.code, "stale-backend-type")
+            state = host.load_state(root)
+            self.assertEqual(state["steps"]["env.inspect"]["status"], "blocked")
+
+    def test_product_id_requires_verified_inspect(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with self.assertRaises(host.Fail) as raised:
+                host.cmd_onboard_set(root, "product.id", "demo", None)
+            self.assertEqual(raised.exception.code, "env-inspect-required")
+
+    def test_inspect_cannot_be_set(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with self.assertRaises(host.Fail) as raised:
+                host.cmd_onboard_set(root, "env.inspect", "ok", None)
+            self.assertEqual(raised.exception.code, "env-inspect-set-refused")
+
+    def test_undigested_journal_fails_retrospect(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.append_ops_journal(
+                root, ["release"], host.Fail("boom", code="brand-new-ops-bug")
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = host.cmd_retrospect(root)
+            self.assertEqual(code, 1)
+            self.assertIn("未消化", output.getvalue())
+            self.assertIn("ops-journal:brand-new-ops-bug", output.getvalue())
+            self.assertFalse(host.state_path(root).exists())
+
+    def test_digested_journal_does_not_fail_retrospect(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.append_ops_journal(
+                root, ["onboard", "inspect"], host.Fail("stale", code="stale-backend-type")
+            )
+            self.assertEqual(host.cmd_retrospect(root), 0)
+
+    def test_unclassified_fail_is_not_journaled(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.append_ops_journal(root, ["status"], host.Fail("typo"))
+            self.assertEqual(host.load_ops_journal(root), [])
 
 
 if __name__ == "__main__":

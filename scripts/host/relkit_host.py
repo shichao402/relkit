@@ -22,6 +22,8 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from urllib.error import HTTPError, URLError
@@ -67,6 +69,7 @@ STATUSES = (
 
 STEP_IDS = (
     "repo.root",
+    "env.inspect",
     "product.id",
     "updater.process",
     "channel.ssot",
@@ -85,16 +88,67 @@ STEP_IDS = (
 )
 
 REQUIRED_FOR_RELEASE = STEP_IDS
-DECISION_STEPS = STEP_IDS[:8]
-ACTION_STEPS = STEP_IDS[8:]
+DECISION_STEPS = (
+    "repo.root",
+    "env.inspect",
+    "product.id",
+    "updater.process",
+    "channel.ssot",
+    "backend.kind",
+    "ssh.host",
+    "ssh.config_dir",
+    "token.isolation",
+)
+ACTION_STEPS = tuple(step for step in STEP_IDS if step not in DECISION_STEPS)
+STALE_BACKEND_TYPES = frozenset({"http-put", "local"})
+INSPECT_SCHEMA = "relkit.inspect/1"
+OPS_JOURNAL_SCHEMA = "relkit.ops-journal/1"
+QUESTION_BATCH_SCHEMA = "relkit.onboarding-questions/1"
+ANSWER_BATCH_SCHEMA = "relkit.onboarding-answers/1"
+ONBOARD_INTENTS = ("fresh", "reconfigure", "upgrade")
+BATCH_DECISION_STEPS = tuple(
+    step for step in DECISION_STEPS if step not in ("repo.root", "env.inspect")
+)
+DIGESTED_ISSUE_CODES = frozenset(
+    {
+        "share-with-token-chown",
+        "list-products-comma",
+        "updater-process-rust-shell",
+        "onboarding-gitignore-split",
+        "sidecar-mjs-hardcode",
+        "fake-stage-version-demote",
+        "stale-backend-type",
+        "env-inspect-blocked",
+        "env-inspect-set-refused",
+        "env-inspect-required",
+        "fake-verify-missing-stage",
+        "fake-verify-no-version",
+        "onboard-batch-intent-invalid",
+        "onboard-batch-intent-conflict",
+        "onboard-answer-step-invalid",
+        "onboard-answer-shape-invalid",
+        "onboard-answer-unreadable",
+        "onboard-answer-schema-invalid",
+        "onboard-answer-revision-conflict",
+        "onboard-answer-conflict",
+    }
+)
 
 EXPLAIN_TEXTS = {
     "repo.root": "Confirm the product repository root and languages. No mutation.",
+    "env.inspect": (
+        "Dump existing wiring before any product decision. "
+        "Re-run onboard inspect after cleanup; error findings block product.id."
+    ),
     "product.id": "Stable product id used by serve/agent tokens and relkit.json.",
     "updater.process": UPDATER_PROCESS_EXPLAIN,
     "channel.ssot": "VERSION.json is the version SSOT; host.py/CI call relkit version, people do not.",
     "backend.kind": "Where bits live. Intranet products share a serve host with a new product id.",
-    "ssh.host": "OpenSSH Host name from ~/.ssh/config. This script never picks one.",
+    "ssh.host": (
+        "OpenSSH Host from ~/.ssh/config plus Include files. "
+        "This script lists exact names, glob patterns, and matching hostnames; "
+        "it never picks one."
+    ),
     "ssh.config_dir": "Directory the running unit actually reads (journal config: line).",
     "token.isolation": "exclusive mints a new token. share-with must be explicit.",
     "serve.register": "SSH to the already-installed binary's init. This script does not edit JSON.",
@@ -102,7 +156,10 @@ EXPLAIN_TEXTS = {
     "signing.keys": "Keygen + embed public keys. Private keys are not committed.",
     "consume.lock": "relkit.consume/2 lock pins release URLs, hashes, and scripts/host tree hash.",
     "sidecar.layout": "relkit-updater binary layout the host pack must keep.",
-    "fake.release": "Prove stage/simulate/verify before a real pack.",
+    "fake.release": (
+        "host.py fake verify stages a dummy zip if needed, then simulate. "
+        "Do not call relkit.exe stage by hand."
+    ),
     "pack.ci": "Real artifacts and CI. Optional for the first wiring, required for shipping.",
     "ops.retrospect": (
         "Final mechanical ops check. Agents must run relkit_host.py retrospect "
@@ -112,7 +169,9 @@ EXPLAIN_TEXTS = {
 
 
 class Fail(Exception):
-    pass
+    def __init__(self, message: str, *, code: str = "unclassified") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def force_utf8_stdio() -> None:
@@ -410,6 +469,7 @@ def recommendations(root: Path, state: dict[str, Any]) -> dict[str, str]:
             product = None
     return {
         "repo.root": f"{root}  stack={','.join(stack['languages']) or 'unknown'}",
+        "env.inspect": "run onboard inspect; error findings must be cleaned first",
         "product.id": str(product or re.sub(r"[^a-z0-9._-]+", "-", root.name.lower()).strip("-")),
         "updater.process": stack["updater"] or "ask the user which process owns Updater.open",
         "channel.ssot": (
@@ -426,7 +486,7 @@ def recommendations(root: Path, state: dict[str, Any]) -> dict[str, str]:
         "signing.keys": "relkit keygen on this repo; private key stays out of git",
         "consume.lock": "relkit_host.py install after scripts/relkit.lock.json is pinned",
         "sidecar.layout": "tools/bin updater sidecar next to the process that calls Updater.open",
-        "fake.release": "stage a dummy zip, simulate, verify; do not publish until pack.ci",
+        "fake.release": "relkit_host.py fake verify (stages dummy zip, then simulate)",
         "pack.ci": "product packaging + CI calling this script's release --execute",
         "ops.retrospect": "run relkit_host.py retrospect and require exit code 0",
     }
@@ -448,7 +508,8 @@ def choice_hint(root: Path, step_id: str) -> str:
         "updater.process": " / ".join(UPDATER_PROCESS_VALUES),
         "channel.ssot": "migrate:VERSION->VERSION.json / VERSION.json / custom",
         "backend.kind": "intranet-relkit-compatible / s3-compatible / static-http",
-        "ssh.host": ssh_host_recommend(),
+        "env.inspect": "clean error findings then onboard inspect; no typed confirmation",
+        "ssh.host": ssh_host_recommend(root=root),
         "ssh.config_dir": "运行中服务日志实际打印的配置目录",
         "token.isolation": "exclusive / share-with:<existing-product>",
     }
@@ -476,6 +537,112 @@ def recommended_value(root: Path, state: dict[str, Any], step_id: str) -> Option
     return str(value) if value else None
 
 
+def decision_options(root: Path, step_id: str) -> list[str]:
+    if step_id == "updater.process":
+        return list(UPDATER_PROCESS_VALUES)
+    if step_id == "channel.ssot":
+        options = ["VERSION.json", "custom"]
+        if (root / "VERSION").is_file() and not (root / "VERSION.json").is_file():
+            options.insert(0, "migrate:VERSION->VERSION.json")
+        return options
+    if step_id == "backend.kind":
+        return ["intranet-relkit-compatible", "s3-compatible", "static-http"]
+    if step_id == "ssh.host":
+        inventory = ssh_inventory(root)
+        values = list(inventory.get("exact") or [])
+        for item in inventory.get("matched") or []:
+            host = str(item.get("host") or "")
+            if host and host not in values:
+                values.append(host)
+        return values
+    if step_id == "token.isolation":
+        return ["exclusive", "share-with:<existing-product>"]
+    return []
+
+
+def question_batch_revision(
+    root: Path, state: dict[str, Any], intent: str
+) -> str:
+    inspection = env_inspect_report(root)
+    material = {
+        "intent": intent,
+        "inspect": inspection,
+        "decisions": {
+            step: {
+                "status": state["steps"][step]["status"],
+                "value": state["steps"][step]["value"],
+            }
+            for step in BATCH_DECISION_STEPS
+        },
+    }
+    encoded = json.dumps(
+        material, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_question_batch(
+    root: Path, state: dict[str, Any], intent: str
+) -> dict[str, Any]:
+    if intent not in ONBOARD_INTENTS:
+        raise Fail(
+            "intent must be " + " / ".join(ONBOARD_INTENTS),
+            code="onboard-batch-intent-invalid",
+        )
+    if state["steps"]["env.inspect"]["status"] != "verified":
+        raise Fail(
+            "env.inspect is not verified; run onboard inspect before batching questions",
+            code="env-inspect-required",
+        )
+    existing_product = str(state.get("product") or "")
+    inspection = env_inspect_report(root)
+    configured_product = str(
+        (inspection.get("facts") or {}).get("product") or ""
+    )
+    if intent == "fresh" and (existing_product or configured_product):
+        found = existing_product or configured_product
+        raise Fail(
+            f"fresh conflicts with existing product.id={found}; "
+            "use reconfigure or upgrade",
+            code="onboard-batch-intent-conflict",
+        )
+    if intent == "upgrade":
+        selected = [
+            step
+            for step in BATCH_DECISION_STEPS
+            if state["steps"][step]["status"]
+            in ("unanswered", "stale", "blocked", "drift")
+        ]
+    else:
+        selected = list(BATCH_DECISION_STEPS)
+    questions: list[dict[str, Any]] = []
+    for step in selected:
+        questions.append(
+            {
+                "id": step,
+                "prompt": explain_step(step),
+                "hint": choice_hint(root, step),
+                "options": decision_options(root, step),
+                "recommended": recommended_value(root, state, step),
+                "current": state["steps"][step]["value"],
+            }
+        )
+    return {
+        "schema": QUESTION_BATCH_SCHEMA,
+        "intent": intent,
+        "revision": question_batch_revision(root, state, intent),
+        "inspection": inspection,
+        "questions": questions,
+        "answerSchema": ANSWER_BATCH_SCHEMA,
+        "answerShape": {
+            "schema": ANSWER_BATCH_SCHEMA,
+            "intent": intent,
+            "revision": "<copy revision>",
+            "answers": {item["id"]: "<value>" for item in questions},
+        },
+    }
+
+
 def next_unresolved_step(state: dict[str, Any]) -> Optional[str]:
     return next(
         (
@@ -494,6 +661,10 @@ def print_decision(root: Path, state: dict[str, Any], step_id: str) -> None:
     hint = choice_hint(root, step_id)
     if hint:
         print(f"可选: {hint}")
+    if step_id == "ssh.host":
+        print_ssh_inventory(ssh_inventory(root))
+    if step_id == "env.inspect":
+        print_env_inspect(env_inspect_report(root))
 
 
 def normalize_interactive_value(step_id: str, raw: str) -> tuple[str, Optional[str]]:
@@ -523,6 +694,10 @@ def run_interactive_wizard(
             print("这是执行步骤，不用文字确认冒充完成。")
             print("运行上面建议的显式子命令；有远端写入时还需 --execute，重启还需 --restart。")
             return 0
+        if step_id == "env.inspect":
+            print_decision(root, state, step_id)
+            cmd_onboard_inspect(root)
+            continue
         print_decision(root, state, step_id)
         answer = input_fn("输入选择；r=采用推荐，?=重看说明，q=保存并退出: ").strip()
         if answer.lower() == "q":
@@ -544,7 +719,18 @@ def run_interactive_wizard(
 
 
 def _expand_ssh_path(raw: str) -> Path:
-    return Path(os.path.expanduser(os.path.expandvars(raw)))
+    return Path(os.path.expanduser(os.path.expandvars(raw.strip().strip("\"'"))))
+
+
+def _ssh_include_paths(raw: str) -> list[Path]:
+    expanded = _expand_ssh_path(raw)
+    name = expanded.name
+    if any(ch in name for ch in "*?["):
+        parent = expanded.parent
+        if not parent.is_dir():
+            return []
+        return sorted(path for path in parent.glob(name) if path.is_file())
+    return [expanded]
 
 
 def parse_ssh_config(
@@ -582,17 +768,17 @@ def parse_ssh_config_ports(
         lower = stripped.lower()
         if lower.startswith("include "):
             for item in stripped.split()[1:]:
-                nested = _expand_ssh_path(item)
-                more_exact, more_patterns, more_ports = parse_ssh_config_ports(
-                    nested, _seen=seen
-                )
-                for name in more_exact:
-                    if name not in exact:
-                        exact.append(name)
-                for name in more_patterns:
-                    if name not in patterns:
-                        patterns.append(name)
-                ports.extend(more_ports)
+                for nested in _ssh_include_paths(item):
+                    more_exact, more_patterns, more_ports = parse_ssh_config_ports(
+                        nested, _seen=seen
+                    )
+                    for name in more_exact:
+                        if name not in exact:
+                            exact.append(name)
+                    for name in more_patterns:
+                        if name not in patterns:
+                            patterns.append(name)
+                    ports.extend(more_ports)
             continue
         if lower.startswith("port ") and current:
             try:
@@ -649,7 +835,9 @@ def ssh_host_allowed(name: str, config_path: Optional[Path] = None) -> bool:
     return False
 
 
-def ssh_host_recommend(config_path: Optional[Path] = None) -> str:
+def ssh_host_recommend(
+    config_path: Optional[Path] = None, *, root: Optional[Path] = None
+) -> str:
     exact, patterns, ports = parse_ssh_config_ports(config_path)
 
     def with_port(name: str) -> str:
@@ -664,7 +852,368 @@ def ssh_host_recommend(config_path: Optional[Path] = None) -> str:
     useful = [item for item in patterns if item != "*"]
     if useful:
         bits.append("patterns: " + ", ".join(with_port(item) for item in useful))
+    if root is not None:
+        matched = ssh_inventory(root, config_path).get("matched") or []
+        if matched:
+            bits.append(
+                "matched: "
+                + ", ".join(
+                    f"{item['host']} via {item['via']}" for item in matched
+                )
+            )
     return "; ".join(bits) if bits else "no Host entries in ~/.ssh/config"
+
+
+def default_ssh_config_path() -> Path:
+    return Path.home() / ".ssh" / "config"
+
+
+def parse_known_host_names(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    names: list[str] = []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("|"):
+            continue
+        parts = stripped.split()
+        if not parts:
+            continue
+        hostfield = parts[1] if parts[0].startswith("@") and len(parts) > 1 else parts[0]
+        for token in hostfield.split(","):
+            token = token.strip()
+            if token.startswith("[") and "]:" in token:
+                token = token[1 : token.index("]:")]
+            if not token or token.startswith("|") or "*" in token or "?" in token:
+                continue
+            if token not in names:
+                names.append(token)
+    return names
+
+
+def collect_json_hosts(value: Any, into: list[str]) -> None:
+    if isinstance(value, dict):
+        for item in value.values():
+            collect_json_hosts(item, into)
+        return
+    if isinstance(value, list):
+        for item in value:
+            collect_json_hosts(item, into)
+        return
+    if not isinstance(value, str) or "://" not in value:
+        return
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return
+    host = (parsed.hostname or "").strip()
+    if host and host not in into:
+        into.append(host)
+
+
+def ssh_inventory(
+    root: Path, config_path: Optional[Path] = None
+) -> dict[str, Any]:
+    path = (config_path or default_ssh_config_path()).resolve()
+    exact, patterns, ports = parse_ssh_config_ports(path)
+    useful = [item for item in patterns if item != "*"]
+    sources: list[str] = []
+    for name in exact:
+        sources.append(name)
+    known_files = [Path.home() / ".ssh" / "known_hosts"]
+    known_dir = Path.home() / ".ssh" / "known_hosts.d"
+    if known_dir.is_dir():
+        known_files.extend(sorted(p for p in known_dir.iterdir() if p.is_file()))
+    known: list[str] = []
+    for known_path in known_files:
+        for name in parse_known_host_names(known_path):
+            if name not in known:
+                known.append(name)
+    config_hosts: list[str] = []
+    relkit_json = root / "relkit.json"
+    if relkit_json.is_file():
+        try:
+            collect_json_hosts(load_json(relkit_json), config_hosts)
+        except (OSError, json.JSONDecodeError, TypeError):
+            config_hosts = []
+    matched: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for name, via in (
+        *[(item, "relkit.json") for item in config_hosts],
+        *[(item, "known_hosts") for item in known],
+    ):
+        if name in seen or name in exact:
+            continue
+        for pattern in useful:
+            if fnmatch.fnmatch(name, pattern):
+                matched.append({"host": name, "via": via, "pattern": pattern})
+                seen.add(name)
+                break
+    return {
+        "config": str(path),
+        "exact": exact,
+        "patterns": useful,
+        "matched": matched,
+        "ports": [
+            {"hosts": tokens, "port": port} for tokens, port in ports
+        ],
+    }
+
+
+def print_ssh_inventory(inventory: dict[str, Any]) -> None:
+    print(f"SSH config: {inventory.get('config')}")
+    index = 1
+    for name in inventory.get("exact") or []:
+        print(f"  {index}. {name} (exact Host)")
+        index += 1
+    for item in inventory.get("matched") or []:
+        print(
+            f"  {index}. {item['host']} "
+            f"(matches {item['pattern']} via {item['via']})"
+        )
+        index += 1
+    patterns = inventory.get("patterns") or []
+    if patterns:
+        print("  patterns (not sshable aliases): " + ", ".join(patterns))
+    if index == 1 and not patterns:
+        print("  (no Host entries)")
+
+
+def inspect_path(root: Path) -> Path:
+    return cache_dir(root) / "inspect.json"
+
+
+def ops_journal_path(root: Path) -> Path:
+    return cache_dir(root) / "ops-journal.jsonl"
+
+
+def env_inspect_report(root: Path) -> dict[str, Any]:
+    findings: list[dict[str, str]] = []
+    facts: dict[str, Any] = {
+        "stack": detect_stack(root),
+        "relkit.json": None,
+        "backends": {},
+        "version": {},
+        "lock": None,
+        "onboarding": None,
+        "ssh": ssh_inventory(root),
+    }
+    relkit_json = root / "relkit.json"
+    if relkit_json.is_file():
+        try:
+            data = load_json(relkit_json)
+        except (OSError, json.JSONDecodeError, TypeError) as error:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "relkit-json-unreadable",
+                    "detail": str(error),
+                }
+            )
+            data = {}
+        facts["relkit.json"] = True
+        facts["product"] = data.get("product")
+        backends = data.get("backends") if isinstance(data.get("backends"), dict) else {}
+        facts["backends"] = {
+            name: (backend or {}).get("type")
+            for name, backend in backends.items()
+            if isinstance(backend, dict)
+        }
+        for name, kind in facts["backends"].items():
+            if kind in STALE_BACKEND_TYPES:
+                findings.append(
+                    {
+                        "severity": "error",
+                        "code": "stale-backend-type",
+                        "detail": f"backends.{name}.type={kind}",
+                    }
+                )
+    else:
+        facts["relkit.json"] = False
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "missing-relkit-json",
+                "detail": "relkit.json is absent (fresh repo)",
+            }
+        )
+    version_json = root / "VERSION.json"
+    version_legacy = root / "VERSION"
+    facts["version"] = {
+        "VERSION.json": version_json.is_file(),
+        "VERSION": version_legacy.is_file(),
+    }
+    if version_legacy.is_file() and not version_json.is_file():
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "legacy-VERSION",
+                "detail": "VERSION exists without VERSION.json",
+            }
+        )
+    lock_path = root / "scripts" / "relkit.lock.json"
+    if lock_path.is_file():
+        try:
+            lock = load_json(lock_path)
+            expected = str(lock.get("hostScriptsSha256") or "").lower()
+            host_dir = root / "scripts" / "host"
+            actual = (
+                tree_sha256(host_dir)
+                if (host_dir / "relkit_host.py").is_file()
+                else ""
+            )
+            facts["lock"] = {
+                "release": lock.get("release"),
+                "hostScriptsMatch": bool(expected) and expected == actual,
+            }
+            if expected and actual and expected != actual:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "host-scripts-drift",
+                        "detail": "scripts/host hash != lock hostScriptsSha256",
+                    }
+                )
+        except (OSError, json.JSONDecodeError, Fail, TypeError) as error:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": "lock-unreadable",
+                    "detail": str(error),
+                }
+            )
+    onboard = state_path(root)
+    facts["onboarding"] = onboard.is_file()
+    return {
+        "schema": INSPECT_SCHEMA,
+        "root": str(root),
+        "facts": facts,
+        "findings": findings,
+    }
+
+
+def print_env_inspect(report: dict[str, Any]) -> None:
+    facts = report.get("facts") or {}
+    print("env.inspect facts")
+    print(f"  relkit.json: {facts.get('relkit.json')}")
+    backends = facts.get("backends") or {}
+    if backends:
+        print("  backends: " + ", ".join(f"{k}={v}" for k, v in backends.items()))
+    version = facts.get("version") or {}
+    print(
+        "  VERSION.json="
+        + str(version.get("VERSION.json"))
+        + " VERSION="
+        + str(version.get("VERSION"))
+    )
+    lock = facts.get("lock")
+    if lock:
+        print(f"  lock: {lock}")
+    print(f"  onboarding.json: {facts.get('onboarding')}")
+    findings = report.get("findings") or []
+    if not findings:
+        print("  findings: none")
+        return
+    print("  findings:")
+    for item in findings:
+        print(f"    [{item['severity']}] {item['code']}: {item['detail']}")
+
+
+def apply_env_inspect(root: Path, state: dict[str, Any], report: dict[str, Any]) -> None:
+    cache_dir(root).mkdir(parents=True, exist_ok=True)
+    inspect_path(root).write_text(dump_json(report), encoding="utf-8")
+    errors = [
+        item for item in report.get("findings") or [] if item.get("severity") == "error"
+    ]
+    if errors:
+        detail = "; ".join(item["detail"] for item in errors)
+        set_step(state, "env.inspect", "blocked", "findings", detail)
+        return
+    set_step(state, "env.inspect", "verified", "clean", "no error findings")
+
+
+def cmd_onboard_inspect(root: Path) -> int:
+    state = load_state(root)
+    report = env_inspect_report(root)
+    apply_env_inspect(root, state, report)
+    save_state(root, state)
+    print_env_inspect(report)
+    errors = [
+        item for item in report.get("findings") or [] if item.get("severity") == "error"
+    ]
+    if errors:
+        codes = sorted({str(item.get("code") or "env-inspect-blocked") for item in errors})
+        raise Fail(
+            "env.inspect blocked; clean error findings then rerun onboard inspect",
+            code=codes[0] if len(codes) == 1 else "env-inspect-blocked",
+        )
+    print("env.inspect verified")
+    return 0
+
+
+def append_ops_journal(root: Path, argv: Sequence[str], error: Fail) -> None:
+    if error.code == "unclassified":
+        return
+    cache_dir(root).mkdir(parents=True, exist_ok=True)
+    entry = {
+        "schema": OPS_JOURNAL_SCHEMA,
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cmd": " ".join(str(item) for item in argv),
+        "code": error.code,
+        "message": redact_text(str(error)),
+    }
+    with ops_journal_path(root).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def load_ops_journal(root: Path) -> list[dict[str, Any]]:
+    path = ops_journal_path(root)
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def dummy_stage_zip(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("DUMMY.txt", "relkit fake.release dummy\n")
+
+
+def stage_dummy_release(root: Path, version: str, binary: Path) -> None:
+    dummy = cache_dir(root) / "dummy-fake"
+    dummy.mkdir(parents=True, exist_ok=True)
+    windows = dummy / "dummy-windows-x64.zip"
+    macos = dummy / "dummy-macos.zip"
+    dummy_stage_zip(windows)
+    dummy_stage_zip(macos)
+    run_relkit(
+        root,
+        binary,
+        [
+            "stage",
+            version,
+            "--add",
+            str(windows),
+            "os=windows,arch=x64,meta.layout=wholeRoot",
+            "--add",
+            str(macos),
+            "os=macos,meta.layout=wholeRoot",
+        ],
+    )
 
 
 def ssh_argv(host: str, port: Optional[int]) -> list[str]:
@@ -1284,16 +1833,22 @@ def cmd_onboard_start(root: Path, *, interactive: bool = False) -> int:
     state = load_state(root)
     stack = detect_stack(root)
     set_step(state, "repo.root", "verified", ".", ",".join(stack["languages"]))
+    report = env_inspect_report(root)
+    apply_env_inspect(root, state, report)
     save_state(root, state)
     print("已检测仓库事实；尚未替你确认任何策略。")
     print(f"仓根: {root}")
     print(f"技术栈: {','.join(stack['languages']) or 'unknown'}")
+    print_env_inspect(report)
     if interactive:
         return run_interactive_wizard(root)
     unresolved = next_unresolved_step(state)
     if unresolved:
         print_decision(root, state, unresolved)
-        print(f"非交互模式写入: onboard set {unresolved} <你的选择>")
+        if unresolved == "env.inspect":
+            print("非交互模式: 清理 error findings 后运行 onboard inspect")
+        else:
+            print(f"非交互模式写入: onboard set {unresolved} <你的选择>")
     return 0
 
 
@@ -1304,7 +1859,10 @@ def cmd_onboard_resume(root: Path, *, interactive: bool = False) -> int:
     step_id = next_unresolved_step(state)
     if step_id:
         print_decision(root, state, step_id)
-        print(f"非交互模式写入: onboard set {step_id} <你的选择>")
+        if step_id == "env.inspect":
+            print("非交互模式: 清理 error findings 后运行 onboard inspect")
+        else:
+            print(f"非交互模式写入: onboard set {step_id} <你的选择>")
         return 0
     print("开箱状态没有未决项。运行 verify 对账。")
     return 0
@@ -1326,17 +1884,27 @@ def cmd_onboard_reset(root: Path, *, yes: bool = False) -> int:
     return 0
 
 
-def cmd_onboard_set(
+def apply_decision_to_state(
     root: Path,
+    state: dict[str, Any],
     step_id: str,
     value: Optional[str],
     share_with: Optional[str],
     note: Optional[str] = None,
-) -> int:
-    state = load_state(root)
+) -> None:
+    if step_id not in BATCH_DECISION_STEPS:
+        raise Fail(
+            f"{step_id} is not a human decision step",
+            code="onboard-answer-step-invalid",
+        )
     previous_note = str(state["steps"].get(step_id, {}).get("note") or "")
     kept_note = previous_note if note is None else note
     if step_id == "product.id":
+        if state["steps"]["env.inspect"]["status"] != "verified":
+            raise Fail(
+                "env.inspect is not verified; run onboard inspect after cleanup",
+                code="env-inspect-required",
+            )
         if not value:
             raise Fail("onboard set product.id needs an id")
         state["product"] = value
@@ -1386,11 +1954,14 @@ def cmd_onboard_set(
             raise Fail("updater.process must be " + " / ".join(UPDATER_PROCESS_VALUES))
         set_step(state, step_id, "confirmed", value, kept_note, mark_later_stale=True)
     elif step_id == "backend.kind":
+        allowed = ("intranet-relkit-compatible", "s3-compatible", "static-http")
+        if value not in allowed:
+            raise Fail("backend.kind must be " + " / ".join(allowed))
         set_step(
             state,
             step_id,
             "confirmed",
-            value or "intranet-relkit-compatible",
+            value,
             kept_note,
             mark_later_stale=True,
         )
@@ -1398,9 +1969,144 @@ def cmd_onboard_set(
         if value is None:
             raise Fail(f"onboard set {step_id} needs a value")
         set_step(state, step_id, "confirmed", value, kept_note, mark_later_stale=True)
+
+
+def cmd_onboard_set(
+    root: Path,
+    step_id: str,
+    value: Optional[str],
+    share_with: Optional[str],
+    note: Optional[str] = None,
+) -> int:
+    if step_id == "env.inspect":
+        raise Fail(
+            "env.inspect is written by onboard inspect, not onboard set",
+            code="env-inspect-set-refused",
+        )
+    state = load_state(root)
+    apply_decision_to_state(root, state, step_id, value, share_with, note)
     save_state(root, state)
     print(f"recorded {step_id}={state['steps'][step_id]['value']} status=confirmed")
     print("no remote mutation happened")
+    return 0
+
+
+def cmd_onboard_questions(root: Path, intent: str, as_json: bool = False) -> int:
+    batch = build_question_batch(root, load_state(root), intent)
+    if as_json:
+        print(dump_json(batch), end="")
+        return 0
+    print(f"批量决策 intent={intent} revision={batch['revision']}")
+    for index, item in enumerate(batch["questions"], start=1):
+        print(f"{index}. {item['id']}: {item['prompt']}")
+        if item["options"]:
+            print("   可选: " + " / ".join(item["options"]))
+        if item["recommended"]:
+            print(f"   推荐: {item['recommended']}")
+        if item["current"]:
+            print(f"   当前: {item['current']}")
+    print("用 onboard apply --answers <json-file> 原子提交整批答案。")
+    return 0
+
+
+def _answer_value(
+    step_id: str, raw: Any
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    if isinstance(raw, str):
+        value, share_with = normalize_interactive_value(step_id, raw)
+        return value, share_with, None
+    if not isinstance(raw, dict):
+        raise Fail(
+            "answer must be a string or object with value/note",
+            code="onboard-answer-shape-invalid",
+        )
+    value_raw = raw.get("value")
+    if not isinstance(value_raw, str):
+        raise Fail(
+            "answer object needs string value",
+            code="onboard-answer-shape-invalid",
+        )
+    value = value_raw.strip()
+    share_with = raw.get("shareWith")
+    if share_with is not None and not isinstance(share_with, str):
+        raise Fail(
+            "answer shareWith must be a string",
+            code="onboard-answer-shape-invalid",
+        )
+    if value.startswith("share-with:"):
+        value, inline_share = normalize_interactive_value("token.isolation", value)
+        share_with = inline_share
+    note = raw.get("note")
+    if note is not None and not isinstance(note, str):
+        raise Fail(
+            "answer note must be a string",
+            code="onboard-answer-shape-invalid",
+        )
+    return value, share_with, note
+
+
+def cmd_onboard_apply(root: Path, answers_path: Path) -> int:
+    resolved_answers = (
+        answers_path.resolve()
+        if answers_path.is_absolute()
+        else (root / answers_path).resolve()
+    )
+    try:
+        payload = load_json(resolved_answers)
+    except (OSError, json.JSONDecodeError, TypeError) as error:
+        raise Fail(
+            f"cannot read answer batch: {error}",
+            code="onboard-answer-unreadable",
+        ) from error
+    if payload.get("schema") != ANSWER_BATCH_SCHEMA:
+        raise Fail(
+            f"answer batch must use {ANSWER_BATCH_SCHEMA}",
+            code="onboard-answer-schema-invalid",
+        )
+    intent = str(payload.get("intent") or "")
+    state = load_state(root)
+    batch = build_question_batch(root, state, intent)
+    if payload.get("revision") != batch["revision"]:
+        raise Fail(
+            "repository facts or decisions changed after questions were generated; "
+            "regenerate the batch and ask only the changed questions",
+            code="onboard-answer-revision-conflict",
+        )
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        raise Fail(
+            "answer batch needs an answers object",
+            code="onboard-answer-shape-invalid",
+        )
+    expected = [item["id"] for item in batch["questions"]]
+    missing = [step for step in expected if step not in answers]
+    unknown = [str(step) for step in answers if step not in expected]
+    conflicts: list[str] = []
+    if missing:
+        conflicts.append("missing: " + ", ".join(missing))
+    if unknown:
+        conflicts.append("not asked: " + ", ".join(unknown))
+    candidate = json.loads(json.dumps(state))
+    if not conflicts:
+        for step in expected:
+            try:
+                value, share_with, note = _answer_value(step, answers[step])
+                apply_decision_to_state(
+                    root, candidate, step, value, share_with, note
+                )
+            except Fail as error:
+                conflicts.append(f"{step}: {error}")
+    product = str(candidate.get("product") or "")
+    shared = str(candidate.get("serve", {}).get("shareWith") or "")
+    if shared and shared == product:
+        conflicts.append("token.isolation: cannot share with the same product.id")
+    if conflicts:
+        raise Fail(
+            "answer batch rejected atomically:\n  " + "\n  ".join(conflicts),
+            code="onboard-answer-conflict",
+        )
+    save_state(root, candidate)
+    print(f"applied {len(expected)} decisions atomically; no remote mutation happened")
     return 0
 
 
@@ -1828,9 +2534,12 @@ def cmd_fake_verify(root: Path, version: Optional[str]) -> int:
     if not resolved:
         current = run_relkit(root, binary, ["version", "get"])
         resolved = (current.stdout or "").strip().splitlines()[-1]
+    if not resolved:
+        raise Fail("fake verify needs a version", code="fake-verify-no-version")
     staged = cache_dir(root) / "staged" / resolved
     if not (staged / "staged.pb").is_file():
-        raise Fail(f"missing staged tree for {resolved}")
+        print(f"no staged tree for {resolved}; staging dummy zip")
+        stage_dummy_release(root, resolved, binary)
     run_relkit(root, binary, ["simulate", "--with-staged", resolved, "--from", "all"])
     state = load_state(root)
     set_step(
@@ -2283,7 +2992,7 @@ def routing_help() -> str:
     return """relkit_host.py — product-repo ops gate. Prints routing only; confirms nothing.
 
   onboard start|resume [--interactive|--non-interactive]
-  onboard explain|set|reset
+  onboard inspect|questions|apply|explain|set|reset
   retrospect
   install
   upgrade vX.Y.Z
@@ -2517,15 +3226,48 @@ def retrospect_report(root: Path) -> dict[str, Any]:
             not prose_gate,
         )
 
+    encountered, digested, undigested = classify_ops_journal(root)
     return {
-        "schema": "relkit.retrospect/1",
+        "schema": "relkit.retrospect/2",
         "root": str(root),
         "groups": {
             "landed": [item for item in items if item["outcome"] == "landed"],
             "todo": [item for item in items if item["outcome"] == "todo"],
             "skipped": [item for item in items if item["outcome"] == "skipped"],
+            "encountered": encountered,
+            "digested": digested,
+            "undigested": undigested,
         },
     }
+
+
+def classify_ops_journal(
+    root: Path,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
+    seen: list[str] = []
+    for row in load_ops_journal(root):
+        code = str(row.get("code") or "").strip()
+        if not code or code == "unclassified" or code in seen:
+            continue
+        seen.append(code)
+    encountered: list[dict[str, str]] = []
+    digested: list[dict[str, str]] = []
+    undigested: list[dict[str, str]] = []
+    journal = ".relkit/cache/ops-journal.jsonl"
+    for code in seen:
+        item = _retrospect_item(
+            "landed" if code in DIGESTED_ISSUE_CODES else "todo",
+            f"ops-journal:{code}",
+            journal,
+            "issue class already digested into host.py or skill",
+            code,
+        )
+        encountered.append(item)
+        if code in DIGESTED_ISSUE_CODES:
+            digested.append(item)
+        else:
+            undigested.append(item)
+    return encountered, digested, undigested
 
 
 def _retrospect_line(item: dict[str, str]) -> str:
@@ -2541,7 +3283,14 @@ def retrospect_failures(root: Path) -> list[str]:
 
 
 def print_retrospect_report(report: dict[str, Any]) -> None:
-    labels = (("landed", "已落地"), ("todo", "待办"), ("skipped", "跳过"))
+    labels = (
+        ("landed", "已落地"),
+        ("todo", "待办"),
+        ("skipped", "跳过"),
+        ("encountered", "本次遇到"),
+        ("digested", "已修进脚本或 skill"),
+        ("undigested", "未消化"),
+    )
     for key, label in labels:
         print(label)
         items = report["groups"][key]
@@ -2558,7 +3307,7 @@ def cmd_retrospect(root: Path, as_json: bool = False) -> int:
         print(dump_json(report), end="")
     else:
         print_retrospect_report(report)
-    if report["groups"]["todo"]:
+    if report["groups"]["todo"] or report["groups"]["undigested"]:
         return 1
     state = load_state(root)
     set_step(
@@ -2602,6 +3351,16 @@ def build_parser() -> argparse.ArgumentParser:
     setter.add_argument("--note", help="short product fact only; not an architecture essay")
     reset = onboard_sub.add_parser("reset", help="delete product .relkit/; does not write docs")
     reset.add_argument("--yes", action="store_true")
+    onboard_sub.add_parser("inspect", help="dump env facts; error findings block product.id")
+    questions = onboard_sub.add_parser(
+        "questions", help="emit one batch of independent human decisions"
+    )
+    questions.add_argument("--intent", required=True, choices=ONBOARD_INTENTS)
+    questions.add_argument("--json", action="store_true")
+    apply_answers = onboard_sub.add_parser(
+        "apply", help="validate and atomically record one answer batch"
+    )
+    apply_answers.add_argument("--answers", required=True)
 
     sub.add_parser("install", help="install lock-pinned artifacts via relkit_consume.py")
     retrospect = sub.add_parser(
@@ -2713,6 +3472,12 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
             return cmd_onboard_explain(args.step)
         if args.onboard_cmd == "reset":
             return cmd_onboard_reset(root, yes=bool(getattr(args, "yes", False)))
+        if args.onboard_cmd == "inspect":
+            return cmd_onboard_inspect(root)
+        if args.onboard_cmd == "questions":
+            return cmd_onboard_questions(root, args.intent, args.json)
+        if args.onboard_cmd == "apply":
+            return cmd_onboard_apply(root, Path(args.answers))
         return cmd_onboard_set(
             root,
             args.step,
@@ -2769,9 +3534,11 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     force_utf8_stdio()
+    raw = list(argv) if argv is not None else sys.argv[1:]
+    root = host_root()
     try:
         parser = build_parser()
-        args = parser.parse_args(list(argv) if argv is not None else None)
+        args = parser.parse_args(raw)
         root = (
             Path(args.project_root).resolve()
             if getattr(args, "project_root", None)
@@ -2780,6 +3547,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return dispatch(root, args)
     except Fail as error:
         print(f"ERROR: {error}", file=sys.stderr)
+        try:
+            append_ops_journal(root, raw, error)
+        except OSError:
+            pass
         return 1
     except Exception as error:
         print(f"ERROR: relkit_host failed: {error}", file=sys.stderr)
