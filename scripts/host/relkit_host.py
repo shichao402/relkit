@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
@@ -79,11 +81,34 @@ STEP_IDS = (
     "sidecar.layout",
     "fake.release",
     "pack.ci",
+    "ops.retrospect",
 )
 
 REQUIRED_FOR_RELEASE = STEP_IDS
 DECISION_STEPS = STEP_IDS[:8]
 ACTION_STEPS = STEP_IDS[8:]
+
+EXPLAIN_TEXTS = {
+    "repo.root": "Confirm the product repository root and languages. No mutation.",
+    "product.id": "Stable product id used by serve/agent tokens and relkit.json.",
+    "updater.process": UPDATER_PROCESS_EXPLAIN,
+    "channel.ssot": "VERSION.json is the version SSOT; host.py/CI call relkit version, people do not.",
+    "backend.kind": "Where bits live. Intranet products share a serve host with a new product id.",
+    "ssh.host": "OpenSSH Host name from ~/.ssh/config. This script never picks one.",
+    "ssh.config_dir": "Directory the running unit actually reads (journal config: line).",
+    "token.isolation": "exclusive mints a new token. share-with must be explicit.",
+    "serve.register": "SSH to the already-installed binary's init. This script does not edit JSON.",
+    "agent.register": "Register a publish profile for this product on the agent host.",
+    "signing.keys": "Keygen + embed public keys. Private keys are not committed.",
+    "consume.lock": "relkit.consume/2 lock pins release URLs, hashes, and scripts/host tree hash.",
+    "sidecar.layout": "relkit-updater binary layout the host pack must keep.",
+    "fake.release": "Prove stage/simulate/verify before a real pack.",
+    "pack.ci": "Real artifacts and CI. Optional for the first wiring, required for shipping.",
+    "ops.retrospect": (
+        "Final mechanical ops check. Agents must run relkit_host.py retrospect "
+        "before claiming onboarding is complete."
+    ),
+}
 
 
 class Fail(Exception):
@@ -374,7 +399,7 @@ def detect_stack(root: Path) -> dict[str, Any]:
     return {"languages": kind, "updater": updater, "root": str(root)}
 
 
-def recommend(root: Path, state: dict[str, Any], step_id: str) -> str:
+def recommendations(root: Path, state: dict[str, Any]) -> dict[str, str]:
     stack = detect_stack(root)
     relkit_json = root / "relkit.json"
     product = None
@@ -383,7 +408,7 @@ def recommend(root: Path, state: dict[str, Any], step_id: str) -> str:
             product = load_json(relkit_json).get("product")
         except (OSError, json.JSONDecodeError, TypeError):
             product = None
-    mapping = {
+    return {
         "repo.root": f"{root}  stack={','.join(stack['languages']) or 'unknown'}",
         "product.id": str(product or re.sub(r"[^a-z0-9._-]+", "-", root.name.lower()).strip("-")),
         "updater.process": stack["updater"] or "ask the user which process owns Updater.open",
@@ -403,31 +428,18 @@ def recommend(root: Path, state: dict[str, Any], step_id: str) -> str:
         "sidecar.layout": "tools/bin updater sidecar next to the process that calls Updater.open",
         "fake.release": "stage a dummy zip, simulate, verify; do not publish until pack.ci",
         "pack.ci": "product packaging + CI calling this script's release --execute",
+        "ops.retrospect": "run relkit_host.py retrospect and require exit code 0",
     }
-    return mapping[step_id]
+
+
+def recommend(root: Path, state: dict[str, Any], step_id: str) -> str:
+    return recommendations(root, state)[step_id]
 
 
 def explain_step(step_id: str) -> str:
-    texts = {
-        "repo.root": "Confirm the product repository root and languages. No mutation.",
-        "product.id": "Stable product id used by serve/agent tokens and relkit.json.",
-        "updater.process": UPDATER_PROCESS_EXPLAIN,
-        "channel.ssot": "VERSION.json is the version SSOT; host.py/CI call relkit version, people do not.",
-        "backend.kind": "Where bits live. Intranet products share a serve host with a new product id.",
-        "ssh.host": "OpenSSH Host name from ~/.ssh/config. This script never picks one.",
-        "ssh.config_dir": "Directory the running unit actually reads (journal config: line).",
-        "token.isolation": "exclusive mints a new token. share-with must be explicit.",
-        "serve.register": "SSH to the already-installed binary's init. This script does not edit JSON.",
-        "agent.register": "Register a publish profile for this product on the agent host.",
-        "signing.keys": "Keygen + embed public keys. Private keys are not committed.",
-        "consume.lock": "relkit.consume/2 lock pins release URLs, hashes, and scripts/host tree hash.",
-        "sidecar.layout": "relkit-updater binary layout the host pack must keep.",
-        "fake.release": "Prove stage/simulate/verify before a real pack.",
-        "pack.ci": "Real artifacts and CI. Optional for the first wiring, required for shipping.",
-    }
-    if step_id not in texts:
+    if step_id not in EXPLAIN_TEXTS:
         raise Fail(f"unknown step {step_id}")
-    return texts[step_id]
+    return EXPLAIN_TEXTS[step_id]
 
 
 def choice_hint(root: Path, step_id: str) -> str:
@@ -1705,6 +1717,8 @@ def publish_via_agent(
 def release_incomplete_steps(state: dict[str, Any], *, via_ci: bool = False) -> list[str]:
     missing: list[str] = []
     for step in REQUIRED_FOR_RELEASE:
+        if step == "ops.retrospect" and via_ci:
+            continue
         status = state["steps"][step]["status"]
         allowed = ("confirmed", "verified") if step in DECISION_STEPS else ("verified",)
         if step == "pack.ci" and via_ci:
@@ -2270,6 +2284,7 @@ def routing_help() -> str:
 
   onboard start|resume [--interactive|--non-interactive]
   onboard explain|set|reset
+  retrospect
   install
   upgrade vX.Y.Z
   fake verify [--version X.Y.Z+N]
@@ -2285,6 +2300,97 @@ CI must name a subcommand. Mutations need --execute. Restarts need --restart.
 Empty-machine install / binary replace lives in the relkit repo:
   python deploy/relkit.py build|install|upgrade
 """
+
+
+def _retrospect_skill_paths(root: Path) -> list[Path]:
+    candidates = (
+        root / "skills" / "relkit-ops" / "SKILL.md",
+        root / ".cursor" / "skills" / "relkit-ops" / "SKILL.md",
+        root / ".codebuddy" / "skills" / "relkit-ops" / "SKILL.md",
+    )
+    return [path for path in candidates if path.is_file()]
+
+
+def retrospect_failures(root: Path) -> list[str]:
+    """Return mechanical drift in the ops contract; never prompts or mutates."""
+    failures: list[str] = []
+
+    recommendation_keys = set(recommendations(root, default_state(root)))
+    if set(STEP_IDS) != set(EXPLAIN_TEXTS):
+        failures.append("STEP_IDS and explain_step keys differ")
+    if set(STEP_IDS) != recommendation_keys:
+        failures.append("STEP_IDS and recommend keys differ")
+    for step_id in STEP_IDS:
+        try:
+            explain_step(step_id)
+            recommend(root, default_state(root), step_id)
+        except (Fail, KeyError) as error:
+            failures.append(f"{step_id} has no explain/recommend entry: {error}")
+
+    expected_ignores = {".relkit/cache/", ".relkit-keys/*.private.pb"}
+    if set(GITIGNORE_RELKIT) != expected_ignores:
+        failures.append("GITIGNORE_RELKIT must ignore only cache and private keys")
+    with tempfile.TemporaryDirectory() as raw:
+        probe = Path(raw)
+        ensure_gitignore(probe)
+        ignore = (probe / ".gitignore").read_text(encoding="utf-8").splitlines()
+        if ".relkit/cache/" not in ignore:
+            failures.append("ensure_gitignore does not ignore .relkit/cache/")
+        if any("onboarding.json" in line for line in ignore):
+            failures.append("ensure_gitignore must track .relkit/onboarding.json")
+
+    routes = routing_help()
+    if "python deploy/relkit.py build|install|upgrade" not in routes:
+        failures.append("routing_help lost deploy/relkit.py build|install|upgrade")
+    forbidden_routes = ("scripts/relkit_host.py", "deploy/relkit.py serve", "deploy/relkit.py agent")
+    if any(item in routes for item in forbidden_routes):
+        failures.append("routing_help advertises a non-canonical ops entry")
+
+    if "rust" not in UPDATER_PROCESS_VALUES or "rust-shell" in UPDATER_PROCESS_VALUES:
+        failures.append("UPDATER_PROCESS_VALUES must include rust and exclude rust-shell")
+
+    sidecar_source = inspect.getsource(reconcile_sidecar_layout)
+    if "build_desktop_release.mjs" in sidecar_source:
+        failures.append("sidecar reconciliation hardcodes a product pack filename")
+
+    if not callable(clear_stale_staged_trees):
+        failures.append("stale staged cleanup function is missing")
+    else:
+        with tempfile.TemporaryDirectory() as raw:
+            probe = Path(raw)
+            stale = cache_dir(probe) / "staged" / "old"
+            current = cache_dir(probe) / "staged" / "current"
+            stale.mkdir(parents=True)
+            current.mkdir(parents=True)
+            removed = clear_stale_staged_trees(probe, "current")
+            if removed != ["old"] or stale.exists() or not current.is_dir():
+                failures.append("stale staged cleanup behavior drifted")
+
+    for skill_path in _retrospect_skill_paths(root):
+        text = skill_path.read_text(encoding="utf-8")
+        if "relkit_host.py retrospect" not in text:
+            failures.append(f"{skill_path.as_posix()} does not require relkit_host.py retrospect")
+        if re.search(r"读.*RETROSPECT\.md.*(?:宣称|完成)", text):
+            failures.append(f"{skill_path.as_posix()} treats reading RETROSPECT.md as the ops gate")
+
+    return failures
+
+
+def cmd_retrospect(root: Path) -> int:
+    failures = retrospect_failures(root)
+    if failures:
+        raise Fail("retrospect failed:\n  " + "\n  ".join(failures))
+    state = load_state(root)
+    set_step(
+        state,
+        "ops.retrospect",
+        "verified",
+        "relkit_host.py retrospect",
+        "mechanical ops checks passed",
+    )
+    save_state(root, state)
+    print("retrospect passed; ops.retrospect=verified")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2317,6 +2423,7 @@ def build_parser() -> argparse.ArgumentParser:
     reset.add_argument("--yes", action="store_true")
 
     sub.add_parser("install", help="install lock-pinned artifacts via relkit_consume.py")
+    sub.add_parser("retrospect", help="run the final non-interactive ops consistency gate")
     upgrade = sub.add_parser("upgrade", help="rewrite lock to a GitHub release and install")
     upgrade.add_argument("release")
 
@@ -2431,6 +2538,8 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
         )
     if args.cmd == "install":
         return cmd_install(root, [])
+    if args.cmd == "retrospect":
+        return cmd_retrospect(root)
     if args.cmd == "upgrade":
         return cmd_upgrade(root, args.release)
     if args.cmd == "fake":

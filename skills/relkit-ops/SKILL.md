@@ -48,4 +48,6 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 
 ## 完成后
 
-先读同目录 [RETROSPECT.md](RETROSPECT.md)，对账后再宣称完成。
+运行 `python scripts/host/relkit_host.py retrospect`，再运行 `status` 检查
+`ops.retrospect` 已是 `verified`；只有前一命令退出码为 0，才能宣称开箱完成。
+`RETROSPECT.md` 只是入口指针，阅读它本身不构成完成闸门。

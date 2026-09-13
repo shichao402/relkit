@@ -54,6 +54,7 @@ class StateTests(unittest.TestCase):
                 host.projection_path(root),
                 root / ".relkit/cache/onboarding.md",
             )
+            self.assertEqual(state["steps"]["ops.retrospect"]["status"], "unanswered")
 
     def test_interactive_requires_human_answer_and_can_resume(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -163,6 +164,13 @@ class RoutingTests(unittest.TestCase):
             root = Path(raw)
             code = host.main(["--project-root", str(root), "keys", "gen"])
             self.assertEqual(code, 1)
+
+    def test_routing_names_only_canonical_product_and_deploy_entries(self) -> None:
+        text = host.routing_help()
+        self.assertIn("relkit_host.py", text)
+        self.assertIn("python deploy/relkit.py build|install|upgrade", text)
+        self.assertNotIn("scripts/relkit_host.py", text)
+        self.assertNotIn("deploy/relkit.py serve", text)
 
     def test_release_checksums_rewrite_rust_sdk_lock(self) -> None:
         artifacts: dict = {}
@@ -676,6 +684,48 @@ class FakeStageTests(unittest.TestCase):
             )
 
 
+class RetrospectTests(unittest.TestCase):
+    def test_retrospect_passes_and_marks_last_step_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self.assertEqual(host.cmd_retrospect(root), 0)
+            state = host.load_state(root)
+            self.assertEqual(host.STEP_IDS[-1], "ops.retrospect")
+            self.assertEqual(state["steps"]["ops.retrospect"]["status"], "verified")
+
+    def test_retrospect_rejects_skill_that_only_points_to_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            skill = root / "skills" / "relkit-ops" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text(
+                "读 RETROSPECT.md 后即可宣称完成。\n",
+                encoding="utf-8",
+            )
+            failures = host.retrospect_failures(root)
+            self.assertTrue(any("relkit_host.py retrospect" in item for item in failures))
+            self.assertTrue(any("reading RETROSPECT.md" in item for item in failures))
+
+    def test_retrospect_requires_cache_ignore_but_tracks_onboarding(self) -> None:
+        self.assertIn(".relkit/cache/", host.GITIGNORE_RELKIT)
+        self.assertNotIn(".relkit/onboarding.json", host.GITIGNORE_RELKIT)
+
+    def test_retrospect_contract_has_matching_step_keys(self) -> None:
+        self.assertEqual(set(host.STEP_IDS), set(host.EXPLAIN_TEXTS))
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self.assertEqual(
+                set(host.STEP_IDS),
+                set(host.recommendations(root, host.default_state(root))),
+            )
+        self.assertIn("rust", host.UPDATER_PROCESS_VALUES)
+        self.assertNotIn("rust-shell", host.UPDATER_PROCESS_VALUES)
+        self.assertNotIn(
+            "build_desktop_release.mjs",
+            inspect.getsource(host.reconcile_sidecar_layout),
+        )
+
+
 class ReconcileTests(unittest.TestCase):
     def test_release_accepts_confirmed_decisions_but_requires_verified_actions(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -690,6 +740,15 @@ class ReconcileTests(unittest.TestCase):
         state["steps"]["pack.ci"]["status"] = "confirmed"
         self.assertIn("pack.ci", host.release_incomplete_steps(state))
         state["steps"]["fake.release"]["status"] = "verified"
+        self.assertEqual(host.release_incomplete_steps(state, via_ci=True), [])
+
+    def test_ci_skips_retrospect_but_local_release_requires_it(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            state = host.default_state(Path(raw))
+        for step in host.REQUIRED_FOR_RELEASE:
+            host.set_step(state, step, "verified", "x")
+        state["steps"]["ops.retrospect"]["status"] = "unanswered"
+        self.assertEqual(host.release_incomplete_steps(state), ["ops.retrospect"])
         self.assertEqual(host.release_incomplete_steps(state, via_ci=True), [])
 
     def test_agent_execute_is_ci_only(self) -> None:
