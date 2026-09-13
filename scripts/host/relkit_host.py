@@ -2306,55 +2306,158 @@ def _retrospect_skill_paths(root: Path) -> list[Path]:
     candidates = (
         root / "skills" / "relkit-ops" / "SKILL.md",
         root / ".cursor" / "skills" / "relkit-ops" / "SKILL.md",
+        root / ".cursor" / "skills" / "dec-relkit-ops" / "SKILL.md",
         root / ".codebuddy" / "skills" / "relkit-ops" / "SKILL.md",
     )
     return [path for path in candidates if path.is_file()]
 
 
-def retrospect_failures(root: Path) -> list[str]:
-    """Return mechanical drift in the ops contract; never prompts or mutates."""
-    failures: list[str] = []
+def _retrospect_item(
+    outcome: str,
+    check: str,
+    path: str,
+    expected: str,
+    actual: str,
+) -> dict[str, str]:
+    return {
+        "outcome": outcome,
+        "check": check,
+        "path": path,
+        "expected": expected,
+        "actual": actual,
+    }
+
+
+def retrospect_report(root: Path) -> dict[str, Any]:
+    """Classify every mechanical ops-contract check without prompting or mutation."""
+    items: list[dict[str, str]] = []
+    host_path = "scripts/host/relkit_host.py"
+
+    def check(
+        check_id: str,
+        path: str,
+        expected: str,
+        actual: str,
+        passed: bool,
+    ) -> None:
+        items.append(
+            _retrospect_item(
+                "landed" if passed else "todo",
+                check_id,
+                path,
+                expected,
+                actual,
+            )
+        )
 
     recommendation_keys = set(recommendations(root, default_state(root)))
-    if set(STEP_IDS) != set(EXPLAIN_TEXTS):
-        failures.append("STEP_IDS and explain_step keys differ")
-    if set(STEP_IDS) != recommendation_keys:
-        failures.append("STEP_IDS and recommend keys differ")
+    step_ids = set(STEP_IDS)
+    check(
+        "step-explanations",
+        host_path,
+        "EXPLAIN_TEXTS keys exactly match STEP_IDS",
+        f"STEP_IDS={sorted(step_ids)}; EXPLAIN_TEXTS={sorted(EXPLAIN_TEXTS)}",
+        step_ids == set(EXPLAIN_TEXTS),
+    )
+    check(
+        "step-recommendations",
+        host_path,
+        "recommendations keys exactly match STEP_IDS",
+        f"STEP_IDS={sorted(step_ids)}; recommendations={sorted(recommendation_keys)}",
+        step_ids == recommendation_keys,
+    )
     for step_id in STEP_IDS:
         try:
             explain_step(step_id)
             recommend(root, default_state(root), step_id)
         except (Fail, KeyError) as error:
-            failures.append(f"{step_id} has no explain/recommend entry: {error}")
+            check(
+                f"step-entry:{step_id}",
+                host_path,
+                f"{step_id} has callable explain and recommend entries",
+                f"entry failed: {error}",
+                False,
+            )
 
     expected_ignores = {".relkit/cache/", ".relkit-keys/*.private.pb"}
-    if set(GITIGNORE_RELKIT) != expected_ignores:
-        failures.append("GITIGNORE_RELKIT must ignore only cache and private keys")
+    check(
+        "gitignore-contract",
+        host_path,
+        f"GITIGNORE_RELKIT={sorted(expected_ignores)}",
+        f"GITIGNORE_RELKIT={sorted(GITIGNORE_RELKIT)}",
+        set(GITIGNORE_RELKIT) == expected_ignores,
+    )
     with tempfile.TemporaryDirectory() as raw:
         probe = Path(raw)
         ensure_gitignore(probe)
         ignore = (probe / ".gitignore").read_text(encoding="utf-8").splitlines()
-        if ".relkit/cache/" not in ignore:
-            failures.append("ensure_gitignore does not ignore .relkit/cache/")
-        if any("onboarding.json" in line for line in ignore):
-            failures.append("ensure_gitignore must track .relkit/onboarding.json")
+        check(
+            "cache-ignore",
+            host_path,
+            "ensure_gitignore writes .relkit/cache/",
+            f"generated lines={ignore}",
+            ".relkit/cache/" in ignore,
+        )
+        check(
+            "onboarding-tracked",
+            host_path,
+            "ensure_gitignore does not ignore .relkit/onboarding.json",
+            f"generated lines={ignore}",
+            not any("onboarding.json" in line for line in ignore),
+        )
 
     routes = routing_help()
-    if "python deploy/relkit.py build|install|upgrade" not in routes:
-        failures.append("routing_help lost deploy/relkit.py build|install|upgrade")
+    canonical_deploy = "python deploy/relkit.py build|install|upgrade"
+    check(
+        "canonical-deploy-route",
+        host_path,
+        f"routing_help contains {canonical_deploy!r}",
+        "canonical deploy route present" if canonical_deploy in routes else "canonical deploy route missing",
+        canonical_deploy in routes,
+    )
     forbidden_routes = ("scripts/relkit_host.py", "deploy/relkit.py serve", "deploy/relkit.py agent")
-    if any(item in routes for item in forbidden_routes):
-        failures.append("routing_help advertises a non-canonical ops entry")
+    found_forbidden = [item for item in forbidden_routes if item in routes]
+    check(
+        "canonical-product-routes",
+        host_path,
+        f"routing_help excludes {list(forbidden_routes)}",
+        f"forbidden routes found={found_forbidden}",
+        not found_forbidden,
+    )
 
-    if "rust" not in UPDATER_PROCESS_VALUES or "rust-shell" in UPDATER_PROCESS_VALUES:
-        failures.append("UPDATER_PROCESS_VALUES must include rust and exclude rust-shell")
+    check(
+        "updater-process-vocabulary",
+        host_path,
+        "UPDATER_PROCESS_VALUES includes rust and excludes rust-shell",
+        f"UPDATER_PROCESS_VALUES={list(UPDATER_PROCESS_VALUES)}",
+        "rust" in UPDATER_PROCESS_VALUES and "rust-shell" not in UPDATER_PROCESS_VALUES,
+    )
 
     sidecar_source = inspect.getsource(reconcile_sidecar_layout)
-    if "build_desktop_release.mjs" in sidecar_source:
-        failures.append("sidecar reconciliation hardcodes a product pack filename")
+    sidecar_is_config_driven = (
+        'sidecar.get("packScript")' in sidecar_source
+        and "root / pack_script" in sidecar_source
+    )
+    check(
+        "generic-sidecar-verification",
+        host_path,
+        "reconcile_sidecar_layout resolves packScript from relkit.json",
+        (
+            "packScript is resolved from relkit.json"
+            if sidecar_is_config_driven
+            else "config-driven sidecar.packScript resolution is missing"
+        ),
+        sidecar_is_config_driven,
+    )
 
     if not callable(clear_stale_staged_trees):
-        failures.append("stale staged cleanup function is missing")
+        check(
+            "stale-stage-cleanup",
+            host_path,
+            "clear_stale_staged_trees is callable and removes only stale trees",
+            "clear_stale_staged_trees is not callable",
+            False,
+        )
     else:
         with tempfile.TemporaryDirectory() as raw:
             probe = Path(raw)
@@ -2363,23 +2466,100 @@ def retrospect_failures(root: Path) -> list[str]:
             stale.mkdir(parents=True)
             current.mkdir(parents=True)
             removed = clear_stale_staged_trees(probe, "current")
-            if removed != ["old"] or stale.exists() or not current.is_dir():
-                failures.append("stale staged cleanup behavior drifted")
+            passed = removed == ["old"] and not stale.exists() and current.is_dir()
+            check(
+                "stale-stage-cleanup",
+                host_path,
+                "remove old and preserve current staged tree",
+                (
+                    f"removed={removed}; old_exists={stale.exists()}; "
+                    f"current_exists={current.is_dir()}"
+                ),
+                passed,
+            )
 
-    for skill_path in _retrospect_skill_paths(root):
+    skill_paths = _retrospect_skill_paths(root)
+    if not skill_paths:
+        items.append(
+            _retrospect_item(
+                "skipped",
+                "skill-gate",
+                "skills/relkit-ops/SKILL.md",
+                "installed relkit-ops skill requires relkit_host.py retrospect",
+                "not applicable: no relkit-ops skill is installed in this repository",
+            )
+        )
+    for skill_path in skill_paths:
         text = skill_path.read_text(encoding="utf-8")
-        if "relkit_host.py retrospect" not in text:
-            failures.append(f"{skill_path.as_posix()} does not require relkit_host.py retrospect")
-        if re.search(r"读.*RETROSPECT\.md.*(?:宣称|完成)", text):
-            failures.append(f"{skill_path.as_posix()} treats reading RETROSPECT.md as the ops gate")
+        display_path = skill_path.relative_to(root).as_posix()
+        requires_command = "relkit_host.py retrospect" in text
+        check(
+            f"skill-command:{display_path}",
+            display_path,
+            "skill requires relkit_host.py retrospect",
+            (
+                "required command present"
+                if requires_command
+                else "required command relkit_host.py retrospect is missing"
+            ),
+            requires_command,
+        )
+        prose_gate = bool(re.search(r"读.*RETROSPECT\.md.*(?:宣称|完成)", text))
+        check(
+            f"skill-mechanical-gate:{display_path}",
+            display_path,
+            "reading RETROSPECT.md alone is not treated as completion",
+            (
+                "RETROSPECT.md reading is incorrectly sufficient"
+                if prose_gate
+                else "completion remains tied to the mechanical command"
+            ),
+            not prose_gate,
+        )
 
-    return failures
+    return {
+        "schema": "relkit.retrospect/1",
+        "root": str(root),
+        "groups": {
+            "landed": [item for item in items if item["outcome"] == "landed"],
+            "todo": [item for item in items if item["outcome"] == "todo"],
+            "skipped": [item for item in items if item["outcome"] == "skipped"],
+        },
+    }
 
 
-def cmd_retrospect(root: Path) -> int:
-    failures = retrospect_failures(root)
-    if failures:
-        raise Fail("retrospect failed:\n  " + "\n  ".join(failures))
+def _retrospect_line(item: dict[str, str]) -> str:
+    return (
+        f"- [{item['check']}] 文件: {item['path']} | "
+        f"期望: {item['expected']} | 现状: {item['actual']}"
+    )
+
+
+def retrospect_failures(root: Path) -> list[str]:
+    """Compatibility view of actionable todo lines."""
+    return [_retrospect_line(item) for item in retrospect_report(root)["groups"]["todo"]]
+
+
+def print_retrospect_report(report: dict[str, Any]) -> None:
+    labels = (("landed", "已落地"), ("todo", "待办"), ("skipped", "跳过"))
+    for key, label in labels:
+        print(label)
+        items = report["groups"][key]
+        if items:
+            for item in items:
+                print(_retrospect_line(item))
+        else:
+            print("- 无")
+
+
+def cmd_retrospect(root: Path, as_json: bool = False) -> int:
+    report = retrospect_report(root)
+    if as_json:
+        print(dump_json(report), end="")
+    else:
+        print_retrospect_report(report)
+    if report["groups"]["todo"]:
+        return 1
     state = load_state(root)
     set_step(
         state,
@@ -2389,7 +2569,8 @@ def cmd_retrospect(root: Path) -> int:
         "mechanical ops checks passed",
     )
     save_state(root, state)
-    print("retrospect passed; ops.retrospect=verified")
+    if not as_json:
+        print("结果: 通过；ops.retrospect=verified")
     return 0
 
 
@@ -2423,7 +2604,10 @@ def build_parser() -> argparse.ArgumentParser:
     reset.add_argument("--yes", action="store_true")
 
     sub.add_parser("install", help="install lock-pinned artifacts via relkit_consume.py")
-    sub.add_parser("retrospect", help="run the final non-interactive ops consistency gate")
+    retrospect = sub.add_parser(
+        "retrospect", help="run the final non-interactive ops consistency gate"
+    )
+    retrospect.add_argument("--json", action="store_true")
     upgrade = sub.add_parser("upgrade", help="rewrite lock to a GitHub release and install")
     upgrade.add_argument("release")
 
@@ -2539,7 +2723,7 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
     if args.cmd == "install":
         return cmd_install(root, [])
     if args.cmd == "retrospect":
-        return cmd_retrospect(root)
+        return cmd_retrospect(root, args.json)
     if args.cmd == "upgrade":
         return cmd_upgrade(root, args.release)
     if args.cmd == "fake":

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import io
 import json
 import inspect
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -685,13 +687,58 @@ class FakeStageTests(unittest.TestCase):
 
 
 class RetrospectTests(unittest.TestCase):
-    def test_retrospect_passes_and_marks_last_step_verified(self) -> None:
+    def test_all_pass_output_has_labeled_groups_and_marks_verified(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            self.assertEqual(host.cmd_retrospect(root), 0)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(host.cmd_retrospect(root), 0)
+            text = output.getvalue()
+            self.assertIn("已落地\n", text)
+            self.assertIn("待办\n- 无", text)
+            self.assertIn("跳过\n", text)
+            self.assertIn("文件:", text)
+            self.assertIn("期望:", text)
+            self.assertIn("现状:", text)
             state = host.load_state(root)
             self.assertEqual(host.STEP_IDS[-1], "ops.retrospect")
             self.assertEqual(state["steps"]["ops.retrospect"]["status"], "verified")
+
+    def test_seeded_skill_drift_is_actionable_todo_and_exit_one(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            skill = root / "skills" / "relkit-ops" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("仅阅读说明。\n", encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = host.cmd_retrospect(root)
+            self.assertEqual(code, 1)
+            text = output.getvalue()
+            self.assertIn("待办\n", text)
+            self.assertIn("文件: skills/relkit-ops/SKILL.md", text)
+            self.assertIn("期望: skill requires relkit_host.py retrospect", text)
+            self.assertIn("现状: required command relkit_host.py retrospect is missing", text)
+            self.assertFalse(host.state_path(root).exists())
+
+    def test_missing_optional_skill_is_classified_as_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = host.retrospect_report(Path(raw))
+        skipped = report["groups"]["skipped"]
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]["check"], "skill-gate")
+        self.assertIn("not applicable", skipped[0]["actual"])
+
+    def test_retrospect_json_follows_host_json_convention(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(host.cmd_retrospect(Path(raw), as_json=True), 0)
+            report = json.loads(output.getvalue())
+        self.assertEqual(report["schema"], "relkit.retrospect/1")
+        self.assertIn("landed", report["groups"])
+        self.assertIn("todo", report["groups"])
+        self.assertIn("skipped", report["groups"])
 
     def test_retrospect_rejects_skill_that_only_points_to_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
