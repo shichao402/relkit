@@ -38,10 +38,21 @@ Go / Dart / Node 三套 SDK 各自实现 check、下载与（部分）apply，�
 - artifact filename 拒绝绝对路径、分隔符、`.`/`..`、保留名、目录逃逸。
 - `lastResult` 只持久化 enum。legacy 映射见 `internal/updater/legacy.go`。
 
+## WebView JSON 投影（不是并行协议）
+
+sidecar 与宿主 **同 SHA、IPC `[1,1]`**。混版本不是产品需求。
+
+本机 IPC 仍是 protobuf 帧。若宿主必须把 `CheckResult` 交给 WebView，JSON 是 **当前 IDL 的投影**，由 Rust facade 的 `check_result_to_json` 唯一产出，禁止手写第二份 `CheckResult` / `UpdateAvailable` DTO。
+
+- 标量零值必须出键：`"releaseNotesMarkdown":""`、`"mandatory":false`。缺键 = 投影器 bug，不是「旧 updater」。
+- 消费者保持严格反序列化。禁止 `#[serde(default)]` / `Option<String>` / 「兼容旧 updater」吞缺键。bool 缺省成 `false` 尤其危险。
+- 字段要变成真正可选：抬 IPC 窗口并改 proto，而不是在客户端 default。
+
 ## 否决
 
 - 常驻 updater 服务 / 系统级共享二进制
-- JSON 行 IPC、自由文本错误码
+- JSON 行 IPC、自由文本错误码、宿主手写 CheckResult JSON 窄桥
+- 用 `serde(default)` / 缺省值把缺键洗成合法结果
 - 各语言再写一套 check/apply 算法
 - 宿主自算下次检查时间
 - 把 InstallSpec 写进签名 index

@@ -25,7 +25,9 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 
 在 `onboard start` 或问 `product.id` 之前：先 `status`，并读现有接线，判断 **fresh / upgrade / cleanup-then-continue**。不要把已有产品当成绿地。
 
-至少看：`relkit.json`（`backends` 类型、`http-put`/`local` 残留、signing、directory URL）、`VERSION.json`（以及是否还留 `VERSION.yaml`）、`scripts/relkit.lock.json`、`.relkit/onboarding.json`、serve/agent 是否已登记、token 文件名、`scripts/host` 树哈希 vs lock、`tools/bin`、调用 `Updater.open` 的 sidecar 路径。
+至少看：`relkit.json`（`backends` 类型、`http-put`/`local` 残留、signing、directory URL）、`VERSION.json`（以及是否还留 `VERSION.yaml`）、`scripts/relkit.lock.json`、`.relkit/onboarding.json`、serve/agent 是否已登记、token 文件名、`scripts/host` 树哈希 vs lock、`tools/bin`、调用 `Updater.open` 的 sidecar 路径是否走官方 facade。
+
+产品仓若已有手写 `CheckResult` / `UpdateAvailable` DTO，或用 `serde(default)` / `Option` 把缺键当旧 updater 兼容：列为 drift，等人删掉并改用 SDK JSON 投影（Rust：`check_result_to_json`）。不要放宽解析。细节以 `onboard explain updater.process` 为准。
 
 陈旧后端类型、孤儿 token 文件名等：先列出清理项并等人选，再写配置。子命令与闸门以 `status` / `onboard explain` 为准。
 

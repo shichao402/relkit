@@ -1,7 +1,12 @@
 //! Rust host facade for `relkit.updater.v1`.
 //!
 //! The DTOs in [`proto`] are generated from `proto/updater/v1/updater.proto`
-//! by `build.rs`; this crate deliberately contains no handwritten wire DTOs.
+//! by `build.rs`. WebView JSON goes through [`check_result_to_json`], not a
+//! handwritten DTO.
+
+mod json;
+
+pub use json::{check_result_from_json, check_result_to_json, JsonError};
 
 use prost::Message;
 use std::fs;

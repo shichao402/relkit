@@ -45,9 +45,12 @@ PUBLISH_PROTOCOL_FALLBACK = 2
 UPDATER_PROCESS_VALUES = ("rust", "node", "dart", "go", "other")
 UPDATER_PROCESS_EXPLAIN = (
     "谁调用 Updater.open。只记封闭词，不要另写决策备忘。"
-    " rust/node/dart/go：该语言进程直连 sidecar。"
-    " other：先口头说明再记。"
-    " 开工窄桥的时机是 sidecar.layout 已定、fake.release 之前。"
+    " rust/node/dart/go：该语言 facade 直连 sidecar。"
+    " 给 WebView 只用对应 SDK 的 JSON 投影（Rust：check_result_to_json）。"
+    " 禁止再开工一份 CheckResult / UpdateAvailable 手写 DTO。"
+    " 缺 releaseNotesMarkdown 这类键是投影器或手写层 bug，不是旧 updater；"
+    " 禁止 serde(default) / Option 吞掉。"
+    " other：先口头说明再记；说明里若出现第二套 JSON 形状，当场拦住。"
 )
 
 STATUSES = (

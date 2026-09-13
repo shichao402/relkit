@@ -1,7 +1,8 @@
 # relkit Rust updater facade
 
 供 Tauri/Rust 宿主调用 `relkit-updater` sidecar。crate 只负责本机进程、protobuf
-分帧、IPC 握手和 scheduler，不重新实现更新算法。
+分帧、IPC 握手、scheduler，以及把 `CheckResult` 投影成 WebView JSON。不重新实现
+更新算法。
 
 ```toml
 [dependencies]
@@ -13,19 +14,23 @@ DTO 在构建时从 `proto/updater/v1/updater.proto` 生成。仓库内构建读
 `protoc`，`protoc-bin-vendored` 会提供固定工具链。
 
 ```rust
-use relkit_updater::{OpenResult, Updater};
+use relkit_updater::{check_result_to_json, OpenResult, Updater};
 use relkit_updater::proto::{ClientProfile, Runtime};
 
 match Updater::open(ClientProfile::default(), Runtime::default()) {
-    OpenResult::Opened { updater, capabilities } => {
+    OpenResult::Opened { updater, capabilities: _ } => {
         let result = updater.check(true, 0, None);
-        // 将生成的 CheckResult 映射到 Tauri command 的窄桥。
+        let json = check_result_to_json(&result).expect("check result has a kind");
+        // 把投影 JSON 交给 WebView。不要手写 CheckResult DTO，不要 serde(default)。
     }
     OpenResult::Failed(error) => {
         // 向 WebView 返回结构化 ErrorCode，不抛裸字符串。
     }
 }
 ```
+
+`check_result_to_json` 始终写出 IDL 标量，包括空的 `releaseNotesMarkdown` 和
+`mandatory: false`。缺键是投影器故障，不是旧 sidecar；宿主侧保持严格反序列化。
 
 sidecar 查找顺序：`Runtime.sidecar_path`、`RELKIT_UPDATER`、安装根目录默认文件名、
 当前壳可执行文件同目录、`InstallSpec.sidecar_relpath`。

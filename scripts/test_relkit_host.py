@@ -110,6 +110,13 @@ class StateTests(unittest.TestCase):
             self.assertEqual(host.detect_stack(root)["updater"], "rust")
             self.assertEqual(host.consume_components(root)[0], "sdk-rust")
 
+    def test_updater_process_explain_forbids_handwritten_bridge(self) -> None:
+        text = host.UPDATER_PROCESS_EXPLAIN
+        self.assertNotIn("开工窄桥", text)
+        self.assertIn("禁止再开工一份 CheckResult", text)
+        self.assertIn("check_result_to_json", text)
+        self.assertIn("serde(default)", text)
+
     def test_updater_process_is_closed_vocab(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
