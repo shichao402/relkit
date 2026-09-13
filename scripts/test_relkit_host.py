@@ -207,6 +207,178 @@ class StateTests(unittest.TestCase):
                 raised.exception.code, "onboard-batch-intent-conflict"
             )
 
+    def test_direct_backends_make_remote_token_steps_not_applicable(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "direct",
+                        "backends": {"cos": {"type": "s3-compatible"}},
+                        "publishTo": ["cos"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "env.inspect", "verified", "clean")
+            state["product"] = "direct"
+            host.set_step(state, "product.id", "confirmed", "direct")
+            batch = host.build_question_batch(root, state, "upgrade")
+            asked = {item["id"] for item in batch["questions"]}
+            self.assertNotIn("ssh.host", asked)
+            self.assertNotIn("ssh.config_dir", asked)
+            self.assertNotIn("token.isolation", asked)
+            self.assertEqual(batch["evidence"]["topology"]["mode"], "direct")
+            self.assertFalse(
+                batch["evidence"]["applicable"]["serve.register"]
+            )
+            self.assertIn(
+                "serve/agent product tokens are not on this route",
+                "\n".join(batch["evidence"]["implications"]),
+            )
+
+    def test_live_products_are_the_only_share_with_options(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "backends": {
+                            "intranet": {"type": "relkit-compatible"}
+                        },
+                        "publishTo": ["intranet"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "env.inspect", "verified", "clean")
+            state["serve"]["sshHost"] = "publisher"
+            responses = [
+                subprocess.CompletedProcess([], 0, "relkit-serve 0.3.17\n", ""),
+                subprocess.CompletedProcess([], 0, "active\nenabled\n", ""),
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    (
+                        "config /etc/relkit-serve/relkit-serve.json\n"
+                        "operator relkit-serve.token (full tree)\n"
+                        "products\n"
+                        "  loom,atlas tokens/loom.token\n"
+                    ),
+                    "",
+                ),
+            ]
+            with patch("relkit_host.ssh_run", side_effect=responses):
+                batch = host.build_question_batch(root, state, "upgrade")
+            token = next(
+                item
+                for item in batch["questions"]
+                if item["id"] == "token.isolation"
+            )
+            self.assertEqual(
+                token["options"],
+                ["exclusive", "share-with:loom", "share-with:atlas"],
+            )
+            remote = batch["evidence"]["remote"]
+            self.assertTrue(remote["operatorTokenPresent"])
+            self.assertEqual(remote["products"], ["loom", "atlas"])
+
+    def test_operator_only_remote_does_not_offer_share_with(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "backends": {
+                            "intranet": {"type": "relkit-compatible"}
+                        },
+                        "publishTo": ["intranet"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "env.inspect", "verified", "clean")
+            state["serve"]["sshHost"] = "publisher"
+            responses = [
+                subprocess.CompletedProcess([], 0, "relkit-serve 0.3.17\n", ""),
+                subprocess.CompletedProcess([], 0, "active\nenabled\n", ""),
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    "operator relkit-serve.token (full tree)\nproducts none\n",
+                    "",
+                ),
+            ]
+            with patch("relkit_host.ssh_run", side_effect=responses):
+                batch = host.build_question_batch(root, state, "upgrade")
+            token = next(
+                item
+                for item in batch["questions"]
+                if item["id"] == "token.isolation"
+            )
+            self.assertEqual(token["options"], ["exclusive"])
+            self.assertIn(
+                "operator credentials are not product tokens",
+                "\n".join(batch["evidence"]["implications"]),
+            )
+
+    def test_token_question_waits_for_live_remote_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "backends": {
+                            "intranet": {"type": "relkit-compatible"}
+                        },
+                        "publishTo": ["intranet"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "env.inspect", "verified", "clean")
+            batch = host.build_question_batch(root, state, "upgrade")
+            asked = {item["id"] for item in batch["questions"]}
+            self.assertIn("ssh.host", asked)
+            self.assertNotIn("token.isolation", asked)
+            self.assertEqual(
+                [item["id"] for item in batch["blocked"]],
+                ["token.isolation"],
+            )
+
+    def test_direct_release_does_not_require_remote_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "backends": {"cos": {"type": "s3-compatible"}},
+                        "publishTo": ["cos"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            for step in host.REQUIRED_FOR_RELEASE:
+                if step not in {
+                    "ssh.host",
+                    "ssh.config_dir",
+                    "token.isolation",
+                    "serve.register",
+                    "agent.register",
+                }:
+                    host.set_step(state, step, "verified", "ok")
+            self.assertEqual(
+                host.release_incomplete_steps(state, root=root), []
+            )
+
     def test_recommendation_does_not_choose_backend(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
