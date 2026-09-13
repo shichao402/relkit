@@ -635,6 +635,39 @@ class FakeStageTests(unittest.TestCase):
             self.assertEqual(state["steps"]["fake.release"]["status"], "verified")
             self.assertEqual(state["steps"]["fake.release"]["note"], "simulate passed")
 
+    def test_new_real_stage_does_not_downgrade_verified_dummy(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            state["steps"]["fake.release"] = {
+                "status": "verified",
+                "value": "0.2.0+112",
+                "note": "dummy simulate passed",
+            }
+            for version in ("0.2.0+112", "0.2.0+135"):
+                tree = root / ".relkit" / "cache" / "staged" / version
+                tree.mkdir(parents=True)
+                (tree / "staged.pb").write_bytes(b"x")
+            host.reconcile_fake_stage(root, state)
+            self.assertEqual(state["steps"]["fake.release"]["status"], "verified")
+            self.assertEqual(state["steps"]["fake.release"]["value"], "0.2.0+112")
+
+    def test_real_publish_cleanup_keeps_only_current_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            for version in ("0.2.0+112", "0.2.0+135"):
+                tree = root / ".relkit" / "cache" / "staged" / version
+                tree.mkdir(parents=True)
+                (tree / "staged.pb").write_bytes(b"x")
+            removed = host.clear_stale_staged_trees(root, "0.2.0+135")
+            self.assertEqual(removed, ["0.2.0+112"])
+            self.assertFalse(
+                (root / ".relkit" / "cache" / "staged" / "0.2.0+112").exists()
+            )
+            self.assertTrue(
+                (root / ".relkit" / "cache" / "staged" / "0.2.0+135").is_dir()
+            )
+
 
 class ReconcileTests(unittest.TestCase):
     def test_release_accepts_confirmed_decisions_but_requires_verified_actions(self) -> None:
@@ -747,6 +780,23 @@ class ReconcileTests(unittest.TestCase):
                     Path("relkit"),
                     product="demo",
                     version="1.0.0+1",
+                    url="http://agent/v1/",
+                    execute=True,
+                )
+
+    def test_cleanup_does_not_mask_missing_current_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            dummy = root / ".relkit" / "cache" / "staged" / "0.2.0+112"
+            dummy.mkdir(parents=True)
+            (dummy / "staged.pb").write_bytes(b"x")
+            host.clear_stale_staged_trees(root, "0.2.0+135")
+            with self.assertRaisesRegex(host.Fail, "no staged tree for 0.2.0\\+135"):
+                host.publish_via_agent(
+                    root,
+                    Path("relkit"),
+                    product="demo",
+                    version="0.2.0+135",
                     url="http://agent/v1/",
                     execute=True,
                 )

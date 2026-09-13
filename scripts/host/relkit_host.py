@@ -1103,6 +1103,12 @@ def reconcile_pack_ci(root: Path, state: dict[str, Any]) -> None:
 def reconcile_fake_stage(root: Path, state: dict[str, Any]) -> None:
     if state["steps"]["fake.release"]["status"] == "unanswered":
         return
+    # fake.release proves the stage -> simulate wiring once. Its dummy staged
+    # tree is disposable cache and may be replaced by a newer real release.
+    # A different live staged version is therefore not evidence that wiring
+    # regressed, and must not demote a verified gate.
+    if state["steps"]["fake.release"]["status"] == "verified":
+        return
     staged = cache_dir(root) / "staged"
     if not staged.is_dir():
         return
@@ -1115,11 +1121,6 @@ def reconcile_fake_stage(root: Path, state: dict[str, Any]) -> None:
     if not candidates:
         return
     version = preferred if preferred in candidates else candidates[-1]
-    if (
-        state["steps"]["fake.release"]["status"] == "verified"
-        and preferred == version
-    ):
-        return
     set_step(
         state,
         "fake.release",
@@ -1127,6 +1128,20 @@ def reconcile_fake_stage(root: Path, state: dict[str, Any]) -> None:
         version,
         "stage present; publish waits for pack.ci",
     )
+
+
+def clear_stale_staged_trees(root: Path, current_version: str) -> list[str]:
+    """Delete disposable staged caches that are not the release being published."""
+    staged = cache_dir(root) / "staged"
+    if not staged.is_dir():
+        return []
+    removed: list[str] = []
+    for path in sorted(staged.iterdir()):
+        if not path.is_dir() or path.name == current_version:
+            continue
+        shutil.rmtree(path)
+        removed.append(path.name)
+    return removed
 
 
 def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, Any]:
@@ -1733,6 +1748,10 @@ def cmd_release(root: Path, args: argparse.Namespace) -> int:
                 "agent publish is CI-only; scripts/ci_release.mjs must set "
                 "RELKIT_RELEASE_VIA_CI=1"
             )
+        if args.execute:
+            removed = clear_stale_staged_trees(root, version)
+            if removed:
+                print("removed stale staged caches: " + ", ".join(removed))
         return publish_via_agent(
             root,
             binary,

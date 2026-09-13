@@ -13,6 +13,7 @@ description: >
 - **relkit 仓且要换箱子上的二进制**：`python deploy/relkit.py` 的 `build` / `install` / `upgrade`。空机首装不是产品开箱的一步。
 - 判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
 - `sidecar.layout` 只验证 lock 安装的 `tools/bin/relkit-updater`；可选 `sidecar.packScript` 仅校验打包脚本接线，实际产物归 `pack.ci` / artifacts。
+- fake dummy 是可丢弃缓存；真实发布前清理非当前版本的 staged 树。
 - 开箱状态只在产品仓 `.relkit/onboarding.json`。`status` 会覆盖
   `.relkit/cache/onboarding.md`（gitignore 投影），本地证据写入
   `.relkit/cache/onboarding.local.json`。`.relkit/cache/` 全部不提交；不要把产品状态写进
