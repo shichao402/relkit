@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import stat
 import sys
 import tempfile
 import unittest
@@ -159,6 +160,29 @@ class InstallTests(unittest.TestCase):
             )
             self.assertTrue((dart / "pubspec.yaml").is_file())
             self.assertTrue((destination / "go.mod").is_file())
+
+    def test_go_sdk_replaces_a_read_only_sparse_checkout(self) -> None:
+        archive = go_sdk_zip()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            artifact = root / "sdk-go.zip"
+            artifact.write_bytes(archive)
+            destination = subject.sdk_destination(root, "sdk-go")
+            # A relkit.consume/1 checkout leaves read-only git pack files behind.
+            pack = destination / ".git" / "objects" / "pack"
+            pack.mkdir(parents=True)
+            idx = pack / "pack-cafe.idx"
+            idx.write_bytes(b"pack")
+            idx.chmod(stat.S_IREAD)
+            try:
+                subject.safe_extract_sdk(
+                    artifact, destination, sha256(archive), "sdk-go"
+                )
+            finally:
+                if idx.is_file():
+                    idx.chmod(stat.S_IWRITE)
+            self.assertTrue((destination / "go.mod").is_file())
+            self.assertFalse(destination.with_name(destination.name + ".relkit-old").exists())
 
     def test_incomplete_go_sdk_is_rejected(self) -> None:
         output = io.BytesIO()

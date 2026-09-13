@@ -134,6 +134,8 @@ DIGESTED_ISSUE_CODES = frozenset(
         "onboard-answer-conflict",
         "lock-v1-no-migration-path",
         "v2-no-go-sdk-artifact",
+        "onboarding-json-ignored",
+        "sdk-readonly-backup-rmtree",
     }
 )
 
@@ -994,6 +996,30 @@ def ops_journal_path(root: Path) -> Path:
     return cache_dir(root) / "ops-journal.jsonl"
 
 
+def onboarding_ignored(root: Path) -> Optional[bool]:
+    """Whether git ignores the decision record; None when git cannot answer.
+
+    ensure_gitignore only appends lines, so a repo that already excluded the
+    whole .relkit/ tree would silently keep onboarding.json uncommittable.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", ".relkit/onboarding.json"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
 def env_inspect_report(root: Path) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
     facts: dict[str, Any] = {
@@ -1089,6 +1115,21 @@ def env_inspect_report(root: Path) -> dict[str, Any]:
                     "detail": str(error),
                 }
             )
+    ignored = onboarding_ignored(root)
+    facts["onboardingIgnored"] = ignored
+    if ignored:
+        findings.append(
+            {
+                "severity": "error",
+                "code": "onboarding-json-ignored",
+                "detail": (
+                    "gitignore excludes .relkit/onboarding.json, so the decision "
+                    "record cannot be committed; a parent exclusion cannot be "
+                    "undone per-file, so use '.relkit/*' plus "
+                    "'!.relkit/onboarding.json'"
+                ),
+            }
+        )
     onboard = state_path(root)
     facts["onboarding"] = onboard.is_file()
     return {
@@ -3269,6 +3310,39 @@ def retrospect_report(root: Path) -> dict[str, Any]:
         "rewrite_lock_artifacts pins relkit-sdk-go.zip",
         f"artifacts={sorted(probe_artifacts)}",
         "sdk-go" in probe_artifacts,
+    )
+
+    inspect_source = inspect.getsource(env_inspect_report)
+    detects_ignored_record = "onboarding-json-ignored" in inspect_source
+    check(
+        "onboarding-record-committable",
+        host_path,
+        "env.inspect fails when gitignore excludes .relkit/onboarding.json",
+        (
+            "inspect reports onboarding-json-ignored"
+            if detects_ignored_record
+            else "inspect never checks whether the decision record is ignored"
+        ),
+        detects_ignored_record,
+    )
+
+    consume_path = "scripts/host/relkit_consume.py"
+    consume_module = import_consume()
+    replace_source = inspect.getsource(consume_module.safe_extract_sdk)
+    forces_removal = (
+        "remove_tree(" in replace_source
+        and "shutil.rmtree(" not in replace_source
+    )
+    check(
+        "readonly-tree-replacement",
+        consume_path,
+        "SDK replacement deletes read-only trees such as a sparse checkout's .git",
+        (
+            "replacement routes deletions through remove_tree"
+            if forces_removal
+            else "replacement calls shutil.rmtree directly and fails on read-only files"
+        ),
+        forces_removal,
     )
 
     sidecar_source = inspect.getsource(reconcile_sidecar_layout)

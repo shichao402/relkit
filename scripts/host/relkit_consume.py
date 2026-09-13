@@ -18,6 +18,7 @@ import platform
 import re
 import shutil
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
@@ -311,6 +312,29 @@ def install_binary(
     return destination
 
 
+def remove_tree(path: Path, *, ignore_errors: bool = False) -> None:
+    """Delete a tree that may contain read-only files.
+
+    Windows refuses os.unlink on read-only entries, and a tree replaced in
+    place can legitimately hold them: a sparse checkout leaves .git/objects/pack
+    read-only. Clearing the bit on failure keeps install idempotent instead of
+    stranding a half-removed backup beside the real destination.
+    """
+
+    def clear_readonly(func: Any, target: Any, _exc: Any) -> None:
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            if not ignore_errors:
+                raise
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_readonly)
+    else:  # pragma: no cover - exercised on hosts older than 3.12
+        shutil.rmtree(path, onerror=clear_readonly)
+
+
 def sdk_destination(root: Path, component: str) -> Path:
     """Where an SDK artifact lands.
 
@@ -444,7 +468,7 @@ def carry_preserved_subtrees(
             continue
         carried = staging / relative
         if carried.exists():
-            shutil.rmtree(carried)
+            remove_tree(carried)
         carried.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(existing, carried)
 
@@ -487,12 +511,21 @@ def safe_extract_sdk(
             encoding="utf-8",
         )
         if backup.exists():
-            shutil.rmtree(backup)
+            remove_tree(backup)
         if destination.exists():
             os.replace(destination, backup)
         os.replace(temporary, destination)
         if backup.exists():
-            shutil.rmtree(backup)
+            # The new tree is already in place; a stubborn backup is litter,
+            # not a failed install.
+            try:
+                remove_tree(backup)
+            except OSError as error:
+                print(
+                    f"relkit consume: installed {label}, but could not remove "
+                    f"{backup.name} ({error}); remove it manually",
+                    file=sys.stderr,
+                )
         print(f"relkit consume: installed {label}")
     except Exception:
         if not destination.exists() and backup.exists():
@@ -500,7 +533,7 @@ def safe_extract_sdk(
         raise
     finally:
         if temporary.exists():
-            shutil.rmtree(temporary)
+            remove_tree(temporary, ignore_errors=True)
 
 
 def verify_binary(path: Path, component: str) -> None:
