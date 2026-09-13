@@ -1,6 +1,6 @@
 # relkit-agent
 
-> 本目录是仓库的一部分（`cmd/relkit-agent`）。部署脚本在仓库根的 `deploy/`。产品仓运维入口是 `scripts/host/relkit_host.py`。设计见 [`docs/design/publish-agent.md`](../../docs/design/publish-agent.md)。
+> 本目录是仓库的一部分（`cmd/relkit-agent`）。部署脚本在 `scripts/deploy/`。产品仓运维入口是 `scripts/host/relkit_host.py`。设计见 [`docs/design/publish-agent.md`](../../docs/design/publish-agent.md)。
 
 发布控制面：CI 只 `relkit stage` 并上传 staged 树；本机持签名私钥与后端凭据执行 `publish.Run`。客户端永远不连 agent。
 
@@ -41,9 +41,9 @@
 
 ## 运维
 
-装机 / 换二进制：`python deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：产品仓 `python scripts/host/relkit_host.py agent add --execute`；共用既有发布凭据时显式加 `--share-with <existing-id>`（重启另加 `--restart`）。`init` 是内部写配置接口，不是人用 CLI。
+装机 / 换二进制：`python scripts/deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：产品仓 `python scripts/host/relkit_host.py agent add --execute`；共用既有发布凭据时显式加 `--share-with <existing-id>`（重启另加 `--restart`）。`init` 是内部写配置接口，不是人用 CLI。
 
-证书续期与 agent 同机、不同进程：安装 `deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。
+证书续期与 agent 同机、不同进程：安装 `scripts/deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。
 
 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
@@ -63,7 +63,7 @@
 - `POST /v1/staged/{product}/{version}/uploads/{id}/complete`
 - `POST /v1/publish`
 
-无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`python3 deploy/relkit.py install agent --binary …`。已有实例：`python deploy/relkit.py upgrade --host <Host>`。
+无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`python3 scripts/deploy/relkit.py install agent --binary …`。已有实例：`python scripts/deploy/relkit.py upgrade --host <Host>`。
 
 ## 删除旧后端前的四步部署顺序
 

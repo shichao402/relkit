@@ -504,9 +504,9 @@ class RoutingTests(unittest.TestCase):
         text = host.routing_help()
         self.assertIn("relkit_host.py", text)
         self.assertIn("onboard inspect|questions|apply", text)
-        self.assertIn("python deploy/relkit.py build|install|upgrade", text)
+        self.assertIn("python scripts/deploy/relkit.py build|install|upgrade", text)
         self.assertNotIn("scripts/relkit_host.py", text)
-        self.assertNotIn("deploy/relkit.py serve", text)
+        self.assertNotIn("scripts/deploy/relkit.py serve", text)
 
     def test_batch_question_and_apply_commands_parse(self) -> None:
         parser = host.build_parser()

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Unified relkit deploy CLI: build, empty-machine install, upgrade binaries.
 
-Stdlib only unless deploy/requirements.txt lists packages. In that case this
-file creates deploy/.venv, pip-installs, and re-execs itself.
+Stdlib only unless scripts/deploy/requirements.txt lists packages. In that case
+this file creates scripts/deploy/.venv, pip-installs, and re-execs itself.
 """
 
 from __future__ import annotations
@@ -26,7 +26,16 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 DEPLOY_DIR = Path(__file__).resolve().parent
-REPO_ROOT = DEPLOY_DIR.parent
+
+
+def _repo_root() -> Path:
+    for candidate in (DEPLOY_DIR, *DEPLOY_DIR.parents):
+        if (candidate / "go.mod").is_file():
+            return candidate
+    return DEPLOY_DIR.parent
+
+
+REPO_ROOT = _repo_root()
 REQUIREMENTS = DEPLOY_DIR / "requirements.txt"
 VENV_DIR = DEPLOY_DIR / ".venv"
 BOOTSTRAP_ENV = "RELKIT_DEPLOY_BOOTSTRAPPED"
@@ -103,7 +112,7 @@ def ensure_bootstrap() -> None:
             os.execv(str(py), [str(py), str(Path(__file__).resolve()), *sys.argv[1:]])
         os.environ[BOOTSTRAP_ENV] = "1"
         return
-    print("==> bootstrap: creating deploy/.venv and installing requirements")
+    print("==> bootstrap: creating scripts/deploy/.venv and installing requirements")
     subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"], check=False)
     VENV_DIR.mkdir(parents=True, exist_ok=True)
     created = subprocess.run(
@@ -112,7 +121,7 @@ def ensure_bootstrap() -> None:
     )
     if created.returncode != 0 or not py.is_file():
         die(
-            "could not create deploy/.venv (python3-venv / ensurepip missing). "
+            "could not create scripts/deploy/.venv (python3-venv / ensurepip missing). "
             "Install a full Python 3.9+ and retry."
         )
     pip = subprocess.run(
@@ -120,7 +129,7 @@ def ensure_bootstrap() -> None:
         check=False,
     )
     if pip.returncode != 0:
-        die("pip install -r deploy/requirements.txt failed")
+        die("pip install -r scripts/deploy/requirements.txt failed")
     stamp.write_text(wanted + "\n", encoding="utf-8")
     os.environ[BOOTSTRAP_ENV] = "1"
     os.execv(str(py), [str(py), str(Path(__file__).resolve()), *sys.argv[1:]])
@@ -1242,7 +1251,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="deploy/relkit.py", description="relkit deploy CLI")
+    parser = argparse.ArgumentParser(prog="scripts/deploy/relkit.py", description="relkit deploy CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     build = sub.add_parser("build", help="cross-compile binaries")

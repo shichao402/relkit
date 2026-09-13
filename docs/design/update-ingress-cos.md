@@ -382,7 +382,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 
 同桶再挂二级域名**不是**第二 backend。验证期第二 backend 曾是成都桶 `relkit-updates-cd-1251882798` / `raw2.firoyang.com`。2026-09-04 按单独指令拆除：仓库与发布机 profile 去掉 `cos2`，证书续期 `targets` 去掉 `raw2`，对象清空后由发布机凭据 `DeleteBucket`（MCP 禁止该 API）。已装 1.13.55 客户端内嵌的 `raw2` entryUrl 会失败，主入口 `raw.` 不受影响。免费证书 `aXOYfCx6` 未自动续期，可在 SSL 控制台删除。
 
-发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令。产品侧用 `relkit_host.py`；换二进制用 `deploy/relkit.py upgrade`。
+发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令。产品侧用 `relkit_host.py`；换二进制用 `scripts/deploy/relkit.py upgrade`。
 
 凭据：`COS_SECRET_ID` / `COS_SECRET_KEY` 只进发布机环境（或 mise 私密配置），**禁止**写入仓库。
 

@@ -1,6 +1,6 @@
 """Pure deploy helpers: config migrate, unit render, redaction, path derivation.
 
-No SSH, no subprocess side effects. Imported by deploy/relkit.py and tests.
+No SSH, no subprocess side effects. Imported by scripts/deploy/relkit.py and tests.
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ def render_serve_unit(
     if port is not None and port < 1024 and "AmbientCapabilities=CAP_NET_BIND_SERVICE" not in text:
         insert = (
             "# Required to bind a privileged port as an unprivileged user.\n"
-            "# Added by deploy/relkit.py because the configured port is below 1024.\n"
+            "# Added by scripts/deploy/relkit.py because the configured port is below 1024.\n"
             "AmbientCapabilities=CAP_NET_BIND_SERVICE\n"
             "CapabilityBoundingSet=CAP_NET_BIND_SERVICE\n\n"
         )

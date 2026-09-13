@@ -1,6 +1,6 @@
 # relkit-serve
 
-> 本目录是 [`go.firoyang.com/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-serve`），与发布 CLI 同仓。部署脚本在仓库根的 `deploy/`。
+> 本目录是 [`go.firoyang.com/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-serve`），与发布 CLI 同仓。部署脚本在 `scripts/deploy/`。
 
 一个静态文件服务，用来托管 [RUP](https://github.com/shichao402/relkit/blob/main/SPEC.md) 发布树。单个静态链接的可执行文件，无运行时依赖。
 
@@ -15,7 +15,7 @@
 
 也可以纯当通用静态服务用 —— 把缓存前缀改成你自己的路径约定即可。只是它的差异化价值来自理解 RUP 的可变/不可变语义，见下文。
 
-**要部署空机或换二进制，用 [`deploy/README.md`](../../deploy/README.md)。** 给已有实例加产品 token 用产品仓 `relkit_host.py serve`。本文解释 serve 为什么长这样。
+**要部署空机或换二进制，用 [`scripts/deploy/README.md`](../../scripts/deploy/README.md)。** 给已有实例加产品 token 用产品仓 `relkit_host.py serve`。本文解释 serve 为什么长这样。
 
 ---
 
@@ -60,7 +60,7 @@ relkit-serve -config /etc/relkit-serve/relkit-serve.json
 Linux + systemd 上一步到位（建用户、装二进制、写配置、装单元、跑自检）：
 
 ```bash
-sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
+sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
 ```
 
 未提供 token 时上传端点关闭，`PUT` 返回 405。这是默认状态，也就是说默认安全。
@@ -77,7 +77,7 @@ sudo python3 deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-a
 
 ## 配置
 
-字段示例在 `deploy/relkit-serve.example.json`。要点：
+字段示例在 `scripts/deploy/relkit-serve.example.json`。要点：
 
 - 缺省按 `./relkit-serve.json`、`/etc/relkit-serve.json` 顺序查找，可用 `-config` 指定；**启动日志总会打印实际用了哪个文件**。
 - **未知字段一律报错。** 拼错键名而静默沿用默认值是最难查的一类配置故障 —— 服务照常启动、报告成功，行为却与配置文件写的不一样。

@@ -438,7 +438,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
 - `GET /-/health`
 
-部署样例与 Caddy 反代见 [`deploy/`](deploy/)。设计说明：[`docs/design/publish-agent.md`](docs/design/publish-agent.md)。
+部署样例与 Caddy 反代见 [`scripts/deploy/`](scripts/deploy/)。设计说明：[`docs/design/publish-agent.md`](docs/design/publish-agent.md)。
 
 ---
 

@@ -33,7 +33,7 @@ main:
         - name: deploy python tests
           script: |
             apt-get update && apt-get install -y python3
-            python3 -m unittest deploy/test_relkit.py scripts/test_relkit_consume.py
+            python3 -m unittest scripts/deploy/test_relkit.py scripts/test_relkit_consume.py
     - name: node-sdk
       docker:
         image: node:22
@@ -62,7 +62,7 @@ main:
         image: golang:1.26
       stages:
         - name: build release artifacts
-          script: python3 deploy/relkit.py build --serve --agent --cli --updater --dart-sdk --version "${CNB_BRANCH#v}" --out dist
+          script: python3 scripts/deploy/relkit.py build --serve --agent --cli --updater --dart-sdk --version "${CNB_BRANCH#v}" --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu
@@ -90,11 +90,11 @@ main:
             Install the server on Linux with systemd:
 
             ```
-            python3 deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64
+            python3 scripts/deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64
             ```
 
             Product ops: copy `scripts/host/` and run `python scripts/host/relkit_host.py`.
-            Empty-machine install: `python3 deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64`
+            Empty-machine install: `python3 scripts/deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64`
             EOF
         - name: create CNB Release
           type: git:release

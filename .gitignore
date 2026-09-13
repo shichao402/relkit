@@ -1,6 +1,6 @@
 .relkit/cache/
 dist/
-deploy/.venv/
+scripts/deploy/.venv/
 tmp/
 *.exe
 *.private.json

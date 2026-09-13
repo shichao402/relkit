@@ -15,7 +15,7 @@
 // Usage:
 //
 //	relkit-serve [flags]                  run the server
-//	relkit-serve init [dir]               internal: write config; called by deploy/relkit.py and product relkit_host.py
+//	relkit-serve init [dir]               internal: write config; called by scripts/deploy/relkit.py and product relkit_host.py
 //	relkit-serve -version
 package main
 

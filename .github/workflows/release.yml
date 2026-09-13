@@ -26,10 +26,10 @@ jobs:
         run: |
           go test ./...
           cargo test --manifest-path sdk/rust/Cargo.toml
-          python -m unittest deploy/test_relkit.py scripts/test_relkit_consume.py scripts/test_relkit_host.py
+          python -m unittest scripts/deploy/test_relkit.py scripts/test_relkit_consume.py scripts/test_relkit_host.py
       - name: Build immutable release artifacts
         run: >-
-          python deploy/relkit.py build
+          python scripts/deploy/relkit.py build
           --serve --agent --cli --updater --dart-sdk --rust-sdk --go-sdk --host-scripts
           --version "${GITHUB_REF_NAME#v}" --out dist
       - name: Write checksums

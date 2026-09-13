@@ -8,7 +8,7 @@
 `relkit`（发布 CLI）与 `relkit-serve`（自托管分发服务）合并为单一仓库 [`cnb.cool/shichao402/relkit`](https://cnb.cool/shichao402/relkit)。
 
 - CLI：`cmd/relkit`
-- 服务：`cmd/relkit-serve`，部署脚本在 `deploy/`
+- 服务：`cmd/relkit-serve`，部署脚本在 `scripts/deploy/`
 
 早期曾拆成两个 GitHub 仓库；二者同属一套 RUP 发布栈、发布节奏一致，分开维护没有收益。旧仓库 `relkit-serve` 归档，不再使用。
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for deploy/relkit_ops.py and CLI parsing."""
+"""Tests for scripts/deploy/relkit_ops.py and CLI parsing."""
 
 from __future__ import annotations
 
@@ -359,7 +359,7 @@ class CliParseTests(unittest.TestCase):
         self.assertEqual(len(first), 64)
 
     def test_rust_sdk_archive_excludes_ignored_target(self):
-        ignore = (DEPLOY.parent / "sdk" / "rust" / ".gitignore").read_text(
+        ignore = (deploy_cli.REPO_ROOT / "sdk" / "rust" / ".gitignore").read_text(
             encoding="utf-8"
         )
         self.assertIn("/target/", ignore.splitlines())

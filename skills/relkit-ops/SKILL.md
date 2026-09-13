@@ -2,18 +2,20 @@
 name: relkit-ops
 description: >
   产品仓 relkit 开箱、发版、升 lock、在已有 serve/agent 上注册/列产品/轮换/吊销 token。
-  有 scripts/host/relkit_host.py（或 scripts/relkit_host.py）时使用；换机上二进制才进 relkit 仓 deploy/relkit.py。
+  有 scripts/host/relkit_host.py（或 scripts/relkit_host.py）时使用。
 ---
 
 # relkit 运维
 
 ## 入口
 
-- **产品仓**：只跑 `python scripts/host/relkit_host.py`（无参数只分流，不替你确认）。子命令、闸门、drift 以该脚本 `--help` / `onboard explain` / `status` 为准。
-- **relkit 仓且要换箱子上的二进制**：`python deploy/relkit.py` 的 `build` / `install` / `upgrade`。空机首装不是产品开箱的一步。
-- 判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
+只跑 `python scripts/host/relkit_host.py`（无参数只分流，不替你确认）。子命令、闸门、drift 以该脚本 `--help` / `onboard explain` / `status` 为准。
+
+判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
 
 Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
+
+**箱子上的二进制**（空机 systemd、换 `relkit-agent` / `relkit-serve`）不在本 skill。那是 relkit 仓的 [`relkit-deploy`](../relkit-deploy/SKILL.md) 与 `python scripts/deploy/relkit.py`。产品仓里若 `versionRelation=behind` 且 `onPublishRoute=true`，告诉用户先到 relkit 仓升远端，不要在本仓假装能 `upgrade --host`。
 
 ## 状态与缓存
 
@@ -41,7 +43,7 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - `updater.process`：封闭词 `rust` / `node` / `dart` / `go` / `other`。**不是** `rust-shell`。手写 DTO / `serde(default)` 吞缺键是 drift；以 `onboard explain updater.process` 为准。
 - agent 发布：`release --execute` 必须由 CI 设 `RELKIT_RELEASE_VIA_CI=1`；本地不要发。
 - `share-with`：只能从 `evidence.remote.products` 的真实产品 ID 中选择；`operatorTokenPresent=true` 不等于存在可继承的产品 token。远端不可读或 `blocked` 含 `token.isolation` 时禁止让用户猜。磁盘 token 仍是**已有 owner** 的 `{owner}.token`，不打印 token 内容。
-- 远端版本：`versionRelation=behind` 且 `onPublishRoute=true` 时先升级远端；若 `onPublishRoute=false`，明确告诉用户它落后但不阻塞当前产品发布。
+- 远端版本：`versionRelation=behind` 且 `onPublishRoute=true` 时先升级远端（relkit 仓 `relkit-deploy`）；若 `onPublishRoute=false`，明确告诉用户它落后但不阻塞当前产品发布。
 - 失败记账：带 `code=` 的 `Fail` 写入 `.relkit/cache/ops-journal.jsonl`（`unclassified` 不记）。`retrospect` 输出本次遇到 / 已修进脚本或 skill / 未消化；未消化非 0。
 
 ## 完成后

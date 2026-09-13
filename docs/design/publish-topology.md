@@ -140,9 +140,9 @@ flowchart TB
 
 ## 7. 现网落地（对照，实现前）
 
-外网 CVM 已运行 agent（默认入口 → `127.0.0.1:8787`）与 serve 操作面壳（仅 `/-/admin`、`/-/p/` → `127.0.0.1:8080`）；serve 的 `/srv/releases` 不是 COS 数据面。配置见 `deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
+外网 CVM 已运行 agent（默认入口 → `127.0.0.1:8787`）与 serve 操作面壳（仅 `/-/admin`、`/-/p/` → `127.0.0.1:8080`）；serve 的 `/srv/releases` 不是 COS 数据面。配置见 `scripts/deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
 
 - nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余请求 → serve 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 serve 自己鉴权
 - 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变
-- 配置样例：`deploy/nginx-intranet.example.conf`
+- 配置样例：`scripts/deploy/nginx-intranet.example.conf`
 - **已按 §5 改代码。** 内网 GET `/` 不再现算门户；没有 `browse/` dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`。外网 `dec` 尚未配 `site.makers`，COS 根路径 403，没有对外目录页。
