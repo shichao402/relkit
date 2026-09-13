@@ -59,6 +59,9 @@ func LoadIndex(cfg *config.Config, indexPath string, channel string, withStaged 
 				if AsHTTPError(err, &httpErr) {
 					continue
 				}
+				if backends.IsMissingCredentialMessage(err.Error()) {
+					continue
+				}
 				return nil, err
 			}
 			if raw == nil {

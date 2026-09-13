@@ -36,7 +36,8 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - `ssh.host`：问人之前脚本已展开 `~/.ssh/config` 的 Include 与通配，并列出 exact / patterns / matched。通配本身不是 SSH 别名。写入 `onboard set ssh.host <值>`。
 - 发布拓扑：只认 `questions --json` 的 `evidence.topology`。`mode=direct` 表示 `publishTo` 只含 S3 等直连后端，serve/agent token 与注册不在发布链路上；不要因状态里残留 `ssh.host` 就把远端说成必需。
 - `sidecar.layout`：只认 lock 装到 `tools/bin/relkit-updater`；可选 `relkit.json` `sidecar.packScript` 只校验接线，不硬编码 `.mjs`。真产物归 `pack.ci`。
-- `fake.release`：只跑 `relkit_host.py fake verify`。缺 staged 树时脚本自己 dummy stage + simulate，禁止手调 `relkit.exe stage`。
+- `fake.release`：只跑 `relkit_host.py fake verify`。缺 staged 树时脚本自己 dummy stage + simulate，禁止手调 `relkit.exe stage`。本机无 COS/S3 发布密钥时仍应能 simulate（对着空远端 index 合并 dummy staged）。
+- `pack.ci`：GitHub Actions 里 `relkit_host.py install` 之后真正 `stage`/`cas-put`/`release --execute` 的工作流算已接线；只 `install` 不够。
 - `updater.process`：封闭词 `rust` / `node` / `dart` / `go` / `other`。**不是** `rust-shell`。手写 DTO / `serde(default)` 吞缺键是 drift；以 `onboard explain updater.process` 为准。
 - agent 发布：`release --execute` 必须由 CI 设 `RELKIT_RELEASE_VIA_CI=1`；本地不要发。
 - `share-with`：只能从 `evidence.remote.products` 的真实产品 ID 中选择；`operatorTokenPresent=true` 不等于存在可继承的产品 token。远端不可读或 `blocked` 含 `token.isolation` 时禁止让用户猜。磁盘 token 仍是**已有 owner** 的 `{owner}.token`，不打印 token 内容。

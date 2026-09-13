@@ -2023,7 +2023,43 @@ def reconcile_sidecar_layout(root: Path, state: dict[str, Any], drift: list[str]
     )
 
 
+def github_release_workflow(root: Path) -> Optional[Path]:
+    workflows = root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return None
+    for path in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if github_workflow_publishes_relkit(text):
+            return path
+    return None
+
+
+def github_workflow_publishes_relkit(text: str) -> bool:
+    if "relkit_host.py" in text and (
+        "release --execute" in text or "RELKIT_RELEASE_VIA_CI" in text
+    ):
+        return True
+    if "relkit_host.py" in text and "install" in text and (
+        "cas-put" in text or " stage " in text or "stage " in text
+    ):
+        return True
+    return False
+
+
 def reconcile_pack_ci(root: Path, state: dict[str, Any]) -> None:
+    workflow = github_release_workflow(root)
+    if workflow is not None:
+        set_step(
+            state,
+            "pack.ci",
+            "confirmed",
+            workflow.relative_to(root).as_posix(),
+            "GitHub Actions publishes lock-pinned relkit artifacts; token stays in CI secrets",
+        )
+        return
     if state["steps"]["pack.ci"]["status"] == "unanswered":
         return
     yaml_dev = root / "ci" / "build_dev.yaml"
@@ -3033,12 +3069,41 @@ def cmd_release(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def relkit_cli_version(raw: str) -> str:
+    text = (raw or "").strip()
+    if text[:1] in "vV" and len(text) > 1 and text[1].isdigit():
+        return text[1:]
+    return text
+
+
+def project_version_for_relkit(root: Path) -> str:
+    for name in ("VERSION.json", "version.json"):
+        path = root / name
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            continue
+        if isinstance(data, dict):
+            raw = str(data.get("version") or "").strip()
+            if raw:
+                return relkit_cli_version(raw)
+    return ""
+
+
 def cmd_fake_verify(root: Path, version: Optional[str]) -> int:
     binary = relkit_bin(root)
-    resolved = version
+    resolved = relkit_cli_version(version or "")
+    if not resolved:
+        resolved = project_version_for_relkit(root)
     if not resolved:
         current = run_relkit(root, binary, ["version", "get"])
-        resolved = (current.stdout or "").strip().splitlines()[-1]
+        resolved = relkit_cli_version(
+            (current.stdout or "").strip().splitlines()[-1]
+            if (current.stdout or "").strip()
+            else ""
+        )
     if not resolved:
         raise Fail("fake verify needs a version", code="fake-verify-no-version")
     staged = cache_dir(root) / "staged" / resolved

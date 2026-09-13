@@ -1316,6 +1316,38 @@ class ReconcileTests(unittest.TestCase):
         state["steps"]["fake.release"]["status"] = "verified"
         self.assertEqual(host.release_incomplete_steps(state, via_ci=True), [])
 
+    def test_github_actions_publish_workflow_confirms_pack_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "release.yml").write_text(
+                "run: python3 scripts/host/relkit_host.py install\n"
+                "run: ./tools/bin/relkit-linux-amd64 stage \"$VER\"\n"
+                "run: ./tools/bin/relkit-linux-amd64 cas-put --product demo\n",
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.reconcile_pack_ci(root, state)
+            self.assertEqual(state["steps"]["pack.ci"]["status"], "confirmed")
+            self.assertEqual(
+                state["steps"]["pack.ci"]["value"],
+                ".github/workflows/release.yml",
+            )
+
+    def test_install_only_github_workflow_does_not_confirm_pack_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "ci.yml").write_text(
+                "run: python3 scripts/host/relkit_host.py install\n",
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.reconcile_pack_ci(root, state)
+            self.assertEqual(state["steps"]["pack.ci"]["status"], "unanswered")
+
     def test_ci_skips_retrospect_but_local_release_requires_it(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             state = host.default_state(Path(raw))
@@ -1329,6 +1361,27 @@ class ReconcileTests(unittest.TestCase):
         source = inspect.getsource(host.cmd_release)
         self.assertIn("RELKIT_RELEASE_VIA_CI", source)
         self.assertIn("agent publish is CI-only", source)
+
+    def test_fake_verify_strips_v_prefix_from_version_json(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.save_state(root, host.default_state(root))
+            (root / "VERSION.json").write_text(
+                '{"version": "v1.13.64"}', encoding="utf-8"
+            )
+            with (
+                patch("relkit_host.relkit_bin", return_value=Path("relkit")),
+                patch("relkit_host.stage_dummy_release") as stage,
+                patch("relkit_host.run_relkit") as run,
+            ):
+                self.assertEqual(host.cmd_fake_verify(root, None), 0)
+            stage.assert_called_once()
+            self.assertEqual(stage.call_args.args[1], "1.13.64")
+            run.assert_called_once_with(
+                root,
+                Path("relkit"),
+                ["simulate", "--with-staged", "1.13.64", "--from", "all"],
+            )
 
     def test_fake_verify_runs_simulate_and_marks_verified(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
