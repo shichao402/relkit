@@ -1069,6 +1069,9 @@ class RetrospectTests(unittest.TestCase):
         self.assertIn(".relkit/cache/", host.GITIGNORE_RELKIT)
         self.assertNotIn(".relkit/onboarding.json", host.GITIGNORE_RELKIT)
 
+    def test_installed_host_scripts_do_not_leave_tracked_bytecode(self) -> None:
+        self.assertIn("__pycache__/", host.GITIGNORE_RELKIT)
+
     def test_retrospect_contract_has_matching_step_keys(self) -> None:
         self.assertEqual(set(host.STEP_IDS), set(host.EXPLAIN_TEXTS))
         with tempfile.TemporaryDirectory() as raw:
