@@ -2,7 +2,7 @@
 
 与 `scripts/host/` 并列：产品仓走 host，本仓装机 / 换二进制走这里。
 
-唯一入口：`python scripts/deploy/relkit.py`（仓库根目录执行；Linux 上也可用 `python3 scripts/deploy/relkit.py`）。Agent 流程见 [`skills/relkit-deploy/SKILL.md`](../../skills/relkit-deploy/SKILL.md)。
+唯一入口：`python scripts/deploy/relkit.py`（仓库根目录执行；Linux 上也可用 `python3 scripts/deploy/relkit.py`）。Agent 流程见 [`DecAssets/skills/relkit-deploy/SKILL.md`](../../DecAssets/skills/relkit-deploy/SKILL.md)。
 
 启动时会自检 Python 3.9+。`scripts/deploy/requirements.txt` 目前没有第三方包，因此不会建 venv。若以后加了 pin，脚本会创建 `scripts/deploy/.venv`、`pip install`，然后 re-exec。
 

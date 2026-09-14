@@ -18,7 +18,7 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 
 ## 产品开箱
 
-给另一个产品仓接入时，复制 `scripts/host/`，跑 `python scripts/host/relkit_host.py`。Skill：[`skills/relkit-ops/SKILL.md`](skills/relkit-ops/SKILL.md)。空机装 systemd / 换二进制才用本仓 [`scripts/deploy/README.md`](scripts/deploy/README.md) 与 [`skills/relkit-deploy/SKILL.md`](skills/relkit-deploy/SKILL.md)。
+给另一个产品仓接入时，复制 `scripts/host/`，跑 `python scripts/host/relkit_host.py`。Skill：[`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md)。空机装 systemd / 换二进制才用本仓 [`scripts/deploy/README.md`](scripts/deploy/README.md) 与 [`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md)。
 
 ## 安装
 
@@ -127,9 +127,9 @@ sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve
 | Protobuf 结构 SSOT | [`proto/`](proto/)（Go / Dart：改完跑 `scripts/gen-proto.ps1`；Node：`cd sdk/node && npm run generate`；Rust：构建时用 vendored protoc 生成） |
 | JSON Schema（辅助） | [`schema/`](schema/) |
 | 一致性夹具 | [`conformance/`](conformance/) |
-| 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`skills/relkit-ops/SKILL.md`](skills/relkit-ops/SKILL.md) |
+| 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md) |
 | 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |
-| 装机 / 换二进制 | [`scripts/deploy/README.md`](scripts/deploy/README.md) · [`skills/relkit-deploy/SKILL.md`](skills/relkit-deploy/SKILL.md) |
+| 装机 / 换二进制 | [`scripts/deploy/README.md`](scripts/deploy/README.md) · [`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md) |
 
 ## 客户端 SDK
 

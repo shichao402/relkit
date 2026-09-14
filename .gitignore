@@ -24,5 +24,6 @@ internal/browse/preview/out/
 
 # Dec managed paths (never commit)
 .dec/cache/
+.dec/sync/
 .dec/.version
 /.secrets/

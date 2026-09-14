@@ -8,7 +8,17 @@ kind: project
 version: v2
 layout_version: 1
 project_name: relkit
-enabled_bundles:
-    - agents-board
-    - relkit
-    - tencent-cloud
+provides_root: DecAssets
+provides:
+    relkit-ops:
+        source: DecAssets/skills/relkit-ops
+        visibility: public
+        plane: global
+        type: skill
+        name: relkit-ops
+    relkit-deploy:
+        source: DecAssets/skills/relkit-deploy
+        visibility: public
+        plane: local
+        type: skill
+        name: relkit-deploy

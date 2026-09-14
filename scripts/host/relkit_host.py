@@ -3583,6 +3583,7 @@ Empty-machine install / binary replace lives in the relkit repo:
 
 def _retrospect_skill_paths(root: Path) -> list[Path]:
     candidates = (
+        root / "DecAssets" / "skills" / "relkit-ops" / "SKILL.md",
         root / "skills" / "relkit-ops" / "SKILL.md",
         root / ".cursor" / "skills" / "relkit-ops" / "SKILL.md",
         root / ".cursor" / "skills" / "dec-relkit-ops" / "SKILL.md",
@@ -3901,7 +3902,7 @@ def retrospect_report(root: Path) -> dict[str, Any]:
             _retrospect_item(
                 "skipped",
                 "skill-gate",
-                "skills/relkit-ops/SKILL.md",
+                "DecAssets/skills/relkit-ops/SKILL.md",
                 "installed relkit-ops skill requires relkit_host.py retrospect",
                 "not applicable: no relkit-ops skill is installed in this repository",
             )

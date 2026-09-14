@@ -19,7 +19,7 @@ description: >
 
 ## 入口
 
-只跑 `python scripts/deploy/relkit.py`（仓库根；Linux 可用 `python3`）。细节以 [`scripts/deploy/README.md`](../../scripts/deploy/README.md) 和该脚本 `--help` 为准。
+只跑 `python scripts/deploy/relkit.py`（仓库根；Linux 可用 `python3`）。细节以 [`scripts/deploy/README.md`](../../../scripts/deploy/README.md) 和该脚本 `--help` 为准。
 
 不要手拼 SSH 写配置，不要用腾讯云 TAT / MCP 代跑命令，不要编造命令输出。Go 的 `relkit` / `relkit-agent` / `relkit-serve` 不是人用的第二套装机 CLI。
 
