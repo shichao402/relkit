@@ -29,14 +29,14 @@ description: >
 2. 先 `--plan`，把脱敏探测、本机 HEAD、协议窗口给用户看。
 3. 用户确认后再 `--apply`。不要把 `--stage-only` 说成升级完成。
 4. 工作区脏则停止，除非用户明确 `--allow-dirty`。默认从当前干净 HEAD 构建，stamp 读 `VERSION.json`；只有用户明确要求才 `--unsafe-from-dist`。不要传 `--version`。
-5. 探测缺组件就按脚本提示加 `--agent-only` 或 `--serve-only`，或改走对应 `install`。不要猜。
+5. **agent + serve 是固定配套**：现网箱必须两个进程都在。缺哪个先 `install` 那个，再 `upgrade`（不要 `--agent-only` / `--serve-only`）。`--agent-only` / `--serve-only` 只留给临时抢救，不是现网拓扑。
 
 现网别名：
 
 | Host | 跑什么 | upgrade |
 |---|---|---|
-| `cvm-gz`（`publish.firoyang.com`） | 只有 agent；数据面在 COS | `--agent-only` |
-| `update.devcloud.woa.com` | agent + serve 数据面 | 不要 `--agent-only`；内网还要 `--serve-listen-addr` / `--public-base-url` / `--public-upload-url`（见 README 黄金路径） |
+| `cvm-gz`（`publish.firoyang.com`） | agent 控制面 + serve 操作面（数据面仍在 COS） | 两个都升；不要 `--agent-only`；不要改 profile URL |
+| `update.devcloud.woa.com` | agent + serve 数据面 | 两个都升；不要传 `--public-base-url`（会改掉 loom 的 `https://…`） |
 
 ## 禁止
 

@@ -21,9 +21,10 @@
 在仓库根、已能 `ssh <Host>`（端口走 `~/.ssh/config`）：
 
 ```bash
-python scripts/deploy/relkit.py build --serve --agent --os linux --arch amd64
-python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --plan --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
-python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --apply --serve-listen-addr :8080 --public-base-url http://update.devcloud.woa.com:8080/ --public-upload-url http://update.devcloud.woa.com:8080/
+python scripts/deploy/relkit.py upgrade --host cvm-gz --plan
+python scripts/deploy/relkit.py upgrade --host cvm-gz --apply
+python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --plan
+python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --apply
 ```
 
 `--plan` 只读并打印脱敏探测结果、本机 HEAD 与协议窗口。`--apply` 默认从当前干净 HEAD 构建 linux/amd64 的 agent+serve，在目标机 `/var/backups/relkit/<utc>/` 备份后换文件并重启。`--stage-only` 只写盘不重启，不得称为升级完成。`--unsafe-from-dist` 才使用已有 `dist/`，并持续告警。失败会从该备份回滚。
@@ -36,7 +37,7 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 `upgrade` 默认从当前 HEAD 构建；改完代码直接 `--apply` 即可。只有 `--unsafe-from-dist` 才会把盘上已有的 `dist/` 送上去。
 
-一台机只跑其中一个进程是合法的：外网发布机 `cvm-gz` 数据面在 COS，没有 `relkit-serve`（[publish-topology](../../docs/design/publish-topology.md) §5），升级时加 `--agent-only`。要升的组件目标机没跑，upgrade 会在探测后报错并给出用哪个 flag 跳过、或该跑哪条 `install`，不会抛栈。
+**agent 与 serve 固定配套。** 外网 `cvm-gz` 与内网 `update.devcloud.woa.com` 都必须跑两个进程（外网 serve 是操作面，数据面仍可在 COS；内网 serve 是 `relkit-compatible` 数据面，见 [publish-topology](../../docs/design/publish-topology.md) §5）。缺哪个先 `install` 哪个，不要用 `--agent-only` / `--serve-only` 当现网默认。内网不要带黄金路径里曾经写过的 `--public-base-url http://…:8080/`，否则会改掉已有 HTTPS `baseUrl`。要升的组件目标机没跑，upgrade 会在探测后报错并指出该跑哪条 `install`，不会抛栈。
 
 agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../../docs/adr/0009-publisher-protocol-negotiation.md)）。升级 agent 后必须用同一 release 的 publisher。滚动放行时可临时下调 `minPublishProtocol`（设 0 关闭）。
 
