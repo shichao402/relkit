@@ -28,7 +28,7 @@ description: >
 1. 确认能 `ssh <Host>`（Host 来自 `~/.ssh/config`，由 `dec pull` 落地）。
 2. 先 `--plan`，把脱敏探测、本机 HEAD、协议窗口给用户看。
 3. 用户确认后再 `--apply`。不要把 `--stage-only` 说成升级完成。
-4. 工作区脏则停止，除非用户明确 `--allow-dirty`。默认从当前 HEAD 构建；只有用户明确要求才 `--unsafe-from-dist`。
+4. 工作区脏则停止，除非用户明确 `--allow-dirty`。默认从当前干净 HEAD 构建，stamp 读 `VERSION.json`；只有用户明确要求才 `--unsafe-from-dist`。不要传 `--version`。
 5. 探测缺组件就按脚本提示加 `--agent-only` 或 `--serve-only`，或改走对应 `install`。不要猜。
 
 现网别名：

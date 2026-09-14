@@ -62,7 +62,9 @@ main:
         image: golang:1.26
       stages:
         - name: build release artifacts
-          script: python3 scripts/deploy/relkit.py build --serve --agent --cli --updater --dart-sdk --version "${CNB_BRANCH#v}" --out dist
+          script: |
+            python3 scripts/deploy/relkit.py version --check-tag "${CNB_BRANCH}"
+            python3 scripts/deploy/relkit.py build --serve --agent --cli --updater --dart-sdk --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu

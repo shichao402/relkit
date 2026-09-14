@@ -8,7 +8,8 @@
 
 | 子命令 | 用途 |
 |---|---|
-| `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`） |
+| `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`）。stamp 读根目录 `VERSION.json` |
+| `version` | 打印 SSOT（`--field number|version|build|tag`）；发版 CI 用 `--check-tag` |
 | `install serve` | 空机首装 systemd `relkit-serve` |
 | `install agent` | 空机首装 systemd `relkit-agent` |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |

@@ -5,7 +5,7 @@
 
 ## 决策
 
-接入 RUP / relkit 的项目**必须**在仓库根目录（与 `relkit.json` 同级）提供规格化的 `VERSION.json`，并由 relkit 提供读写与 code 派生；宿主语言**禁止**自备版本解析器作为权威实现。
+接入 RUP / relkit 的项目**必须**在仓库根目录（与 `relkit.json` 同级）提供规格化的 `VERSION.json`，并由 relkit 提供读写与 code 派生；宿主语言**禁止**自备版本解析器作为权威实现。relkit **本仓**同样使用根目录 `VERSION.json`：GitHub tag 为 `v` + number；`scripts/deploy/relkit.py` 的 build/upgrade stamp 只读该文件。
 
 ### 文件规格
 

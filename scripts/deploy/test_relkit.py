@@ -29,6 +29,24 @@ class RequirementsTests(unittest.TestCase):
         self.assertEqual(ops.parse_requirements("foo==1.0\n# x\nbar\n"), ["foo==1.0", "bar"])
 
 
+class SsotTests(unittest.TestCase):
+    def test_parses_number_and_tag(self):
+        out = ops.parse_ssot_document('{"schema":"rup.version/1","version":"0.3.20+0"}\n')
+        self.assertEqual(out["number"], "0.3.20")
+        self.assertEqual(out["version"], "0.3.20+0")
+        self.assertEqual(out["build"], 0)
+        self.assertEqual(out["tag"], "v0.3.20")
+
+    def test_rejects_wrong_schema(self):
+        with self.assertRaises(ValueError):
+            ops.parse_ssot_document('{"schema":"nope","version":"0.3.20+0"}\n')
+
+    def test_repo_ssot_matches_parser(self):
+        text = (deploy_cli.REPO_ROOT / "VERSION.json").read_text(encoding="utf-8")
+        out = ops.parse_ssot_document(text)
+        self.assertEqual(out["tag"], "v" + out["number"])
+
+
 class RedactTests(unittest.TestCase):
     def test_redacts_token_fields_and_signature_urls(self):
         payload = {
@@ -311,7 +329,8 @@ class CliParseTests(unittest.TestCase):
         self.assertIn("build", result.stdout)
         self.assertIn("install", result.stdout)
         self.assertIn("upgrade", result.stdout)
-        self.assertIn("upgrade", result.stdout)
+        self.assertIn("version", result.stdout)
+        self.assertNotIn("0.2.1", result.stdout)
         self.assertNotRegex(result.stdout, r"(?m)^\s+token\s")
 
     def test_upgrade_requires_host(self):
@@ -319,6 +338,31 @@ class CliParseTests(unittest.TestCase):
         env["RELKIT_DEPLOY_BOOTSTRAPPED"] = "1"
         result = subprocess.run(
             [sys.executable, str(DEPLOY / "relkit.py"), "upgrade"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_version_prints_ssot_number(self):
+        env = os.environ.copy()
+        env["RELKIT_DEPLOY_BOOTSTRAPPED"] = "1"
+        result = subprocess.run(
+            [sys.executable, str(DEPLOY / "relkit.py"), "version"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), ops.parse_ssot_document(
+            (deploy_cli.REPO_ROOT / "VERSION.json").read_text(encoding="utf-8")
+        )["number"])
+
+    def test_version_check_tag_rejects_mismatch(self):
+        env = os.environ.copy()
+        env["RELKIT_DEPLOY_BOOTSTRAPPED"] = "1"
+        result = subprocess.run(
+            [sys.executable, str(DEPLOY / "relkit.py"), "version", "--check-tag", "v0.0.0"],
             capture_output=True,
             text=True,
             env=env,

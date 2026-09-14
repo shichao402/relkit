@@ -395,3 +395,30 @@ def parse_requirements(text: str) -> list[str]:
             continue
         reqs.append(line)
     return reqs
+
+
+SSOT_SCHEMA = "rup.version/1"
+SSOT_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)\+(\d+)$")
+
+
+def parse_ssot_document(text: str) -> dict[str, Any]:
+    """Parse a rup.version/1 VERSION.json body. Number is x.y.z; tag is v{number}."""
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"VERSION.json is not valid JSON: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("VERSION.json must be an object")
+    if raw.get("schema") != SSOT_SCHEMA:
+        raise ValueError(f"VERSION.json schema must be {SSOT_SCHEMA}")
+    version = str(raw.get("version") or "")
+    match = SSOT_VERSION_RE.match(version)
+    if not match:
+        raise ValueError("VERSION.json version must be x.y.z+build")
+    number = f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+    return {
+        "version": version,
+        "number": number,
+        "build": int(match.group(4)),
+        "tag": "v" + number,
+    }

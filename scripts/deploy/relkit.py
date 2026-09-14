@@ -61,6 +61,7 @@ from relkit_ops import (  # noqa: E402
     parse_exec_config,
     parse_listen_port,
     parse_requirements,
+    parse_ssot_document,
     read_write_paths,
     redact_text,
     redact_value,
@@ -176,9 +177,20 @@ def git_identity() -> dict[str, str]:
     return {"commit": commit, "dirty": "true" if dirty else "false"}
 
 
-def git_stamp(version: str) -> str:
+def load_ssot() -> dict[str, Any]:
+    path = REPO_ROOT / "VERSION.json"
+    if not path.is_file():
+        die("missing VERSION.json; it is the relkit version SSOT")
+    try:
+        return parse_ssot_document(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        die(str(exc))
+        raise
+
+
+def git_stamp(number: str) -> str:
     ident = git_identity()
-    stamp = f"{version}+{ident['commit'][:12]}"
+    stamp = f"{number}+{ident['commit'][:12]}"
     if ident["dirty"] == "true":
         stamp += "-dirty"
     return stamp
@@ -314,7 +326,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         or getattr(args, "host_scripts", False)
     ):
         targets = ["serve", "agent"]
-    stamp = git_stamp(args.version)
+    stamp = git_stamp(load_ssot()["number"])
     platforms = [
         ("linux", "amd64"),
         ("linux", "arm64"),
@@ -1191,7 +1203,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
                 serve=spec["upgradeServe"],
                 agent=spec["upgradeAgent"],
                 cli=False,
-                version=args.version,
                 out="dist",
                 os="linux",
                 arch="amd64",
@@ -1250,6 +1261,17 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         print("apply finished as stage-only; systemd still runs the previous process")
 
 
+def cmd_version(args: argparse.Namespace) -> None:
+    ssot = load_ssot()
+    if args.check_tag:
+        expected = ssot["tag"]
+        if args.check_tag != expected:
+            die(f"git tag {args.check_tag} does not match VERSION.json {expected}")
+        print(expected)
+        return
+    print(ssot[args.field])
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scripts/deploy/relkit.py", description="relkit deploy CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1263,7 +1285,6 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--rust-sdk", action="store_true")
     build.add_argument("--go-sdk", action="store_true")
     build.add_argument("--host-scripts", action="store_true")
-    build.add_argument("--version", default="0.2.1")
     build.add_argument("--out", default="dist")
     build.add_argument("--os")
     build.add_argument("--arch")
@@ -1295,7 +1316,6 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--stage-only", action="store_true", help="write files but do not restart; not a completed upgrade")
     upgrade.add_argument("--allow-dirty", action="store_true")
     upgrade.add_argument("--unsafe-from-dist", action="store_true", help="ship existing dist/ binaries instead of building HEAD")
-    upgrade.add_argument("--version", default="0.2.1")
     upgrade.add_argument("--serve-binary", default="dist/relkit-serve-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")
     upgrade.add_argument(
@@ -1311,6 +1331,19 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--prefix", default="/usr/local/bin")
     upgrade.add_argument("--serve-only", action="store_true")
     upgrade.add_argument("--agent-only", action="store_true")
+
+    ver = sub.add_parser("version", help="print VERSION.json (relkit SSOT)")
+    ver.add_argument(
+        "--field",
+        choices=("number", "version", "build", "tag"),
+        default="number",
+        help="number=x.y.z, version=x.y.z+build, tag=v{number}",
+    )
+    ver.add_argument(
+        "--check-tag",
+        metavar="TAG",
+        help="require TAG to equal v{number} from VERSION.json",
+    )
 
     remote = sub.add_parser("remote", help=argparse.SUPPRESS)
     remote.add_argument("remote_cmd", choices=["probe", "apply"])
@@ -1333,6 +1366,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 cmd_install_agent(args)
         elif args.cmd == "upgrade":
             cmd_upgrade(args)
+        elif args.cmd == "version":
+            cmd_version(args)
         elif args.cmd == "remote":
             cmd_remote(args)
         else:
