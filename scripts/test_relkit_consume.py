@@ -51,9 +51,16 @@ def go_sdk_zip() -> bytes:
 def host_scripts_zip() -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
-        archive.writestr("relkit_consume.py", "# consume\n")
-        archive.writestr("relkit_host.py", "# host\n")
+        for name in subject.BY_NAME["host-scripts"].required_paths:
+            archive.writestr(name, f"# {name}\n")
     return output.getvalue()
+
+
+def write_host_scripts(directory: Path) -> None:
+    for name in subject.BY_NAME["host-scripts"].required_paths:
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {name}\n", encoding="utf-8")
 
 
 def lock_for(url: str, sdk: bytes, binary: bytes, rust_sdk: bytes | None = None) -> dict:
@@ -227,8 +234,7 @@ class InstallTests(unittest.TestCase):
 
             expected_dir = root / "expected"
             expected_dir.mkdir()
-            (expected_dir / "relkit_consume.py").write_text("# consume\n", encoding="utf-8")
-            (expected_dir / "relkit_host.py").write_text("# host\n", encoding="utf-8")
+            write_host_scripts(expected_dir)
             lock = lock_for("https://example.invalid/artifact", sdk, binary)
             lock["hostScriptsSha256"] = subject.host_scripts_tree_sha256(expected_dir)
             lock["artifacts"]["host-scripts"] = {
@@ -279,15 +285,14 @@ class InstallTests(unittest.TestCase):
 
             expected_dir = root / "expected"
             expected_dir.mkdir()
-            (expected_dir / "relkit_consume.py").write_text("# consume\n", encoding="utf-8")
-            (expected_dir / "relkit_host.py").write_text("# host\n", encoding="utf-8")
+            write_host_scripts(expected_dir)
             expected = subject.host_scripts_tree_sha256(expected_dir)
             real_replace = subject.os.replace
             failed = False
 
             def flaky_replace(source, target):
                 nonlocal failed
-                if Path(target).name == "relkit_host.py" and not failed:
+                if Path(target).name == "host" and Path(source).name.startswith(".host-scripts-") and not failed:
                     failed = True
                     raise PermissionError("locked")
                 return real_replace(source, target)
@@ -438,6 +443,33 @@ class DownloadTests(unittest.TestCase):
                     subject.download_artifact(root, "cli", spec)
             self.assertFalse(
                 (root / ".relkit/cache/artifacts" / ("0" * 64)).exists()
+            )
+
+    def test_watched_windows_tree_replaces_files_and_removes_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            destination = root / "bindings"
+            staging = root / "staging"
+            backup = root / "backup"
+            (destination / "old").mkdir(parents=True)
+            (destination / "old" / "stale.ts").write_text("stale", encoding="utf-8")
+            (destination / "same.js").write_text("old", encoding="utf-8")
+            (staging / "dist").mkdir(parents=True)
+            (staging / "dist" / "updater.js").write_text("new", encoding="utf-8")
+            (staging / "same.js").write_text("replaced", encoding="utf-8")
+
+            subject.replace_watched_tree_on_windows(staging, destination, backup)
+
+            self.assertEqual(
+                (destination / "dist" / "updater.js").read_text(encoding="utf-8"),
+                "new",
+            )
+            self.assertEqual(
+                (destination / "same.js").read_text(encoding="utf-8"), "replaced"
+            )
+            self.assertFalse((destination / "old" / "stale.ts").exists())
+            self.assertEqual(
+                (backup / "same.js").read_text(encoding="utf-8"), "old"
             )
 
 

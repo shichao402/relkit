@@ -1,4 +1,15 @@
 # relkit Rust updater facade
+## WebView JSON
+
+`check_result_to_json` / `check_result_from_json` 使用 `pbjson-build` 从
+`proto/updater/v1/updater.proto` 生成的 canonical ProtoJSON 实现，不维护
+`*Wire` 镜像。`Timestamp` 编码为 RFC3339（例如
+`"2026-08-17T01:15:06.123Z"`），int64 遵循 ProtoJSON 字符串编码；为严格
+WebView 合同，标量默认值也会输出。
+
+五种 `CheckResult` 变体必须与 `conformance/updater/` fixture 双向
+round-trip。产品只消费 release lock 安装的 crate 和 TS bindings，不在产品仓
+运行 protobuf codegen。
 
 供 Tauri/Rust 宿主调用 `relkit-updater` sidecar。crate 只负责本机进程、protobuf
 分帧、IPC 握手、scheduler，以及把 `CheckResult` 投影成 WebView JSON。不重新实现

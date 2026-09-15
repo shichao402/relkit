@@ -22,15 +22,22 @@ jobs:
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: bindings/ts/package-lock.json
       - name: Test
         run: |
           go test ./...
           cargo test --manifest-path sdk/rust/Cargo.toml
           python -m unittest scripts/deploy/test_relkit.py scripts/test_relkit_consume.py scripts/test_relkit_host.py
+          npm --prefix bindings/ts ci
+          npm --prefix bindings/ts test
       - name: Build immutable release artifacts
         run: |
           python scripts/deploy/relkit.py version --check-tag "${GITHUB_REF_NAME}"
-          python scripts/deploy/relkit.py build --serve --agent --cli --updater --dart-sdk --rust-sdk --go-sdk --host-scripts --out dist
+          python scripts/deploy/relkit.py build --all --out dist
       - name: Write checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS

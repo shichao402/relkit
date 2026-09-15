@@ -27,6 +27,8 @@ class TreeHashTests(unittest.TestCase):
             second = host.tree_sha256(root)
             self.assertEqual(first, second)
             (root / "README.local").write_text("ignored\n", encoding="utf-8")
+            self.assertNotEqual(first, host.tree_sha256(root))
+            (root / "README.local").unlink()
             self.assertEqual(first, host.tree_sha256(root))
             (root / "relkit_consume.py").write_text("y\n", encoding="utf-8")
             self.assertNotEqual(first, host.tree_sha256(root))
@@ -432,7 +434,22 @@ class StateTests(unittest.TestCase):
             )
             self.assertEqual(
                 host.consume_components(root),
-                ["sdk-rust", "cli", "updater"],
+            ["sdk-rust", "bindings-ts", "cli", "updater"],
+            )
+
+    def test_nested_client_src_tauri_consumes_rust_and_ts(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "go.mod").write_text("module example.test\n", encoding="utf-8")
+            client = root / "client" / "src-tauri"
+            client.mkdir(parents=True)
+            (client / "Cargo.toml").write_text("[package]\nname='console'\n", encoding="utf-8")
+            (root / "client" / "package.json").write_text("{}\n", encoding="utf-8")
+            stack = host.detect_stack(root)
+            self.assertEqual(stack["languages"], ["go", "rust", "node"])
+            self.assertEqual(
+                host.consume_components(root),
+                ["sdk-go", "sdk-rust", "bindings-ts", "cli", "updater"],
             )
 
     def test_root_src_tauri_selects_rust_sdk(self) -> None:
@@ -1798,6 +1815,100 @@ class InspectAndJournalTests(unittest.TestCase):
             root = Path(raw)
             host.append_ops_journal(root, ["status"], host.Fail("typo"))
             self.assertEqual(host.load_ops_journal(root), [])
+
+
+class UpdaterGateTests(unittest.TestCase):
+    def state(self, root: Path, process: str) -> dict:
+        state = host.default_state(root)
+        host.set_step(state, "updater.process", "confirmed", process)
+        return state
+
+    def test_other_requires_declared_existing_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "other"), drift)
+            self.assertTrue(any("updater.entry" in item for item in drift))
+
+    def test_nested_webview_requires_generated_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "client").mkdir()
+            (root / "client/package.json").write_text("{}", encoding="utf-8")
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "rust"), drift)
+            self.assertTrue(any("WebView requires" in item for item in drift))
+
+    def test_unrelated_serde_default_is_not_an_updater_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src").mkdir()
+            (root / "src/update.rs").write_text(
+                "#[serde(default)]\nstruct Connection { tls: bool }\n",
+                encoding="utf-8",
+            )
+            (root / "relkit.json").write_text(
+                json.dumps({"updater": {"entry": "src/update.rs"}}),
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "other"), drift)
+            self.assertFalse(any("handwritten updater shape" in item for item in drift))
+
+    def test_registered_sdk_directory_is_a_sidecar_chokepoint(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src/update").mkdir(parents=True)
+            (root / "src/other").mkdir(parents=True)
+            (root / "src/update/facade.rs").write_text(
+                "use relkit_updater::Updater;\nconst BIN: &str = \"relkit-updater\";\n",
+                encoding="utf-8",
+            )
+            (root / "src/update/install.rs").write_text(
+                'run("relkit-updater");\n', encoding="utf-8"
+            )
+            (root / "src/other/duplicate.rs").write_text(
+                'run("relkit-updater");\n', encoding="utf-8"
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "rust"), drift)
+            self.assertFalse(any("src/update/" in item and "sidecar name" in item for item in drift))
+            self.assertTrue(any("src/other/duplicate.rs" in item for item in drift))
+
+    def test_other_entry_is_only_sidecar_chokepoint(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src").mkdir()
+            (root / "src/update.rs").write_text('run("relkit-updater");\n', encoding="utf-8")
+            (root / "src/second.rs").write_text('run("relkit-updater");\n', encoding="utf-8")
+            (root / "relkit.json").write_text(
+                json.dumps({"updater": {"entry": "src/update.rs"}}), encoding="utf-8"
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "other"), drift)
+            self.assertTrue(any("src/second.rs" in item for item in drift))
+            self.assertFalse(any("src/update.rs" in item and "sidecar name" in item for item in drift))
+
+    def test_url_allowlist_does_not_exempt_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src").mkdir()
+            entry = root / "src/update.ts"
+            entry.write_text(
+                'interface UpdateAvailable {}\nconst u="https://x.test/rup/index";\n',
+                encoding="utf-8",
+            )
+            (root / "relkit.json").write_text(
+                json.dumps({"updater": {
+                    "entry": "src/update.ts",
+                    "urlAllowlist": ["src/update.ts"],
+                }}),
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "other"), drift)
+            self.assertFalse(any("not allowlisted" in item for item in drift))
+            self.assertTrue(any("handwritten updater shape" in item for item in drift))
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ sys.path.insert(0, str(DEPLOY))
 
 import relkit_ops as ops  # noqa: E402
 import relkit as deploy_cli  # noqa: E402
+from hostlib.facets import BY_NAME, Component, TARGETS, validate_components, with_component
 
 
 class RequirementsTests(unittest.TestCase):
@@ -316,6 +317,57 @@ class BackupRollbackTests(unittest.TestCase):
 
 
 class CliParseTests(unittest.TestCase):
+    def test_bindings_archive_uses_precompiled_entrypoints(self):
+        names = {name for _, name in deploy_cli.component_entries("bindings-ts")}
+        self.assertIn("dist/updater_pb.js", names)
+        self.assertIn("dist/updater_pb.d.ts", names)
+        self.assertNotIn("updater/v1/updater_pb.ts", names)
+
+    def test_tag_ci_builds_every_registry_component(self):
+        workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
+        text = workflow.read_text(encoding="utf-8")
+        self.assertIn("build --all", text)
+        self.assertIn("npm --prefix bindings/ts test", text)
+        parser = deploy_cli.build_parser()
+        args = parser.parse_args(["build", "--all"])
+        self.assertTrue(args.all)
+        for row in deploy_cli.registry_components():
+            self.assertTrue(hasattr(args, row.build_flag.replace("-", "_")))
+
+    def test_registry_preserves_artifact_and_install_name_goldens(self):
+        self.assertEqual(BY_NAME["sdk-rust"].archive, "relkit-sdk-rust.zip")
+        self.assertEqual(BY_NAME["bindings-ts"].archive, "relkit-bindings-ts.zip")
+        self.assertEqual(BY_NAME["cli"].install_name("windows-amd64"), "relkit.exe")
+        self.assertEqual(BY_NAME["cli"].install_name("linux-amd64"), "relkit-linux-amd64")
+        self.assertEqual(BY_NAME["cli"].install_name("darwin-arm64"), "relkit")
+        self.assertEqual(
+            [f"{BY_NAME['updater'].binary_prefix}-{target}" + (".exe" if target.startswith("windows-") else "")
+             for target in TARGETS],
+            [
+                "relkit-updater-linux-amd64",
+                "relkit-updater-linux-arm64",
+                "relkit-updater-windows-amd64.exe",
+                "relkit-updater-darwin-amd64",
+                "relkit-updater-darwin-arm64",
+            ],
+        )
+
+    def test_fictional_facade_is_one_validated_registry_row(self):
+        row = Component(
+            "sdk-zig", "product-tree", "zig-sdk", "relkit-sdk-zig.zip",
+            "sdk/zig", "third_party/relkit/sdk/zig", "files",
+            ("build.zig",), portable=True, detect=("build.zig",),
+            updater_process="zig", import_signals=("@import(\"relkit\")",),
+        )
+        rows = with_component(row)
+        added = rows[-1]
+        self.assertEqual(added.build_flag, "zig-sdk")
+        self.assertEqual(added.name, "sdk-zig")
+        self.assertEqual(added.destination, "third_party/relkit/sdk/zig")
+        self.assertEqual(added.updater_process, "zig")
+        with self.assertRaisesRegex(ValueError, "missing fields"):
+            validate_components([Component("bad", "product-tree", "", "", "", "", "files", ())])
+
     def test_help_and_subcommands(self):
         env = os.environ.copy()
         env["RELKIT_DEPLOY_BOOTSTRAPPED"] = "1"
@@ -393,10 +445,11 @@ class CliParseTests(unittest.TestCase):
         args = deploy_cli.build_parser().parse_args(["build", "--host-scripts"])
         self.assertTrue(args.host_scripts)
         entries = deploy_cli.host_script_entries()
-        self.assertEqual(
-            [name for _, name in entries],
-            ["relkit_consume.py", "relkit_host.py"],
-        )
+        names = [name for _, name in entries]
+        self.assertIn("relkit_consume.py", names)
+        self.assertIn("relkit_host.py", names)
+        self.assertIn("hostlib/facets.py", names)
+        self.assertFalse(any("__pycache__" in name for name in names))
         first = deploy_cli.host_scripts_tree_sha256(entries)
         second = deploy_cli.host_scripts_tree_sha256(entries)
         self.assertEqual(first, second)

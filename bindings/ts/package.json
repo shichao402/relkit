@@ -1,0 +1,22 @@
+{
+  "name": "@relkit/updater-bindings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./updater/v1": {
+      "types": "./dist/updater_pb.d.ts",
+      "import": "./dist/updater_pb.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test conformance.test.mjs"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.14.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

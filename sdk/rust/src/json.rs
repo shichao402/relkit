@@ -1,13 +1,9 @@
-//! Current-IDL JSON projection of [`CheckResult`] for WebView hosts.
+//! Canonical ProtoJSON projection generated from `updater.proto`.
 //!
-//! This is not a second wire protocol. Missing keys are bugs; do not default them.
+//! `pbjson-build` owns names, oneofs, bytes, int64 and WKT/Timestamp mapping.
+//! Its `emit_fields` option intentionally includes scalar defaults.
 
-use crate::proto::check_result;
-use crate::proto::{
-    ArtifactView, CheckResult, Error, Failed, FallbackRequired, PriorReleaseNotes, RecoveryHelp,
-    RecoveryLink, Throttled, UpToDate, UpdateAvailable,
-};
-use serde::{Deserialize, Serialize};
+use crate::proto::CheckResult;
 
 #[derive(Debug)]
 pub struct JsonError(pub String);
@@ -20,342 +16,88 @@ impl std::fmt::Display for JsonError {
 
 impl std::error::Error for JsonError {}
 
-/// Serialize a check result. Empty strings and `false` are always present.
 pub fn check_result_to_json(result: &CheckResult) -> Result<String, JsonError> {
-    let wire = CheckResultWire::from_proto(result)?;
-    serde_json::to_string(&wire).map_err(|error| JsonError(error.to_string()))
+    let mut value =
+        serde_json::to_value(result).map_err(|error| JsonError(error.to_string()))?;
+    normalize_utc_timestamps(&mut value);
+    serde_json::to_string(&value).map_err(|error| JsonError(error.to_string()))
 }
 
-/// Strict parse: absent `releaseNotesMarkdown` (and other IDL scalars) fails.
 pub fn check_result_from_json(json: &str) -> Result<CheckResult, JsonError> {
-    let wire: CheckResultWire =
+    let input: serde_json::Value =
         serde_json::from_str(json).map_err(|error| JsonError(error.to_string()))?;
-    Ok(wire.into_proto())
+    let result: CheckResult =
+        serde_json::from_value(input.clone()).map_err(|error| JsonError(error.to_string()))?;
+    let canonical: serde_json::Value = serde_json::from_str(&check_result_to_json(&result)?)
+        .map_err(|error| JsonError(error.to_string()))?;
+    if input != canonical {
+        let path = first_difference(&input, &canonical, "$");
+        return Err(JsonError(format!(
+            "non-canonical or missing protobuf JSON field at {path}"
+        )));
+    }
+    Ok(result)
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum CheckResultWire {
-    UpToDate(UpToDateWire),
-    UpdateAvailable(UpdateAvailableWire),
-    FallbackRequired(FallbackRequiredWire),
-    Throttled(ThrottledWire),
-    Failed(FailedWire),
+fn normalize_utc_timestamps(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text)
+            if text.len() >= 25
+                && text.ends_with("+00:00")
+                && text.as_bytes().get(4) == Some(&b'-')
+                && text.as_bytes().get(10) == Some(&b'T') =>
+        {
+            text.truncate(text.len() - 6);
+            text.push('Z');
+        }
+        serde_json::Value::Array(values) => {
+            values.iter_mut().for_each(normalize_utc_timestamps);
+        }
+        serde_json::Value::Object(values) => {
+            values.values_mut().for_each(normalize_utc_timestamps);
+        }
+        _ => {}
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct UpToDateWire {
-    sequence: i64,
-    current_is_yanked: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct UpdateAvailableWire {
-    plan_id: String,
-    prompt_key: String,
-    version: String,
-    code: i64,
-    mandatory: bool,
-    remaining_hops: i32,
-    sequence: i64,
-    release_notes_markdown: String,
-    release_notes_url: String,
-    prior_release_notes: Vec<PriorReleaseNotesWire>,
-    artifacts: Vec<ArtifactViewWire>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PriorReleaseNotesWire {
-    version: String,
-    code: i64,
-    notes: String,
-    notes_url: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ArtifactViewWire {
-    name: String,
-    size: i64,
-    sha256: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FallbackRequiredWire {
-    prompt_key: String,
-    manual_url: String,
-    message: String,
-    mandatory: bool,
-    sequence: i64,
-    min_code: i64,
-    max_code: i64,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ThrottledWire {
-    next_allowed_at: Option<TimestampWire>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TimestampWire {
-    seconds: i64,
-    nanos: i32,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FailedWire {
-    error: Option<ErrorWire>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ErrorWire {
-    code: i32,
-    retryable: bool,
-    message: String,
-    attempts: Vec<String>,
-    recovery: Option<RecoveryHelpWire>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RecoveryHelpWire {
-    message: String,
-    links: Vec<RecoveryLinkWire>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RecoveryLinkWire {
-    label: String,
-    url: String,
-}
-
-impl CheckResultWire {
-    fn from_proto(result: &CheckResult) -> Result<Self, JsonError> {
-        match &result.kind {
-            Some(check_result::Kind::UpToDate(value)) => Ok(Self::UpToDate(UpToDateWire {
-                sequence: value.sequence,
-                current_is_yanked: value.current_is_yanked,
-            })),
-            Some(check_result::Kind::UpdateAvailable(value)) => {
-                Ok(Self::UpdateAvailable(UpdateAvailableWire::from_proto(value)))
+fn first_difference(input: &serde_json::Value, canonical: &serde_json::Value, path: &str) -> String {
+    match (input, canonical) {
+        (serde_json::Value::Object(left), serde_json::Value::Object(right)) => {
+            for (key, value) in right {
+                let child = format!("{path}.{key}");
+                match left.get(key) {
+                    Some(actual) if actual == value => {}
+                    Some(actual) => return first_difference(actual, value, &child),
+                    None => return child,
+                }
             }
-            Some(check_result::Kind::FallbackRequired(value)) => {
-                Ok(Self::FallbackRequired(FallbackRequiredWire {
-                    prompt_key: value.prompt_key.clone(),
-                    manual_url: value.manual_url.clone(),
-                    message: value.message.clone(),
-                    mandatory: value.mandatory,
-                    sequence: value.sequence,
-                    min_code: value.min_code,
-                    max_code: value.max_code,
-                }))
+            left.keys()
+                .find(|key| !right.contains_key(*key))
+                .map(|key| format!("{path}.{key}"))
+                .unwrap_or_else(|| path.to_owned())
+        }
+        (serde_json::Value::Array(left), serde_json::Value::Array(right)) => {
+            for (index, value) in right.iter().enumerate() {
+                let child = format!("{path}[{index}]");
+                match left.get(index) {
+                    Some(actual) if actual == value => {}
+                    Some(actual) => return first_difference(actual, value, &child),
+                    None => return child,
+                }
             }
-            Some(check_result::Kind::Throttled(value)) => Ok(Self::Throttled(ThrottledWire {
-                next_allowed_at: value.next_allowed_at.as_ref().map(|ts| TimestampWire {
-                    seconds: ts.seconds,
-                    nanos: ts.nanos,
-                }),
-            })),
-            Some(check_result::Kind::Failed(value)) => Ok(Self::Failed(FailedWire {
-                error: value.error.as_ref().map(ErrorWire::from_proto),
-            })),
-            None => Err(JsonError("check result has no kind".into())),
+            path.to_owned()
         }
-    }
-
-    fn into_proto(self) -> CheckResult {
-        let kind = match self {
-            Self::UpToDate(value) => check_result::Kind::UpToDate(UpToDate {
-                sequence: value.sequence,
-                current_is_yanked: value.current_is_yanked,
-            }),
-            Self::UpdateAvailable(value) => {
-                check_result::Kind::UpdateAvailable(value.into_proto())
-            }
-            Self::FallbackRequired(value) => check_result::Kind::FallbackRequired(FallbackRequired {
-                prompt_key: value.prompt_key,
-                manual_url: value.manual_url,
-                message: value.message,
-                mandatory: value.mandatory,
-                sequence: value.sequence,
-                min_code: value.min_code,
-                max_code: value.max_code,
-            }),
-            Self::Throttled(value) => check_result::Kind::Throttled(Throttled {
-                next_allowed_at: value.next_allowed_at.map(|ts| prost_types::Timestamp {
-                    seconds: ts.seconds,
-                    nanos: ts.nanos,
-                }),
-            }),
-            Self::Failed(value) => check_result::Kind::Failed(Failed {
-                error: value.error.map(ErrorWire::into_proto),
-            }),
-        };
-        CheckResult { kind: Some(kind) }
-    }
-}
-
-impl UpdateAvailableWire {
-    fn from_proto(value: &UpdateAvailable) -> Self {
-        Self {
-            plan_id: value.plan_id.clone(),
-            prompt_key: value.prompt_key.clone(),
-            version: value.version.clone(),
-            code: value.code,
-            mandatory: value.mandatory,
-            remaining_hops: value.remaining_hops,
-            sequence: value.sequence,
-            release_notes_markdown: value.release_notes_markdown.clone(),
-            release_notes_url: value.release_notes_url.clone(),
-            prior_release_notes: value
-                .prior_release_notes
-                .iter()
-                .map(|notes| PriorReleaseNotesWire {
-                    version: notes.version.clone(),
-                    code: notes.code,
-                    notes: notes.notes.clone(),
-                    notes_url: notes.notes_url.clone(),
-                })
-                .collect(),
-            artifacts: value
-                .artifacts
-                .iter()
-                .map(|artifact| ArtifactViewWire {
-                    name: artifact.name.clone(),
-                    size: artifact.size,
-                    sha256: hex_encode(&artifact.sha256),
-                })
-                .collect(),
-        }
-    }
-
-    fn into_proto(self) -> UpdateAvailable {
-        UpdateAvailable {
-            plan_id: self.plan_id,
-            prompt_key: self.prompt_key,
-            version: self.version,
-            code: self.code,
-            mandatory: self.mandatory,
-            remaining_hops: self.remaining_hops,
-            sequence: self.sequence,
-            release_notes_markdown: self.release_notes_markdown,
-            release_notes_url: self.release_notes_url,
-            prior_release_notes: self
-                .prior_release_notes
-                .into_iter()
-                .map(|notes| PriorReleaseNotes {
-                    version: notes.version,
-                    code: notes.code,
-                    notes: notes.notes,
-                    notes_url: notes.notes_url,
-                })
-                .collect(),
-            artifacts: self
-                .artifacts
-                .into_iter()
-                .map(|artifact| ArtifactView {
-                    name: artifact.name,
-                    size: artifact.size,
-                    sha256: hex_decode(&artifact.sha256),
-                })
-                .collect(),
-        }
-    }
-}
-
-impl ErrorWire {
-    fn from_proto(value: &Error) -> Self {
-        Self {
-            code: value.code,
-            retryable: value.retryable,
-            message: value.message.clone(),
-            attempts: value.attempts.clone(),
-            recovery: value.recovery.as_ref().map(|help| RecoveryHelpWire {
-                message: help.message.clone(),
-                links: help
-                    .links
-                    .iter()
-                    .map(|link| RecoveryLinkWire {
-                        label: link.label.clone(),
-                        url: link.url.clone(),
-                    })
-                    .collect(),
-            }),
-        }
-    }
-
-    fn into_proto(self) -> Error {
-        Error {
-            code: self.code,
-            retryable: self.retryable,
-            message: self.message,
-            attempts: self.attempts,
-            recovery: self.recovery.map(|help| RecoveryHelp {
-                message: help.message,
-                links: help
-                    .links
-                    .into_iter()
-                    .map(|link| RecoveryLink {
-                        label: link.label,
-                        url: link.url,
-                    })
-                    .collect(),
-            }),
-        }
-    }
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
-
-fn hex_decode(text: &str) -> Vec<u8> {
-    let bytes = text.as_bytes();
-    if bytes.len() % 2 != 0 {
-        return Vec::new();
-    }
-    let mut out = Vec::with_capacity(bytes.len() / 2);
-    let mut index = 0;
-    while index < bytes.len() {
-        let Some(high) = from_hex(bytes[index]) else {
-            return Vec::new();
-        };
-        let Some(low) = from_hex(bytes[index + 1]) else {
-            return Vec::new();
-        };
-        out.push((high << 4) | low);
-        index += 2;
-    }
-    out
-}
-
-fn from_hex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
+        _ => path.to_owned(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::{
+        check_result, Error, ErrorCode, Failed, FallbackRequired, Throttled, UpToDate,
+        UpdateAvailable,
+    };
 
     fn empty_notes_available() -> CheckResult {
         CheckResult {
@@ -378,10 +120,7 @@ mod tests {
     #[test]
     fn empty_notes_and_false_mandatory_emit_keys() {
         let json = check_result_to_json(&empty_notes_available()).unwrap();
-        assert!(
-            json.contains("\"releaseNotesMarkdown\":\"\""),
-            "{json}"
-        );
+        assert!(json.contains("\"releaseNotesMarkdown\":\"\""), "{json}");
         assert!(json.contains("\"releaseNotesUrl\":\"\""), "{json}");
         assert!(json.contains("\"mandatory\":false"), "{json}");
         assert_eq!(
@@ -391,29 +130,74 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_is_rfc3339() {
+        let result = CheckResult {
+            kind: Some(check_result::Kind::Throttled(Throttled {
+                next_allowed_at: Some(pbjson_types::Timestamp {
+                    seconds: 1_786_943_706,
+                    nanos: 123_000_000,
+                }),
+            })),
+        };
+        let json = check_result_to_json(&result).unwrap();
+        assert_eq!(
+            json,
+            r#"{"throttled":{"nextAllowedAt":"2026-08-17T05:15:06.123Z"}}"#
+        );
+        assert_eq!(check_result_from_json(&json).unwrap(), result);
+    }
+
+    #[test]
+    fn five_variants_round_trip() {
+        let variants = [
+            (CheckResult {
+                kind: Some(check_result::Kind::UpToDate(UpToDate::default())),
+            }, include_str!("../../../conformance/updater/check-result-up-to-date.json")),
+            (empty_notes_available(), include_str!("../../../conformance/updater/check-result-empty-notes.json")),
+            (CheckResult {
+                kind: Some(check_result::Kind::FallbackRequired(FallbackRequired::default())),
+            }, include_str!("../../../conformance/updater/check-result-fallback-required.json")),
+            (CheckResult {
+                kind: Some(check_result::Kind::Throttled(Throttled {
+                    next_allowed_at: Some(pbjson_types::Timestamp {
+                        seconds: 1_786_943_706,
+                        nanos: 123_000_000,
+                    }),
+                })),
+            }, include_str!("../../../conformance/updater/check-result-throttled.json")),
+            (CheckResult {
+                kind: Some(check_result::Kind::Failed(Failed {
+                    error: Some(Error {
+                        code: ErrorCode::Network as i32,
+                        retryable: true,
+                        message: "offline".into(),
+                        attempts: Vec::new(),
+                        recovery: None,
+                    }),
+                })),
+            }, include_str!("../../../conformance/updater/check-result-failed.json")),
+        ];
+        for (result, fixture) in variants {
+            let json = check_result_to_json(&result).unwrap();
+            assert_eq!(json, fixture.trim_end());
+            assert_eq!(check_result_from_json(&json).unwrap(), result, "{json}");
+        }
+    }
+
+    #[test]
     fn missing_release_notes_markdown_is_rejected() {
         let mut value: serde_json::Value =
             serde_json::from_str(&check_result_to_json(&empty_notes_available()).unwrap()).unwrap();
-        value["updateAvailable"]
-            .as_object_mut()
-            .unwrap()
-            .remove("releaseNotesMarkdown");
+        value["updateAvailable"].as_object_mut().unwrap().remove("releaseNotesMarkdown");
         let error = check_result_from_json(&value.to_string()).unwrap_err();
-        assert!(
-            error.0.contains("releaseNotesMarkdown"),
-            "{}",
-            error.0
-        );
+        assert!(error.0.contains("releaseNotesMarkdown"), "{}", error.0);
     }
 
     #[test]
     fn missing_mandatory_is_rejected() {
         let mut value: serde_json::Value =
             serde_json::from_str(&check_result_to_json(&empty_notes_available()).unwrap()).unwrap();
-        value["updateAvailable"]
-            .as_object_mut()
-            .unwrap()
-            .remove("mandatory");
+        value["updateAvailable"].as_object_mut().unwrap().remove("mandatory");
         let error = check_result_from_json(&value.to_string()).unwrap_err();
         assert!(error.0.contains("mandatory"), "{}", error.0);
     }

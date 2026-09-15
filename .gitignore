@@ -1,5 +1,5 @@
 .relkit/cache/
-dist/
+/dist/
 scripts/deploy/.venv/
 tmp/
 *.exe
@@ -27,3 +27,5 @@ internal/browse/preview/out/
 .dec/sync/
 .dec/.version
 /.secrets/
+
+bindings/ts/node_modules/

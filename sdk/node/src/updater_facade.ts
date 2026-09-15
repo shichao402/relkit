@@ -6,8 +6,20 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { fromBinary, toBinary } from "@bufbuild/protobuf";
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
+  ApplyOpSchema,
+  ApplyResultSchema,
+  CheckOpSchema,
+  CheckResultSchema,
+  CleanupOpSchema,
+  DownloadOpSchema,
+  DownloadResultSchema,
+  ErrorSchema,
+  FailedSchema,
+  ResultSchema,
+  SkipOpSchema,
+  StatusOpSchema,
   UpdaterEventSchema,
   UpdaterRequestSchema,
   type Capabilities,
@@ -27,6 +39,9 @@ import {
 export const ipcMin = 1;
 export const ipcMax = 1;
 export const ipcCurrent = 1;
+
+const facadeError = (code: number, message: string, retryable = false): Error =>
+  create(ErrorSchema, { code, retryable, message, attempts: [] });
 
 export type Glue = {
   locate(runtime: Runtime): Promise<string>;
@@ -106,20 +121,20 @@ export class Updater {
       if (!caps) {
         return {
           kind: "failed",
-          error: { code: 8, retryable: false, message: "no capabilities", attempts: [] },
+          error: facadeError(8, "no capabilities"),
         };
       }
       if (caps.ipc < ipcMin) {
-        return { kind: "failed", error: { code: 9, retryable: false, message: "sidecar IPC too old", attempts: [] } };
+        return { kind: "failed", error: facadeError(9, "sidecar IPC too old") };
       }
       if (caps.ipc > ipcMax) {
-        return { kind: "failed", error: { code: 10, retryable: false, message: "sidecar IPC too new", attempts: [] } };
+        return { kind: "failed", error: facadeError(10, "sidecar IPC too new") };
       }
       return { kind: "opened", updater: new Updater(profile, runtime, glue, bin, caps), capabilities: caps };
     } catch (e) {
       return {
         kind: "failed",
-        error: { code: 19, retryable: false, message: String(e), attempts: [] },
+        error: facadeError(19, String(e)),
       };
     }
   }
@@ -137,53 +152,65 @@ export class Updater {
 
   async check(opts: { force?: boolean; exactCode?: bigint; policy?: CheckPolicy } = {}): Promise<CheckResult> {
     for await (const ev of this.call({
-      op: { case: "check", value: { force: !!opts.force, exactCode: opts.exactCode ?? 0n, policy: opts.policy } },
+      op: { case: "check", value: create(CheckOpSchema, { force: !!opts.force, exactCode: opts.exactCode ?? 0n, policy: opts.policy }) },
     })) {
       if (ev.kind.case === "check") return ev.kind.value;
       if (ev.kind.case === "failed") return { kind: { case: "failed", value: ev.kind.value } } as CheckResult;
     }
-    return { kind: { case: "failed", value: { error: { code: 1, message: "no check result", retryable: true, attempts: [] } } } } as CheckResult;
+    return create(CheckResultSchema, {
+      kind: { case: "failed", value: create(FailedSchema, {
+        error: facadeError(1, "no check result", true),
+      }) },
+    });
   }
 
   async skip(opts: { code: bigint }): Promise<Result> {
-    for await (const ev of this.call({ op: { case: "skip", value: { code: opts.code } } })) {
+    for await (const ev of this.call({ op: { case: "skip", value: create(SkipOpSchema, { code: opts.code }) } })) {
       if (ev.kind.case === "result") return ev.kind.value;
     }
-    return { kind: { case: "ok", value: {} } } as Result;
+    return create(ResultSchema, { kind: { case: "ok", value: {} } });
   }
 
   async download(opts: { planId: string }, onEvent?: (e: UpdaterEvent) => void): Promise<DownloadResult> {
-    for await (const ev of this.call({ op: { case: "download", value: { planId: opts.planId } } })) {
+    for await (const ev of this.call({ op: { case: "download", value: create(DownloadOpSchema, { planId: opts.planId }) } })) {
       onEvent?.(ev);
       if (ev.kind.case === "download") return ev.kind.value;
     }
-    return { kind: { case: "failed", value: { error: { code: 1, message: "no download result", retryable: true, attempts: [] } } } } as DownloadResult;
+    return create(DownloadResultSchema, {
+      kind: { case: "failed", value: create(FailedSchema, {
+        error: facadeError(1, "no download result", true),
+      }) },
+    });
   }
 
   async apply(opts: { planId: string }, onEvent?: (e: UpdaterEvent) => void): Promise<ApplyResult> {
-    for await (const ev of this.call({ op: { case: "apply", value: { planId: opts.planId } } })) {
+    for await (const ev of this.call({ op: { case: "apply", value: create(ApplyOpSchema, { planId: opts.planId }) } })) {
       onEvent?.(ev);
       if (ev.kind.case === "apply") return ev.kind.value;
     }
-    return { kind: { case: "failed", value: { error: { code: 1, message: "no apply result", retryable: true, attempts: [] } } } } as ApplyResult;
+    return create(ApplyResultSchema, {
+      kind: { case: "failed", value: create(FailedSchema, {
+        error: facadeError(1, "no apply result", true),
+      }) },
+    });
   }
 
   async status(): Promise<StatusSnapshot> {
-    for await (const ev of this.call({ op: { case: "status", value: {} } })) {
+    for await (const ev of this.call({ op: { case: "status", value: create(StatusOpSchema) } })) {
       if (ev.kind.case === "status") return ev.kind.value;
     }
     return {} as StatusSnapshot;
   }
 
   async cleanup(): Promise<Result> {
-    for await (const ev of this.call({ op: { case: "cleanup", value: {} } })) {
+    for await (const ev of this.call({ op: { case: "cleanup", value: create(CleanupOpSchema) } })) {
       if (ev.kind.case === "result") return ev.kind.value;
     }
-    return { kind: { case: "ok", value: {} } } as Result;
+    return create(ResultSchema, { kind: { case: "ok", value: {} } });
   }
 
   async cancel(): Promise<Result> {
-    return { kind: { case: "ok", value: {} } } as Result;
+    return create(ResultSchema, { kind: { case: "ok", value: {} } });
   }
 }
 

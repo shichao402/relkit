@@ -16,7 +16,7 @@ Go / Dart / Node 三套 SDK 各自实现 check、下载与（部分）apply，�
 2. **两层协议。** `rup.v2` = 线上签名对象。`relkit.updater.v1` = 本机 IPC、state、plan、session、InstallSpec。安装布局不进入 index/manifest。
 3. **IPC。** 一次进程一条 `UpdaterRequest`；stdout 只输出 4 字节大端长度分帧的 protobuf `UpdaterEvent`；stderr 只写人类日志。取消 = 杀子进程。apply worker（`--worker`）在宿主退出后靠 session 文件继续。
 4. **IPC 窗口。** 模式对齐 ADR 0009 的 `[min,max]`，当前 `[1,1]`。无交集返回 `updaterTooOld` / `updaterTooNew`。窗口是 facade 编译期常量，不进 `ClientProfile`。协议头不是 `X-Relkit-Publish-Protocol`。
-5. **宿主 facade 与 wire 同一 IDL。** 方法、结果五变体、错误码、`ClientProfile` 由 `protoc-gen-relkit-facade` 生成。禁止手写第二份 DTO 或转换层。Go 仅允许导出首字母大写。失败返回带 `ErrorCode` 的结果对象，不抛裸异常。
+5. **宿主 facade 与 wire 同一 IDL。** 方法、结果五变体、错误码、`ClientProfile` 由生成器生成。每门语言的绑定随 relkit release 发布；产品仓只 import，永不执行 codegen。禁止手写第二份 DTO 或转换层。Go 仅允许导出首字母大写。失败返回带 `ErrorCode` 的结果对象，不抛裸异常。
 6. **数值宽度。** `code` / `sequence` / `size` 等与 `rup.v2` 一样用 `int64`。间隔用 `google.protobuf.Duration`；引擎按 `minCheckInterval`（5 分钟）钳制，不信任宿主小时整数。
 7. **sidecar。** 每个产品安装树一份同版本 `relkit-updater`，不进 PATH、不注册系统服务。consume 同一 SHA 产出 facade 与二进制。
 8. **旧 SDK。** 冻结功能，仅作迁移桥；稳定后删除旁路实现。引擎读取 legacy JSON state 一次并写成 `state.pb`，水位与 skipped 必须导入。
@@ -42,9 +42,10 @@ Go / Dart / Node 三套 SDK 各自实现 check、下载与（部分）apply，�
 
 sidecar 与宿主 **同 SHA、IPC `[1,1]`**。混版本不是产品需求。
 
-本机 IPC 仍是 protobuf 帧。若宿主必须把 `CheckResult` 交给 WebView，JSON 是 **当前 IDL 的投影**，由 Rust facade 的 `check_result_to_json` 唯一产出，禁止手写第二份 `CheckResult` / `UpdateAvailable` DTO。
+本机 IPC 仍是 protobuf 帧。若宿主必须把 `CheckResult` 交给 WebView，JSON 是 **canonical protobuf JSON**：各 facade 使用本语言 protobuf 库从同一 IDL 派生同一投影，禁止手写第二份 `CheckResult` / `UpdateAvailable` DTO。Rust 函数名 `check_result_to_json` 只是该门面的出口，不是另一份协议。
 
-- 标量零值必须出键：`"releaseNotesMarkdown":""`、`"mandatory":false`。缺键 = 投影器 bug，不是「旧 updater」。
+- WKT 遵循 ProtoJSON；`Timestamp` 是 RFC3339 字符串。标量零值必须出键：`"releaseNotesMarkdown":""`、`"mandatory":false`。缺键 = 投影器 bug，不是「旧 updater」。
+- 五种结果变体都以 `conformance/updater/` fixture 做双向 round-trip；绑定与 sidecar 由同一 release lock 固定。
 - 消费者保持严格反序列化。禁止 `#[serde(default)]` / `Option<String>` / 「兼容旧 updater」吞缺键。bool 缺省成 `false` 尤其危险。
 - 字段要变成真正可选：抬 IPC 窗口并改 proto，而不是在客户端 default。
 
@@ -56,9 +57,11 @@ sidecar 与宿主 **同 SHA、IPC `[1,1]`**。混版本不是产品需求。
 - 各语言再写一套 check/apply 算法
 - 宿主自算下次检查时间
 - 把 InstallSpec 写进签名 index
+- 为每门语言手抄 build / lock / consume 分支
+- 把冻结的 legacy `sdk/node` 客户端当成 WebView 绑定
 
 ## 后果
 
-- 接新语言 = 加一个 facade 生成目标
+- 接新语言 = 在组件 registry 加一行
 - SvnMergeTool / Dec 只编排 UI 与进程生命周期
 - 消费仓必须同一 consume SHA 带上 sidecar

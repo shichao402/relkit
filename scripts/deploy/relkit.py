@@ -36,6 +36,14 @@ def _repo_root() -> Path:
 
 
 REPO_ROOT = _repo_root()
+HOST_DIR = REPO_ROOT / "scripts" / "host"
+if str(HOST_DIR) not in sys.path:
+    sys.path.insert(0, str(HOST_DIR))
+from hostlib.facets import (  # noqa: E402
+    TARGETS,
+    components as registry_components,
+)
+
 REQUIREMENTS = DEPLOY_DIR / "requirements.txt"
 VENV_DIR = DEPLOY_DIR / ".venv"
 BOOTSTRAP_ENV = "RELKIT_DEPLOY_BOOTSTRAPPED"
@@ -284,12 +292,47 @@ def go_sdk_entries() -> list[tuple[Path, str]]:
 
 def host_script_entries() -> list[tuple[Path, str]]:
     host_root = REPO_ROOT / "scripts" / "host"
-    names = ("relkit_consume.py", "relkit_host.py")
-    entries = [(host_root / name, name) for name in names]
-    missing = [str(path) for path, _ in entries if not path.is_file()]
-    if missing:
-        raise Fail("host scripts are missing: " + ", ".join(missing))
-    return entries
+    return [
+        (path, path.relative_to(host_root).as_posix())
+        for path in sorted(host_root.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts
+    ]
+
+
+def tree_entries(source: str) -> list[tuple[Path, str]]:
+    source_root = REPO_ROOT / source
+    paths = release_source_paths(source)
+    if not paths:
+        raise Fail(f"{source} has no tracked files")
+    return [
+        (REPO_ROOT / relative, (REPO_ROOT / relative).relative_to(source_root).as_posix())
+        for relative in paths
+        if (REPO_ROOT / relative).is_file()
+    ]
+
+
+def component_entries(name: str) -> list[tuple[Path, str]]:
+    if name == "host-scripts":
+        return host_script_entries()
+    if name == "sdk-rust":
+        return rust_sdk_entries()
+    if name == "sdk-go":
+        return go_sdk_entries()
+    if name == "bindings-ts":
+        root = REPO_ROOT / "bindings" / "ts"
+        names = (
+            "package.json",
+            "README.md",
+            "dist/updater_pb.js",
+            "dist/updater_pb.d.ts",
+        )
+        entries = [(root / relative, relative) for relative in names]
+        missing = [relative for path, relative in entries if not path.is_file()]
+        if missing:
+            raise Fail("bindings-ts is incomplete: " + ", ".join(missing))
+        return entries
+    row = next(row for row in registry_components("product-tree") if row.name == name)
+    return tree_entries(row.source)
 
 
 def host_scripts_tree_sha256(entries: Sequence[tuple[Path, str]]) -> str:
@@ -310,42 +353,31 @@ def cmd_build(args: argparse.Namespace) -> None:
     if not out_dir.is_absolute():
         out_dir = REPO_ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    targets = []
-    if args.serve:
-        targets.append("serve")
-    if args.agent:
-        targets.append("agent")
-    if args.cli:
-        targets.append("cli")
-    if getattr(args, "updater", False):
-        targets.append("updater")
-    if not targets and not (
-        getattr(args, "dart_sdk", False)
-        or getattr(args, "rust_sdk", False)
-        or getattr(args, "go_sdk", False)
-        or getattr(args, "host_scripts", False)
-    ):
-        targets = ["serve", "agent"]
+    binary_rows = registry_components("host-binary") + registry_components("product-binary")
+    tree_rows = registry_components("product-tree")
+    if getattr(args, "all", False):
+        targets = [row.name for row in binary_rows]
+        selected_trees = list(tree_rows)
+    else:
+        targets = [
+            row.name for row in binary_rows
+            if getattr(args, row.build_flag.replace("-", "_"), False)
+        ]
+        selected_trees = [
+            row for row in tree_rows
+            if getattr(args, row.build_flag.replace("-", "_"), False)
+        ]
+        if not targets and not selected_trees:
+            targets = ["serve", "agent"]
     stamp = git_stamp(load_ssot()["number"])
-    platforms = [
-        ("linux", "amd64"),
-        ("linux", "arm64"),
-        ("windows", "amd64"),
-        ("darwin", "amd64"),
-        ("darwin", "arm64"),
-    ]
+    platforms = [tuple(target.split("-", 1)) for target in TARGETS]
     if args.os:
         platforms = [p for p in platforms if p[0] == args.os]
     if args.arch:
         platforms = [p for p in platforms if p[1] == args.arch]
     if not platforms:
         die("no build platforms left after --os/--arch filters")
-    pkgs = {
-        "serve": ("./cmd/relkit-serve", "relkit-serve"),
-        "agent": ("./cmd/relkit-agent", "relkit-agent"),
-        "cli": ("./cmd/relkit", "relkit"),
-        "updater": ("./cmd/relkit-updater", "relkit-updater"),
-    }
+    pkgs = {row.name: (row.go_package, row.binary_prefix) for row in binary_rows}
     step(f"build {stamp}")
     built: list[dict[str, Any]] = []
     for kind in targets:
@@ -368,66 +400,20 @@ def cmd_build(args: argparse.Namespace) -> None:
                 env=env,
             )
             built.append({"component": kind, "os": os_name, "arch": arch, "path": dest.name, "sha256": file_sha256(dest)})
-    if getattr(args, "dart_sdk", False):
-        sdk_root = REPO_ROOT / "sdk" / "dart"
-        sdk_archive = out_dir / "relkit-sdk-dart.zip"
-        paths = release_source_paths("sdk/dart")
-        if not paths:
-            die("sdk/dart has no tracked files")
-        write_deterministic_zip(
-            sdk_archive,
-            [
-                (REPO_ROOT / relative, (REPO_ROOT / relative).relative_to(sdk_root).as_posix())
-                for relative in paths
-                if (REPO_ROOT / relative).is_file()
-            ],
-        )
-        built.append(
-            {
-                "component": "sdk-dart",
-                "os": "any",
-                "arch": "any",
-                "path": sdk_archive.name,
-                "sha256": file_sha256(sdk_archive),
-            }
-        )
-    if getattr(args, "rust_sdk", False):
-        sdk_archive = out_dir / "relkit-sdk-rust.zip"
-        write_deterministic_zip(sdk_archive, rust_sdk_entries())
-        built.append(
-            {
-                "component": "sdk-rust",
-                "os": "any",
-                "arch": "any",
-                "path": sdk_archive.name,
-                "sha256": file_sha256(sdk_archive),
-            }
-        )
-    if getattr(args, "go_sdk", False):
-        sdk_archive = out_dir / "relkit-sdk-go.zip"
-        write_deterministic_zip(sdk_archive, go_sdk_entries())
-        built.append(
-            {
-                "component": "sdk-go",
-                "os": "any",
-                "arch": "any",
-                "path": sdk_archive.name,
-                "sha256": file_sha256(sdk_archive),
-            }
-        )
     host_tree_hash = ""
-    if getattr(args, "host_scripts", False):
-        entries = host_script_entries()
-        scripts_archive = out_dir / "relkit-host-scripts.zip"
-        write_deterministic_zip(scripts_archive, entries)
-        host_tree_hash = host_scripts_tree_sha256(entries)
+    for row in selected_trees:
+        entries = component_entries(row.name)
+        archive = out_dir / row.archive
+        write_deterministic_zip(archive, entries)
+        if row.name == "host-scripts":
+            host_tree_hash = host_scripts_tree_sha256(entries)
         built.append(
             {
-                "component": "host-scripts",
+                "component": row.name,
                 "os": "any",
                 "arch": "any",
-                "path": scripts_archive.name,
-                "sha256": file_sha256(scripts_archive),
+                "path": archive.name,
+                "sha256": file_sha256(archive),
             }
         )
     ident = git_identity()
@@ -1277,14 +1263,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     build = sub.add_parser("build", help="cross-compile binaries")
-    build.add_argument("--serve", action="store_true")
-    build.add_argument("--agent", action="store_true")
-    build.add_argument("--cli", action="store_true")
-    build.add_argument("--updater", action="store_true")
-    build.add_argument("--dart-sdk", action="store_true")
-    build.add_argument("--rust-sdk", action="store_true")
-    build.add_argument("--go-sdk", action="store_true")
-    build.add_argument("--host-scripts", action="store_true")
+    for row in registry_components():
+        build.add_argument(f"--{row.build_flag}", action="store_true")
+    build.add_argument("--all", action="store_true", help="build every registry component")
     build.add_argument("--out", default="dist")
     build.add_argument("--os")
     build.add_argument("--arch")

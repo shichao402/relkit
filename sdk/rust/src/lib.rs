@@ -20,6 +20,7 @@ use std::time::{Duration, SystemTime};
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/relkit.updater.v1.rs"));
+    include!(concat!(env!("OUT_DIR"), "/relkit.updater.v1.serde.rs"));
 }
 
 use proto::updater_event;
@@ -558,7 +559,7 @@ fn scheduler_wait(policy: Option<&CheckPolicy>) -> Duration {
     std::cmp::max(minimum, std::cmp::min(success, failure))
 }
 
-fn prost_duration(value: &prost_types::Duration) -> Duration {
+fn prost_duration(value: &pbjson_types::Duration) -> Duration {
     if value.seconds < 0 || value.nanos < 0 {
         return Duration::ZERO;
     }

@@ -26,9 +26,21 @@ fn main() {
     std::env::set_var("PROTOC", protoc);
 
     let includes: Vec<PathBuf> = vec![proto_root.to_path_buf(), well_known];
+    let descriptor_path = PathBuf::from(std::env::var_os("OUT_DIR").unwrap())
+        .join("updater_descriptor.bin");
     prost_build::Config::new()
+        .file_descriptor_set_path(&descriptor_path)
+        .compile_well_known_types()
+        .extern_path(".google.protobuf", "::pbjson_types")
         .compile_protos(std::slice::from_ref(&input), &includes)
         .expect("generate relkit.updater.v1 DTOs from canonical IDL");
+    let descriptors = std::fs::read(&descriptor_path).expect("read updater descriptor set");
+    pbjson_build::Builder::new()
+        .register_descriptors(&descriptors)
+        .expect("register updater descriptors")
+        .emit_fields()
+        .build(&[".relkit.updater.v1"])
+        .expect("generate canonical protobuf JSON implementations");
 
     println!("cargo:rerun-if-changed={}", input.display());
 }

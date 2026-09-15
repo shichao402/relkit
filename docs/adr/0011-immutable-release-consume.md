@@ -12,13 +12,15 @@
 
 ## 决策
 
-1. relkit tag CI 一次性构建 CLI、updater、SDK 和 `scripts/host` Release 附件。
+1. relkit tag CI 用 `build --all` 一次性构建清单上的全部组件：CLI、updater、SDK、只含预编译 protobuf-ES 产物的 `bindings-ts`（JS + `.d.ts`，产品不再编译生成源），以及 `scripts/host` Release 附件。加一门面只改 `hostlib/facets.py` 一行，不改 workflow 的组件列表。
 2. 宿主只接受 `relkit.consume/2` lock。lock 固定 Release、commit、consumer 脚本
    SHA-256，以及每个附件的绝对 URL 和 SHA-256。
 3. `scripts/host/relkit_consume.py` 只下载、验哈希、原子安装和运行版本探针。
    lock 含 host scripts 附件时，`install` 先自修复 `scripts/host`，再进入产品构建。
 4. 宿主不得 clone relkit、安装 Go、现场编译，或回退 PATH/LFS 中的二进制。
 5. `relkit.consume/1`、`scripts/consume.py` 及其参数直接删除，不提供兼容层。
+6. `scripts/host` 附件和 `hostScriptsSha256` 覆盖整棵相对路径树；内容按 LF
+   归一化，忽略 `__pycache__`。safe extract 验证每个相对路径并原子替换整树。
 
 ## 结果
 
