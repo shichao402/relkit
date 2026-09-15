@@ -45,7 +45,10 @@ def _impl_force_utf8_stdio() -> None:
                 pass
 
 def _impl_host_root(script_file: Optional[Path] = None) -> Path:
-    path = (script_file or Path(__file__)).resolve()
+    if script_file is None:
+        facade_file = getattr(_runtime.facade(), "__file__", __file__)
+        script_file = Path(facade_file)
+    path = script_file.resolve()
     parent = path.parent
     if parent.name == "host" and parent.parent.name == "scripts":
         return parent.parent.parent
@@ -54,7 +57,10 @@ def _impl_host_root(script_file: Optional[Path] = None) -> Path:
     return parent.parent
 
 def _impl_host_scripts_dir(script_file: Optional[Path] = None) -> Path:
-    return (script_file or Path(__file__)).resolve().parent
+    if script_file is None:
+        facade_file = getattr(_runtime.facade(), "__file__", __file__)
+        script_file = Path(facade_file)
+    return script_file.resolve().parent
 
 def _impl_tree_sha256(directory: Path) -> str:
     try:

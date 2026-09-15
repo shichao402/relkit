@@ -503,6 +503,11 @@ class RoutingTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertFalse(host.state_path(root).is_file())
 
+    def test_default_root_comes_from_facade_not_hostlib_module(self) -> None:
+        entry = Path(host.__file__).resolve()
+        self.assertEqual(host.host_scripts_dir(), entry.parent)
+        self.assertEqual(host.host_root(), entry.parent.parent.parent)
+
     def test_serve_add_without_execute_fails(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
