@@ -37,8 +37,14 @@ def _repo_root() -> Path:
 
 REPO_ROOT = _repo_root()
 HOST_DIR = REPO_ROOT / "scripts" / "host"
-if str(HOST_DIR) not in sys.path:
-    sys.path.insert(0, str(HOST_DIR))
+REQUIREMENTS = DEPLOY_DIR / "requirements.txt"
+VENV_DIR = DEPLOY_DIR / ".venv"
+BOOTSTRAP_ENV = "RELKIT_DEPLOY_BOOTSTRAPPED"
+MIN_PY = (3, 9)
+# Sibling copies on a remote /tmp/relkit-deploy, then the in-repo host scripts.
+for extra in (DEPLOY_DIR, HOST_DIR):
+    if str(extra) not in sys.path:
+        sys.path.insert(0, str(extra))
 from hostlib.facets import (  # noqa: E402
     BY_NAME,
     HOST_SOURCE_SUFFIXES,
@@ -46,14 +52,6 @@ from hostlib.facets import (  # noqa: E402
     packed_host_surface_errors,
     components as registry_components,
 )
-
-REQUIREMENTS = DEPLOY_DIR / "requirements.txt"
-VENV_DIR = DEPLOY_DIR / ".venv"
-BOOTSTRAP_ENV = "RELKIT_DEPLOY_BOOTSTRAPPED"
-MIN_PY = (3, 9)
-# Ensure sibling imports work when copied to /tmp on a remote host.
-if str(DEPLOY_DIR) not in sys.path:
-    sys.path.insert(0, str(DEPLOY_DIR))
 
 from relkit_ops import (  # noqa: E402
     dump_json,
@@ -1138,6 +1136,18 @@ def ssh_argv(host: str, extra: Sequence[str] | None = None) -> list[str]:
     return argv
 
 
+def remote_bootstrap_sources() -> list[tuple[Path, str]]:
+    """Local files copied next to the remote CLI. dest is a subdir of remote_dir ('' = root)."""
+    return [
+        (DEPLOY_DIR / "relkit.py", ""),
+        (DEPLOY_DIR / "relkit_ops.py", ""),
+        (DEPLOY_DIR / "relkit-serve.service", ""),
+        (DEPLOY_DIR / "relkit-agent.service", ""),
+        (HOST_DIR / "hostlib" / "__init__.py", "hostlib"),
+        (HOST_DIR / "hostlib" / "facets.py", "hostlib"),
+    ]
+
+
 def scp_to(host: str, sources: Sequence[Path], dest: str) -> None:
     require_cmd("scp")
     argv = ["scp", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"]
@@ -1179,7 +1189,14 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     py = remote_python(host)
     remote_dir = "/tmp/relkit-deploy"
     run(ssh_argv(host, ["mkdir", "-p", remote_dir]))
-    scp_to(host, [DEPLOY_DIR / "relkit.py", DEPLOY_DIR / "relkit_ops.py", DEPLOY_DIR / "relkit-serve.service", DEPLOY_DIR / "relkit-agent.service"], remote_dir + "/")
+    by_dest: dict[str, list[Path]] = {}
+    for path, sub in remote_bootstrap_sources():
+        by_dest.setdefault(sub, []).append(path)
+    for sub, paths in by_dest.items():
+        dest = remote_dir if not sub else f"{remote_dir}/{sub}"
+        if sub:
+            run(ssh_argv(host, ["mkdir", "-p", dest]))
+        scp_to(host, paths, dest + "/")
     probe_out = run(
         ssh_argv(host, ["sudo", py, remote_dir + "/relkit.py", "remote", "probe"]),
         capture=True,

@@ -292,6 +292,16 @@ class MissingTargetTests(unittest.TestCase):
         self.assertIn("no binary at /usr/local/bin/relkit-serve", missing[0])
         self.assertNotIn("no systemd unit", missing[0])
 
+    def test_remote_bootstrap_includes_hostlib_facets(self):
+        sources = deploy_cli.remote_bootstrap_sources()
+        names = [(path.name, dest) for path, dest in sources]
+        self.assertIn(("relkit.py", ""), names)
+        self.assertIn(("relkit_ops.py", ""), names)
+        self.assertIn(("__init__.py", "hostlib"), names)
+        self.assertIn(("facets.py", "hostlib"), names)
+        for path, _dest in sources:
+            self.assertTrue(path.is_file(), path)
+
 
 class TokenPermTests(unittest.TestCase):
     def test_0600_ok_0640_rejected(self):
