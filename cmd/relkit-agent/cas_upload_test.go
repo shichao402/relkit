@@ -194,16 +194,9 @@ func TestCASCredentialsRequiresProductToken(t *testing.T) {
 }
 
 func TestCASCredentialsRejectsProfileWithoutIngest(t *testing.T) {
-	t.Setenv("STATIC_TOKEN", "token")
 	fx := newAgentFixture(t, agentFixtureOpts{
 		patchProfile: func(profile *config.PublishProfile) {
-			profile.Backends = map[string]map[string]any{
-				"static": {
-					"type":    "static-http",
-					"baseUrl": "https://example.invalid/rup/",
-				},
-			}
-			profile.PublishTo = []string{"static"}
+			profile.PublishTo = nil
 		},
 	})
 	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(`{"product":"demo","blobs":[{"sha256":"`+strings.Repeat("a", 64)+`","size":1}]}`))

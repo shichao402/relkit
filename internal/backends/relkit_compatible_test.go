@@ -124,7 +124,7 @@ func TestCreateRejectsRemoteBaseWithLoopbackRelkitEndpoint(t *testing.T) {
 }
 
 func TestCreateRejectsRemovedBackendTypes(t *testing.T) {
-	for _, backendType := range []string{"local", "http-put"} {
+	for _, backendType := range []string{"local", "http-put", "static-http"} {
 		t.Run(backendType, func(t *testing.T) {
 			cfg := &config.Config{
 				Backends: map[string]map[string]any{

@@ -244,9 +244,8 @@ flowchart TB
 | 目标 | 后端 type | 状态 / 备注 |
 |---|---|---|
 | COS 自定义域名整树托管，CLI 直接写桶 | `s3-compatible` | **已实现**；字段见 CLI.md（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`，可选 `region` / `forcePathStyle` / `timeoutSeconds`）。公网产品的 **primary ingest** |
-| CNB / GitHub 仓库上的 `entryUrls` 备援 | `static-http`（GET = raw） | 只描述已由外部流程提交并可匿名读取的树；不可写、不可作 ingest |
 | 自建 relkit-serve 数据面 | `relkit-compatible` | **已实现**；`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`；内网 primary ingest |
-| 只读 HTTP / 外部已送达对象 | `static-http` | **已实现**；不可作 ingest |
+| CNB / GitHub raw 或已送达 HTTP | （不是后端） | 把可匿名读取的绝对 URL 写进签名文档 `urls[]`；不可作 ingest，也不再有 `static-http` 类型 |
 
 正式发布优先配置 `s3-compatible`。**禁止**手工打乱「产物 → manifest → 指针最后写」顺序冒充正式发布。
 
@@ -255,21 +254,21 @@ flowchart TB
 1. **发布机清 `casCredentials`**：字段虽被过渡版本接受并忽略，仍须先从全部 profile 删除。
 2. **内网 serve 先 GC**：先上线上传租约与 `gc.casGrace: "24h"`，确认 GC 不会清理刚上传但尚未发布的 CAS。
 3. **开写入面并迁 profile 后发版验证**：配置 `RELKIT_SERVE_TOKEN`，把内网后端改为 `relkit-compatible`，完成一次真实 `cas-put` / publish / verify。
-4. **稳定后才部署删除类型版本**：最后再升级不含 `local` / `http-put` 的 agent/CLI。
+4. **稳定后才部署删除类型版本**：最后再升级不含 `local` / `http-put` / `static-http` 的 agent/CLI。
 
 `casCredentials=sts`、GetFederationToken、临时钥与客户端 `sign` 只属于已废弃方案，不得用于新配置。
 
 ## 8. 迁移 runbook：COS ↔ CNB（或其它路径型镜像）
 
-适用：项目先整树（或主流量）在 COS，后希望主流量或整树迁到 CNB 仓库直链（`static-http`）；反向同理。  
-原则来自 SPEC §1.1 / §5.3 与 bootstrap-directory：客户端不改常量；靠双写 + 改 directory / `urls[]`。
+适用：项目先整树（或主流量）在 COS，后希望主流量或整树迁到 CNB 仓库直链；反向同理。  
+原则来自 SPEC §1.1 / §5.3 与 bootstrap-directory：客户端不改常量；靠双写 + 改 directory / `urls[]`。CNB / GitHub raw **不是** relkit 后端。
 
 ### 8.1 阶段 A — 双写，不关旧源
 
-1. 先由仓库 CI 或其它外部流程把完整发布树送到 CNB / GitHub，并确认 raw URL 可匿名读取；再增加只读 `static-http` 后端，`baseUrl` 指向 `/-/raw/...` 前缀。
-2. `pointerTo` / `artifactTo` 只能包含可写的 `s3-compatible` 或 `relkit-compatible`；只读 `static-http` 用于 verify 与声明已经存在的取货点。
+1. 先由仓库 CI 或其它外部流程把完整发布树送到 CNB / GitHub，并确认 raw URL 可匿名读取。
+2. `pointerTo` / `artifactTo` 只能包含可写的 `s3-compatible` 或 `relkit-compatible`；外部 URL 只作为签名文档里的取货点。
 3. 再发至少一版：新文档 `urls[]` 只能包含已经实际存在、可匿名读取的取货点。
-4. `relkit verify`（必要时 `--deep`）两侧都通过。
+4. `relkit verify`（必要时 `--deep`）可写后端通过。
 
 ### 8.2 阶段 B — 改引导，仍保留旧源 URL
 

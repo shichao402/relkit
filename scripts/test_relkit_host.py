@@ -416,6 +416,19 @@ class StateTests(unittest.TestCase):
             root = Path(raw)
             state = host.default_state(root)
             self.assertIsNone(host.recommended_value(root, state, "backend.kind"))
+            self.assertEqual(
+                host.decision_options(root, "backend.kind"),
+                ["intranet-relkit-compatible", "s3-compatible"],
+            )
+
+    def test_static_http_is_not_an_onboard_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            host.cmd_onboard_start(root)
+            with self.assertRaises(host.Fail) as raised:
+                host.cmd_onboard_set(root, "backend.kind", "static-http", None)
+            self.assertIn("s3-compatible", str(raised.exception))
+            self.assertNotIn("static-http", host.decision_options(root, "backend.kind"))
 
     def test_nested_src_tauri_detects_rust_and_node(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1778,6 +1791,23 @@ class InspectAndJournalTests(unittest.TestCase):
             self.assertEqual(raised.exception.code, "stale-backend-type")
             state = host.load_state(root)
             self.assertEqual(state["steps"]["env.inspect"]["status"], "blocked")
+
+    def test_static_http_blocks_inspect(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "backends": {"mirror": {"type": "static-http"}},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(host.Fail) as raised:
+                host.cmd_onboard_inspect(root)
+            self.assertEqual(raised.exception.code, "stale-backend-type")
 
     def test_product_id_requires_verified_inspect(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

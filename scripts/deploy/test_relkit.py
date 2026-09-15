@@ -169,6 +169,15 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(migrated["tokenEnv"], "RELKIT_SERVE_TOKEN")
         self.assertTrue(any("http-put" in item for item in notes))
 
+    def test_migrate_rejects_static_http(self):
+        with self.assertRaises(ValueError) as raised:
+            ops.migrate_backend(
+                {"type": "static-http", "baseUrl": "https://example.invalid/"},
+                serve_addr="127.0.0.1:8080",
+                public_base_url=None,
+            )
+        self.assertIn("static-http", str(raised.exception))
+
     def test_migrate_local_with_public_url(self):
         profile = {
             "backends": {

@@ -43,7 +43,7 @@ relkit publish
 relkit backends
 ```
 
-已实现后端：`s3-compatible` · `relkit-compatible` · `static-http`
+已实现后端：`s3-compatible` · `relkit-compatible`
 
 ### 快速开始
 
@@ -168,7 +168,7 @@ cd sdk/node && npm test
 覆盖：
 
 - `chain` / `selectors` / `envelope` 的 conformance 夹具回归
-- `s3-compatible` / `relkit-compatible` 端到端发布，以及 `static-http` 只读校验（`.pb`）
+- `s3-compatible` / `relkit-compatible` 端到端发布与校验（`.pb`）
 - `relkit-serve` 的 Range / PUT / GC / 配置加载 / 操作面板鉴权
 - `sdk` 客户端 Check/Download（Go 与 Node）
 - `version` 项目 VERSION.json SSOT（get/set/bump/code）

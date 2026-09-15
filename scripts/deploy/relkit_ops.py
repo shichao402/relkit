@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 DEFAULT_CAS_GRACE = "24h"
 DELETED_BACKENDS = frozenset({"local", "http-put"})
+REMOVED_BACKENDS = frozenset({"static-http"})
 COMPATIBLE = "relkit-compatible"
 TOKEN_ENV = "RELKIT_SERVE_TOKEN"
 
@@ -202,6 +203,10 @@ def migrate_backend(
         raise ValueError("backend must be an object")
     if n:
         notes.append("removed casCredentials")
+    if kind in REMOVED_BACKENDS:
+        raise ValueError(
+            f"backend type {kind!r} was removed; use s3-compatible or relkit-compatible"
+        )
     if kind not in DELETED_BACKENDS and kind != COMPATIBLE:
         return cleaned, notes
     if kind == COMPATIBLE:

@@ -66,7 +66,7 @@ CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。目标路径：这
 profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个后端名：
 
 - 必须支持 `Head` + `Promote`（即 `s3-compatible` 与 `relkit-compatible`）。
-- 公网产品选 COS，内网产品选 `relkit-compatible`。`static-http` 只读，**不可**作 ingest。
+- 公网产品选 COS，内网产品选 `relkit-compatible`。
 - 未声明时取 `artifactTo` 里第一个满足条件的后端；一个都没有则拒绝发布。
 - **`artifactTo` 落地前：** 现网 profile 只有 `publishTo`。ingest 取 `publishTo` 里**第一个实现 `Ingest` 的后端**。一个都没有 → `POST /v1/cas/credentials` 返回 400，CI 继续整包 `PUT /v1/staged`。
 
@@ -89,9 +89,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 | `artifactTo` | `artifact/`（几十~几百 MiB） | COS、`relkit-compatible`。默认只有 ingest 一家 |
 | `pointerTo` | `manifest/` `index/` `directory/` `fallback/`（几 KB 签名 pb） | ingest + `entryUrls` 备桶（异地域 COS，见 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)） |
 
-`pointerTo` 里承载 `entryUrls` 的那些后端必须过 ADR 0007 三条准入：目标网络可达、`Cache-Control` 我方可配、失效域与主正交。**CNB / GitHub raw 不合格**——大陆不可达且 raw 端点缓存由平台定，而 `directory/` 是要求短缓存的可变指针。它们仍可作只读校验镜像，但不写进客户端常量。
-
-`static-http` 永远不进 `artifactTo` / `pointerTo`，因为它不提供写接口。若外部 CI / git / rsync 已经放好对象，只把可匿名读取的绝对 URL 申报为取货点。
+`pointerTo` 里承载 `entryUrls` 的那些后端必须过 ADR 0007 三条准入：目标网络可达、`Cache-Control` 我方可配、失效域与主正交。**CNB / GitHub raw 不合格**——大陆不可达且 raw 端点缓存由平台定，而 `directory/` 是要求短缓存的可变指针。它们可以出现在签名文档的 `urls[]` 里当额外取货点，但不写进客户端常量，也不是一种 relkit 后端。
 
 `pointerTo` 未声明时等于 `artifactTo`。两个列表都必须 `Writable()`。
 
@@ -101,9 +99,9 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 - 已有的 `directory.publishTo` 是 `pointerTo` 的雏形，**并进 `pointerTo`**，不要再加第三个目标列表。
 - `publishTo` 可以有多家：CI 仍只喂 ingest；其余副本由 agent `Materialize`。`artifactTo` 字段落地后再把产物列表从 `publishTo` 里拆出来。
 
-#### git 后端不是只读 static-http
+#### git / Release 附件不是 relkit 后端
 
-CNB / GitHub 的 raw 地址只能在完整发布树已经由外部流程提交并可匿名读取后，作为只读 `static-http` 镜像。`static-http` 不提供 `Put*`，也不接受 `stageDir`；需要由 relkit 完成写入时，必须使用 `s3-compatible` 或 `relkit-compatible`，禁止把「写进工作目录、等人手或另一条 CI 去推」当成发布完成。
+CNB / GitHub 的 raw 或 Release 直链不是一种 `type`。需要由 relkit 完成写入时，必须使用 `s3-compatible` 或 `relkit-compatible`，禁止把「写进工作目录、等人手或另一条 CI 去推」当成发布完成。外部流程已经放好的对象，把可匿名读取的绝对 URL 写进签名文档即可。
 
 agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不上，不突破签名。
 
@@ -131,7 +129,7 @@ agent preflight：`POST /v1/publish/preflight`（产品 token）。serve preflig
 #### Promote 与 Materialize
 
 - **`Promote(cas, artifact)`** 只在 ingest 后端上发生：同存储内把对象变成正式 key。COS 用 CopyObject，serve 用 COPY。`Head` 命中且 size 一致时 **只 Promote**，即使 agent 盘上没有该文件（CI 已直传到 `cas/`）。缺源且本地仍有整包副本时才 `PutArtifact` 回退。
-- **`Materialize(blob, artifactKey)`** 是其余可写 `artifactTo` 后端拿到副本的唯一途径：agent 取字节（从 ingest，或从 staged 已带的 URL）再交给另一 `s3-compatible` / `relkit-compatible` 后端。`static-http` 不参与 Materialize。
+- **`Materialize(blob, artifactKey)`** 是其余可写 `artifactTo` 后端拿到副本的唯一途径：agent 取字节（从 ingest，或从 staged 已带的 URL）再交给另一 `s3-compatible` / `relkit-compatible` 后端。
 
 调用方不选实现，`publish.Run` 里不出现后端类型判断。
 
@@ -170,17 +168,17 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 
 #### 实现落点（无第二套流程）
 
-| | `s3-compatible` | `relkit-compatible` | `static-http` |
-|---|---|---|---|
-| GET 切面 | 匿名 HTTP | 匿名 HTTP | 匿名 HTTP |
-| 写切面 | SigV4 / CopyObject | 能力 URL / COPY | 无；由外部系统放置 |
-| 可作 ingest | 是 | 是 | 否 |
-| CI 字节直达 | query 预签名 PUT | serve 能力 URL PUT | 不适用 |
-| 取得 artifact 副本 | `Promote`（同桶 CopyObject） | `Promote`（COPY） | 只引用已存在的绝对 URL |
-| 默认角色 | 公网 ingest / pointer | 内网 ingest / pointer | 只读镜像 / 外部 URL |
-| 清 inbox | 桶生命周期或后端删除 | serve GC：租约 + `casGrace` | 无 inbox |
+| | `s3-compatible` | `relkit-compatible` |
+|---|---|---|
+| GET 切面 | 匿名 HTTP | 匿名 HTTP |
+| 写切面 | SigV4 / CopyObject | 能力 URL / COPY |
+| 可作 ingest | 是 | 是 |
+| CI 字节直达 | query 预签名 PUT | serve 能力 URL PUT |
+| 取得 artifact 副本 | `Promote`（同桶 CopyObject） | `Promote`（COPY） |
+| 默认角色 | 公网 ingest / pointer | 内网 ingest / pointer |
+| 清 inbox | 桶生命周期或后端删除 | serve GC：租约 + `casGrace` |
 
-`local` / `http-put` 已删除。没有第二条「无 COS 发布流程」：内网只是 ingest = `relkit-compatible`，请求 URL 由 serve 签发。
+`local` / `http-put` / `static-http` 已删除。没有第二条「无 COS 发布流程」：内网只是 ingest = `relkit-compatible`，请求 URL 由 serve 签发。外部已送达的 URL 写进签名文档，不占用后端类型。
 
 ## 3. HTTP 表面
 

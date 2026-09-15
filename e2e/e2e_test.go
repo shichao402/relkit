@@ -35,9 +35,8 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 
 	backendsOut := runRelkit(t, exe, project, nil, 0, "backends")
 	assertContains(t, backendsOut, "relkit-compatible")
-	assertContains(t, backendsOut, "static-http")
 	assertContains(t, backendsOut, "s3-compatible")
-	if strings.Contains(backendsOut, "\nlocal") || strings.Contains(backendsOut, "http-put") {
+	if strings.Contains(backendsOut, "static-http") || strings.Contains(backendsOut, "\nlocal") || strings.Contains(backendsOut, "http-put") {
 		t.Fatalf("removed backend was listed:\n%s", backendsOut)
 	}
 
@@ -269,46 +268,6 @@ func TestPublishRetainVersionsTrimsIndex(t *testing.T) {
 	if index.Versions[0].Version != "2.0.0+200" {
 		t.Fatalf("kept version = %s, want 2.0.0+200", index.Versions[0].Version)
 	}
-}
-
-func TestStaticHTTPBackend(t *testing.T) {
-	exe := buildRelkit(t)
-	project := t.TempDir()
-	dist := filepath.Join(project, "dist")
-	www := filepath.Join(project, "www")
-	mustMkdirAll(t, dist)
-	mustMkdirAll(t, www)
-
-	token := "static-audit-token"
-	t.Setenv("RELKIT_SERVE_TOKEN", token)
-	server := httptest.NewServer(newUploadHandler(t, www, token))
-	defer server.Close()
-
-	runRelkit(t, exe, project, nil, 0, "init", "--product", "siteapp")
-	runRelkit(t, exe, project, nil, 0, "keygen", "--key-id", "k1", "--out", "keys", "--update-config")
-	setPrivateKeyPath(t, project, "keys/k1.private.pb")
-	addBackend(t, project, "origin", map[string]any{
-		"type":     "relkit-compatible",
-		"baseUrl":  server.URL + "/",
-		"tokenEnv": "RELKIT_SERVE_TOKEN",
-	})
-
-	writeArtifact(t, dist, "siteapp-1.0.0-win-x64.zip", "site 1.0.0 ", 64)
-	runRelkit(t, exe, project, nil, 0,
-		"stage", "1.0.0+100",
-		"--add", filepath.Join(dist, "siteapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
-	)
-	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100", "--to", "origin")
-	out := runRelkit(t, exe, project, nil, 0, "verify", "--to", "origin", "--deep")
-	assertContains(t, out, "verify passed")
-	assertContains(t, out, "HEAD")
-
-	addBackend(t, project, "audit", map[string]any{
-		"type":    "static-http",
-		"baseUrl": server.URL + "/",
-	})
-	out = runRelkit(t, exe, project, nil, 0, "verify", "--to", "audit", "--deep")
-	assertContains(t, out, "verify passed")
 }
 
 func TestRelkitCompatibleBackend(t *testing.T) {

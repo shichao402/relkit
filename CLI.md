@@ -310,49 +310,27 @@ type Backend interface {
 }
 ```
 
-`static-http` 的 `baseUrl` 描述外部系统已经托管、可匿名读取的位置；该后端始终只读。
+`URLFor` 是路径型后端才有的能力：URL 在上传前就能算出来。Release 型返回 false。`verify` 用它做一项容易被忽略的检查 —— 后端为某个 key 生成的 URL 是否真的出现在已发布的文档里。不一致意味着 `baseUrl` 改过但没有重新发布，此时文件在新位置、文档指向旧位置，客户端会静默地下载失败。
 
-`URLFor` 鏄矾寰勫瀷鍚庣鎵嶆湁鐨勮兘鍔涳細URL 鍦ㄤ笂浼犲墠灏辫兘绠楀嚭鏉ャ€俁elease 鍨嬭繑鍥?false銆俙verify` 鐢ㄥ畠鍋氫竴椤瑰鏄撹蹇界暐鐨勬鏌?鈥斺€?鍚庣涓烘煇涓?key 鐢熸垚鐨?URL 鏄惁鐪熺殑鍑虹幇鍦ㄥ凡鍙戝竷鐨勬枃妗ｉ噷銆備笉涓€鑷存剰鍛崇潃 `baseUrl` 鏀硅繃浣嗘病鏈夐噸鏂板彂甯冿紝姝ゆ椂鏂囦欢鍦ㄦ柊浣嶇疆銆佹枃妗ｆ寚鍚戞棫浣嶇疆锛屽鎴风浼氶潤榛樺湴涓嬭浇澶辫触銆?
+### 6.1 两种后端
 
-### 6.1 三种后端
-
-后端按「发布工具连接哪套数据面 API」命名，现行实现只保留三种：
+后端按「发布工具连接哪套数据面 API」命名，现行实现只保留两种：
 
 | type | 写入 / 读取方式 | CAS ingest | 状态 |
 |---|---|---|---|
 | `s3-compatible` | S3 API：PUT / HEAD / CopyObject / DELETE；客户端下载走 `baseUrl` | 是 | **已实现** |
 | `relkit-compatible` | relkit-serve：能力 URL / HEAD / COPY / DELETE；客户端下载走 `baseUrl` | 是 | **已实现** |
-| `static-http` | 匿名 HTTP GET，只读审计既有外部树 | 否 | **已实现** |
 
-`local` 与 `http-put` 已删除。需要本机演练时启动真实数据面：
+`local`、`http-put` 与 `static-http` 已删除。需要本机演练时启动真实数据面：
 
 ```bash
 export RELKIT_SERVE_TOKEN='<relkit-serve init 输出的运营方 token>'
 relkit-serve -dir ./dist -addr 127.0.0.1:30341
 ```
 
-然后配置 `relkit-compatible` 指向 `http://127.0.0.1:30341/`。不要用本地目录后端伪造一条生产写入链路。
+然后配置 `relkit-compatible` 指向 `http://127.0.0.1:30341/`。不要用本地目录后端伪造一条生产写入链路。外部已送达的文件把绝对 URL 写进签名文档，不要配置只读后端。
 
-### 6.2 `static-http`
-
-用于只读镜像或已经由 CI、rsync、git 等外部机制送达的树：
-
-```json
-{
-  "type": "static-http",
-  "baseUrl": "https://cnb.cool/group/repo/-/raw/main/release/",
-  "timeoutSeconds": 30
-}
-```
-
-| 字段 | 必填 | 说明 |
-|---|---|---|
-| `baseUrl` | 是 | 绝对 http(s) URL；URL = `baseUrl + key` |
-| `timeoutSeconds` | 否 | 单次请求超时，默认 30 |
-
-`static-http` 不签发 CAS 上传请求，不能作为 ingest，也不能参与 publish 写入。外部系统必须先把完整树送达并确保 URL 可读，再用它执行 verify 或声明既有 URL。
-
-### 6.3 `relkit-compatible`
+### 6.2 `relkit-compatible`
 
 用于自建 `relkit-serve` 数据面。普通文档写入使用 Bearer；CAS 正文先由发布控制面调用 `POST /-/cas/uploads`，再把服务端签发的绝对能力 URL放进 `requests[]`。后端同时使用 HEAD、带 `X-Relkit-Copy-Source` 的 COPY 语义和 DELETE。
 
@@ -373,11 +351,11 @@ relkit-serve -dir ./dist -addr 127.0.0.1:30341
 | `tokenEnv` | 是 | 运营方 token 的环境变量名；不得写 token 明文 |
 | `timeoutSeconds` | 否 | 写入超时，默认 600 |
 
-### 6.4 CAS 上传请求文档
+### 6.3 CAS 上传请求文档
 
 `POST /v1/cas/credentials` 对每个待上传 blob 返回 `requests[]`。每项只有 `method`、绝对 `url`、可选 `headers` 与 `expiresAt`；单对象上传恰好一个请求。客户端逐项执行 HTTP 请求，**不认识 SigV4 / STS，也不签名**。禁止恢复 `sign` 字段或相对 URL。
 
-### 6.5 推荐对外入口（自有域名 + COS）
+### 6.4 推荐对外入口（自有域名 + COS）
 
 拓扑已冻结（详见设计文档）；`s3-compatible` **已实现**（SigV4）：
 
@@ -391,7 +369,7 @@ relkit-serve -dir ./dist -addr 127.0.0.1:30341
 ---
 
 
-### 6.6 `s3-compatible`
+### 6.5 `s3-compatible`
 
 路径型后端：上传走 S3 兼容 API（SigV4），客户端下载仍只看 `baseUrl + key`（自有域名 / CDN）。适用于腾讯云 COS、AWS S3、MinIO。
 
@@ -424,7 +402,7 @@ relkit-serve -dir ./dist -addr 127.0.0.1:30341
 
 ---
 
-### 6.7 `relkit-agent`（发布机）
+### 6.6 `relkit-agent`（发布机）
 
 CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/`），发布机持钥 `publish`。二进制：`cmd/relkit-agent`。运维命令与路径见 [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)。
 
@@ -502,7 +480,7 @@ internal/model/ jsonio/     瀵硅薄鏋勯€犮€佺‘瀹氭€у簭鍒楀�
 internal/config/ keys/      閰嶇疆涓庡瘑閽?
 internal/stage/ publish/    鍥哄寲涓庡崄姝ュ彂甯冪紪鎺?
 internal/verify/ simulate/  鏍￠獙涓庨€夎矾妯℃嫙
-internal/httpx/ backends/   HTTP 与 static-http / relkit-compatible / s3-compatible
+internal/httpx/ backends/   HTTP 与 relkit-compatible / s3-compatible
 e2e/                        绂荤嚎涓庣湡瀹?HTTP 绔埌绔?
 testdata/conformance/       鍗忚澶瑰叿鍓湰锛堜笌鏈洰褰曞悓姝ワ級
 ```

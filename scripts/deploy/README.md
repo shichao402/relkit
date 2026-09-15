@@ -29,7 +29,7 @@ python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --apply
 
 `--plan` 只读并打印脱敏探测结果、本机 HEAD 与协议窗口。`--apply` 默认从当前干净 HEAD 构建 linux/amd64 的 agent+serve，在目标机 `/var/backups/relkit/<utc>/` 备份后换文件并重启。`--stage-only` 只写盘不重启，不得称为升级完成。`--unsafe-from-dist` 才使用已有 `dist/`，并持续告警。失败会从该备份回滚。
 
-upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
+upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、遇到 `static-http` 直接停（该类型已删除、不会改写成可写后端）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
 
 `uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-serve` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
 

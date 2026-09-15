@@ -101,27 +101,23 @@ func Create(name string, cfg *config.Config, root string) (Backend, error) {
 		return nil, err
 	}
 	switch backendType {
-	case "static-http":
-		return newStaticHTTPBackend(name, entry, root)
 	case "relkit-compatible":
 		return newRelkitCompatibleBackend(name, entry, root)
 	case "s3-compatible":
 		return newS3CompatibleBackend(name, entry, root)
-	case "local", "http-put":
-		return nil, Error{Message: fmt.Sprintf("backend type %q was removed; use relkit-compatible (see ADR 0008)", backendType)}
+	case "local", "http-put", "static-http":
+		return nil, Error{Message: fmt.Sprintf("backend type %q was removed; use relkit-compatible or s3-compatible (see ADR 0008)", backendType)}
 	default:
-		return nil, Error{Message: fmt.Sprintf("unsupported backend type %q for backend %q (available: relkit-compatible, s3-compatible, static-http)", backendType, name)}
+		return nil, Error{Message: fmt.Sprintf("unsupported backend type %q for backend %q (available: relkit-compatible, s3-compatible)", backendType, name)}
 	}
 }
 
 func AvailableTypes() []string {
-	return []string{"relkit-compatible", "s3-compatible", "static-http"}
+	return []string{"relkit-compatible", "s3-compatible"}
 }
 
 func SummaryFor(backendType string) (summary string, required []string, optional []string) {
 	switch backendType {
-	case "static-http":
-		return "read-only mirror serving files over HTTP at a predictable path", []string{"baseUrl"}, []string{"timeoutSeconds"}
 	case "relkit-compatible":
 		return "uploads to relkit-serve with capability URLs; clients download via baseUrl", []string{"baseUrl", "tokenEnv"}, []string{"uploadUrl", "timeoutSeconds"}
 	case "s3-compatible":
