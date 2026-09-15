@@ -9,12 +9,15 @@ import (
 
 func TestFrozenSDKBanner(t *testing.T) {
 	root := findModuleRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "sdk", "updater.go"))
+	raw, err := os.ReadFile(filepath.Join(root, "internal", "inprocess", "updater.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), "Frozen") {
-		t.Fatal("sdk.Updater must stay frozen (ADR 0010)")
+		t.Fatal("in-process Updater must stay frozen (ADR 0010)")
+	}
+	if _, err := os.Stat(filepath.Join(root, "sdk", "updater.go")); !os.IsNotExist(err) {
+		t.Fatal("sdk/updater.go must not ship the in-process engine")
 	}
 }
 

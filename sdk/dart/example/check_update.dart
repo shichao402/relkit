@@ -14,6 +14,7 @@ library;
 import 'dart:io';
 
 import 'package:rup_client/rup_client.dart';
+import 'package:rup_client/src/updater.dart';
 
 void main(List<String> args) async {
   String? valueOf(String name) {

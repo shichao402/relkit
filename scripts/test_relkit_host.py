@@ -1915,6 +1915,30 @@ class UpdaterGateTests(unittest.TestCase):
             self.assertFalse(any("not allowlisted" in item for item in drift))
             self.assertTrue(any("handwritten updater shape" in item for item in drift))
 
+    def test_in_process_updater_is_not_a_host_calling_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "internal").mkdir()
+            (root / "internal/update.go").write_text(
+                "package update\n\nvar _ = " + "sdk." + "Updater{}\n",
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "go"), drift)
+            self.assertTrue(any("in-process updater API" in item for item in drift))
+
+    def test_engine_authoring_tree_may_keep_frozen_updater(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "sdk").mkdir()
+            (root / "sdk/updater.go").write_text(
+                "package sdk\n\ntype Updater struct{}\nvar _ = " + "Rup" + "Updater{}\n",
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "go"), drift)
+            self.assertFalse(any("in-process updater API" in item for item in drift))
+
 
 if __name__ == "__main__":
     unittest.main()

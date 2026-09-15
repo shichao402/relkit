@@ -24,7 +24,7 @@ class UpdateRuntimeConfig {
   /// When true, the startup tick ignores throttling (`check(force: true)`).
   final bool forceOnStart;
 
-  /// Throttle intervals and download behaviour for [RupUpdater].
+  /// Throttle intervals and download behaviour for the updater sidecar.
   final UpdatePolicy policy;
 
   /// Parses host JSON. Unknown keys are ignored.

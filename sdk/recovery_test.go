@@ -4,19 +4,20 @@ import (
 	"context"
 	"testing"
 
+	"go.firoyang.com/relkit/internal/inprocess"
 	"go.firoyang.com/relkit/sdk"
 )
 
 func TestCheckAttachesRecoveryWhenRemoteFails(t *testing.T) {
-	u := &sdk.Updater{
+	u := &inprocess.Updater{
 		Product:     "demo",
 		Channel:     "stable",
 		CurrentCode: 1,
 		EntryURLs:   []string{"https://127.0.0.1:1/directory/demo.pb"},
 		TrustedKeys: sdk.TrustedKeys{"k1": make([]byte, 32)},
-		Recovery: &sdk.RecoveryHelp{
+		Recovery: &inprocess.RecoveryHelp{
 			Message: "install manually",
-			Links:   []sdk.RecoveryLink{{Label: "GitHub", URL: "https://github.com/example/app/releases"}},
+			Links:   []inprocess.RecoveryLink{{Label: "GitHub", URL: "https://github.com/example/app/releases"}},
 		},
 		Policy: sdk.Policy{AfterSuccess: 0, AfterFailure: 0, DocumentTimeout: 1},
 	}

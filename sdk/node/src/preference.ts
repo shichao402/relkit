@@ -48,6 +48,10 @@ export function rankByLearning<T>(options: {
   return indexed.map((row) => row.item);
 }
 
+export function directoryServiceKey(id: string): string {
+  return `service:${id}`;
+}
+
 export function rankUrlStrings(
   urls: readonly string[],
   state: UpdateState,

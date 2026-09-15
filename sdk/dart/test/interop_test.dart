@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:rup_client/rup_client.dart';
+import 'package:rup_client/src/updater.dart';
 import 'package:test/test.dart';
 
 /// Why the publisher cannot run here, or null when it can.

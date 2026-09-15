@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	"go.firoyang.com/relkit/internal/inprocess"
 	"go.firoyang.com/relkit/sdk"
 )
 
@@ -35,15 +36,15 @@ func TestConformanceOfflineRecovery(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	u := &sdk.Updater{
+	u := &inprocess.Updater{
 		Product:     "demo",
 		Channel:     "stable",
 		CurrentCode: 1,
 		EntryURLs:   []string{"https://127.0.0.1:1/directory/demo.pb"},
 		TrustedKeys: sdk.TrustedKeys{"k1": make([]byte, 32)},
-		Recovery: &sdk.RecoveryHelp{
+		Recovery: &inprocess.RecoveryHelp{
 			Message: doc.Expect.Recovery.Message,
-			Links:   []sdk.RecoveryLink{{Label: doc.Expect.Recovery.Links[0].Label, URL: doc.Expect.Recovery.Links[0].URL}},
+			Links:   []inprocess.RecoveryLink{{Label: doc.Expect.Recovery.Links[0].Label, URL: doc.Expect.Recovery.Links[0].URL}},
 		},
 		Policy: sdk.Policy{AfterSuccess: 0, AfterFailure: 0, DocumentTimeout: 1},
 	}

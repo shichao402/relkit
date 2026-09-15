@@ -43,7 +43,7 @@ def go_sdk_zip() -> bytes:
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("go.mod", "module go.firoyang.com/relkit\n")
         archive.writestr("go.sum", "")
-        archive.writestr("sdk/updater.go", "package sdk\n")
+        archive.writestr("sdk/doc.go", "package sdk\n")
         archive.writestr("api/updater/v1/updater.pb.go", "package updaterv1\n")
     return output.getvalue()
 
@@ -147,7 +147,7 @@ class InstallTests(unittest.TestCase):
             )
             # The host's `replace` target must resolve to a buildable module.
             self.assertTrue((destination / "go.mod").is_file())
-            self.assertTrue((destination / "sdk" / "updater.go").is_file())
+            self.assertTrue((destination / "sdk" / "doc.go").is_file())
             self.assertTrue(
                 (destination / "api" / "updater" / "v1" / "updater.pb.go").is_file()
             )

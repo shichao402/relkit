@@ -40,7 +40,10 @@ HOST_DIR = REPO_ROOT / "scripts" / "host"
 if str(HOST_DIR) not in sys.path:
     sys.path.insert(0, str(HOST_DIR))
 from hostlib.facets import (  # noqa: E402
+    BY_NAME,
+    HOST_SOURCE_SUFFIXES,
     TARGETS,
+    packed_host_surface_errors,
     components as registry_components,
 )
 
@@ -48,10 +51,6 @@ REQUIREMENTS = DEPLOY_DIR / "requirements.txt"
 VENV_DIR = DEPLOY_DIR / ".venv"
 BOOTSTRAP_ENV = "RELKIT_DEPLOY_BOOTSTRAPPED"
 MIN_PY = (3, 9)
-GO_MODULE_PATH = "go.firoyang.com/relkit"
-# Public entrypoints a Go host imports; everything else is pulled in by go list.
-GO_SDK_ENTRYPOINTS = ("./sdk", "./sdk/updaterfacade")
-
 # Ensure sibling imports work when copied to /tmp on a remote host.
 if str(DEPLOY_DIR) not in sys.path:
     sys.path.insert(0, str(DEPLOY_DIR))
@@ -232,73 +231,6 @@ def write_deterministic_zip(
             archive.writestr(info, source.read_bytes(), compresslevel=9)
 
 
-def rust_sdk_entries() -> list[tuple[Path, str]]:
-    sdk_root = REPO_ROOT / "sdk" / "rust"
-    paths = release_source_paths("sdk/rust")
-    proto_path = REPO_ROOT / "proto" / "updater" / "v1" / "updater.proto"
-    if not paths or not proto_path.is_file():
-        raise Fail("sdk/rust or canonical updater proto is missing")
-    entries = [
-        (REPO_ROOT / relative, (REPO_ROOT / relative).relative_to(sdk_root).as_posix())
-        for relative in paths
-        if (REPO_ROOT / relative).is_file()
-    ]
-    entries.append((proto_path, "proto/updater/v1/updater.proto"))
-    return entries
-
-
-def go_sdk_packages() -> list[str]:
-    """Module-internal packages a Go host needs, resolved by the compiler itself.
-
-    Asking `go list` keeps the artifact honest when sdk/ grows a dependency; a
-    hand-written directory list would only surface the gap at the host's build.
-    """
-    listed = run(
-        ["go", "list", "-deps", *GO_SDK_ENTRYPOINTS],
-        cwd=REPO_ROOT,
-        capture=True,
-    ).stdout
-    prefix = GO_MODULE_PATH + "/"
-    packages = {
-        line.strip()[len(prefix) :]
-        for line in listed.splitlines()
-        if line.strip().startswith(prefix)
-    }
-    if not packages:
-        raise Fail("go list resolved no relkit packages for the Go SDK artifact")
-    return sorted(packages)
-
-
-def go_sdk_entries() -> list[tuple[Path, str]]:
-    entries: list[tuple[Path, str]] = []
-    for name in ("go.mod", "go.sum"):
-        path = REPO_ROOT / name
-        if not path.is_file():
-            raise Fail(f"Go module is missing {name}")
-        entries.append((path, name))
-    for package in go_sdk_packages():
-        sources = [
-            item
-            for item in release_source_paths(package)
-            if item.endswith(".go")
-            and not item.endswith("_test.go")
-            and Path(item).parent.as_posix() == package
-        ]
-        if not sources:
-            raise Fail(f"Go SDK package {package} has no tracked sources")
-        entries.extend((REPO_ROOT / item, item) for item in sources)
-    return entries
-
-
-def host_script_entries() -> list[tuple[Path, str]]:
-    host_root = REPO_ROOT / "scripts" / "host"
-    return [
-        (path, path.relative_to(host_root).as_posix())
-        for path in sorted(host_root.rglob("*"))
-        if path.is_file() and "__pycache__" not in path.parts
-    ]
-
-
 def tree_entries(source: str) -> list[tuple[Path, str]]:
     source_root = REPO_ROOT / source
     paths = release_source_paths(source)
@@ -311,28 +243,146 @@ def tree_entries(source: str) -> list[tuple[Path, str]]:
     ]
 
 
-def component_entries(name: str) -> list[tuple[Path, str]]:
-    if name == "host-scripts":
-        return host_script_entries()
-    if name == "sdk-rust":
-        return rust_sdk_entries()
-    if name == "sdk-go":
-        return go_sdk_entries()
-    if name == "bindings-ts":
-        root = REPO_ROOT / "bindings" / "ts"
-        names = (
-            "package.json",
-            "README.md",
-            "dist/updater_pb.js",
-            "dist/updater_pb.d.ts",
+def working_tree_entries(source: str, exclude_parts: Sequence[str]) -> list[tuple[Path, str]]:
+    source_root = REPO_ROOT / source
+    if not source_root.is_dir():
+        raise Fail(f"{source} is missing")
+    excluded = set(exclude_parts)
+    return [
+        (path, path.relative_to(source_root).as_posix())
+        for path in sorted(source_root.rglob("*"))
+        if path.is_file() and not excluded.intersection(path.parts)
+    ]
+
+
+def listed_file_entries(source: str, names: Sequence[str], component: str) -> list[tuple[Path, str]]:
+    source_root = REPO_ROOT / source
+    entries = [(source_root / relative, relative) for relative in names]
+    missing = [relative for path, relative in entries if not path.is_file()]
+    if missing:
+        raise Fail(f"{component} is incomplete: " + ", ".join(missing))
+    return entries
+
+
+def go_dep_packages(module: str, entrypoints: Sequence[str]) -> list[str]:
+    """Module-internal packages a Go host needs, resolved by the compiler itself.
+
+    Asking `go list` keeps the artifact honest when sdk/ grows a dependency; a
+    hand-written directory list would only surface the gap at the host's build.
+    """
+    listed = run(
+        ["go", "list", "-deps", *entrypoints],
+        cwd=REPO_ROOT,
+        capture=True,
+    ).stdout
+    prefix = module + "/"
+    packages = {
+        line.strip()[len(prefix) :]
+        for line in listed.splitlines()
+        if line.strip().startswith(prefix)
+    }
+    if not packages:
+        raise Fail("go list resolved no relkit packages for the Go SDK artifact")
+    return sorted(packages)
+
+
+def go_deps_entries(
+    source: str,
+    module: str,
+    entrypoints: Sequence[str],
+    files: Sequence[str],
+    exclude_suffixes: Sequence[str],
+) -> list[tuple[Path, str]]:
+    source_root = REPO_ROOT / source
+    entries = listed_file_entries(source, files, "sdk-go")
+    for package in go_dep_packages(module, entrypoints):
+        tracked = package if source == "." else (Path(source) / package).as_posix()
+        sources = [
+            item
+            for item in release_source_paths(tracked)
+            if item.endswith(".go")
+            and not any(item.endswith(suffix) for suffix in exclude_suffixes)
+            and Path(item).parent.as_posix() == tracked
+            and (REPO_ROOT / item).is_file()
+        ]
+        if not sources:
+            raise Fail(f"Go SDK package {package} has no tracked sources")
+        entries.extend(
+            (
+                REPO_ROOT / item,
+                item if source == "." else Path(item).relative_to(source_root).as_posix(),
+            )
+            for item in sources
         )
-        entries = [(root / relative, relative) for relative in names]
-        missing = [relative for path, relative in entries if not path.is_file()]
-        if missing:
-            raise Fail("bindings-ts is incomplete: " + ", ".join(missing))
-        return entries
-    row = next(row for row in registry_components("product-tree") if row.name == name)
-    return tree_entries(row.source)
+    return entries
+
+
+def component_entries(name: str) -> list[tuple[Path, str]]:
+    row = BY_NAME[name]
+    if row.role != "product-tree":
+        raise Fail(f"{name} is not a packed product-tree")
+    kind = row.pack_kind()
+    if kind == "listed-files":
+        entries = listed_file_entries(row.source, row.pack_files, row.name)
+    elif kind == "working-tree":
+        entries = working_tree_entries(row.source, row.pack_exclude_parts)
+    elif kind == "go-deps":
+        entries = go_deps_entries(
+            row.source,
+            row.go_module,
+            row.go_entrypoints,
+            row.pack_files,
+            row.pack_exclude_suffixes,
+        )
+    elif kind == "tracked-tree":
+        entries = tree_entries(row.source)
+    else:
+        raise Fail(f"{row.name} has unknown pack {row.pack}")
+    for extra_src, extra_dest in row.pack_extras:
+        path = REPO_ROOT / extra_src
+        if not path.is_file():
+            raise Fail(f"{row.name} extra {extra_src} is missing")
+        entries.append((path, extra_dest))
+    if row.pack_exclude_paths:
+        entries = [
+            item for item in entries
+            if not pack_path_excluded(item[1], row.pack_exclude_paths)
+        ]
+    if not entries:
+        raise Fail(f"{row.name} packed no files")
+    if row.updater_process:
+        texts = {
+            name: source.read_text(encoding="utf-8", errors="ignore")
+            for source, name in entries
+            if source.suffix.lower() in HOST_SOURCE_SUFFIXES
+            and source.is_file()
+        }
+        problems = packed_host_surface_errors(row, [name for _, name in entries], texts)
+        if problems:
+            raise Fail("; ".join(problems))
+    return entries
+
+
+def pack_path_excluded(archive_name: str, prefixes: Sequence[str]) -> bool:
+    for prefix in prefixes:
+        if prefix.endswith("/"):
+            if archive_name == prefix[:-1] or archive_name.startswith(prefix):
+                return True
+        elif archive_name == prefix or archive_name.startswith(prefix + "/"):
+            return True
+    return False
+
+
+def host_script_entries() -> list[tuple[Path, str]]:
+    return component_entries("host-scripts")
+
+
+def rust_sdk_entries() -> list[tuple[Path, str]]:
+    return component_entries("sdk-rust")
+
+
+def go_sdk_entries() -> list[tuple[Path, str]]:
+    return component_entries("sdk-go")
 
 
 def host_scripts_tree_sha256(entries: Sequence[tuple[Path, str]]) -> str:
@@ -405,7 +455,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         entries = component_entries(row.name)
         archive = out_dir / row.archive
         write_deterministic_zip(archive, entries)
-        if row.name == "host-scripts":
+        if row.probe == "tree-sha256":
             host_tree_hash = host_scripts_tree_sha256(entries)
         built.append(
             {

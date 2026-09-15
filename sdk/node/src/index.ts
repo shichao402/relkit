@@ -1,14 +1,8 @@
 /**
- * A RUP client for Node: check for an update, verify it, download it.
+ * Host-facing Node surface: protocol helpers plus the generated updater facade.
  *
- * The protocol contract lives in relkit's `SPEC.md`; this package implements the
- * client half of it. Everything up to and including "here is a file whose sha256
- * matches a signed manifest" is protocol, and is what `updater.ts` provides.
- *
- * Applying that file is deliberately NOT in this package. An Electron host that
- * replaces its own directory has to solve locked files, a stable launcher path,
- * single-instance locks and login-item registration, none of which are protocol
- * and all of which differ per host. Use the verified file directly.
+ * Check/download/apply for products goes through `updater_facade.ts` and the
+ * sidecar. The in-process class in `updater.ts` is not part of this barrel.
  */
 
 export {
@@ -54,9 +48,7 @@ export {
 export {
   defaultRuntimeConfig,
   runtimeConfigFromJson,
-  UpdateScheduler,
   type UpdateRuntimeConfig,
-  type UpdateSchedulerOptions,
 } from "./scheduler.js";
 export {
   matchesSelectors,
@@ -75,17 +67,5 @@ export {
   type UpdatePolicy,
   type UpdateStateStore,
 } from "./state.js";
-export {
-  directoryServiceKey,
-  RupUpdater,
-  type CheckFailed,
-  type CheckThrottled,
-  type FallbackRequired,
-  type RecoveryHelp,
-  type RecoveryLink,
-  type RupUpdaterOptions,
-  type UpdateAvailable,
-  type UpdateCheckResult,
-  type UpToDate,
-} from "./updater.js";
+export { directoryServiceKey } from "./preference.js";
 export { Updater, ipcMin, ipcMax, ipcCurrent, defaultGlue } from "./updater_facade.js";

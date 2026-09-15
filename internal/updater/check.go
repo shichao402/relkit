@@ -10,6 +10,7 @@ import (
 	"time"
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	"go.firoyang.com/relkit/internal/inprocess"
 	"go.firoyang.com/relkit/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -85,7 +86,7 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 	}
 
 	sdkState := engineStateToSDK(state)
-	u := &sdk.Updater{
+	u := &inprocess.Updater{
 		Product:         profile.Product,
 		Channel:         runtime.Channel,
 		CurrentCode:     int(runtime.CurrentCode),
@@ -258,7 +259,7 @@ func (e *Engine) emitCheckFailed(code updaterv1.ErrorCode, retryable bool, messa
 	})
 }
 
-func (e *Engine) fetchExact(ctx context.Context, u *sdk.Updater, exactCode int64) (*sdk.UpdateAvailable, error) {
+func (e *Engine) fetchExact(ctx context.Context, u *inprocess.Updater, exactCode int64) (*inprocess.UpdateAvailable, error) {
 	// Walk using public Check is insufficient. Reconstruct via a one-off updater
 	// whose CurrentCode is exactCode-1 only if exactCode-1 exists — forbidden by
 	// the plan. Instead inspect CheckForce path by temporarily using selectors
@@ -269,7 +270,7 @@ func (e *Engine) fetchExact(ctx context.Context, u *sdk.Updater, exactCode int64
 	return nil, fmt.Errorf("exact code %d not reachable", exactCode)
 }
 
-func (e *Engine) buildPlan(st store, profile *updaterv1.ClientProfile, runtime *updaterv1.Runtime, result sdk.CheckResult) (*updaterv1.UpdatePlan, error) {
+func (e *Engine) buildPlan(st store, profile *updaterv1.ClientProfile, runtime *updaterv1.Runtime, result inprocess.CheckResult) (*updaterv1.UpdatePlan, error) {
 	av := result.Available
 	id := newID("plan")
 	now := time.Now().UTC()

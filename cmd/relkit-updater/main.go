@@ -9,6 +9,7 @@ import (
 	"os/signal"
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	"go.firoyang.com/relkit/internal/ipc"
 	"go.firoyang.com/relkit/internal/updater"
 )
 
@@ -39,7 +40,7 @@ func run(args []string) int {
 			Hello: &updaterv1.ClientHello{IpcMin: updater.IPCMin, IpcMax: updater.IPCMax},
 		}
 		// capabilities-only: emit caps without requiring profile
-		if err := updater.WriteFrame(os.Stdout, &updaterv1.UpdaterEvent{
+		if err := ipc.WriteFrame(os.Stdout, &updaterv1.UpdaterEvent{
 			Kind: &updaterv1.UpdaterEvent_Capabilities{Capabilities: capabilitiesEvent(version)},
 		}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -63,7 +64,7 @@ func run(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	req := &updaterv1.UpdaterRequest{}
-	if err := updater.ReadFrame(os.Stdin, req); err != nil {
+	if err := ipc.ReadFrame(os.Stdin, req); err != nil {
 		if err == io.EOF {
 			fmt.Fprintln(os.Stderr, "empty stdin")
 			return 2

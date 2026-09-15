@@ -7,6 +7,7 @@ import (
 	"os"
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	"go.firoyang.com/relkit/internal/ipc"
 	"go.firoyang.com/relkit/sdk"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -30,7 +31,7 @@ func (e *Engine) writer() io.Writer {
 }
 
 func (e *Engine) emit(ev *updaterv1.UpdaterEvent) error {
-	return WriteFrame(e.writer(), ev)
+	return ipc.WriteFrame(e.writer(), ev)
 }
 
 // PublicCapabilities is the handshake payload.

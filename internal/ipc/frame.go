@@ -1,4 +1,4 @@
-package updater
+package ipc
 
 import (
 	"encoding/binary"

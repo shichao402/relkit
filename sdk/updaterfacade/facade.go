@@ -14,7 +14,7 @@ import (
 	"time"
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
-	"go.firoyang.com/relkit/internal/updater"
+	"go.firoyang.com/relkit/internal/ipc"
 )
 
 // Glue locates and runs the sidecar. Hosts may inject a fake in tests.
@@ -68,7 +68,7 @@ func (DefaultGlue) Run(ctx context.Context, bin string, args []string, stdin []b
 	}
 	for {
 		ev := &updaterv1.UpdaterEvent{}
-		if err := updater.ReadFrame(stdout, ev); err != nil {
+		if err := ipc.ReadFrame(stdout, ev); err != nil {
 			break
 		}
 		if onEvent != nil {
@@ -167,7 +167,7 @@ func (u *Updater) call(ctx context.Context, req *updaterv1.UpdaterRequest, onEve
 
 func protoMarshal(m *updaterv1.UpdaterRequest) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := updater.WriteFrame(&buf, m); err != nil {
+	if err := ipc.WriteFrame(&buf, m); err != nil {
 		return nil, err
 	}
 	// Engine reads one framed request from stdin; WriteFrame already framed it.

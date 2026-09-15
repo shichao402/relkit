@@ -1,14 +1,16 @@
-package sdk
+package inprocess
 
 import (
 	"context"
 	"sync"
 	"time"
+
+	"go.firoyang.com/relkit/sdk"
 )
 
 // UpdateScheduler runs periodic CheckForce calls in the background.
 type UpdateScheduler struct {
-	Runtime  RuntimeConfig
+	Runtime  sdk.RuntimeConfig
 	Check    func(ctx context.Context, force bool) CheckResult
 	OnResult func(CheckResult)
 
@@ -32,7 +34,7 @@ func (s *UpdateScheduler) Start() {
 	if s.Runtime.CheckOnStart || force {
 		go s.tick(force)
 	} else {
-		s.armLocked(s.Runtime.Policy.normalizedSuccess())
+		s.armLocked(policySuccess(s.Runtime.Policy))
 	}
 }
 
@@ -69,7 +71,7 @@ func (s *UpdateScheduler) tick(force bool) {
 	onResult := s.OnResult
 	policy := s.Runtime.Policy
 	if policy.AfterSuccess <= 0 || policy.AfterFailure <= 0 {
-		policy = DefaultPolicy()
+		policy = sdk.DefaultPolicy()
 		if s.Runtime.Policy.AfterSuccess > 0 {
 			policy.AfterSuccess = s.Runtime.Policy.AfterSuccess
 		}
@@ -102,9 +104,9 @@ func (s *UpdateScheduler) tick(force bool) {
 	}
 	switch {
 	case result.Err != nil:
-		s.armLocked(policy.normalizedFailure())
+		s.armLocked(policyFailure(policy))
 	default:
-		s.armLocked(policy.normalizedSuccess())
+		s.armLocked(policySuccess(policy))
 	}
 }
 
@@ -121,4 +123,18 @@ func (s *UpdateScheduler) armLocked(d time.Duration) {
 			s.tick(false)
 		}
 	})
+}
+
+func policySuccess(p sdk.Policy) time.Duration {
+	if p.AfterSuccess > 0 {
+		return p.AfterSuccess
+	}
+	return sdk.DefaultPolicy().AfterSuccess
+}
+
+func policyFailure(p sdk.Policy) time.Duration {
+	if p.AfterFailure > 0 {
+		return p.AfterFailure
+	}
+	return sdk.DefaultPolicy().AfterFailure
 }

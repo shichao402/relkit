@@ -19,7 +19,7 @@ Go / Dart / Node 三套 SDK 各自实现 check、下载与（部分）apply，�
 5. **宿主 facade 与 wire 同一 IDL。** 方法、结果五变体、错误码、`ClientProfile` 由生成器生成。每门语言的绑定随 relkit release 发布；产品仓只 import，永不执行 codegen。禁止手写第二份 DTO 或转换层。Go 仅允许导出首字母大写。失败返回带 `ErrorCode` 的结果对象，不抛裸异常。
 6. **数值宽度。** `code` / `sequence` / `size` 等与 `rup.v2` 一样用 `int64`。间隔用 `google.protobuf.Duration`；引擎按 `minCheckInterval`（5 分钟）钳制，不信任宿主小时整数。
 7. **sidecar。** 每个产品安装树一份同版本 `relkit-updater`，不进 PATH、不注册系统服务。consume 同一 SHA 产出 facade 与二进制。
-8. **旧 SDK。** 冻结功能，仅作迁移桥；稳定后删除旁路实现。引擎读取 legacy JSON state 一次并写成 `state.pb`，水位与 skipped 必须导入。
+8. **旧 SDK。** 进程内 check/download 只给 `relkit-updater` 用：Go 在 `internal/inprocess`，Dart/Node 的 `RupUpdater` 留在源码树供对拍，**不进宿主 zip、不是宿主 API**。产品源码引用 `RupUpdater` / `sdk.Updater` 是 drift。Node 宿主只消费 `bindings-ts`。引擎读取 legacy JSON state 一次并写成 `state.pb`。
 
 ## 宿主调用面（签名 SSOT）
 

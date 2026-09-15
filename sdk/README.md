@@ -10,7 +10,8 @@ This directory holds **language SDKs** for consuming RUP updates.
 | Dart | [`dart/lib/src/updater_facade.dart`](dart/lib/src/updater_facade.dart) | same |
 | Node | [`node/src/updater_facade.ts`](node/src/updater_facade.ts) | same |
 
-Legacy `RupUpdater` / `sdk.Updater` implementations are **frozen** and will be removed after host migration. Do not add features there.
+Legacy in-process `RupUpdater` / `internal/inprocess.Updater` implementations are
+**engine-internal**. They are not host APIs and are not packed into consume zips.
 
 Signatures: [`../conformance/updater/facade-signatures.txt`](../conformance/updater/facade-signatures.txt)
 

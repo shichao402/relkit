@@ -10,6 +10,7 @@ import (
 	"time"
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	"go.firoyang.com/relkit/internal/ipc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -97,11 +98,11 @@ func TestValidateArtifactFilename(t *testing.T) {
 func TestFrameRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	ev := &updaterv1.UpdaterEvent{Kind: &updaterv1.UpdaterEvent_Log{Log: &updaterv1.Log{Message: "hi"}}}
-	if err := WriteFrame(&buf, ev); err != nil {
+	if err := ipc.WriteFrame(&buf, ev); err != nil {
 		t.Fatal(err)
 	}
 	got := &updaterv1.UpdaterEvent{}
-	if err := ReadFrame(&buf, got); err != nil {
+	if err := ipc.ReadFrame(&buf, got); err != nil {
 		t.Fatal(err)
 	}
 	if got.GetLog().GetMessage() != "hi" {
@@ -220,7 +221,7 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 		t.Fatal("apply accepted without starting worker")
 	}
 	ev := &updaterv1.UpdaterEvent{}
-	if err := ReadFrame(&stdout, ev); err != nil {
+	if err := ipc.ReadFrame(&stdout, ev); err != nil {
 		t.Fatal(err)
 	}
 	if ev.GetApply().GetAccepted() == nil {
@@ -310,14 +311,14 @@ func TestHandleRequestMissingHello(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev := &updaterv1.UpdaterEvent{}
-	if err := ReadFrame(&buf, ev); err != nil {
+	if err := ipc.ReadFrame(&buf, ev); err != nil {
 		t.Fatal(err)
 	}
 	if ev.GetCapabilities() == nil {
 		t.Fatal("first event must be capabilities")
 	}
 	ev2 := &updaterv1.UpdaterEvent{}
-	if err := ReadFrame(&buf, ev2); err != nil {
+	if err := ipc.ReadFrame(&buf, ev2); err != nil {
 		t.Fatal(err)
 	}
 	if ev2.GetFailed() == nil {

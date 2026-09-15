@@ -44,42 +44,16 @@ Generated types: `lib/src/gen/rup/v2/` (re-exported by `package:rup_client/rup_c
 
 ## What it does
 
-- `RupUpdater.check()` — verify index, select next version, resolve artifact
-- `RupUpdater.download()` — Range multi-connection when possible, resume, retries; `DownloadProgress`
-- `UpdateScheduler` — start + periodic throttled checks
-- `UpdateRuntimeConfig` — host-injected scheduler config (`forceOnStart`, etc.)
+- `Updater` (facade) — spawn `relkit-updater` for check/download/apply
+- protocol helpers — envelope, chain, selectors, hash-verified download
 - `src/apply/` — optional install helpers: `wholeRoot` (directory swap) and
   `versionedDir` (`versions/<id>/` + atomic `active.json`). Defaults:
   Windows `versionedDir`, macOS `wholeRoot`. Not protocol; see SPEC appendix B.
 
-The package does not decide UI, prompts, or silent installs. It does not read
-configuration files: load JSON in the host and pass [UpdateRuntimeConfig].
+In-process `RupUpdater` / `UpdateScheduler` stay in this repo for engine tests
+and are not exported or packed into host zips.
 
-### Background checks
-
-```dart
-const runtime = UpdateRuntimeConfig(
-  checkOnStart: true,
-  forceOnStart: true, // cold start bypasses throttle; periodic ticks do not
-);
-
-UpdateScheduler(
-  runtime: runtime,
-  check: updater.check,
-  onResult: (result) { /* show UI on UpdateAvailable */ },
-).start();
-```
-
-Example host JSON (`assets/config/rup_update.json`):
-
-```json
-{
-  "checkOnStart": true,
-  "forceOnStart": true,
-  "afterSuccessHours": 24,
-  "afterFailureHours": 1
-}
-```
+The package does not decide UI, prompts, or silent installs.
 
 ```dart
 final runtime = UpdateRuntimeConfig.fromJson(jsonDecode(await rootBundle.loadString(...)));

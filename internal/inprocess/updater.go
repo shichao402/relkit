@@ -1,8 +1,7 @@
-package sdk
+package inprocess
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -14,14 +13,12 @@ import (
 	"go.firoyang.com/relkit/internal/envelope"
 	"go.firoyang.com/relkit/internal/model"
 	"go.firoyang.com/relkit/internal/selectors"
+	"go.firoyang.com/relkit/sdk"
 )
-
-// TrustedKeys maps keyId -> raw 32-byte ed25519 public key.
-type TrustedKeys map[string]ed25519.PublicKey
 
 // Updater checks for and downloads RUP v2 updates.
 //
-// Frozen: new hosts must use sdk/updaterfacade + relkit-updater (ADR 0010).
+// Frozen: engine-internal. Hosts must use sdk/updaterfacade + relkit-updater (ADR 0010).
 type Updater struct {
 	Product         string
 	Channel         string
@@ -29,11 +26,11 @@ type Updater struct {
 	IndexURLs       []string // ignored when EntryURLs is non-empty
 	EntryURLs       []string // signed directory bootstrap (SPEC §12.1 step 0 / §16)
 	FallbackURLs    []string // optional; also filled from directory services
-	TrustedKeys     TrustedKeys
+	TrustedKeys     sdk.TrustedKeys
 	ClientSelectors map[string]string
-	Fetcher         Fetcher
-	StateStore      StateStore
-	Policy          Policy
+	Fetcher         sdk.Fetcher
+	StateStore      sdk.StateStore
+	Policy          sdk.Policy
 
 	// Deprecated: prefer StateStore. Still honored when StateStore is nil.
 	LastSeenFallbackSequence *int64
@@ -41,18 +38,18 @@ type Updater struct {
 	// Recovery is compile-time last-resort copy. Shown when remote check fails.
 	Recovery *RecoveryHelp
 
-	state *UpdateState
+	state *sdk.UpdateState
 }
 
 // UpdateAvailable is returned when a newer reachable version exists.
 type UpdateAvailable struct {
-	Target             *rupv2.VersionNode
-	Manifest           *rupv2.Manifest
-	Artifact           *rupv2.Artifact
-	Mandatory          bool
-	RemainingHops      int
-	Sequence           int64
-	PriorReleaseNotes  []PriorReleaseNotes
+	Target            *rupv2.VersionNode
+	Manifest          *rupv2.Manifest
+	Artifact          *rupv2.Artifact
+	Mandatory         bool
+	RemainingHops     int
+	Sequence          int64
+	PriorReleaseNotes []PriorReleaseNotes
 }
 
 // FallbackRequired urges a manual update via a signed rule (SPEC §12.6).
@@ -79,29 +76,29 @@ type RecoveryLink struct {
 
 // CheckResult is the outcome of Check.
 type CheckResult struct {
-	UpToDate         bool
-	CurrentIsYanked  bool
-	Available        *UpdateAvailable
-	Fallback         *FallbackRequired
-	Recovery         *RecoveryHelp
-	Throttled        bool
-	NextAllowedAt    time.Time
-	Sequence         int64
-	Attempts         []string
-	Err              error
+	UpToDate        bool
+	CurrentIsYanked bool
+	Available       *UpdateAvailable
+	Fallback        *FallbackRequired
+	Recovery        *RecoveryHelp
+	Throttled       bool
+	NextAllowedAt   time.Time
+	Sequence        int64
+	Attempts        []string
+	Err             error
 }
 
 // PriorReleaseNotes is a historical notes link collected from the index.
 type PriorReleaseNotes struct {
-	Version string
-	Code    int64
-	Notes   string
+	Version  string
+	Code     int64
+	Notes    string
 	NotesURL string
 }
 
-func (u *Updater) policy() Policy {
+func (u *Updater) policy() sdk.Policy {
 	p := u.Policy
-	def := DefaultPolicy()
+	def := sdk.DefaultPolicy()
 	if p.AfterSuccess <= 0 {
 		p.AfterSuccess = def.AfterSuccess
 	}
@@ -126,27 +123,27 @@ func (u *Updater) policy() Policy {
 	return p
 }
 
-func (u *Updater) fetcher() Fetcher {
+func (u *Updater) fetcher() sdk.Fetcher {
 	if u.Fetcher != nil {
 		return u.Fetcher
 	}
 	p := u.policy()
-	return &HTTPFetcher{DocumentTimeout: p.DocumentTimeout, IdleTimeout: p.DownloadIdleTimeout}
+	return &sdk.HTTPFetcher{DocumentTimeout: p.DocumentTimeout, IdleTimeout: p.DownloadIdleTimeout}
 }
 
-func (u *Updater) loadState() *UpdateState {
+func (u *Updater) loadState() *sdk.UpdateState {
 	if u.state != nil {
 		return u.state
 	}
 	if u.StateStore != nil {
 		st, err := u.StateStore.Load()
 		if err != nil || st == nil {
-			st = &UpdateState{}
+			st = &sdk.UpdateState{}
 		}
 		u.state = st
 		return st
 	}
-	st := &UpdateState{LastSeenFallbackSequence: u.LastSeenFallbackSequence}
+	st := &sdk.UpdateState{LastSeenFallbackSequence: u.LastSeenFallbackSequence}
 	u.state = st
 	return st
 }
@@ -230,9 +227,9 @@ func (u *Updater) CheckForce(ctx context.Context, force bool) CheckResult {
 }
 
 type indexCandidate struct {
-	URL            string
-	PreferenceKey  string
-	FallbackURL    string
+	URL           string
+	PreferenceKey string
+	FallbackURL   string
 }
 
 func (u *Updater) resolveIndexPlan(ctx context.Context) (candidates []indexCandidate, fallbackURLs []string, attempts []string) {
@@ -240,7 +237,7 @@ func (u *Updater) resolveIndexPlan(ctx context.Context) (candidates []indexCandi
 	st := u.loadState()
 
 	if len(u.EntryURLs) > 0 {
-		entries := RankURLStrings(u.EntryURLs, st)
+		entries := sdk.RankURLStrings(u.EntryURLs, st)
 		for _, entryURL := range entries {
 			doc, err := u.loadDirectory(ctx, entryURL)
 			if err != nil {
@@ -257,7 +254,7 @@ func (u *Updater) resolveIndexPlan(ctx context.Context) (candidates []indexCandi
 				}
 				candidates = append(candidates, indexCandidate{
 					URL:           svc.IndexUrl,
-					PreferenceKey: DirectoryServiceKey(svc.Id),
+					PreferenceKey: sdk.DirectoryServiceKey(svc.Id),
 					FallbackURL:   svc.FallbackUrl,
 				})
 				if svc.FallbackUrl != "" {
@@ -269,11 +266,11 @@ func (u *Updater) resolveIndexPlan(ctx context.Context) (candidates []indexCandi
 			}
 			attempts = append(attempts, fmt.Sprintf("%s: no services for channel %q", entryURL, u.Channel))
 		}
-		candidates = RankByLearning(candidates, func(c indexCandidate) string { return c.PreferenceKey }, st)
+		candidates = sdk.RankByLearning(candidates, func(c indexCandidate) string { return c.PreferenceKey }, st)
 		return candidates, uniqueStrings(fallbackURLs), attempts
 	}
 
-	for _, url := range RankURLStrings(u.IndexURLs, st) {
+	for _, url := range sdk.RankURLStrings(u.IndexURLs, st) {
 		candidates = append(candidates, indexCandidate{URL: url, PreferenceKey: url})
 	}
 	return candidates, uniqueStrings(fallbackURLs), attempts
@@ -296,7 +293,7 @@ func (u *Updater) loadDirectory(ctx context.Context, rawURL string) (*rupv2.Upda
 		return nil, fmt.Errorf("product mismatch")
 	}
 	st := u.loadState()
-	if !AcceptsSequence(doc.DirectorySequence, st.LastSeenDirectorySequence) {
+	if !sdk.AcceptsSequence(doc.DirectorySequence, st.LastSeenDirectorySequence) {
 		return nil, fmt.Errorf("directory sequence %d older than last seen", doc.DirectorySequence)
 	}
 	return doc, nil
@@ -367,7 +364,7 @@ func (u *Updater) checkIndex(ctx context.Context) CheckResult {
 			st.RecordSourceFailure(cand.PreferenceKey)
 			continue
 		}
-		if !AcceptsSequence(index.Sequence, st.LastSeenSequence) {
+		if !sdk.AcceptsSequence(index.Sequence, st.LastSeenSequence) {
 			attempts = append(attempts, fmt.Sprintf("%s: sequence %d older than last seen", cand.URL, index.Sequence))
 			continue
 		}
@@ -458,7 +455,7 @@ func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []strin
 	st := u.loadState()
 	var attempts []string
 	attempts = append(attempts, planAttempts...)
-	for _, rawURL := range RankURLStrings(urls, st) {
+	for _, rawURL := range sdk.RankURLStrings(urls, st) {
 		body, err := u.fetcher().GetBytes(ctx, bustCache(rawURL))
 		if err != nil {
 			attempts = append(attempts, fmt.Sprintf("%s: fetch: %v", rawURL, err))
@@ -478,7 +475,7 @@ func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []strin
 			attempts = append(attempts, fmt.Sprintf("%s: product mismatch", rawURL))
 			continue
 		}
-		if !AcceptsSequence(doc.Sequence, st.LastSeenFallbackSequence) {
+		if !sdk.AcceptsSequence(doc.Sequence, st.LastSeenFallbackSequence) {
 			attempts = append(attempts, fmt.Sprintf("%s: sequence %d older than last seen", rawURL, doc.Sequence))
 			continue
 		}
@@ -521,7 +518,7 @@ func (u *Updater) fetchTarget(ctx context.Context, index *rupv2.Index, target *r
 		return nil, nil, fmt.Errorf("target has no manifest urls")
 	}
 	st := u.loadState()
-	urls := RankURLStrings(target.Manifest.Urls, st)
+	urls := sdk.RankURLStrings(target.Manifest.Urls, st)
 	var last error
 	for _, url := range urls {
 		body, err := u.fetcher().GetBytes(ctx, url)
@@ -573,10 +570,10 @@ func (u *Updater) Download(ctx context.Context, available *UpdateAvailable, dest
 		return fmt.Errorf("nil update")
 	}
 	st := u.loadState()
-	urls := RankURLStrings(available.Artifact.Urls, st)
+	urls := sdk.RankURLStrings(available.Artifact.Urls, st)
 	art := *available.Artifact
 	art.Urls = urls
-	verified, err := DownloadArtifact(ctx, u.fetcher(), &art, destPath, u.policy(), nil)
+	verified, err := sdk.DownloadArtifact(ctx, u.fetcher(), &art, destPath, u.policy(), nil)
 	if err != nil {
 		for _, url := range urls {
 			st.RecordSourceFailure(url)

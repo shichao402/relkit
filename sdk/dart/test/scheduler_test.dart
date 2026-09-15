@@ -14,6 +14,8 @@ library;
 import 'dart:async';
 
 import 'package:rup_client/rup_client.dart';
+import 'package:rup_client/src/scheduler.dart';
+import 'package:rup_client/src/updater.dart';
 import 'package:test/test.dart';
 
 /// A [Timer] the test decides when to fire.

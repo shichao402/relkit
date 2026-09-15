@@ -1,17 +1,8 @@
-/// A RUP client: check for an update, verify it, download it, apply it.
+/// Protocol helpers and the generated `relkit-updater` facade.
 ///
-/// The protocol contract lives in `SPEC.md`; this package implements the client
-/// half of it. Everything up to and including "here is a file whose sha256
-/// matches a signed manifest" is protocol, and is what `src/updater.dart`
-/// provides.
-///
-/// Applying that file is not protocol. `src/apply/` offers one strategy —
-/// replacing a directory of files, which is what a portable desktop
-/// application is — and a host whose shape is different (an installer, a
-/// package manager, a service) should ignore it and use the verified file
-/// directly. It is exported rather than hidden because that one strategy
-/// covers the common case, and the Windows part of it is subtle enough that
-/// every host reinventing it would get it wrong in the same way.
+/// Check/download/apply for products goes through [Updater] in
+/// `updater_facade.dart`. The in-process engine stays in this repo for
+/// tests and is not part of the host barrel.
 library;
 
 export 'package:fixnum/fixnum.dart' show Int64;
@@ -48,9 +39,7 @@ export 'src/models.dart';
 export 'src/preference.dart';
 export 'src/release_notes.dart';
 export 'src/runtime_config.dart';
-export 'src/scheduler.dart';
 export 'src/selectors.dart';
 export 'src/state.dart';
-export 'src/updater.dart';
 export 'src/updater_facade.dart'
     show Glue, DefaultGlue, OpenResult, Updater, ipcMin, ipcMax, ipcCurrent;

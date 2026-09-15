@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import shutil
@@ -18,7 +19,15 @@ sys.path.insert(0, str(DEPLOY))
 
 import relkit_ops as ops  # noqa: E402
 import relkit as deploy_cli  # noqa: E402
-from hostlib.facets import BY_NAME, Component, TARGETS, validate_components, with_component
+from hostlib.facets import (
+    BY_NAME,
+    HOST_SOURCE_SUFFIXES,
+    Component,
+    TARGETS,
+    packed_host_surface_errors,
+    validate_components,
+    with_component,
+)
 
 
 class RequirementsTests(unittest.TestCase):
@@ -319,9 +328,58 @@ class BackupRollbackTests(unittest.TestCase):
 class CliParseTests(unittest.TestCase):
     def test_bindings_archive_uses_precompiled_entrypoints(self):
         names = {name for _, name in deploy_cli.component_entries("bindings-ts")}
-        self.assertIn("dist/updater_pb.js", names)
-        self.assertIn("dist/updater_pb.d.ts", names)
+        self.assertEqual(names, set(BY_NAME["bindings-ts"].pack_files))
         self.assertNotIn("updater/v1/updater_pb.ts", names)
+
+    def test_component_entries_does_not_branch_on_component_names(self):
+        source = inspect.getsource(deploy_cli.component_entries)
+        self.assertNotIn("if name ==", source)
+        self.assertNotIn("if row.name ==", source)
+        self.assertIn("pack_kind()", source)
+
+    def test_registry_pack_covers_required_archive_paths(self):
+        self.assertEqual(BY_NAME["host-scripts"].pack_kind(), "working-tree")
+        self.assertEqual(BY_NAME["sdk-go"].pack_kind(), "go-deps")
+        self.assertEqual(BY_NAME["sdk-rust"].pack_kind(), "tracked-tree")
+        self.assertEqual(BY_NAME["bindings-ts"].pack_kind(), "listed-files")
+        self.assertEqual(BY_NAME["sdk-dart"].pack_kind(), "tracked-tree")
+        for row in deploy_cli.registry_components("product-tree"):
+            names = {name for _, name in deploy_cli.component_entries(row.name)}
+            for required in row.required_paths:
+                self.assertTrue(
+                    required in names or any(
+                        name == required or name.startswith(required.rstrip("/") + "/")
+                        for name in names
+                    ),
+                    f"{row.name} packed files missing {required}",
+                )
+
+    def test_host_zips_omit_in_process_updater(self):
+        dart = {name for _, name in deploy_cli.component_entries("sdk-dart")}
+        self.assertNotIn("lib/src/updater.dart", dart)
+        self.assertNotIn("lib/src/scheduler.dart", dart)
+        self.assertFalse(any(name.startswith("test/") for name in dart))
+        go = {name for _, name in deploy_cli.component_entries("sdk-go")}
+        self.assertNotIn("sdk/updater.go", go)
+        self.assertFalse(any(name.startswith("internal/inprocess/") for name in go))
+        self.assertFalse(any(name.startswith("internal/updater/") for name in go))
+        self.assertTrue(any(name.startswith("sdk/") for name in go))
+        self.assertTrue(any(name.startswith("sdk/updaterfacade/") for name in go))
+        self.assertTrue(any(name.startswith("internal/ipc/") for name in go))
+        for row in deploy_cli.registry_components("product-tree"):
+            if not row.updater_process:
+                continue
+            entries = deploy_cli.component_entries(row.name)
+            names = [name for _, name in entries]
+            texts = {
+                name: source.read_text(encoding="utf-8", errors="ignore")
+                for source, name in entries
+                if source.suffix.lower() in HOST_SOURCE_SUFFIXES
+                and source.is_file()
+            }
+            self.assertEqual(packed_host_surface_errors(row, names, texts), ())
+            self.assertIn("facade", row.host_api)
+            self.assertTrue(row.facade_paths)
 
     def test_tag_ci_builds_every_registry_component(self):
         workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
@@ -358,6 +416,7 @@ class CliParseTests(unittest.TestCase):
             "sdk/zig", "third_party/relkit/sdk/zig", "files",
             ("build.zig",), portable=True, detect=("build.zig",),
             updater_process="zig", import_signals=("@import(\"relkit\")",),
+            host_api=("facade",), facade_paths=("src/lib.zig",),
         )
         rows = with_component(row)
         added = rows[-1]
@@ -365,8 +424,38 @@ class CliParseTests(unittest.TestCase):
         self.assertEqual(added.name, "sdk-zig")
         self.assertEqual(added.destination, "third_party/relkit/sdk/zig")
         self.assertEqual(added.updater_process, "zig")
-        with self.assertRaisesRegex(ValueError, "missing fields"):
-            validate_components([Component("bad", "product-tree", "", "", "", "", "files", ())])
+        with self.assertRaisesRegex(ValueError, "updater_process requires facade_paths"):
+            validate_components([
+                Component(
+                    "sdk-nim", "product-tree", "nim-sdk", "relkit-sdk-nim.zip",
+                    "sdk/nim", "third_party/relkit/sdk/nim", "files",
+                    ("src/lib.nim",), portable=True, updater_process="nim",
+                    host_api=("facade",),
+                )
+            ])
+        dart = BY_NAME["sdk-dart"]
+        self.assertEqual(
+            packed_host_surface_errors(
+                dart, dart.facade_paths, {dart.facade_paths[0]: "class Updater {}"},
+            ),
+            (),
+        )
+        self.assertTrue(
+            packed_host_surface_errors(
+                dart, dart.facade_paths, {"lib/src/updater.dart": "class RupUpdater {}"},
+            )
+        )
+        self.assertTrue(
+            packed_host_surface_errors(dart, ("lib/src/other.dart",), {})
+        )
+        with self.assertRaisesRegex(ValueError, "listed-files pack requires pack_files"):
+            validate_components([
+                Component(
+                    "sdk-bad", "product-tree", "bad-sdk", "relkit-sdk-bad.zip",
+                    "sdk/bad", "third_party/relkit/sdk/bad", "files",
+                    ("x",), portable=True, pack="listed-files",
+                )
+            ])
 
     def test_help_and_subcommands(self):
         env = os.environ.copy()

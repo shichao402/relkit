@@ -13,6 +13,7 @@ import (
 
 	rupv2 "go.firoyang.com/relkit/api/rup/v2"
 	"go.firoyang.com/relkit/internal/envelope"
+	"go.firoyang.com/relkit/internal/inprocess"
 	"go.firoyang.com/relkit/sdk"
 )
 
@@ -94,7 +95,7 @@ func TestCheckAndDownload(t *testing.T) {
 
 	pub := ed25519.NewKeyFromSeed(seed32).Public().(ed25519.PublicKey)
 	store := sdk.NewMemoryStateStore(nil)
-	u := &sdk.Updater{
+	u := &inprocess.Updater{
 		Product:         "demo",
 		Channel:         "stable",
 		CurrentCode:     0,
@@ -181,7 +182,7 @@ func TestDirectoryBootstrap(t *testing.T) {
 	mux.HandleFunc("/m.pb", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(manBytes) })
 	mux.HandleFunc("/a.bin", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(payload) })
 
-	u := &sdk.Updater{
+	u := &inprocess.Updater{
 		Product: "demo", Channel: "stable", CurrentCode: 0,
 		EntryURLs:   []string{srv.URL + "/directory.pb"},
 		TrustedKeys: sdk.TrustedKeys{"k1": pub},

@@ -19,14 +19,17 @@
 - `product-tree`：`host-scripts`、各 SDK 与 bindings，作为 portable zip 安装。
 
 行内声明 build flag、Go package / binary prefix、archive、源和安装路径、完整性
-探针、target 安装名 override、stack detection、默认消费、import 信号及 WebView
-投影义务。deploy 反向 import host 树里的清单；build 参数与产物名、SHA256SUMS /
-lock key、consume 目标与完整性检查、保留子树和 updater 门禁均由它派生。
+探针、打包规则、**宿主调用面**（`host_api` 必须含 `facade`，`facade_paths`
+必须打进 zip）、target 安装名 override、stack detection、默认消费、import
+信号及 WebView 投影义务。有 `updater_process` 的语言行打包时扫描源码，禁止
+把 `RupUpdater` / `package inprocess` 打进宿主 zip。deploy 反向 import host
+树里的清单，只解释这些字段，不再按组件名写打包分支。
 
 门禁注册在 `hostlib/gates.py` 并遍历清单。`updater.process=other` 不是豁免：
 `relkit.json` 必须声明 `updater.entry`，有 WebView 时还要声明
 `updater.projection`。`updater.urlAllowlist` 只按路径豁免 URL 检测，不豁免
-sidecar chokepoint 或手写形状检测。
+sidecar chokepoint 或手写形状检测。产品源码引用 `RupUpdater` / `sdk.Updater`
+是 drift：那不是宿主调用面。
 
 `scripts/host/relkit_host.py` 只组装 parser/dispatch，并兼容 re-export 既有
 测试和产品脚本使用的符号。实现按职责位于 `hostlib/`：
@@ -39,6 +42,7 @@ sidecar chokepoint 或手写形状检测。
 ## 否决
 
 - 为 bindings-ts 再增加一组 `if component == ...`。
+- 增加一门语言却不声明 `facade_paths`，或把进程内引擎打进宿主 zip。
 - 把清单放在 deploy 树，使产品 consume 后看不到发布时的声明。
 - 按语言维护平行的组件数组、安装目标或门禁。
 - 以缺少 SDK import 作为未声明更新功能仓库的失败证据。

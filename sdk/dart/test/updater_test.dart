@@ -17,6 +17,7 @@ import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:fixnum/fixnum.dart';
 import 'package:rup_client/rup_client.dart';
+import 'package:rup_client/src/updater.dart';
 import 'package:test/test.dart';
 
 /// A fetcher backed by a map, which also records what was asked for.

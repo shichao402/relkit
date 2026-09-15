@@ -16,6 +16,7 @@ import (
 	"time"
 
 	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	"go.firoyang.com/relkit/internal/inprocess"
 	"go.firoyang.com/relkit/internal/testutil"
 	"go.firoyang.com/relkit/sdk"
 )
@@ -39,7 +40,7 @@ func TestThrottleAndStateStore(t *testing.T) {
 	st := &sdk.UpdateState{LastCheckAt: &now, LastResult: "success"}
 	_ = store.Save(st)
 
-	u := &sdk.Updater{
+	u := &inprocess.Updater{
 		Product: "demo", Channel: "stable", CurrentCode: 0,
 		IndexURLs:   []string{"http://127.0.0.1:1/nope"},
 		TrustedKeys: sdk.TrustedKeys{"k": make(ed25519.PublicKey, ed25519.PublicKeySize)},
@@ -48,7 +49,7 @@ func TestThrottleAndStateStore(t *testing.T) {
 	}
 	// Reload state from store
 	loaded, _ := store.Load()
-	u = &sdk.Updater{
+	u = &inprocess.Updater{
 		Product: "demo", Channel: "stable", CurrentCode: 0,
 		IndexURLs:   []string{"http://127.0.0.1:1/nope"},
 		TrustedKeys: sdk.TrustedKeys{"k": make(ed25519.PublicKey, ed25519.PublicKeySize)},
