@@ -37,7 +37,9 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - 开箱前先跑 `onboard start` / `onboard inspect`：脚本会列出 `relkit.json` backends、VERSION、lock、SSH Include/通配匹配主机。`http-put` / `local` / `static-http` 等陈旧类型是 error，挡住 `product.id`。不要用手写确认代替 inspect。
 - `ssh.host`：问人之前脚本已展开 `~/.ssh/config` 的 Include 与通配，并列出 exact / patterns / matched。通配本身不是 SSH 别名。写入 `onboard set ssh.host <值>`。
 - 发布拓扑：只认 `questions --json` 的 `evidence.topology`。`mode=direct` 表示 `publishTo` 只含 S3 等直连后端，serve/agent token 与注册不在发布链路上；不要因状态里残留 `ssh.host` 就把远端说成必需。
-- `sidecar.layout`：只认 lock 装到 `tools/bin/relkit-updater`；可选 `relkit.json` `sidecar.packScript` 只校验接线，不硬编码 `.mjs`。真产物归 `pack.ci`。
+- `sidecar.layout`：只认 lock 装到 `tools/bin/relkit-updater`；可选 `relkit.json` `sidecar.packScript` 只校验接线，不硬编码 `.mjs`。真产物归 `pack.ci`。macOS 的 universal sidecar 只跑 `relkit_host.py sidecar universal --out <路径>`：`install` 每个目标都装成同一个文件名，只能放构建机自己的架构。
+- `relkit_consume.py` 是 release 内部件，随版本在 `scripts/host/` 里搬家。产品代码禁止 `import relkit_consume`，也禁止再写 `scripts/relkit_consume.py` 这个已退役路径；闸门 `consumer-entry-only` 会报，改法是走 `relkit_host.py` 的子命令。
+- host 脚本要求 Python ≥ 3.9（hostlib 导入期就会求值 PEP 585 泛型）。产品入口脚本不要接受或安装 3.8，否则闸门 `host-python-floor` 报 drift；CI 容器只装 3.8 时要改成装 3.9 以上。
 - `fake.release`：只跑 `relkit_host.py fake verify`。缺 staged 树时脚本自己 dummy stage + simulate，禁止手调 `relkit.exe stage`。本机无 COS/S3 发布密钥时仍应能 simulate（对着空远端 index 合并 dummy staged）。
 - `pack.ci`：GitHub Actions 里 `relkit_host.py install` 之后真正 `stage`/`cas-put`/`release --execute` 的工作流算已接线；只 `install` 不够。
 - `updater.process`：封闭词由组件 registry 派生（当前 `rust` / `node` / `dart` / `go` / `other`），**不是** `rust-shell`。手写 DTO / `serde(default)` 吞缺键是 drift。产品源码出现 `RupUpdater` 或 `sdk.Updater` 也是 drift：升级宿主只许走 facade + sidecar。选择 `other` 时，`relkit.json` 必须声明存在的 `updater.entry`；存在 WebView 还必须声明 `updater.projection`。sidecar 名只能出现在声明入口（及 `sidecar.packScript`），projection 仍按满强度形状检测。

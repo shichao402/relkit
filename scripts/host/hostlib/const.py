@@ -10,6 +10,12 @@ LOCAL_SCHEMA = "relkit.onboarding.local/1"
 
 LOCK_SCHEMA = "relkit.consume/2"
 
+# hostlib evaluates PEP 585 builtin generics while importing (gates.Gate), so an
+# older interpreter dies inside the import instead of at the entry guard. The
+# entry scripts repeat this floor as a literal because they must refuse before
+# importing hostlib at all; retrospect checks the two agree.
+MIN_PYTHON = (3, 9)
+
 DEFAULT_SERVE_DIR = "/etc/relkit-serve"
 
 DEFAULT_AGENT_CONFIG = "/etc/relkit-agent/relkit-agent.json"
@@ -153,6 +159,9 @@ DIGESTED_ISSUE_CODES = frozenset(
         "host-scripts-pycache-untracked",
         "upgrade-legacy-inventory-unreadable",
         "decision-before-live-inventory",
+        "sidecar-universal-not-darwin",
+        "sidecar-universal-missing-attachment",
+        "sidecar-universal-lipo-failed",
     }
 )
 

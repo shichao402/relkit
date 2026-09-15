@@ -1970,5 +1970,206 @@ class UpdaterGateTests(unittest.TestCase):
             self.assertFalse(any("in-process updater API" in item for item in drift))
 
 
+class ConsumerEntryGateTests(unittest.TestCase):
+    def state(self, root: Path) -> dict:
+        state = host.default_state(root)
+        host.set_step(state, "consume.lock", "verified", "v0.3.25")
+        return state
+
+    def drift_for(self, write: object) -> list[str]:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            write(root)
+            drift: list[str] = []
+            host.run_gates(root, self.state(root), drift)
+            return drift
+
+    def test_product_import_of_the_consumer_is_drift(self) -> None:
+        def write(root: Path) -> None:
+            (root / "scripts").mkdir()
+            (root / "scripts/build.py").write_text(
+                "import relkit_consume\n", encoding="utf-8"
+            )
+
+        drift = self.drift_for(write)
+        self.assertTrue(any("release-internal" in item for item in drift))
+        self.assertTrue(any("scripts/build.py" in item for item in drift))
+
+    def test_retired_root_consumer_path_is_drift(self) -> None:
+        def write(root: Path) -> None:
+            (root / "scripts").mkdir()
+            (root / "scripts/ci_release.sh").write_text(
+                'python "$DIR/scripts/relkit_consume.py" install\n', encoding="utf-8"
+            )
+
+        drift = self.drift_for(write)
+        self.assertTrue(any("is retired" in item for item in drift))
+
+    def test_installed_host_tree_is_not_a_product_import(self) -> None:
+        def write(root: Path) -> None:
+            (root / "scripts/host").mkdir(parents=True)
+            (root / "scripts/host/relkit_host.py").write_text(
+                "import relkit_consume\n", encoding="utf-8"
+            )
+
+        self.assertEqual(self.drift_for(write), [])
+
+    def test_unanswered_lock_keeps_the_gate_quiet(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "scripts").mkdir()
+            (root / "scripts/build.py").write_text(
+                "import relkit_consume\n", encoding="utf-8"
+            )
+            drift: list[str] = []
+            host.run_gates(root, host.default_state(root), drift)
+            self.assertEqual(drift, [])
+
+
+class HostPythonFloorGateTests(unittest.TestCase):
+    def state(self, root: Path) -> dict:
+        state = host.default_state(root)
+        host.set_step(state, "consume.lock", "verified", "v0.3.25")
+        return state
+
+    def drift_for(self, body: str, name: str = "scripts/ci_release.sh") -> list[str]:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            drift: list[str] = []
+            host.run_gates(root, self.state(root), drift)
+            return [item for item in drift if "Python 3." in item]
+
+    def test_entry_script_accepting_python38_is_drift(self) -> None:
+        drift = self.drift_for(
+            "MIN='import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'\n"
+            'python3 scripts/host/relkit_host.py install\n'
+        )
+        self.assertTrue(any("accepts Python 3.8" in item for item in drift))
+
+    def test_installing_python38_is_drift(self) -> None:
+        drift = self.drift_for(
+            "yum install -y python38\n"
+            'python3.8 scripts/host/relkit_host.py install\n'
+        )
+        self.assertTrue(any("accepts Python 3.8" in item for item in drift))
+
+    def test_modern_floor_is_clean(self) -> None:
+        drift = self.drift_for(
+            "MIN='import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)'\n"
+            "for c in python3 python3.12 python3.9; do :; done\n"
+            'python3 scripts/host/relkit_host.py install\n'
+        )
+        self.assertEqual(drift, [])
+
+    def test_script_that_never_calls_the_host_is_not_scanned(self) -> None:
+        drift = self.drift_for(
+            "yum install -y python38\npython3.8 scripts/other.py\n",
+            name="scripts/unrelated.sh",
+        )
+        self.assertEqual(drift, [])
+
+    def test_windows_batch_proxy_is_scanned(self) -> None:
+        drift = self.drift_for(
+            "py -3.8 scripts\\host\\relkit_host.py install\r\n",
+            name="scripts/ci_release.bat",
+        )
+        self.assertTrue(any("ci_release.bat" in item for item in drift))
+
+
+class SidecarUniversalTests(unittest.TestCase):
+    def test_refuses_outside_macos(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            with patch("relkit_host.sys.platform", "win32"):
+                with self.assertRaises(host.Fail) as caught:
+                    host.cmd_sidecar_universal(Path(raw), Path(raw) / "out")
+            self.assertEqual(caught.exception.code, "sidecar-universal-not-darwin")
+
+    def test_fuses_both_darwin_attachments(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            requested: list[str] = []
+
+            class FakeConsume:
+                @staticmethod
+                def load_lock(path: Path) -> dict:
+                    return {"artifacts": {"updater": {}}}
+
+                @staticmethod
+                def artifact_spec(lock: dict, component: str, target: str) -> dict:
+                    return {"url": f"https://x.test/{target}", "sha256": "0" * 64}
+
+                @staticmethod
+                def download_artifact(project: Path, label: str, spec: dict) -> Path:
+                    requested.append(label)
+                    artifact = root / label
+                    artifact.write_bytes(b"binary")
+                    return artifact
+
+            out = root / "tools" / "bin" / "relkit-updater"
+
+            def fake_fuse(inputs, destination) -> list[str]:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(b"fat")
+                return ["x86_64", "arm64"]
+
+            with (
+                patch("relkit_host.sys.platform", "darwin"),
+                patch("relkit_host.import_consume", return_value=FakeConsume),
+                patch("relkit_host._lipo_fuse", side_effect=fake_fuse) as fuse,
+            ):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(host.cmd_sidecar_universal(root, out), 0)
+            self.assertEqual(requested, ["updater-darwin-amd64", "updater-darwin-arm64"])
+            self.assertEqual(len(fuse.call_args.args[0]), 2)
+            self.assertTrue(out.is_file())
+
+    def test_missing_attachment_is_a_classified_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+
+            class FakeConsume:
+                @staticmethod
+                def load_lock(path: Path) -> dict:
+                    return {"artifacts": {}}
+
+                @staticmethod
+                def artifact_spec(lock: dict, component: str, target: str) -> dict:
+                    raise RuntimeError(f"no {component} for {target}")
+
+            with (
+                patch("relkit_host.sys.platform", "darwin"),
+                patch("relkit_host.import_consume", return_value=FakeConsume),
+            ):
+                with self.assertRaises(host.Fail) as caught:
+                    host.cmd_sidecar_universal(root, root / "out")
+            self.assertEqual(
+                caught.exception.code, "sidecar-universal-missing-attachment"
+            )
+
+    def test_sidecar_universal_parses(self) -> None:
+        args = host.build_parser().parse_args(
+            ["sidecar", "universal", "--out", "tools/bin/relkit-updater"]
+        )
+        self.assertEqual(args.cmd, "sidecar")
+        self.assertEqual(args.sidecar_cmd, "universal")
+
+
+class HostPythonFloorDeclarationTests(unittest.TestCase):
+    def test_entry_guards_match_the_declared_floor(self) -> None:
+        floor = re.compile(r"sys\.version_info\s*<\s*\((\d+),\s*(\d+)\)")
+        scripts = Path(__file__).parent / "host"
+        for name in ("relkit_host.py", "relkit_consume.py"):
+            found = floor.search((scripts / name).read_text(encoding="utf-8"))
+            self.assertIsNotNone(found, name)
+            self.assertEqual(
+                (int(found.group(1)), int(found.group(2))),
+                tuple(host.MIN_PYTHON),
+                name,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
