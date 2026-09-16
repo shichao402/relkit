@@ -154,7 +154,10 @@ func collect(products []Product, makersCfg *makers.Config, printer Printer) ([]b
 		}
 		channels := siteDoc.Channels
 		if len(channels) == 0 {
-			channels = []string{"stable"} // compatibility with relkit.site/1 writers before channels
+			// Compatibility with relkit.site/1 writers before channels became
+			// part of the document. New publishes always provide the exact
+			// list; old public products used these conventional channels.
+			channels = []string{"stable", "beta", "dev"}
 		}
 		input := browse.ProductData{Site: siteDoc}
 		for _, channel := range channels {

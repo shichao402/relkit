@@ -42,8 +42,8 @@ func (b *memoryBackend) PutPointer(data []byte, key string) ([]string, error) {
 
 func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0")
-	putWebmeta(t, shared, "cronkit", "2.0.0")
+	putWebmeta(t, shared, "dec", "1.0.0", "dev")
+	putWebmeta(t, shared, "cronkit", "2.0.0", "beta")
 	putCount := 0
 	oldFactory := createBackend
 	createBackend = func(_ string, cfg *config.Config, _ string) (backends.Backend, error) {
@@ -88,17 +88,17 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	}
 }
 
-func putWebmeta(t *testing.T, data map[string][]byte, id, version string) {
+func putWebmeta(t *testing.T, data map[string][]byte, id, version, channel string) {
 	t.Helper()
 	siteRaw, _ := webmeta.MarshalSite(webmeta.Site{
-		Product: id, Title: strings.ToUpper(id), Channels: []string{"stable"},
+		Product: id, Title: strings.ToUpper(id),
 		UpdatedAt: "2026-09-16T00:00:00Z",
 	})
 	latestRaw, _ := webmeta.MarshalLatest(webmeta.Latest{
-		Product: id, Channel: "stable", Version: version, Code: 1,
+		Product: id, Channel: channel, Version: version, Code: 1,
 		PublishedAt: "2026-09-16T00:00:00Z",
 		Artifacts:   []webmeta.Artifact{{ID: "app", Filename: id + ".zip"}},
 	})
 	data[webmeta.SiteKey(id)] = siteRaw
-	data[webmeta.LatestKey(id, "stable")] = latestRaw
+	data[webmeta.LatestKey(id, channel)] = latestRaw
 }
