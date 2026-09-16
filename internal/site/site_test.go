@@ -86,6 +86,16 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	if putCount != firstPutCount {
 		t.Fatalf("unchanged rebuild wrote %d more pointers", putCount-firstPutCount)
 	}
+
+	delete(shared, webmeta.SiteKey("dec"))
+	delete(shared, webmeta.LatestKey("dec", "dev"))
+	changed, err = Rebuild(cfg, products, nil)
+	if err == nil || !strings.Contains(err.Error(), "incomplete snapshot") {
+		t.Fatalf("missing prior product changed=%v err=%v", changed, err)
+	}
+	if putCount != firstPutCount {
+		t.Fatal("incomplete snapshot was deployed")
+	}
 }
 
 func putWebmeta(t *testing.T, data map[string][]byte, id, version, channel string) {

@@ -6,6 +6,7 @@ package site
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,6 +79,11 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	if len(sinks) == 0 {
 		return false, fmt.Errorf("site rebuild has no destination (configure agent site.makers or a HostsBrowse backend)")
 	}
+	memberPath := filepath.Join(siteCfg.StateDir, "site", "members.json")
+	members := inputMembers(inputs)
+	if err := guardCompleteSnapshot(memberPath, products, members); err != nil {
+		return false, err
+	}
 	dump, err := browse.Build(inputs)
 	if err != nil {
 		return false, err
@@ -85,6 +91,9 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	sum := hashDump(dump, sinks)
 	statePath := filepath.Join(siteCfg.StateDir, "site", "dump.sha256")
 	if previous, err := os.ReadFile(statePath); err == nil && strings.TrimSpace(string(previous)) == sum {
+		if err := writeMembers(memberPath, members); err != nil {
+			return false, err
+		}
 		printer("site rebuild: unchanged; deployment skipped")
 		return false, nil
 	}
@@ -100,7 +109,64 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	if err := os.WriteFile(statePath, []byte(sum+"\n"), 0o644); err != nil {
 		return false, err
 	}
+	if err := writeMembers(memberPath, members); err != nil {
+		return false, err
+	}
 	return true, nil
+}
+
+func inputMembers(inputs []browse.ProductData) []string {
+	members := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		if input.Site != nil {
+			members = append(members, input.Site.Product)
+		}
+	}
+	sort.Strings(members)
+	return members
+}
+
+func guardCompleteSnapshot(path string, products []Product, current []string) error {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var previous []string
+	if err := json.Unmarshal(data, &previous); err != nil {
+		return fmt.Errorf("site membership state: %w", err)
+	}
+	configured := map[string]bool{}
+	for _, product := range products {
+		configured[product.ID] = true
+	}
+	present := map[string]bool{}
+	for _, product := range current {
+		present[product] = true
+	}
+	var missing []string
+	for _, product := range previous {
+		if configured[product] && !present[product] {
+			missing = append(missing, product)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("site rebuild refused incomplete snapshot; previously published products missing data: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func writeMembers(path string, members []string) error {
+	data, err := json.MarshalIndent(members, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 func collect(products []Product, makersCfg *makers.Config, printer Printer) ([]browse.ProductData, []sink, error) {

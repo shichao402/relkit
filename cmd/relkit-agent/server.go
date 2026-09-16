@@ -318,11 +318,14 @@ func parseSize(text string) (int64, error) {
 }
 
 type Server struct {
-	cfg     *Config
-	locks   sync.Map // product -> *sync.Mutex
-	siteMu  sync.Mutex
-	idemMu  sync.Mutex
-	uploads sync.Map // upload id -> *liveUpload
+	cfg           *Config
+	locks         sync.Map // product -> *sync.Mutex
+	siteMu        sync.Mutex
+	siteTriggerMu sync.Mutex
+	siteRunning   bool
+	sitePending   bool
+	idemMu        sync.Mutex
+	uploads       sync.Map // upload id -> *liveUpload
 }
 
 func NewServer(cfg *Config) *Server {
@@ -375,6 +378,48 @@ func (s *Server) rebuildSite(printer func(string)) (bool, error) {
 	return siterebuild.Rebuild(siterebuild.Config{
 		Makers: s.cfg.Site.Makers, StateDir: s.cfg.StateDir,
 	}, products, printer)
+}
+
+// triggerSiteRebuild coalesces concurrent publishes while guaranteeing one
+// more pass when a publish completes during an active rebuild.
+func (s *Server) triggerSiteRebuild(product, version string) {
+	s.siteTriggerMu.Lock()
+	s.sitePending = true
+	if s.siteRunning {
+		s.siteTriggerMu.Unlock()
+		return
+	}
+	s.siteRunning = true
+	s.siteTriggerMu.Unlock()
+
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf("site rebuild after %s/%s panicked: %v", product, version, recovered)
+				s.siteTriggerMu.Lock()
+				restart := s.sitePending
+				s.siteRunning = false
+				s.siteTriggerMu.Unlock()
+				if restart {
+					s.triggerSiteRebuild(product, version)
+				}
+			}
+		}()
+		for {
+			s.siteTriggerMu.Lock()
+			if !s.sitePending {
+				s.siteRunning = false
+				s.siteTriggerMu.Unlock()
+				return
+			}
+			s.sitePending = false
+			s.siteTriggerMu.Unlock()
+
+			if _, err := s.rebuildSite(func(line string) { log.Printf("%s", line) }); err != nil {
+				log.Printf("site rebuild after %s/%s: %v", product, version, err)
+			}
+		}
+	}()
 }
 
 func (s *Server) lookupCredential(r *http.Request) *credential {
@@ -716,6 +761,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if idemKey != "" {
 		if cached, ok := s.loadIdempotent(idemKey); ok {
 			writeJSON(w, http.StatusOK, cached)
+			if !req.DryRun {
+				s.triggerSiteRebuild(req.Product, version)
+			}
 			return
 		}
 	}
@@ -776,11 +824,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 	if !req.DryRun {
-		go func() {
-			if _, err := s.rebuildSite(func(line string) { log.Printf("%s", line) }); err != nil {
-				log.Printf("site rebuild after %s/%s: %v", req.Product, version, err)
-			}
-		}()
+		s.triggerSiteRebuild(req.Product, version)
 	}
 }
 

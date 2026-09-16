@@ -292,7 +292,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	failures = append(failures, webFailures...)
 	failures = append(failures, replicaFailures...)
 	if len(failures) > 0 && !allowPartial {
-		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest/browse pointer or Makers index is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
+		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest data pointer is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
 	}
 
 	sweepOrphanCAS(cfg, index, pruned, staged, committed, printer)
