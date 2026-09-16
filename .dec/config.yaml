@@ -13,7 +13,7 @@ provides:
     relkit-ops:
         source: DecAssets/skills/relkit-ops
         visibility: public
-        plane: global
+        plane: local
         type: skill
         name: relkit-ops
     relkit-deploy:

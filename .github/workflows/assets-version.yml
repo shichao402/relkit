@@ -1,0 +1,23 @@
+name: DecAssets version gate
+
+on:
+  pull_request:
+    paths:
+      - "DecAssets/**"
+      - "VERSION.json"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require VERSION.json bump when DecAssets changes
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q '^DecAssets/'; then
+            if ! git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q '^VERSION.json$'; then
+              echo "DecAssets changed; VERSION.json must change in the same PR"
+              exit 1
+            fi
+          fi
