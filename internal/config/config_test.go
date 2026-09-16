@@ -51,7 +51,7 @@ func TestLoadRetainVersionsDefaultZero(t *testing.T) {
 	}
 }
 
-func TestLoadSiteMakers(t *testing.T) {
+func TestLoadRejectsProductSiteMakers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigName)
 	raw := `{
@@ -69,22 +69,12 @@ func TestLoadSiteMakers(t *testing.T) {
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Site.Makers == nil || cfg.Site.Makers.ProjectID != "makers-9qaqgz7dfhz8" {
-		t.Fatalf("makers=%+v", cfg.Site.Makers)
-	}
-	if cfg.Site.Makers.TokenEnv != DefaultMakersTokenEnv {
-		t.Fatalf("tokenEnv=%q", cfg.Site.Makers.TokenEnv)
-	}
-	if cfg.Site.Makers.Region != "china" {
-		t.Fatalf("region=%q", cfg.Site.Makers.Region)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "relkit-agent") {
+		t.Fatalf("expected ownership error, got %v", err)
 	}
 }
 
-func TestLoadSiteMakersOnly(t *testing.T) {
+func TestLoadSiteRequiresProductCopy(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigName)
 	raw := `{
@@ -92,23 +82,17 @@ func TestLoadSiteMakersOnly(t *testing.T) {
   "backends": {
     "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
   },
-  "site": {
-    "makers": {"projectId": "makers-only", "region": "global", "tokenEnv": "PAGES_TOKEN"}
-  }
+  "site": {}
 }`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Site.Title != "" || cfg.Site.Makers == nil || cfg.Site.Makers.Region != "global" || cfg.Site.Makers.TokenEnv != "PAGES_TOKEN" {
-		t.Fatalf("site=%+v makers=%+v", cfg.Site, cfg.Site.Makers)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected empty site error")
 	}
 }
 
-func TestLoadSiteMakersRejectsBadRegion(t *testing.T) {
+func TestLoadSiteMakersAlwaysRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigName)
 	raw := `{

@@ -930,7 +930,7 @@ class AgentProvisionTests(unittest.TestCase):
                 "http://update.devcloud.woa.com:8080/",
             )
 
-    def test_profile_keeps_only_the_makers_token_env_from_site(self) -> None:
+    def test_profile_never_carries_site_owner_config(self) -> None:
         machine = {
             "product": "loom",
             "signing": {"keyId": "k1", "privateKeyPath": ".relkit-keys/k1.private.pb"},
@@ -952,7 +952,7 @@ class AgentProvisionTests(unittest.TestCase):
 
         machine["site"]["makers"] = {"tokenEnv": "MAKERS_TOKEN", "projectId": "x"}
         profile = host.extract_publish_profile(machine)
-        self.assertEqual(profile["site"], {"makers": {"tokenEnv": "MAKERS_TOKEN"}})
+        self.assertNotIn("site", profile)
 
     def test_provision_refuses_without_execute(self) -> None:
         args = host.build_parser().parse_args(["agent", "provision"])

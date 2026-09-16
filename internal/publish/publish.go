@@ -14,7 +14,6 @@ import (
 
 	rupv2 "go.firoyang.com/relkit/api/rup/v2"
 	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/browse"
 	"go.firoyang.com/relkit/internal/chain"
 	"go.firoyang.com/relkit/internal/changelog"
 	"go.firoyang.com/relkit/internal/config"
@@ -159,13 +158,6 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 			printer("  " + webmeta.SiteKey(cfg.Product) + "  <- site copy")
 		}
 		printer("  " + webmeta.LatestKey(cfg.Product, channel) + "  <- fixed latest links")
-		printer("  " + browse.ProductKey(cfg.Product) + "  <- human index dump")
-		printer("  " + browse.IndexKey() + "  <- human catalog page")
-		printer("  " + browse.CatalogKey() + "  <- human catalog json")
-		for _, sink := range OpenBrowseSinks(cfg, openedBackends) {
-			printer("  " + sink.Name() + "  <- BrowseSink")
-		}
-		warnMissingSiteSink(cfg, openedBackends, printer)
 		return nil, nil
 	}
 
@@ -346,6 +338,7 @@ func writeWebPointers(
 			Title:       cfg.Site.Title,
 			Description: cfg.Site.Description,
 			Homepage:    cfg.Site.Homepage,
+			Channels:    append([]string(nil), cfg.Channels...),
 			UpdatedAt:   model.UTCNow(),
 		})
 		if err != nil {
@@ -394,64 +387,7 @@ func writeWebPointers(
 		}
 	}
 
-	var siteDoc *webmeta.Site
-	if hasSiteCopy(cfg) {
-		siteDoc = &webmeta.Site{
-			Product:     cfg.Product,
-			Title:       cfg.Site.Title,
-			Description: cfg.Site.Description,
-			Homepage:    cfg.Site.Homepage,
-			UpdatedAt:   model.UTCNow(),
-		}
-	}
-	catalog := browse.ApplyPublish(loadBrowseCatalog(cfg, targets), siteDoc, latestDoc, model.UTCNow())
-	indexHTML, err := browse.RenderIndex(catalog)
-	if err != nil {
-		return nil, err
-	}
-	productHTML, err := browse.RenderProduct(browse.ProductPage(catalog, cfg.Product))
-	if err != nil {
-		return nil, err
-	}
-	catalogJSON, err := browse.MarshalCatalog(catalog)
-	if err != nil {
-		return nil, err
-	}
-	dump := map[string][]byte{
-		browse.IndexKey():              indexHTML,
-		browse.ProductKey(cfg.Product): productHTML,
-		browse.CatalogKey():            catalogJSON,
-	}
-	if err := browse.WriteDump(cfg.Root, dump); err != nil {
-		return nil, err
-	}
-
-	sinks := OpenBrowseSinks(cfg, targets)
-	if len(sinks) > 0 {
-		printer("deploying human index...")
-	}
-	for _, sink := range sinks {
-		if err := sink.Deploy(dump); err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", sink.Name(), err))
-			printer(fmt.Sprintf("  %-12s FAILED: %v", sink.Name(), err))
-			continue
-		}
-		printer(fmt.Sprintf("  %-12s .relkit/browse", sink.Name()))
-	}
-	warnMissingSiteSink(cfg, targets, printer)
 	return failures, nil
-}
-
-func loadBrowseCatalog(cfg *config.Config, targets []backends.Backend) *browse.Catalog {
-	if dumped := browse.ReadDumpCatalog(cfg.Root); dumped != nil {
-		return dumped
-	}
-	for _, sink := range OpenBrowseSinks(cfg, targets) {
-		if doc := sink.LoadCatalog(); doc != nil {
-			return doc
-		}
-	}
-	return nil
 }
 
 func trustedKeys(cfg *config.Config, signers []envelope.Signer) map[string]ed25519.PublicKey {

@@ -223,6 +223,24 @@ class MigrateTests(unittest.TestCase):
         self.assertTrue(any("set baseUrl" in item for item in notes))
         self.assertTrue(any("set uploadUrl" in item for item in notes))
 
+    def test_migrate_profile_removes_product_owned_site(self):
+        profile = {
+            "site": {"makers": {"tokenEnv": "PAGES_TOKEN"}},
+            "backends": {
+                "prod": {
+                    "type": "s3-compatible",
+                    "baseUrl": "https://raw.example/",
+                }
+            },
+        }
+        migrated, notes = ops.migrate_profile(
+            profile,
+            serve_addr="127.0.0.1:8080",
+            public_base_url=None,
+        )
+        self.assertNotIn("site", migrated)
+        self.assertTrue(any("site.makers" in item for item in notes))
+
     def test_unknown_backend_left_alone(self):
         backend = {"type": "s3-compatible", "bucket": "x"}
         out, notes = ops.migrate_backend(

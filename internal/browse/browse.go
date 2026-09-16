@@ -1,19 +1,14 @@
 // Package browse builds the unsigned HTML people open in a browser.
 // Protocol clients never read these files.
 //
-// Public hosting is EdgeOne Makers: relkit publish deploys .relkit/browse
-// when site.makers is set. sites/updates-index/ is the Makers contract
-// (placeholder, optional future edge-functions/), not a per-release copy
-// target. Intranet relkit-compatible backends write the same files to the
-// data-plane browse/ prefix and skip Makers.
+// relkit-agent rebuilds the complete site from data-plane site/latest
+// documents. Product publishing never reads rendered catalog files.
 package browse
 
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path"
-	"path/filepath"
 	"sort"
 
 	"go.firoyang.com/relkit/internal/webmeta"
@@ -51,51 +46,95 @@ type Channel struct {
 	Artifacts   []webmeta.Artifact `json:"artifacts"`
 }
 
-func ApplyPublish(existing *Catalog, site *webmeta.Site, latest webmeta.Latest, updatedAt string) *Catalog {
-	out := &Catalog{Schema: SchemaCatalog, UpdatedAt: updatedAt}
-	if existing != nil {
-		out.Products = append([]Product(nil), existing.Products...)
-	}
-
-	page := productFromPublish(site, latest)
-	replaced := false
-	for i, prev := range out.Products {
-		if prev.ID != page.ID {
-			continue
-		}
-		out.Products[i] = mergeProduct(prev, page)
-		replaced = true
-		break
-	}
-	if !replaced {
-		out.Products = append(out.Products, page)
-	}
-	sort.Slice(out.Products, func(i, j int) bool {
-		return out.Products[i].ID < out.Products[j].ID
-	})
-	return out
+// ProductData is the complete human-facing data for one product. It is read
+// from the data plane; rendered catalog files are never used as input.
+type ProductData struct {
+	Site    *webmeta.Site
+	Latests []webmeta.Latest
 }
 
-func productFromPublish(site *webmeta.Site, latest webmeta.Latest) Product {
-	artifacts := humanArtifacts(latest.Artifacts)
+// Build deterministically renders the entire static site from authoritative
+// site/latest documents.
+func Build(products []ProductData) (map[string][]byte, error) {
+	catalog := &Catalog{Schema: SchemaCatalog}
+	for _, input := range products {
+		if len(input.Latests) == 0 {
+			continue
+		}
+		product := productFromData(input)
+		if product.ID == "" {
+			continue
+		}
+		catalog.Products = append(catalog.Products, product)
+		if input.Site != nil && input.Site.UpdatedAt > catalog.UpdatedAt {
+			catalog.UpdatedAt = input.Site.UpdatedAt
+		}
+		for _, latest := range input.Latests {
+			if latest.PublishedAt > catalog.UpdatedAt {
+				catalog.UpdatedAt = latest.PublishedAt
+			}
+		}
+	}
+	sort.Slice(catalog.Products, func(i, j int) bool {
+		return catalog.Products[i].ID < catalog.Products[j].ID
+	})
+
+	indexHTML, err := RenderIndex(catalog)
+	if err != nil {
+		return nil, err
+	}
+	catalogJSON, err := MarshalCatalog(catalog)
+	if err != nil {
+		return nil, err
+	}
+	dump := map[string][]byte{
+		IndexKey():   indexHTML,
+		CatalogKey(): catalogJSON,
+	}
+	for i := range catalog.Products {
+		productHTML, err := RenderProduct(&catalog.Products[i])
+		if err != nil {
+			return nil, err
+		}
+		dump[ProductKey(catalog.Products[i].ID)] = productHTML
+	}
+	return dump, nil
+}
+
+func productFromData(input ProductData) Product {
+	id := ""
+	if input.Site != nil {
+		id = input.Site.Product
+	}
+	if id == "" && len(input.Latests) > 0 {
+		id = input.Latests[0].Product
+	}
 	page := Product{
-		ID:    latest.Product,
-		Title: latest.Product,
-		Channels: []Channel{{
+		ID:    id,
+		Title: id,
+	}
+	if input.Site != nil {
+		if input.Site.Title != "" {
+			page.Title = input.Site.Title
+		}
+		page.Description = input.Site.Description
+		page.Homepage = input.Site.Homepage
+	}
+	for _, latest := range input.Latests {
+		if latest.Product != id || latest.Channel == "" {
+			continue
+		}
+		page.Channels = append(page.Channels, Channel{
 			Name:        latest.Channel,
 			Version:     latest.Version,
 			Code:        latest.Code,
 			PublishedAt: latest.PublishedAt,
-			Artifacts:   artifacts,
-		}},
+			Artifacts:   humanArtifacts(latest.Artifacts),
+		})
 	}
-	if site != nil {
-		if site.Title != "" {
-			page.Title = site.Title
-		}
-		page.Description = site.Description
-		page.Homepage = site.Homepage
-	}
+	sort.Slice(page.Channels, func(i, j int) bool {
+		return channelRank(page.Channels[i].Name) < channelRank(page.Channels[j].Name)
+	})
 	return page
 }
 
@@ -114,29 +153,6 @@ func humanArtifacts(all []webmeta.Artifact) []webmeta.Artifact {
 	// Old releases have no audience selector. Preserve their existing page
 	// rather than rendering an empty product.
 	return append([]webmeta.Artifact(nil), all...)
-}
-
-func mergeProduct(prev, next Product) Product {
-	out := prev
-	out.Title = next.Title
-	out.Description = next.Description
-	out.Homepage = next.Homepage
-	replaced := false
-	for i, ch := range out.Channels {
-		if ch.Name != next.Channels[0].Name {
-			continue
-		}
-		out.Channels[i] = next.Channels[0]
-		replaced = true
-		break
-	}
-	if !replaced {
-		out.Channels = append(out.Channels, next.Channels[0])
-	}
-	sort.Slice(out.Channels, func(i, j int) bool {
-		return channelRank(out.Channels[i].Name) < channelRank(out.Channels[j].Name)
-	})
-	return out
 }
 
 func channelRank(name string) string {
@@ -185,34 +201,4 @@ func ProductPage(cat *Catalog, id string) *Product {
 		}
 	}
 	return nil
-}
-
-func DumpDir(root string) string {
-	return filepath.Join(root, ".relkit", "browse")
-}
-
-func WriteDump(root string, files map[string][]byte) error {
-	dir := DumpDir(root)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	for key, data := range files {
-		name := filepath.Base(key)
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ReadDumpCatalog(root string) *Catalog {
-	raw, err := os.ReadFile(filepath.Join(DumpDir(root), "catalog.json"))
-	if err != nil {
-		return nil
-	}
-	doc, err := UnmarshalCatalog(raw)
-	if err != nil {
-		return nil
-	}
-	return doc
 }

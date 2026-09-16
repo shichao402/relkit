@@ -35,11 +35,7 @@ func TestRunWritesNormalizedReleasePolicy(t *testing.T) {
 		},
 		Backends:  map[string]map[string]any{"prod": {"type": "relkit-compatible", "secretEnv": "BACKEND_SECRET"}},
 		PublishTo: []string{"prod"},
-		Site: config.SiteConfig{Makers: &config.MakersConfig{
-			ProjectID: "makers-demo",
-			Region:    "global",
-			TokenEnv:  "MAKERS_TOKEN",
-		}},
+		Site:      config.SiteConfig{Title: "Demo"},
 		Changelog: config.ChangelogConfig{
 			File:        "CHANGELOG.md",
 			URLTemplate: "https://example.com/notes/{version}",
@@ -77,8 +73,8 @@ func TestRunWritesNormalizedReleasePolicy(t *testing.T) {
 	if policy.Product != "demo" || policy.Signing.KeyID != "k1" {
 		t.Fatalf("loaded policy = %+v", policy)
 	}
-	if policy.Site.Makers == nil || policy.Site.Makers.ProjectID != "makers-demo" {
-		t.Fatalf("loaded makers = %+v", policy.Site.Makers)
+	if policy.Site.Title != "Demo" {
+		t.Fatalf("loaded site = %+v", policy.Site)
 	}
 	if policy.Directory == nil || len(policy.Directory.EntryURLs) != 1 {
 		t.Fatalf("loaded directory = %+v", policy.Directory)

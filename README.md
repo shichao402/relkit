@@ -87,11 +87,7 @@ relkit verify --deep
 "site": {
   "title": "Demo App",
   "description": "一句话说明这个产品是什么、给谁用。",
-  "homepage": "https://git.example.com/org/demoapp",
-  "makers": {
-    "projectId": "makers-xxxxxxxx",
-    "tokenEnv": "EDGEONE_PAGES_API_TOKEN"
-  }
+  "homepage": "https://git.example.com/org/demoapp"
 }
 ```
 
@@ -99,7 +95,7 @@ relkit verify --deep
 
 - 每个 channel 发布都覆盖 `site/<product>.json`，由 `relkit-serve` 产品门户读取。
 - 每个 channel 发布只覆盖自己那份 `latest/<product>/<channel>.json`，在发布时固化本版各 artifact 的 ID、selectors 与 URL。dev 发布不影响 stable 的指针。
-- 公网 COS 发布若配了 `site.makers`，同一轮还会把 `.relkit/browse/` 部署到 EdgeOne Makers（HTML 不进 COS）。内网 `relkit-compatible` 把同一份文件写到数据面 `browse/`。
+- `relkit-agent site-rebuild` 从所有已注册产品的 `site/` 与 `latest/` 指针静态重建完整目录站。公网由 agent 顶层 `site.makers` 部署到 EdgeOne Makers；内网写到 `HostsBrowse` 数据面的 `browse/`。渲染产物从不作为下一次重建的输入。
 
 因此 `relkit-serve` 可按 channel 提供 `/-/latest/<product>/<channel>/<artifact-id>` 这种长期有效地址，例如 `/-/latest/demoapp/stable/windows`。请求只读取已发布的 latest 指针并跳转，不实时扫描 index / manifest。
 

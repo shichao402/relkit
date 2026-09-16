@@ -72,8 +72,6 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	assertContains(t, dryRun, "pointer, written last")
 	assertContains(t, dryRun, "site/demoapp.json")
 	assertContains(t, dryRun, "latest/demoapp/stable.json")
-	assertContains(t, dryRun, "browse/demoapp.html")
-	assertContains(t, dryRun, "browse/index.html")
 	if _, err := os.Stat(filepath.Join(project, "dist", "publish")); !os.IsNotExist(err) {
 		t.Fatalf("dry run unexpectedly created dist/publish")
 	}
@@ -94,7 +92,7 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if site.Product != "demoapp" || site.Title != "demoapp" {
+	if site.Product != "demoapp" || site.Title != "demoapp" || len(site.Channels) != 2 {
 		t.Fatalf("site = %+v, want demoapp copy", site)
 	}
 	latestRaw, err := os.ReadFile(filepath.Join(project, "dist", "publish", "latest", "demoapp", "stable.json"))
@@ -108,12 +106,8 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	if latest.Version != "1.0.0+100" || latest.Channel != "stable" || len(latest.Artifacts) != 2 {
 		t.Fatalf("latest = %+v, want stable 1.0.0+100 with 2 artifacts", latest)
 	}
-	indexHTML, err := os.ReadFile(filepath.Join(project, "dist", "publish", "browse", "index.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(indexHTML), "demoapp") || strings.Contains(string(indexHTML), ".pb") {
-		t.Fatalf("browse index should list the product without .pb navigation\n%s", indexHTML)
+	if _, err := os.Stat(filepath.Join(project, "dist", "publish", "browse")); !os.IsNotExist(err) {
+		t.Fatalf("product publish must not write browse output: %v", err)
 	}
 
 	writeArtifact(t, dist, "demoapp-1.0.1-dev-win-x64.zip", "dev 1.0.1 ", 64)

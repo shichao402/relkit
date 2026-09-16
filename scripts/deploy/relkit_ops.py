@@ -264,6 +264,9 @@ def migrate_profile(
     notes: list[str] = []
     if n:
         notes.append(f"removed casCredentials x{n}")
+    if "site" in cfg:
+        cfg.pop("site", None)
+        notes.append("removed product-owned site config; configure site.makers in relkit-agent.json")
     backends = cfg.get("backends")
     if isinstance(backends, dict):
         new_backends = {}

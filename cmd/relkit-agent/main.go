@@ -3,6 +3,7 @@
 //
 //	relkit-agent [flags]                         run the server
 //	relkit-agent init …                          internal: called by product relkit_host.py
+//	relkit-agent site-rebuild [-config PATH]      rebuild the static release site
 //	relkit-agent -version
 package main
 
@@ -32,6 +33,9 @@ func run(argv []string) int {
 			return 1
 		}
 		return 0
+	}
+	if len(argv) > 0 && argv[0] == "site-rebuild" {
+		return runSiteRebuild(argv[1:])
 	}
 
 	fs := flag.NewFlagSet("relkit-agent", flag.ContinueOnError)
@@ -70,6 +74,30 @@ func run(argv []string) int {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("serve: %v", err)
 		return 1
+	}
+	return 0
+}
+
+func runSiteRebuild(argv []string) int {
+	fs := flag.NewFlagSet("relkit-agent site-rebuild", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	configPath := fs.String("config", "relkit-agent.json", "agent config path")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	cfg, err := LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: config: %v\n", err)
+		return 1
+	}
+	srv := NewServer(cfg)
+	changed, err := srv.rebuildSite(func(line string) { fmt.Fprintln(os.Stdout, line) })
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	if changed {
+		fmt.Fprintln(os.Stdout, "site rebuild: deployed")
 	}
 	return 0
 }

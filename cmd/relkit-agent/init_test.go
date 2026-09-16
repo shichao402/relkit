@@ -351,11 +351,6 @@ func TestInitMigrateProfileFromLegacy(t *testing.T) {
 		},
 		"site": map[string]any{
 			"title": "Demo Portal",
-			"makers": map[string]any{
-				"projectId": "makers-demo",
-				"region":    "global",
-				"tokenEnv":  "MAKERS_TOKEN",
-			},
 		},
 	}
 	legacyBytes, _ := json.MarshalIndent(legacy, "", "  ")
@@ -402,7 +397,7 @@ func TestInitMigrateProfileFromLegacy(t *testing.T) {
 			t.Fatalf("profile leaked public policy field %q: %s", forbidden, text)
 		}
 	}
-	for _, required := range []string{`"product": "demo"`, `"keyId": "k1"`, `"privateKeyPath"`, `"privateKeyEnv"`, `"backends"`, `"publishTo"`, `"tokenEnv"`} {
+	for _, required := range []string{`"product": "demo"`, `"keyId": "k1"`, `"privateKeyPath"`, `"privateKeyEnv"`, `"backends"`, `"publishTo"`} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("profile lacks machine field %s: %s", required, text)
 		}

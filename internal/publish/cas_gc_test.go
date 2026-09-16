@@ -11,10 +11,21 @@ import (
 )
 
 type casMem struct {
-	typeOnlyBackend
 	files   map[string][]byte
 	deleted []string
 }
+
+func (b *casMem) Name() string                                  { return "mem" }
+func (b *casMem) Type() string                                  { return "mem" }
+func (b *casMem) Describe() string                              { return "mem" }
+func (b *casMem) URLsAreLive() bool                             { return true }
+func (b *casMem) Writable() bool                                { return true }
+func (b *casMem) HostsBrowse() bool                             { return false }
+func (b *casMem) URLFor(string) *string                         { return nil }
+func (b *casMem) Probe(string) (bool, *int64, string)           { return false, nil, "" }
+func (b *casMem) PutArtifact(string, string) ([]string, error)  { return nil, nil }
+func (b *casMem) PutImmutable([]byte, string) ([]string, error) { return nil, nil }
+func (b *casMem) PutPointer([]byte, string) ([]string, error)   { return nil, nil }
 
 func (b *casMem) Get(key string) ([]byte, error) {
 	return b.files[key], nil

@@ -8,37 +8,29 @@
 
 **不要**在发版时把 dump 拷进本目录再提交。本目录不是每次发布的拷贝目标。
 
-## 发布怎么上去
+## 站点怎么上去
 
-`relkit publish` 总会在产品 root 写出：
+`relkit publish` 只更新 `site/<product>.json` 与 `latest/<product>/<channel>.json`。agent 随后运行与 `relkit-agent site-rebuild` 相同的全量重建：读取全部注册产品，静态渲染 `index.html`、所有产品页和 `catalog.json`。渲染产物从不读回合并。
 
-```text
-.relkit/browse/index.html
-.relkit/browse/<product>.html
-.relkit/browse/catalog.json
-```
-
-| | `HostsBrowse` 数据面（`relkit-compatible`） | `site.makers`（现网外网） |
+| | `HostsBrowse` 数据面（`relkit-compatible`） | agent `site.makers`（现网外网） |
 |---|---|---|
 | 站点根 | 数据面上的 `browse/` | EdgeOne Makers（现网项目 `relkit-updates-index`） |
-| 要不要 Makers | 不要：本轮若只有 HostsBrowse 后端，即使配了 makers 也跳过 | 要：本轮有协议专用后端（如 COS）且配了 `site.makers` |
-| 文件从哪来 | 同一份 dump | 同一份 dump |
+| 配置归属 | 产品 publish profile 的后端 | `/etc/relkit-agent/relkit-agent.json` 顶层 |
+| 文件从哪来 | agent 全量 rebuild | 同一份完整 dump |
 
-产品仓库示例：
+agent 配置示例：
 
 ```json
 "site": {
-  "title": "Demo App",
   "makers": {
     "projectId": "makers-xxxxxxxx",
-    "tokenEnv": "EDGEONE_PAGES_API_TOKEN"
+    "tokenEnv": "EDGEONE_PAGES_API_TOKEN",
+    "region": "china"
   }
 }
 ```
 
-`tokenEnv` 默认 `EDGEONE_PAGES_API_TOKEN`。token 只进发布机环境，禁止写入仓库。`--to serve` 或纯内网 `publishTo` 不会打 Makers。公网 COS 发布若没配 `site.makers`，publish 会警告：协议已提交，人页不会更新。
-
-Makers 失败与 `site` / `latest` / `browse` 指针失败同类：协议 index 可能已经 live，要用 `--allow-partial` 才接受人页落后。
+`tokenEnv` 默认 `EDGEONE_PAGES_API_TOKEN`。token 只进发布机环境，禁止写入仓库。rebuild 失败不回滚已提交的协议 index；修好站点配置后单独重跑 `relkit-agent site-rebuild`，不要重发产品版本。
 
 ## 现在：纯静态
 
@@ -46,7 +38,7 @@ Makers 失败与 `site` / `latest` / `browse` 指针失败同类：协议 index 
 
 访问计数（未落地）：嵌 51.la，后台看报表，不把次数画在卡片上。不要用 Edge Function + KV/Blob 做 `+1`，不要自建 Redis，不要腾讯分析 / 灯塔。结论见 [`docs/ROADMAP.md`](../../docs/ROADMAP.md)。
 
-以后若要函数，在本目录加 `edge-functions/`（无状态改写，不当计数账本）；内网发布不受影响，只要 publish 仍写出 `browse/`。动态方案若要减部署次数，优先静态壳 + COS 上的 `catalog.json`，不要 KV。
+以后若要函数，在本目录加 `edge-functions/`（无状态改写，不当计数账本）；内网不受影响。当前保持纯静态，不做页面 fetch/CORS/KV。
 
 ## 部署
 

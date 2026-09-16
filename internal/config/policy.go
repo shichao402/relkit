@@ -50,15 +50,9 @@ type PublicKeyConfig struct {
 }
 
 type ProductSitePolicy struct {
-	Title       string               `json:"title,omitempty"`
-	Description string               `json:"description,omitempty"`
-	Homepage    string               `json:"homepage,omitempty"`
-	Makers      *ProductMakersPolicy `json:"makers,omitempty"`
-}
-
-type ProductMakersPolicy struct {
-	ProjectID string `json:"projectId"`
-	Region    string `json:"region,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Homepage    string `json:"homepage,omitempty"`
 }
 
 type ProductDirectoryPolicy struct {
@@ -79,7 +73,6 @@ type PublishProfile struct {
 	Backends  map[string]map[string]any `json:"backends"`
 	PublishTo []string                  `json:"publishTo,omitempty"`
 	Directory *PublishDirectoryProfile  `json:"directory,omitempty"`
-	Site      PublishSiteProfile        `json:"site,omitempty"`
 }
 
 type PublishSigningProfile struct {
@@ -90,14 +83,6 @@ type PublishSigningProfile struct {
 
 type PublishDirectoryProfile struct {
 	PublishTo []string `json:"publishTo,omitempty"`
-}
-
-type PublishSiteProfile struct {
-	Makers *PublishMakersProfile `json:"makers,omitempty"`
-}
-
-type PublishMakersProfile struct {
-	TokenEnv string `json:"tokenEnv,omitempty"`
 }
 
 // TrustedPublicKeys returns the verification keys clients embed. On a publish
@@ -186,12 +171,6 @@ func ExtractProductPolicy(cfg *Config) (*ProductPolicy, error) {
 	} else if _, exists := cfg.Signing["publicKeys"]; exists {
 		return nil, Error{Message: "signing.publicKeys must be an array"}
 	}
-	if cfg.Site.Makers != nil {
-		policy.Site.Makers = &ProductMakersPolicy{
-			ProjectID: cfg.Site.Makers.ProjectID,
-			Region:    cfg.Site.Makers.Region,
-		}
-	}
 	if cfg.Directory != nil {
 		policy.Directory = &ProductDirectoryPolicy{
 			EntryURLs: append([]string(nil), cfg.Directory.EntryURLs...),
@@ -226,9 +205,6 @@ func ExtractPublishProfile(cfg *Config) (*PublishProfile, error) {
 	profile.Signing.PrivateKeyPath, _ = cfg.Signing["privateKeyPath"].(string)
 	if cfg.Directory != nil && len(cfg.Directory.PublishTo) > 0 {
 		profile.Directory = &PublishDirectoryProfile{PublishTo: append([]string(nil), cfg.Directory.PublishTo...)}
-	}
-	if cfg.Site.Makers != nil && cfg.Site.Makers.TokenEnv != "" {
-		profile.Site.Makers = &PublishMakersProfile{TokenEnv: cfg.Site.Makers.TokenEnv}
 	}
 	if err := validatePublishProfile(profile); err != nil {
 		return nil, err
@@ -307,18 +283,6 @@ func MergeProductPolicy(policy *ProductPolicy, profile *PublishProfile, productR
 			cfg.Directory.PublishTo = append([]string(nil), profile.Directory.PublishTo...)
 		}
 	}
-	if policy.Site.Makers != nil {
-		cfg.Site.Makers = &MakersConfig{
-			ProjectID: policy.Site.Makers.ProjectID,
-			Region:    policy.Site.Makers.Region,
-		}
-		if profile.Site.Makers != nil {
-			cfg.Site.Makers.TokenEnv = profile.Site.Makers.TokenEnv
-		}
-		if cfg.Site.Makers.TokenEnv == "" {
-			cfg.Site.Makers.TokenEnv = DefaultMakersTokenEnv
-		}
-	}
 	if policy.Recovery != nil {
 		cfg.Recovery = &RecoveryConfig{
 			Message: policy.Recovery.Message,
@@ -373,16 +337,6 @@ func validateProductPolicy(policy *ProductPolicy) error {
 	for i, key := range policy.Signing.PublicKeys {
 		if key.KeyID == "" || (key.PublicKeyBase64 == "" && key.Key == "") {
 			return Error{Message: fmt.Sprintf("signing.publicKeys[%d] requires keyId and publicKeyBase64 (or legacy key)", i)}
-		}
-	}
-	if policy.Site.Makers != nil {
-		if policy.Site.Makers.ProjectID == "" {
-			return Error{Message: "site.makers.projectId is required"}
-		}
-		switch policy.Site.Makers.Region {
-		case "", "china", "global":
-		default:
-			return Error{Message: `site.makers.region must be "china" or "global"`}
 		}
 	}
 	if policy.Recovery != nil {
@@ -498,7 +452,7 @@ func mergedRaw(cfg *Config) (map[string]any, error) {
 	if cfg.Recovery != nil {
 		doc["recovery"] = cfg.Recovery
 	}
-	if cfg.Site.Title != "" || cfg.Site.Description != "" || cfg.Site.Homepage != "" || cfg.Site.Makers != nil {
+	if cfg.Site.Title != "" || cfg.Site.Description != "" || cfg.Site.Homepage != "" {
 		doc["site"] = cfg.Site
 	}
 	data, err := jsonio.MarshalCompact(doc)

@@ -75,6 +75,26 @@ func TestListDumpFilesKeepsHTMLAndCatalog(t *testing.T) {
 	}
 }
 
+func TestDumpFilesAcceptsBrowseKeysAndSorts(t *testing.T) {
+	files, err := dumpFiles(map[string][]byte{
+		"browse/demo.html":    []byte("demo"),
+		"browse/index.html":   []byte("index"),
+		"browse/catalog.json": []byte("{}"),
+		"index/demo.pb":       []byte("no"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(files))
+	for _, file := range files {
+		got = append(got, file.Rel)
+	}
+	want := []string{"catalog.json", "demo.html", "index.html"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("files=%v want=%v", got, want)
+	}
+}
+
 func TestDeployDirUsesWrappedTempToken(t *testing.T) {
 	var uploaded []Object
 	var createBody map[string]any

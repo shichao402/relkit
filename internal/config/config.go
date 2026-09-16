@@ -86,12 +86,7 @@ type SiteConfig struct {
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Homepage    string `json:"homepage,omitempty"`
-	// Makers deploys the human index to EdgeOne Pages after a public publish.
-	// Intranet relkit-compatible backends skip this even when it is set.
-	Makers *MakersConfig `json:"makers,omitempty"`
 }
-
-const DefaultMakersTokenEnv = "EDGEONE_PAGES_API_TOKEN"
 
 // RecoveryConfig is the optional relkit.json "recovery" object. Onboarding
 // treats it as required for a complete host embed.
@@ -104,14 +99,6 @@ type RecoveryConfig struct {
 type RecoveryLink struct {
 	Label string `json:"label"`
 	URL   string `json:"url"`
-}
-
-// MakersConfig is the optional relkit.json "site.makers" object.
-type MakersConfig struct {
-	ProjectID string `json:"projectId"`
-	TokenEnv  string `json:"tokenEnv,omitempty"`
-	// Region is "china" (default) or "global".
-	Region string `json:"region,omitempty"`
 }
 
 func FindConfig(start string) (string, error) {
@@ -362,39 +349,11 @@ func Load(path string) (*Config, error) {
 		if cfg.Site.Homepage, err = optionalString(obj, "homepage", "site.homepage"); err != nil {
 			return nil, err
 		}
-		if makersRaw, ok := obj["makers"]; ok {
-			mobj, ok := makersRaw.(map[string]any)
-			if !ok {
-				return nil, Error{Message: "site.makers must be an object"}
-			}
-			makers := &MakersConfig{}
-			if makers.ProjectID, err = optionalString(mobj, "projectId", "site.makers.projectId"); err != nil {
-				return nil, err
-			}
-			if makers.ProjectID == "" {
-				return nil, Error{Message: "site.makers.projectId is required"}
-			}
-			if makers.TokenEnv, err = optionalString(mobj, "tokenEnv", "site.makers.tokenEnv"); err != nil {
-				return nil, err
-			}
-			if makers.TokenEnv == "" {
-				makers.TokenEnv = DefaultMakersTokenEnv
-			}
-			if makers.Region, err = optionalString(mobj, "region", "site.makers.region"); err != nil {
-				return nil, err
-			}
-			if makers.Region == "" {
-				makers.Region = "china"
-			}
-			switch makers.Region {
-			case "china", "global":
-			default:
-				return nil, Error{Message: `site.makers.region must be "china" or "global"`}
-			}
-			cfg.Site.Makers = makers
+		if _, ok := obj["makers"]; ok {
+			return nil, Error{Message: "site.makers belongs in relkit-agent configuration, not product relkit.json"}
 		}
-		if cfg.Site.Title == "" && cfg.Site.Description == "" && cfg.Site.Homepage == "" && cfg.Site.Makers == nil {
-			return nil, Error{Message: "site needs at least one of title / description / homepage / makers"}
+		if cfg.Site.Title == "" && cfg.Site.Description == "" && cfg.Site.Homepage == "" {
+			return nil, Error{Message: "site needs at least one of title / description / homepage"}
 		}
 	}
 

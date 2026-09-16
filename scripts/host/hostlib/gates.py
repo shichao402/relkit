@@ -78,6 +78,18 @@ def _source_files(root: Path) -> list[Path]:
         and not path.relative_to(root).as_posix().startswith("scripts/host/")
     ]
 
+@gate("product-site-policy")
+def product_site_policy(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    cfg = _config(root)
+    if not cfg:
+        return
+    site = cfg.get("site")
+    if not isinstance(site, dict) or not str(site.get("title") or "").strip():
+        drift.append("relkit.json site.title is required for the human release catalog")
+        return
+    if "makers" in site:
+        drift.append("relkit.json site.makers is forbidden; configure it once in relkit-agent.json")
+
 
 def _entry_files(root: Path) -> list[Path]:
     return [

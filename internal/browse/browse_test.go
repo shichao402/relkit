@@ -9,28 +9,42 @@ import (
 	"go.firoyang.com/relkit/internal/webmeta"
 )
 
-func TestApplyPublishMergesChannels(t *testing.T) {
-	first := ApplyPublish(nil, &webmeta.Site{Title: "Demo", Product: "demo"}, webmeta.Latest{
-		Product: "demo", Channel: "stable", Version: "1.0.0", Code: 100,
-		Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo.zip", URLs: []string{"https://raw.example/demo.zip"}}},
-	}, "2026-01-01T00:00:00Z")
-	second := ApplyPublish(first, &webmeta.Site{Title: "Demo", Product: "demo"}, webmeta.Latest{
-		Product: "demo", Channel: "dev", Version: "1.1.0", Code: 110,
-		Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo-dev.zip", URLs: []string{"https://raw.example/dev.zip"}}},
-	}, "2026-01-02T00:00:00Z")
-	if len(second.Products) != 1 || len(second.Products[0].Channels) != 2 {
-		t.Fatalf("got %+v", second.Products)
+func TestBuildRendersAllProductsAndChannelsDeterministically(t *testing.T) {
+	input := []ProductData{
+		{Site: &webmeta.Site{Title: "Demo", Product: "demo", UpdatedAt: "2026-01-02T00:00:00Z"}, Latests: []webmeta.Latest{
+			{Product: "demo", Channel: "dev", Version: "1.1.0", Code: 110, PublishedAt: "2026-01-02T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo-dev.zip", URLs: []string{"https://raw.example/dev.zip"}}}},
+			{Product: "demo", Channel: "stable", Version: "1.0.0", Code: 100, PublishedAt: "2026-01-01T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo.zip", URLs: []string{"https://raw.example/demo.zip"}}}},
+		}},
+		{Site: &webmeta.Site{Title: "Other", Product: "other"}, Latests: []webmeta.Latest{
+			{Product: "other", Channel: "stable", Version: "2.0.0", Code: 200, PublishedAt: "2026-01-03T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "app", Filename: "other.zip"}}},
+		}},
 	}
-	if second.Products[0].Channels[0].Name != "stable" {
-		t.Fatalf("stable should sort first: %+v", second.Products[0].Channels)
-	}
-
-	indexHTML, err := RenderIndex(second)
+	first, err := Build(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := string(indexHTML)
-	for _, want := range []string{"Demo", "stable", "1.0.0", "dev", "1.1.0", "demo.html"} {
+	second, err := Build(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, body := range first {
+		if string(second[key]) != string(body) {
+			t.Fatalf("%s changed across identical builds", key)
+		}
+	}
+	catalog, err := UnmarshalCatalog(first[CatalogKey()])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Products) != 2 || len(catalog.Products[0].Channels) != 2 {
+		t.Fatalf("got %+v", catalog.Products)
+	}
+	if catalog.Products[0].Channels[0].Name != "stable" {
+		t.Fatalf("stable should sort first: %+v", catalog.Products[0].Channels)
+	}
+
+	body := string(first[IndexKey()])
+	for _, want := range []string{"Demo", "Other", "stable", "1.0.0", "dev", "1.1.0", "demo.html", "other.html"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index missing %q\n%s", want, body)
 		}
@@ -45,55 +59,32 @@ func TestApplyPublishMergesChannels(t *testing.T) {
 		t.Errorf("must not load external fonts\n%s", body)
 	}
 
-	productHTML, err := RenderProduct(ProductPage(second, "demo"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(productHTML), "Download") {
-		t.Fatalf("product page missing download\n%s", productHTML)
+	if !strings.Contains(string(first[ProductKey("demo")]), "Download") {
+		t.Fatalf("product page missing download\n%s", first[ProductKey("demo")])
 	}
 }
 
 func TestHumanPagePrefersUserFacingArtifacts(t *testing.T) {
-	catalog := ApplyPublish(nil, nil, webmeta.Latest{
+	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
 		Product: "dec", Channel: "stable", Version: "1.0.0", Code: 1,
 		Artifacts: []webmeta.Artifact{
 			{ID: "runtime", Filename: "dec-server-linux-amd64", Selectors: map[string]string{"audience": "runtime"}},
 			{ID: "console", Filename: "dec-console-linux-amd64.AppImage", Selectors: map[string]string{"audience": "user"}},
 		},
-	}, "now")
-	artifacts := catalog.Products[0].Channels[0].Artifacts
+	}}})
+	artifacts := catalog.Channels[0].Artifacts
 	if len(artifacts) != 1 || artifacts[0].Filename != "dec-console-linux-amd64.AppImage" {
 		t.Fatalf("human artifacts = %+v", artifacts)
 	}
 }
 
 func TestHumanPageKeepsLegacyArtifacts(t *testing.T) {
-	catalog := ApplyPublish(nil, nil, webmeta.Latest{
+	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
 		Product: "old", Channel: "stable", Version: "1.0.0", Code: 1,
 		Artifacts: []webmeta.Artifact{{ID: "legacy", Filename: "old.bin"}},
-	}, "now")
-	if got := len(catalog.Products[0].Channels[0].Artifacts); got != 1 {
+	}}})
+	if got := len(catalog.Channels[0].Artifacts); got != 1 {
 		t.Fatalf("legacy artifact count = %d, want 1", got)
-	}
-}
-
-func TestWriteDumpRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	cat := ApplyPublish(nil, nil, webmeta.Latest{
-		Product: "app", Channel: "stable", Version: "2.0.0", Code: 2,
-		Artifacts: []webmeta.Artifact{{Filename: "a.bin", URLs: []string{"https://x/a.bin"}}},
-	}, "now")
-	raw, err := MarshalCatalog(cat)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteDump(dir, map[string][]byte{CatalogKey(): raw}); err != nil {
-		t.Fatal(err)
-	}
-	got := ReadDumpCatalog(dir)
-	if got == nil || got.Products[0].ID != "app" {
-		t.Fatalf("dump catalog = %+v", got)
 	}
 }
 

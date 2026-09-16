@@ -19,9 +19,11 @@ import (
 	"go.firoyang.com/relkit/internal/config"
 	"go.firoyang.com/relkit/internal/directory"
 	"go.firoyang.com/relkit/internal/humansize"
+	"go.firoyang.com/relkit/internal/makers"
 	"go.firoyang.com/relkit/internal/model"
 	"go.firoyang.com/relkit/internal/publish"
 	"go.firoyang.com/relkit/internal/publishproto"
+	siterebuild "go.firoyang.com/relkit/internal/site"
 	"go.firoyang.com/relkit/internal/stage"
 )
 
@@ -48,7 +50,12 @@ type FileConfig struct {
 	StateDir           string                   `json:"stateDir,omitempty"`
 	MinPublishProtocol *int                     `json:"minPublishProtocol,omitempty"`
 	MaxPublishProtocol *int                     `json:"maxPublishProtocol,omitempty"`
+	Site               SiteConfig               `json:"site,omitempty"`
 	Products           map[string]ProductConfig `json:"products"`
+}
+
+type SiteConfig struct {
+	Makers *makers.Config `json:"makers,omitempty"`
 }
 
 // UploadTokenEntry is a publisher credential. One file maps to one or more
@@ -87,6 +94,7 @@ type Config struct {
 	StateDir           string
 	MinPublishProtocol int
 	MaxPublishProtocol int
+	Site               SiteConfig
 	Products           map[string]ProductConfig
 	ConfigPath         string
 }
@@ -98,6 +106,22 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if raw.Products == nil {
 		raw.Products = map[string]ProductConfig{}
+	}
+	if raw.Site.Makers != nil {
+		if strings.TrimSpace(raw.Site.Makers.ProjectID) == "" {
+			return nil, fmt.Errorf("site.makers.projectId is required")
+		}
+		switch raw.Site.Makers.Region {
+		case "", "china", "global":
+		default:
+			return nil, fmt.Errorf(`site.makers.region must be "china" or "global"`)
+		}
+		if raw.Site.Makers.TokenEnv == "" {
+			raw.Site.Makers.TokenEnv = makers.DefaultTokenEnv
+		}
+		if raw.Site.Makers.Region == "" {
+			raw.Site.Makers.Region = "china"
+		}
 	}
 	cfg := &Config{
 		Addr:               raw.Addr,
@@ -112,6 +136,7 @@ func LoadConfig(path string) (*Config, error) {
 		StateDir:           raw.StateDir,
 		MinPublishProtocol: publishproto.Min,
 		MaxPublishProtocol: publishproto.Max,
+		Site:               raw.Site,
 		Products:           raw.Products,
 		ConfigPath:         path,
 	}
@@ -295,6 +320,7 @@ func parseSize(text string) (int64, error) {
 type Server struct {
 	cfg     *Config
 	locks   sync.Map // product -> *sync.Mutex
+	siteMu  sync.Mutex
 	idemMu  sync.Mutex
 	uploads sync.Map // upload id -> *liveUpload
 }
@@ -307,6 +333,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/-/health", s.handleHealth)
 	mux.HandleFunc("/-/version", s.handleVersion)
+	mux.HandleFunc("/-/site", s.handleSiteStatus)
 	mux.HandleFunc(publishproto.AgentPreflightPath, s.handlePublishPreflight)
 	mux.HandleFunc("/v1/drop/", s.handleDrop)
 	mux.HandleFunc("/v1/cas/credentials", s.handleCASCredentials)
@@ -315,9 +342,39 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+func (s *Server) handleSiteStatus(w http.ResponseWriter, r *http.Request) {
+	status := map[string]any{"configured": false, "tokenPresent": false}
+	if cfg := s.cfg.Site.Makers; cfg != nil && cfg.ProjectID != "" {
+		tokenEnv := cfg.TokenEnv
+		if tokenEnv == "" {
+			tokenEnv = makers.DefaultTokenEnv
+		}
+		status["configured"] = true
+		status["projectId"] = cfg.ProjectID
+		status["region"] = cfg.Region
+		status["tokenEnv"] = tokenEnv
+		status["tokenPresent"] = strings.TrimSpace(os.Getenv(tokenEnv)) != ""
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 func (s *Server) productLock(product string) *sync.Mutex {
 	v, _ := s.locks.LoadOrStore(product, &sync.Mutex{})
 	return v.(*sync.Mutex)
+}
+
+func (s *Server) rebuildSite(printer func(string)) (bool, error) {
+	s.siteMu.Lock()
+	defer s.siteMu.Unlock()
+	products := make([]siterebuild.Product, 0, len(s.cfg.Products))
+	for id, product := range s.cfg.Products {
+		products = append(products, siterebuild.Product{
+			ID: id, Root: product.Root, Profile: product.Profile,
+		})
+	}
+	return siterebuild.Rebuild(siterebuild.Config{
+		Makers: s.cfg.Site.Makers, StateDir: s.cfg.StateDir,
+	}, products, printer)
 }
 
 func (s *Server) lookupCredential(r *http.Request) *credential {
@@ -718,6 +775,13 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		_ = s.saveIdempotent(idemKey, resp)
 	}
 	writeJSON(w, http.StatusOK, resp)
+	if !req.DryRun {
+		go func() {
+			if _, err := s.rebuildSite(func(line string) { log.Printf("%s", line) }); err != nil {
+				log.Printf("site rebuild after %s/%s: %v", req.Product, version, err)
+			}
+		}()
+	}
 }
 
 func (s *Server) idemPath(key string) string {

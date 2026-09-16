@@ -32,11 +32,7 @@ func TestExtractProductPolicyOmitsMachineFields(t *testing.T) {
 			File:        "docs/CHANGELOG.md",
 			URLTemplate: "https://example.com/notes/{version}",
 		},
-		Site: SiteConfig{Makers: &MakersConfig{
-			ProjectID: "makers-demo",
-			Region:    "global",
-			TokenEnv:  "MAKERS_SECRET",
-		}},
+		Site: SiteConfig{Title: "Demo"},
 	}
 
 	policy, err := ExtractProductPolicy(cfg)
@@ -53,7 +49,7 @@ func TestExtractProductPolicyOmitsMachineFields(t *testing.T) {
 			t.Fatalf("policy contains machine field/value %q: %s", forbidden, text)
 		}
 	}
-	for _, required := range []string{`"projectId":"makers-demo"`, `"entryUrls"`, `"publicKeys"`, `"urlTemplate":"https://example.com/notes/{version}"`} {
+	for _, required := range []string{`"title":"Demo"`, `"entryUrls"`, `"publicKeys"`, `"urlTemplate":"https://example.com/notes/{version}"`} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("policy lacks %s: %s", required, text)
 		}
@@ -65,6 +61,7 @@ func TestLoadProductPolicyStrictlyRejectsMachineAndUnknownFields(t *testing.T) {
 		"top-level backend": `,"backends":{"prod":{"type":"s3-compatible"}}`,
 		"private key":       `,"privateKeyEnv":"SECRET"`,
 		"makers token":      `,"tokenEnv":"SECRET"`,
+		"makers":            `,"site":{"makers":{"projectId":"m1"}}`,
 		"directory target":  `,"publishTo":["prod"]`,
 		"changelog file":    `,"changelog":{"file":"CHANGELOG.md","urlTemplate":"https://example.com/{version}"}`,
 	} {
@@ -107,10 +104,7 @@ func TestMergeProductPolicy(t *testing.T) {
 		},
 		Changelog: ProductChangelogPolicy{URLTemplate: "https://example.com/notes/{version}"},
 		Directory: &ProductDirectoryPolicy{EntryURLs: []string{"https://updates.example/directory/demo.pb"}},
-		Site: ProductSitePolicy{Makers: &ProductMakersPolicy{
-			ProjectID: "makers-demo",
-			Region:    "global",
-		}},
+		Site:      ProductSitePolicy{Title: "Demo"},
 	}
 	profile := &PublishProfile{
 		Product:   "demo",
@@ -118,7 +112,6 @@ func TestMergeProductPolicy(t *testing.T) {
 		Backends:  map[string]map[string]any{"prod": {"type": "s3-compatible", "baseUrl": "https://example.invalid/"}},
 		PublishTo: []string{"prod"},
 		Directory: &PublishDirectoryProfile{PublishTo: []string{"prod"}},
-		Site:      PublishSiteProfile{Makers: &PublishMakersProfile{TokenEnv: "MAKERS_TOKEN"}},
 	}
 	root := filepath.Join(t.TempDir(), "product")
 
@@ -136,8 +129,8 @@ func TestMergeProductPolicy(t *testing.T) {
 	if cfg.Directory == nil || len(cfg.Directory.EntryURLs) != 1 || len(cfg.Directory.PublishTo) != 1 {
 		t.Fatalf("merged directory = %+v", cfg.Directory)
 	}
-	if cfg.Site.Makers == nil || cfg.Site.Makers.TokenEnv != "MAKERS_TOKEN" {
-		t.Fatalf("merged makers = %+v", cfg.Site.Makers)
+	if cfg.Site.Title != "Demo" {
+		t.Fatalf("merged site = %+v", cfg.Site)
 	}
 	if cfg.Changelog.URLTemplate != "https://example.com/notes/{version}" || cfg.Changelog.File != "" {
 		t.Fatalf("merged changelog = %+v", cfg.Changelog)

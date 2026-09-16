@@ -19,7 +19,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 - CI 各平台 Job 只构建并把产物上传到按本次 `buildId` 隔离的 drop；依赖全部平台成功的独立汇总 Job 才执行 `relkit stage`、版本闸门、`cas-put` 与唯一一次 publish。任何平台 Job 都不是发布协调者，drop 不得跨流水线构建复用。`relkit cas-put` 对 agent 走同一套 CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 缺失的 `cas/{sha256}` → 交瘦 staged tar → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**：CI 只喂第一个 ingest；其余 `publishTo` 由 agent `Materialize`。整包 `PUT /v1/staged` 仍是兼容路径。`artifactTo` / `pointerTo` 拆分尚未实现。**写 index 指针才是真发布**。
 - **`artifactTo` 与 `pointerTo` 分开（目标，profile 字段尚未落地）。** 几百 MiB 的 `artifact/` 只发给能当数据面的后端（`s3-compatible`、`relkit-compatible`），默认就 ingest 一家；几 KB 的签名 pb 才扇给 `entryUrls` 备桶。现网仍用一份 `publishTo`。用一个 `publishTo` 把产物也镜像进 git 仓，等于每次发版往历史灌一份删不掉的大文件。承载 `entryUrls` 的备援须过 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 三条准入（目标网络可达、`Cache-Control` 我方可配、失效域与主正交）；CNB / GitHub raw 不合格，当前形态是异地域第二个 COS 桶 + 独立自有二级域名。
 - 协议对象走 **Backend adapter**。CAS 的 `cas/{sha256}` inbox **只存在于 ingest 后端**；其余后端只有 `artifact/...`。**切面不因 type 分叉**：CI、`publish.Run`、客户端看到的接口对所有后端相同。query 预签名 / 能力 URL / COPY / 字节从哪儿来都是实现细节，禁止 `if backend.Type()=="s3-compatible"` 出现在 publish 或 CI 脚本里。
-- **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。落地走 **BrowseSink**（外网 Makers、内网数据面 `browse/`、以后其它 site）。不要用 `Backend.Type()` 猜人页，也不要用 serve 现算一页当对外目录。
+- **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。它由 agent 对全部产品的数据面事实静态重建，外网落 Makers、内网落 `browse/`。产品 publish 不拥有站点。
 - **relkit-serve 现算的门户**（今 GET `/` 那套主题页、`/-/p/`、`?files=1`）是打到自托管箱上的操作面：容量就是这一台机，以后长成 relkit 后台面板。它不是对外目录，内外网对外都不要再把人指到这里。
 - 环境差只在节点旁注明现网用法，不要为内外网发明第二种发布流程。人页皮肤也不分叉：dump 一份，托管地方按 sink 选。
 
@@ -30,7 +30,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 | nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
 | relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
 | relkit-serve | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只把 `/-/admin`、`/-/p/` 当操作面壳，本机空目录不是 COS 数据面 |
-| COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / BrowseSink 节点 |
+| COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / 站点 sink 节点 |
 
 同机可以是一个 nginx、两个 `server_name`（CI 的 `/v1/*` → 8787，客户端 GET → 8080 或读盘）。内网 CI 打的是该箱**内网 IP:443** 上的名字，不是回环 hostname。
 
@@ -70,10 +70,11 @@ flowchart TB
 
   pIngest --> idx["PutPointer index = 真发布"]
   pMirror --> idx
-  idx --> meta["site.json / latest.json"]
-  meta --> dump[".relkit/browse dump 三份"]
+  idx --> meta["site/id.json + latest/id/channel.json"]
+  meta -.-> rebuild["agent site rebuild<br/>读取全部 products"]
+  rebuild --> dump["完整静态 browse dump"]
 
-  dump --> sink{"adapter: BrowseSink.Deploy<br/>配置选实现"}
+  dump --> sink{"site sink<br/>配置归 agent"}
 
   sink --> makers["Makers<br/>现网外网人页 · 可卸"]
   sink --> tree["HTTP GET 树 browse/<br/>现网内网人页"]
@@ -84,7 +85,7 @@ flowchart TB
   other --> done
 ```
 
-dump 三份：`index.html`（总目录）、`<product>.html`（单产品页）、`catalog.json`（合并用清单）。协议客户端不读。
+dump 包含 `index.html`（总目录）、全部 `<product>.html`、`catalog.json`（派生数据）。协议客户端不读，rebuild 也不把它当输入。
 
 ## 4. 下载
 
@@ -128,14 +129,15 @@ flowchart TB
 - nginx 切面不变：`/v1/` → agent；其余 GET 仍进 serve。分流的是 serve 自己的路径，不是再加一台机。
 - 不在这一步把面板当对外目录；面板鉴权见 [ADR 0006](../adr/0006-admin-panel-bootstrap.md)。
 
-## 6. BrowseSink 选型（实现约定）
+## 6. 站点重建与 sink 选型（实现约定）
 
-`publish.Run` 打开 `[]Backend` 与 `[]BrowseSink`，对外目录只循环 sink。
+`publish.Run` 只写 `site/<product>.json` 与 `latest/<product>/<channel>.json`，不渲染 HTML，也不打开站点 sink。发布成功后 agent 触发同一条 `site rebuild`；失败只使人页滞后，不回滚已提交的协议 index。
 
-- `Backend.HostsBrowse()==true`（`relkit-compatible`）→ `DataPlaneBrowse`：把 dump 三份 `PutPointer` 到 `browse/`。
-- `site.makers` 已配，且本轮存在 `HostsBrowse()==false` 的 target → `MakersSink`。`--to serve` 因此不会打 Makers。
-- 本轮需要外部人页（有非 HostsBrowse 的后端）却没有配任何 site sink → 警告：协议可提交，人页不更新。
-- 以后加 Cloudflare / GitHub Pages：新 sink 实现 + `relkit.json` 配置，不要再写 `Type()=="s3-compatible"`。
+- agent 的 `products` map 是站点产品集合。rebuild 从各产品数据面读全量 `site/`、`latest/`，调用纯函数 `browse.Build`，整站输出 `index.html`、全部 `<product>.html` 与 `catalog.json`。
+- `Backend.HostsBrowse()==true`（`relkit-compatible`）→ 把完整 dump `PutPointer` 到 `browse/`。
+- agent 顶层 `site.makers` → 把同一份完整 dump Folder 部署到 Makers。Makers 配置不属于产品 policy/profile。
+- `catalog.json` 只是派生输出，禁止读回后 merge。相同输入的 dump 哈希不变，跳过重复部署。
+- 以后加 Cloudflare / GitHub Pages：给站点 rebuild 加 sink，不改产品 `relkit.json`。
 - serve 现算页 **不是** BrowseSink。不要为了「内网也有好看首页」把门户留在 `/`。
 
 ## 7. 现网落地（对照，实现前）
@@ -145,4 +147,4 @@ flowchart TB
 - nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余请求 → serve 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 serve 自己鉴权
 - 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变
 - 配置样例：`scripts/deploy/nginx-intranet.example.conf`
-- **已按 §5 改代码。** 内网 GET `/` 不再现算门户；没有 `browse/` dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`。外网 `dec` 尚未配 `site.makers`，COS 根路径 403，没有对外目录页。
+- 内网 GET `/` 不现算门户；没有 rebuild dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`。公网 COS 根路径仍是协议数据面，HTML 由 agent 站点配置部署到 Makers。

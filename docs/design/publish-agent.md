@@ -22,8 +22,8 @@ CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯�
 
 | 文件 | 谁写、放哪 | 装什么 | 禁止装什么 |
 |---|---|---|---|
-| `release-policy.json` | 仓库 `relkit stage` 写入 staged 树，随元数据上传 | 产品 id、通道、`codeStrategy`、公钥、directory 入口、site 文案 / Makers 项目 id | 私钥路径、后端凭据、`ingest` / `artifactTo` / `pointerTo`、Makers `tokenEnv`、changelog 本地 `file` |
-| publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product` + `signing.keyId`（与 policy 对齐）、私钥 env/path、backends、`ingest`、`artifactTo` / `pointerTo`、directory 发布目标、Makers `tokenEnv` | 公钥集、通道策略、entryUrls |
+| `release-policy.json` | 仓库 `relkit stage` 写入 staged 树，随元数据上传 | 产品 id、通道、`codeStrategy`、公钥、directory 入口、site 文案 | 私钥路径、后端凭据、`ingest` / `artifactTo` / `pointerTo`、全部 Makers 配置、changelog 本地 `file` |
+| publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product` + `signing.keyId`（与 policy 对齐）、私钥 env/path、backends、`ingest`、`artifactTo` / `pointerTo`、directory 发布目标 | 公钥集、通道策略、entryUrls、全部 Makers 配置 |
 
 产品根上的 `relkit.json` **不是** agent 发布配置。仓库里那份只给本地 / CI 的 `relkit stage` 抽 policy 用；发布机上若还留着旧副本，应迁 profile 后改名为 `relkit.json.migrated` 或删掉。
 
@@ -267,12 +267,12 @@ Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某�
 
 ## 8. 给人看的索引页
 
-`publish.Run` 会写出 `browse/<product>.html`、合并后的 `browse/index.html` 与 `browse/catalog.json`（产品树 dump 在 `.relkit/browse/`）。协议客户端不读这些页。
+`publish.Run` 只更新数据面的 `site/<product>.json` 与 `latest/<product>/<channel>.json`。`relkit-agent site-rebuild` 遍历 agent `products`，从数据面收集全部产品后静态渲染完整 `browse/` dump。协议客户端不读这些页；`catalog.json` 也从不作为重建输入。
 
 | | 公网 | 内网 |
 |---|---|---|
 | 托管 | EdgeOne Makers（契约在本仓库 `sites/updates-index/`，**不要把 dump 拷进该目录当发版步骤**） | 数据面 `browse/` |
-| 怎么上去 | 仓库 policy 带 `site.makers.projectId`；本机 profile 带 `tokenEnv`；publish 写出 dump 后直接 Upload | `relkit-compatible` 由 publish 直接写；即使配了 makers 也跳过 |
+| 怎么上去 | agent 顶层 `site.makers` 持有 projectId/region/tokenEnv；rebuild 后 Folder 整站 Upload | rebuild 把完整 dump 写入每个 `HostsBrowse` 数据面 |
 | 动态 | 现在没有 `edge-functions/`，就是静态站。计数走 51.la（见 `docs/ROADMAP.md`），不要 KV。以后要函数只加在该子目录，且不当账本；内网不跟 |
 
 COS 不放 HTML。不要为此打开静态网站源站。页上不把 `.pb` 当导航，也不加载外链字体或图。

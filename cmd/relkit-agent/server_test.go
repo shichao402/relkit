@@ -12,14 +12,37 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	rupv2 "go.firoyang.com/relkit/api/rup/v2"
 	"go.firoyang.com/relkit/internal/config"
 	"go.firoyang.com/relkit/internal/keys"
+	"go.firoyang.com/relkit/internal/makers"
 	"go.firoyang.com/relkit/internal/publishproto"
 	"go.firoyang.com/relkit/internal/stage"
 )
+
+func TestSiteStatusIsRedacted(t *testing.T) {
+	t.Setenv("PAGES_SECRET", "must-not-leak")
+	srv := NewServer(&Config{Site: SiteConfig{Makers: &makers.Config{
+		ProjectID: "makers-demo", TokenEnv: "PAGES_SECRET", Region: "china",
+	}}})
+	req := httptest.NewRequest(http.MethodGet, "/-/site", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	body := rec.Body.String()
+	var status map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || status["tokenPresent"] != true {
+		t.Fatalf("status=%d body=%s", rec.Code, body)
+	}
+	if strings.Contains(body, "must-not-leak") {
+		t.Fatalf("site status leaked token: %s", body)
+	}
+}
 
 func TestAgentStagedAndPublishDryRun(t *testing.T) {
 	root := t.TempDir()

@@ -8,6 +8,13 @@
   "maxPartConcurrency": 16,
   "uploadTTL": "24h",
   "stateDir": "/var/lib/relkit-agent",
+  "site": {
+    "makers": {
+      "projectId": "makers-example",
+      "tokenEnv": "EDGEONE_PAGES_API_TOKEN",
+      "region": "china"
+    }
+  },
   "uploadTokens": [],
   "products": {}
 }

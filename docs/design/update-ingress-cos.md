@@ -355,7 +355,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 
 **不要**为了赶时间先用默认桶域名发一版：`entryUrls` 一旦随二进制发出去就几乎不可变，那样等于把厂商、地域、桶名焊进所有老客户端，之后只能按 §8 双写迁移收场。
 
-给人看的索引页没有编译进客户端，换托管或换域名只影响书签，**不影响**已装客户端的更新链。COS 只放协议对象：根路径 `GET /` 403 是 REST 源站拒 ListBucket，不要为此打开「静态网站源站」。公网索引站是 EdgeOne Makers（契约目录 `sites/updates-index/`，当前纯静态、无 `edge-functions/`）；`relkit publish` 在公网 COS 目标上若配了 `site.makers`，会把产品 `.relkit/browse/` dump 直接 Upload。内网用同一份 dump 写在数据面 `browse/`，不经过 Makers。
+给人看的索引页没有编译进客户端，换托管或换域名只影响书签，**不影响**已装客户端的更新链。COS 只放协议对象与 `site/`、`latest/` 数据：根路径 `GET /` 403 是 REST 源站拒 ListBucket，不要为此打开「静态网站源站」。公网索引站是 EdgeOne Makers（契约目录 `sites/updates-index/`，当前纯静态、无 `edge-functions/`）；agent 从所有产品的数据面指针静态重建整站，再由 agent 顶层 `site.makers` Folder 部署。内网把同一份完整 dump 写在 `HostsBrowse` 数据面的 `browse/`。
 
 ### 10.1 证书（已完成，含续期义务）
 
@@ -375,7 +375,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 2. 证书续期自动化：独立程序 `relkit-cos-cert-renew` + systemd timer（与 agent 同机不同进程），配置 `targets[]`。
 3. 需要边缘加速时再挂 CDN 加速域名（届时 CNAME 改指 `*.cdn.dnsv1.com`，证书托管随之迁到 CDN）。
 4. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
-5. 公网：仓库 `relkit.json` 的 `site.makers` 随 stage 进入 `release-policy.json`，本机 profile 提供 `tokenEnv`；`relkit publish` 会把 `.relkit/browse/` 部署到 Makers（项目 `relkit-updates-index`）。内网 publish 已写 `browse/`，不必再部署 Makers。
+5. 公网：产品 `relkit.json` 只提供 site 文案；Makers projectId/region/tokenEnv 只在 agent 顶层配置。publish 更新 `site/` 与 `latest/` 后触发全量静态 rebuild。内网由同一 rebuild 写 `browse/`。
 
 ### 10.4 验证用第二 backend（成都桶）——已拆除
 
@@ -394,7 +394,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 3. 新发版 `baseUrl` / 新客户端 `entryUrls` 走 `https://raw.firoyang.com/rup/...`。
 
    **改 `baseUrl` 会让 `verify` 对所有历史版本报错。** 已发布的 index / manifest 里 `urls[]` 是当时的 `baseUrl`（`updates.`）写死的，而 `verify` 要求每个条目都列出当前 backend 的 URL（`internal/verify` 的 `checkDeclaredURL` 用 `backend.URLFor(key)` 严格比对）。切到 `raw.` 后，dev 通道历史版本会产出 `does not list this backend's URL`。这些 URL 在双挂期仍可下载，**客户端不受影响**，红的只是 verify。别为了让 verify 变绿去重发历史版本或回滚 `baseUrl`；按 §8 双写迁移的节奏，等历史版本被 `retainVersions` 淘汰即可。判断发布是否健康看新发版本那几条。
-4. 公网 publish（配了 `site.makers`）把 dump 部署到 Makers。内网跳过这步。**不要**把 HTML 拷进 relkit 仓库的 `sites/updates-index/` 当发版步骤。
+4. 公网由 agent `site-rebuild` 把全量 dump 部署到 Makers。内网写 HostsBrowse。**不要**把 HTML 拷进 relkit 仓库的 `sites/updates-index/` 当发版步骤。
 5. 旧客户端都升到认 `raw.` 之后，再把 `updates` CNAME 改到 EdgeOne Makers。在此之前不要动 `updates`，否则已装 Dec 会找不到 directory。
 
 ## 11. 交叉引用

@@ -18,12 +18,13 @@ const (
 )
 
 type Site struct {
-	Schema      string `json:"schema"`
-	Product     string `json:"product"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Homepage    string `json:"homepage,omitempty"`
-	UpdatedAt   string `json:"updatedAt"`
+	Schema      string   `json:"schema"`
+	Product     string   `json:"product"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Homepage    string   `json:"homepage,omitempty"`
+	Channels    []string `json:"channels,omitempty"`
+	UpdatedAt   string   `json:"updatedAt"`
 }
 
 type Latest struct {

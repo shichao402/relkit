@@ -46,6 +46,7 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - `updater.process`：封闭词由组件 registry 派生（当前 `rust` / `node` / `dart` / `go` / `other`），**不是** `rust-shell`。手写 DTO / `serde(default)` 吞缺键是 drift。产品源码出现 `RupUpdater` 或 `sdk.Updater` 也是 drift：升级宿主只许走 facade + sidecar。选择 `other` 时，`relkit.json` 必须声明存在的 `updater.entry`；存在 WebView 还必须声明 `updater.projection`。sidecar 名只能出现在声明入口（及 `sidecar.packScript`），projection 仍按满强度形状检测。
 - `updater.urlAllowlist` 是路径列表，只豁免这些路径中的 updater endpoint/base URL 文本；不豁免 sidecar 名、手写 `CheckResult` / `UpdateAvailable`、自声明 proto 或宽松反序列化。
 - agent 发布：`release --execute` 必须由 CI 设 `RELKIT_RELEASE_VIA_CI=1`；本地不要发。
+- 人页：产品 `relkit.json` 只写 `site.title/description/homepage`，禁止 `site.makers`。Makers projectId/region/tokenEnv 属于箱上 `relkit-agent.json` 顶层；产品发布只更新 `site/`、`latest/` 数据，agent 异步全量静态重建。人页落后时到 relkit 仓按 `relkit-deploy` 跑 `relkit-agent site-rebuild`，禁止靠重发产品版本救页。
 - `share-with`：只能从 `evidence.remote.products` 的真实产品 ID 中选择；`operatorTokenPresent=true` 不等于存在可继承的产品 token。远端不可读或 `blocked` 含 `token.isolation` 时禁止让用户猜。磁盘 token 仍是**已有 owner** 的 `{owner}.token`，不打印 token 内容。
 - 远端版本：`versionRelation=behind` 且 `onPublishRoute=true` 时先升级远端（relkit 仓 `relkit-deploy`）；若 `onPublishRoute=false`，明确告诉用户它落后但不阻塞当前产品发布。
 - 失败记账：带 `code=` 的 `Fail` 写入 `.relkit/cache/ops-journal.jsonl`（`unclassified` 不记）。`retrospect` 输出本次遇到 / 已修进脚本或 skill / 未消化；未消化非 0。

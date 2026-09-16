@@ -12,12 +12,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/browse"
-	"go.firoyang.com/relkit/internal/config"
 	"go.firoyang.com/relkit/internal/httpx"
 )
 
@@ -74,15 +73,23 @@ type dumpFile struct {
 	Body []byte
 }
 
-// DeployDump uploads .relkit/browse (html + catalog.json) to the configured
-// Makers project. It does not print or return the Pages token.
-func DeployDump(root string, makers *config.MakersConfig) error {
-	if makers == nil || makers.ProjectID == "" {
+const DefaultTokenEnv = "EDGEONE_PAGES_API_TOKEN"
+
+// Config belongs to the site owner (relkit-agent), never to a product policy.
+type Config struct {
+	ProjectID string `json:"projectId"`
+	TokenEnv  string `json:"tokenEnv,omitempty"`
+	Region    string `json:"region,omitempty"`
+}
+
+// DeployDump uploads an in-memory, complete static site.
+func DeployDump(dump map[string][]byte, cfg *Config) error {
+	if cfg == nil || cfg.ProjectID == "" {
 		return fmt.Errorf("site.makers.projectId is required")
 	}
-	tokenEnv := makers.TokenEnv
+	tokenEnv := cfg.TokenEnv
 	if tokenEnv == "" {
-		tokenEnv = config.DefaultMakersTokenEnv
+		tokenEnv = DefaultTokenEnv
 	}
 	token := os.Getenv(tokenEnv)
 	if token == "" {
@@ -90,9 +97,9 @@ func DeployDump(root string, makers *config.MakersConfig) error {
 	}
 	client := &Client{
 		Token:   token,
-		BaseURL: APIBaseURL(makers.Region),
+		BaseURL: APIBaseURL(cfg.Region),
 	}
-	_, err := client.DeployDir(makers.ProjectID, browse.DumpDir(root))
+	_, err := client.Deploy(dump, cfg.ProjectID)
 	return err
 }
 
@@ -118,20 +125,33 @@ func (c *Client) now() time.Time {
 	return time.Now()
 }
 
-// DeployDir uploads allowed dump files and creates a Folder deployment.
+// Deploy uploads allowed browse keys and creates a Folder deployment.
+func (c *Client) Deploy(dump map[string][]byte, projectID string) (*Result, error) {
+	files, err := dumpFiles(dump)
+	if err != nil {
+		return nil, err
+	}
+	return c.deployFiles(projectID, files)
+}
+
+// DeployDir remains a preview/test helper; production rebuilds deploy memory.
 func (c *Client) DeployDir(projectID, dir string) (*Result, error) {
+	files, err := listDumpFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	return c.deployFiles(projectID, files)
+}
+
+func (c *Client) deployFiles(projectID string, files []dumpFile) (*Result, error) {
 	if c.Token == "" {
 		return nil, fmt.Errorf("Pages token is empty")
 	}
 	if projectID == "" {
 		return nil, fmt.Errorf("site.makers.projectId is required")
 	}
-	files, err := listDumpFiles(dir)
-	if err != nil {
-		return nil, err
-	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("%s has no index/product HTML or catalog.json", dir)
+		return nil, fmt.Errorf("dump has no index/product HTML or catalog.json")
 	}
 
 	var temp tempToken
@@ -402,6 +422,32 @@ func listDumpFiles(dir string) ([]dumpFile, error) {
 			return nil, fmt.Errorf("dump exceeds %d bytes", maxUploadBytes)
 		}
 		files = append(files, dumpFile{Rel: path.Clean(entry.Name()), Body: body})
+	}
+	return files, nil
+}
+
+func dumpFiles(dump map[string][]byte) ([]dumpFile, error) {
+	names := make([]string, 0, len(dump))
+	for name := range dump {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var files []dumpFile
+	var total int
+	for _, name := range names {
+		rel := strings.TrimPrefix(path.Clean(name), "browse/")
+		if !keepDumpName(rel) {
+			continue
+		}
+		body := dump[name]
+		total += len(body)
+		if len(files)+1 > maxUploadFiles {
+			return nil, fmt.Errorf("dump has more than %d files", maxUploadFiles)
+		}
+		if total > maxUploadBytes {
+			return nil, fmt.Errorf("dump exceeds %d bytes", maxUploadBytes)
+		}
+		files = append(files, dumpFile{Rel: rel, Body: body})
 	}
 	return files, nil
 }

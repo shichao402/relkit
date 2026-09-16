@@ -48,12 +48,12 @@ func WriteSampleDump(dir string) error {
 }
 
 func sampleCatalog() *Catalog {
-	stable := ApplyPublish(nil, &webmeta.Site{
+	input := ProductData{Site: &webmeta.Site{
 		Product:     "svn-auto-merge",
 		Title:       "SVN Auto Merge",
 		Description: "OSGame 客户端团队的 SVN 合并工具。解压到任意目录即可运行。",
 		Homepage:    "https://git.woa.com/osgame-client/SvnMergeTool",
-	}, webmeta.Latest{
+	}, Latests: []webmeta.Latest{{
 		Product:     "svn-auto-merge",
 		Channel:     "stable",
 		Version:     "0.2.0+100",
@@ -63,13 +63,7 @@ func sampleCatalog() *Catalog {
 			{ID: "win", Filename: "SvnAutoMerge_windows_0.2.0build100.zip", Size: 12 << 20, Selectors: map[string]string{"os": "windows", "arch": "x64"}, URLs: []string{"https://update.example/artifact/win.zip"}},
 			{ID: "mac", Filename: "SvnAutoMerge_macos_0.2.0build100.zip", Size: 18 << 20, Selectors: map[string]string{"os": "macos"}, URLs: []string{"https://update.example/artifact/mac.zip"}},
 		},
-	}, "2026-08-20T00:00:00Z")
-	return ApplyPublish(stable, &webmeta.Site{
-		Product:     "svn-auto-merge",
-		Title:       "SVN Auto Merge",
-		Description: "OSGame 客户端团队的 SVN 合并工具。解压到任意目录即可运行。",
-		Homepage:    "https://git.woa.com/osgame-client/SvnMergeTool",
-	}, webmeta.Latest{
+	}, {
 		Product:     "svn-auto-merge",
 		Channel:     "dev",
 		Version:     "0.2.0+106",
@@ -79,5 +73,9 @@ func sampleCatalog() *Catalog {
 			{ID: "win", Filename: "SvnAutoMerge_windows_0.2.0build106.zip", Size: 12 << 20, Selectors: map[string]string{"os": "windows", "arch": "x64"}, URLs: []string{"https://update.example/artifact/win-dev.zip"}},
 			{ID: "mac", Filename: "SvnAutoMerge_macos_0.2.0build106.zip", Size: 18 << 20, Selectors: map[string]string{"os": "macos"}, URLs: []string{"https://update.example/artifact/mac-dev.zip"}},
 		},
-	}, "2026-08-30T00:00:00Z")
+	}}}
+	return &Catalog{
+		Schema: SchemaCatalog, UpdatedAt: "2026-08-30T00:00:00Z",
+		Products: []Product{productFromData(input)},
+	}
 }
