@@ -219,7 +219,11 @@ func (u *Updater) Download(ctx context.Context, planId string, onEvent func(*upd
 }
 
 func (u *Updater) Apply(ctx context.Context, planId string, onEvent func(*updaterv1.UpdaterEvent)) *updaterv1.ApplyResult {
-	evs := u.call(ctx, &updaterv1.UpdaterRequest{Op: &updaterv1.UpdaterRequest_Apply{Apply: &updaterv1.ApplyOp{PlanId: planId}}}, onEvent)
+	return u.ApplyWith(ctx, planId, false, onEvent)
+}
+
+func (u *Updater) ApplyWith(ctx context.Context, planId string, installOnly bool, onEvent func(*updaterv1.UpdaterEvent)) *updaterv1.ApplyResult {
+	evs := u.call(ctx, &updaterv1.UpdaterRequest{Op: &updaterv1.UpdaterRequest_Apply{Apply: &updaterv1.ApplyOp{PlanId: planId, InstallOnly: installOnly}}}, onEvent)
 	for _, ev := range evs {
 		if ev.GetApply() != nil {
 			return ev.GetApply()
@@ -245,6 +249,24 @@ func (u *Updater) Status(ctx context.Context) *updaterv1.StatusSnapshot {
 
 func (u *Updater) Cleanup(ctx context.Context) *updaterv1.Result {
 	return lastResult(u.call(ctx, &updaterv1.UpdaterRequest{Op: &updaterv1.UpdaterRequest_Cleanup{Cleanup: &updaterv1.CleanupOp{}}}, nil))
+}
+
+func (u *Updater) ListInstalled(ctx context.Context) *updaterv1.InstalledList {
+	evs := u.call(ctx, &updaterv1.UpdaterRequest{Op: &updaterv1.UpdaterRequest_ListInstalled{ListInstalled: &updaterv1.ListInstalledOp{}}}, nil)
+	for _, ev := range evs {
+		if ev.GetInstalled() != nil {
+			return ev.GetInstalled()
+		}
+	}
+	return &updaterv1.InstalledList{}
+}
+
+func (u *Updater) SwitchActive(ctx context.Context, code int64) *updaterv1.Result {
+	return lastResult(u.call(ctx, &updaterv1.UpdaterRequest{Op: &updaterv1.UpdaterRequest_SwitchActive{SwitchActive: &updaterv1.SwitchActiveOp{Code: code}}}, nil))
+}
+
+func (u *Updater) Rollback(ctx context.Context) *updaterv1.Result {
+	return lastResult(u.call(ctx, &updaterv1.UpdaterRequest{Op: &updaterv1.UpdaterRequest_Rollback{Rollback: &updaterv1.RollbackOp{}}}, nil))
 }
 
 func (u *Updater) Cancel() *updaterv1.Result {

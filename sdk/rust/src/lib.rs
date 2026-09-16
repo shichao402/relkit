@@ -27,14 +27,14 @@ use proto::updater_event;
 use proto::updater_request;
 use proto::{
     ApplyOp, ApplyResult, Capabilities, CheckOp, CheckPolicy, CheckResult, CleanupOp, ClientHello,
-    ClientProfile, DownloadOp, DownloadResult, Error, ErrorCode, Failed, Ok,
-    Result as OperationResult, Runtime, SchedulerConfig, SkipOp, StatusOp, StatusSnapshot,
-    UpdaterEvent, UpdaterRequest,
+    ClientProfile, DownloadOp, DownloadResult, Error, ErrorCode, Failed, InstalledList,
+    ListInstalledOp, Ok, Result as OperationResult, RollbackOp, Runtime, SchedulerConfig, SkipOp,
+    StatusOp, StatusSnapshot, SwitchActiveOp, UpdaterEvent, UpdaterRequest,
 };
 
 pub const IPC_MIN: u32 = 1;
-pub const IPC_MAX: u32 = 1;
-pub const IPC_CURRENT: u32 = 1;
+pub const IPC_MAX: u32 = 2;
+pub const IPC_CURRENT: u32 = 2;
 const MAX_FRAME_SIZE: usize = 32 * 1024 * 1024;
 
 /// Prefixes one protobuf message with its 4-byte big-endian length.
@@ -396,9 +396,22 @@ impl Updater {
     where
         F: FnMut(&UpdaterEvent),
     {
+        self.apply_with(plan_id, false, on_event)
+    }
+
+    pub fn apply_with<F>(
+        &self,
+        plan_id: impl Into<String>,
+        install_only: bool,
+        mut on_event: F,
+    ) -> ApplyResult
+    where
+        F: FnMut(&UpdaterEvent),
+    {
         let events = self.call(
             updater_request::Op::Apply(ApplyOp {
                 plan_id: plan_id.into(),
+                install_only,
             }),
             &mut on_event,
         );
@@ -438,6 +451,31 @@ impl Updater {
             Ok(()) => ok_result(),
             Err(error) => failed_result(ErrorCode::Canceled, error.to_string(), false),
         }
+    }
+
+    // Facade signature tokens: listInstalled switchActive rollback
+    pub fn list_installed(&self) -> InstalledList {
+        self.call(
+            updater_request::Op::ListInstalled(ListInstalledOp {}),
+            &mut |_| {},
+        )
+        .into_iter()
+        .find_map(|event| match event.kind {
+            Some(updater_event::Kind::Installed(list)) => Some(list),
+            _ => None,
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn switch_active(&self, code: i64) -> OperationResult {
+        operation_result(self.call(
+            updater_request::Op::SwitchActive(SwitchActiveOp { code }),
+            &mut |_| {},
+        ))
+    }
+
+    pub fn rollback(&self) -> OperationResult {
+        operation_result(self.call(updater_request::Op::Rollback(RollbackOp {}), &mut |_| {}))
     }
 
     pub fn scheduler<F>(&self, config: SchedulerConfig, on_event: F) -> Scheduler
@@ -845,7 +883,7 @@ mod tests {
 
     #[test]
     fn handshake_enforces_window_and_call_writes_hello() {
-        for (ipc, expected) in [(0, ErrorCode::UpdaterTooOld), (2, ErrorCode::UpdaterTooNew)] {
+        for (ipc, expected) in [(0, ErrorCode::UpdaterTooOld), (3, ErrorCode::UpdaterTooNew)] {
             let result = Updater::open_with_glue(
                 ClientProfile::default(),
                 Runtime::default(),
@@ -875,7 +913,7 @@ mod tests {
         let request = UpdaterRequest::decode(&payload[4..4 + size]).unwrap();
         let hello = request.hello.unwrap();
         assert_eq!(hello.ipc_min, 1);
-        assert_eq!(hello.ipc_max, 1);
+        assert_eq!(hello.ipc_max, 2);
     }
 
     #[test]

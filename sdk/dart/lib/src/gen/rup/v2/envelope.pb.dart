@@ -23,7 +23,7 @@ class Signature extends $pb.GeneratedMessage {
     $core.String? alg,
     $core.List<$core.int>? sig,
   }) {
-    final result = create();
+    final result = Signature._();
     if (keyId != null) result.keyId = keyId;
     if (alg != null) result.alg = alg;
     if (sig != null) result.sig = sig;
@@ -34,15 +34,15 @@ class Signature extends $pb.GeneratedMessage {
 
   factory Signature.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Signature()..mergeFromBuffer(data, registry);
   factory Signature.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Signature()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Signature',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
-      createEmptyInstance: create)
+      createEmptyInstance: Signature.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'keyId')
     ..aOS(2, _omitFieldNames ? '' : 'alg')
     ..a<$core.List<$core.int>>(
@@ -59,12 +59,14 @@ class Signature extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Signature() / Signature.new instead')
   static Signature create() => Signature._();
+  static $pb.GeneratedMessage $_createMessage() => Signature._();
   @$core.override
-  Signature createEmptyInstance() => create();
+  Signature createEmptyInstance() => Signature._();
   @$core.pragma('dart2js:noInline')
-  static Signature getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Signature>(create);
+  static Signature getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Signature>(Signature.$_createMessage);
   static Signature? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -104,7 +106,7 @@ class Envelope extends $pb.GeneratedMessage {
     $core.List<$core.int>? payload,
     $core.Iterable<Signature>? signatures,
   }) {
-    final result = create();
+    final result = Envelope._();
     if (schema != null) result.schema = schema;
     if (payload != null) result.payload = payload;
     if (signatures != null) result.signatures.addAll(signatures);
@@ -115,20 +117,20 @@ class Envelope extends $pb.GeneratedMessage {
 
   factory Envelope.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Envelope()..mergeFromBuffer(data, registry);
   factory Envelope.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Envelope()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Envelope',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
-      createEmptyInstance: create)
+      createEmptyInstance: Envelope.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'schema')
     ..a<$core.List<$core.int>>(
         2, _omitFieldNames ? '' : 'payload', $pb.PbFieldType.OY)
     ..pPM<Signature>(3, _omitFieldNames ? '' : 'signatures',
-        subBuilder: Signature.create)
+        subBuilder: Signature.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -141,12 +143,14 @@ class Envelope extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Envelope() / Envelope.new instead')
   static Envelope create() => Envelope._();
+  static $pb.GeneratedMessage $_createMessage() => Envelope._();
   @$core.override
-  Envelope createEmptyInstance() => create();
+  Envelope createEmptyInstance() => Envelope._();
   @$core.pragma('dart2js:noInline')
-  static Envelope getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Envelope>(create);
+  static Envelope getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Envelope>(Envelope.$_createMessage);
   static Envelope? _defaultInstance;
 
   @$pb.TagNumber(1)

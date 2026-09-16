@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file rup/v2/http.proto.
  */
 export const file_rup_v2_http: GenFile = /*@__PURE__*/
-  fileDesc("ChFydXAvdjIvaHR0cC5wcm90bxIGcnVwLnYyIikKBkhlYWx0aBIOCgZzdGF0dXMYASABKAkSDwoHdmVyc2lvbhgCIAEoCSImCgVFcnJvchIMCgRjb2RlGAEgASgJEg8KB21lc3NhZ2UYAiABKAlCLVorY25iLmNvb2wvc2hpY2hhbzQwMi9yZWxraXQvYXBpL3J1cC92MjtydXB2MmIGcHJvdG8z");
+  fileDesc("ChFydXAvdjIvaHR0cC5wcm90bxIGcnVwLnYyIikKBkhlYWx0aBIOCgZzdGF0dXMYASABKAkSDwoHdmVyc2lvbhgCIAEoCSImCgVFcnJvchIMCgRjb2RlGAEgASgJEg8KB21lc3NhZ2UYAiABKAlCKVonZ28uZmlyb3lhbmcuY29tL3JlbGtpdC9hcGkvcnVwL3YyO3J1cHYyYgZwcm90bzM");
 
 /**
  * Health is returned by GET /-/health as application/protobuf.

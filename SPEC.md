@@ -795,7 +795,14 @@ Channel：v2 首版 directory **可以**为每个 `(product)` 提供面向默认
 | 名称 | 行为 | 默认平台 |
 |------|------|----------|
 | `wholeRoot` | 整安装根替换（便携目录 / `.app`） | macOS / Linux |
-| `versionedDir` | 写入 `versions/<version>/`，原子切换 `active.json` | Windows |
+| `versionedDir` | 写入 `versions/<version>/`，原子切换 `active.json`；也可扩展为按项目选版本的安装库 | Windows；macOS 需保留完整 `.app` bundle |
 | `fileSet` | 多文件 journal 事务（同版本全套提交或全套回滚） | Dec 套件 |
 
-引擎 **必须**拒绝未支持的组合（当前：`macos` + `versionedDir`）。`retain` 缺省为当前 + 上一版。
+引擎 **必须**拒绝自己尚未正确实现的平台 / 布局组合，不能静默落出不可启动的目录。
+`versionedDir` 在 darwin 上把完整 `.app` 拷进 `versions/<id>/<Product>.app`，不再剥外层。
+payload 里没有 `.app` 时 apply 失败。`retain` 缺省为当前 + 上一版；`reserved_codes` 保护项目 pin。
+`ApplyOp.install_only` 只入库不改 `active.json`。IPC 窗口 `[1, 2]`：list / switch / rollback 为窗口 2。
+
+落盘契约（版本目录形状、`active.json` 字段、**launcher 由产品提供**、宿主退出与重启时序、
+`retain` 取值、sidecar 刷新位置、接入 checklist）见
+[`docs/design/install-layouts.md`](docs/design/install-layouts.md)。这张表只分类，不足以照着接入。

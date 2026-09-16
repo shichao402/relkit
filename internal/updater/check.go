@@ -111,19 +111,41 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 		state.LastSeenFallbackSequence = *sdkState.LastSeenFallbackSequence
 	}
 
-	if result.Available != nil && op.ExactCode != 0 && result.Available.Target != nil && result.Available.Target.Code != op.ExactCode {
-		// Re-run selection for exact code using the same updater internals by
-		// constructing a synthetic available from a second forced check is not
-		// enough; fetch the index path via CheckForce already selected next hop.
-		// exactCode: find that node by downloading through CheckFallback-free path.
-		exact, err := e.fetchExact(ctx, u, op.ExactCode)
-		if err != nil {
+	if op.ExactCode != 0 {
+		if op.ExactCode == runtime.CurrentCode {
+			state.LastResult = updaterv1.LastResult_LAST_RESULT_UP_TO_DATE
+			_ = st.saveState(state)
+			return e.emit(&updaterv1.UpdaterEvent{
+				Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
+					Kind: &updaterv1.CheckResult_UpToDate{UpToDate: &updaterv1.UpToDate{
+						Sequence:        result.Sequence,
+						CurrentIsYanked: result.CurrentIsYanked,
+					}},
+				}},
+			})
+		}
+		exact := u.FetchExact(ctx, op.ExactCode)
+		result.Attempts = append(result.Attempts, exact.Attempts...)
+		if exact.Err != nil {
 			state.LastResult = updaterv1.LastResult_LAST_RESULT_FAILED
 			_ = st.saveState(state)
-			code, retry := classifyFetch(err)
-			return e.emitCheckFailed(code, retry, err.Error(), result.Attempts, profile)
+			code, retry := classifyFetch(exact.Err)
+			if containsAny(exact.Err.Error(), "not reachable", "yanked") {
+				code, retry = updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false
+			}
+			return e.emitCheckFailed(code, retry, exact.Err.Error(), result.Attempts, profile)
 		}
-		result.Available = exact
+		if exact.Available == nil {
+			state.LastResult = updaterv1.LastResult_LAST_RESULT_FAILED
+			_ = st.saveState(state)
+			return e.emitCheckFailed(updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, fmt.Sprintf("exact code %d not reachable", op.ExactCode), result.Attempts, profile)
+		}
+		result.Available = exact.Available
+		result.Sequence = exact.Sequence
+		result.CurrentIsYanked = exact.CurrentIsYanked
+		result.Fallback = nil
+		result.UpToDate = false
+		result.Err = nil
 	}
 
 	if result.Available != nil && result.Available.Target != nil {
@@ -257,17 +279,6 @@ func (e *Engine) emitCheckFailed(code updaterv1.ErrorCode, retryable bool, messa
 			Kind: &updaterv1.CheckResult_Failed{Failed: &updaterv1.Failed{Error: err}},
 		}},
 	})
-}
-
-func (e *Engine) fetchExact(ctx context.Context, u *inprocess.Updater, exactCode int64) (*inprocess.UpdateAvailable, error) {
-	// Walk using public Check is insufficient. Reconstruct via a one-off updater
-	// whose CurrentCode is exactCode-1 only if exactCode-1 exists — forbidden by
-	// the plan. Instead inspect CheckForce path by temporarily using selectors
-	// after a normal check is not available. We fetch index through CheckForce
-	// with a stub: call CheckForce then if available code mismatches, error.
-	_ = ctx
-	_ = u
-	return nil, fmt.Errorf("exact code %d not reachable", exactCode)
 }
 
 func (e *Engine) buildPlan(st store, profile *updaterv1.ClientProfile, runtime *updaterv1.Runtime, result inprocess.CheckResult) (*updaterv1.UpdatePlan, error) {

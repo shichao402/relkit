@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,6 +55,9 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 
 	sessionID := newID("sess")
 	now := timestamppb.Now()
+	if err := acquireApplyLock(inst.InstallRoot, sessionID); err != nil {
+		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, err.Error())
+	}
 	sess := &updaterv1.ApplySessionRecord{
 		SessionId:         sessionID,
 		PlanId:            plan.PlanId,
@@ -66,14 +70,17 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 		TargetVersion:     plan.Version,
 		Pid:               int32(os.Getppid()),
 		Layout:            inst.Layout,
-		Relaunch:          inst.Relaunch,
+		Relaunch:          inst.Relaunch && !op.InstallOnly,
 		ExecutableRelpath: inst.ExecutableRelpath,
 		Preserve:          inst.Preserve,
 		Retain:            inst.Retain,
 		FileSet:           inst.FileSet,
 		SidecarRelpath:    inst.SidecarRelpath,
+		InstallOnly:       op.InstallOnly,
+		ReservedCodes:     inst.ReservedCodes,
 	}
 	if err := st.saveSession(sess); err != nil {
+		releaseApplyLock(inst.InstallRoot)
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, err.Error())
 	}
 	_ = writeCompatibilitySession(req.GetRuntime().GetDataDir(), sess)
@@ -87,6 +94,7 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 		sess.HeartbeatAt = timestamppb.Now()
 		_ = st.saveSession(sess)
 		_ = writeCompatibilitySession(req.GetRuntime().GetDataDir(), sess)
+		releaseApplyLock(inst.InstallRoot)
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, "failed to start apply worker: "+err.Error())
 	}
 	return e.emit(&updaterv1.UpdaterEvent{
@@ -189,6 +197,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	refreshApplyLock(sess.InstallRoot, sess.SessionId, os.Getpid())
 	setPhase := func(p updaterv1.SessionPhase, errp *updaterv1.Error) {
 		sess.Phase = p
 		sess.HeartbeatAt = timestamppb.Now()
@@ -203,6 +212,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 			updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
 			newError(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil),
 		)
+		releaseApplyLock(sess.InstallRoot)
 		return err
 	}
 	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COPYING, nil)
@@ -224,9 +234,10 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 			phase = updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
 		}
 		setPhase(phase, newError(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
+		releaseApplyLock(sess.InstallRoot)
 		return err
 	}
-	if sess.Relaunch && sess.ExecutableRelpath != "" {
+	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
 		setPhase(updaterv1.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
 		exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
 		if sess.Layout == updaterv1.Layout_LAYOUT_VERSIONED_DIR {
@@ -241,6 +252,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		_ = cmd.Start()
 	}
 	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMPLETED, nil)
+	releaseApplyLock(sess.InstallRoot)
 	return nil
 }
 
@@ -289,63 +301,160 @@ func writeActive(root string, p activePointer) error {
 	return atomicWrite(filepath.Join(root, ActivePointer), append(raw, '\n'))
 }
 
+func writeVersionMeta(versionDir string, meta versionMeta) error {
+	raw, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filepath.Join(versionDir, VersionMetaName), append(raw, '\n'))
+}
+
+func readVersionMeta(versionDir string) *versionMeta {
+	raw, err := os.ReadFile(filepath.Join(versionDir, VersionMetaName))
+	if err != nil {
+		return nil
+	}
+	var m versionMeta
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	return &m
+}
+
+type versionMeta struct {
+	Code       int64  `json:"code"`
+	Version    string `json:"version"`
+	Path       string `json:"path"`
+	Executable string `json:"executable,omitempty"`
+}
+
 func applyVersionedDir(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) error {
 	id := strings.ReplaceAll(plan.Version, "/", "_")
 	if id == "" {
 		id = fmt.Sprintf("code-%d", plan.Code)
 	}
 	dest := filepath.Join(sess.InstallRoot, "versions", id)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
 	payload, err := unpackFirst(sess, plan)
 	if err != nil {
 		return err
 	}
-	if err := copyTree(payload, dest); err != nil {
-		_ = os.RemoveAll(dest)
+	copySrc := payload
+	if runtime.GOOS == "darwin" || looksLikeAppBundle(payload) {
+		app := payload
+		if !strings.HasSuffix(payload, ".app") {
+			app = findAppBundle(payload)
+		}
+		if app == "" {
+			if runtime.GOOS == "darwin" {
+				_ = os.RemoveAll(dest)
+				return fmt.Errorf("macos versionedDir requires a complete .app bundle")
+			}
+		} else {
+			copySrc = app
+			dest = filepath.Join(dest, filepath.Base(app))
+		}
+	}
+	if err := copyTree(copySrc, dest); err != nil {
+		_ = os.RemoveAll(filepath.Join(sess.InstallRoot, "versions", id))
+		return err
+	}
+	versionRel := filepath.ToSlash(filepath.Join("versions", id))
+	exeRel := filepath.ToSlash(filepath.Join("versions", id, sess.ExecutableRelpath))
+	meta := versionMeta{
+		Code:       plan.Code,
+		Version:    plan.Version,
+		Path:       versionRel,
+		Executable: exeRel,
+	}
+	if err := writeVersionMeta(filepath.Join(sess.InstallRoot, "versions", id), meta); err != nil {
 		return err
 	}
 	prev := readActive(sess.InstallRoot)
 	ptr := activePointer{
 		Code:       plan.Code,
 		Version:    plan.Version,
-		Path:       filepath.ToSlash(filepath.Join("versions", id)),
-		Executable: filepath.ToSlash(filepath.Join("versions", id, sess.ExecutableRelpath)),
+		Path:       versionRel,
+		Executable: exeRel,
 	}
 	if prev != nil {
 		ptr.Previous = prev.Path
 	}
-	if err := writeActive(sess.InstallRoot, ptr); err != nil {
-		return err
+	if !sess.InstallOnly {
+		if err := writeActive(sess.InstallRoot, ptr); err != nil {
+			return err
+		}
+	} else if prev != nil {
+		ptr = *prev
 	}
 	retain := int(sess.Retain)
 	if retain <= 0 {
 		retain = 2
 	}
-	pruneVersions(sess.InstallRoot, ptr, retain)
+	pruneVersions(sess.InstallRoot, ptr, retain, sess.ReservedCodes, versionRel)
 	refreshSidecar(sess, payload)
 	return nil
 }
 
-func pruneVersions(root string, current activePointer, retain int) {
-	keep := map[string]struct{}{filepath.FromSlash(current.Path): {}}
+func pruneVersions(root string, current activePointer, retain int, reserved []int64, extraKeep string) {
+	if retain <= 0 {
+		retain = 2
+	}
+	keep := map[string]struct{}{}
+	if current.Path != "" {
+		keep[filepath.ToSlash(current.Path)] = struct{}{}
+	}
+	if extraKeep != "" {
+		keep[filepath.ToSlash(extraKeep)] = struct{}{}
+	}
 	if current.Previous != "" && retain >= 2 {
-		keep[filepath.FromSlash(current.Previous)] = struct{}{}
+		keep[filepath.ToSlash(current.Previous)] = struct{}{}
+	}
+	reservedSet := map[int64]struct{}{}
+	for _, c := range reserved {
+		if c != 0 {
+			reservedSet[c] = struct{}{}
+		}
 	}
 	base := filepath.Join(root, "versions")
 	ents, err := os.ReadDir(base)
 	if err != nil {
 		return
 	}
+	type item struct {
+		rel  string
+		name string
+		code int64
+	}
+	var all []item
 	for _, e := range ents {
-		p := filepath.Join("versions", e.Name())
-		if _, ok := keep[p]; ok {
+		if !e.IsDir() {
 			continue
 		}
-		if retain <= 2 {
-			_ = os.RemoveAll(filepath.Join(root, p))
+		rel := filepath.ToSlash(filepath.Join("versions", e.Name()))
+		code := int64(0)
+		if m := readVersionMeta(filepath.Join(root, filepath.FromSlash(rel))); m != nil {
+			code = m.Code
 		}
+		all = append(all, item{rel: rel, name: e.Name(), code: code})
+		if _, ok := reservedSet[code]; ok {
+			keep[rel] = struct{}{}
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].name > all[j].name })
+	for _, it := range all {
+		if len(keep) >= retain {
+			break
+		}
+		keep[it.rel] = struct{}{}
+	}
+	for _, it := range all {
+		if _, ok := keep[it.rel]; ok {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(root, filepath.FromSlash(it.rel)))
 	}
 }
 
@@ -353,6 +462,11 @@ func applyWholeRoot(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePl
 	payload, err := unpackFirst(sess, plan)
 	if err != nil {
 		return err
+	}
+	if runtime.GOOS == "darwin" {
+		if app := findAppBundle(payload); app != "" {
+			payload = app
+		}
 	}
 	install := sess.InstallRoot
 	backup := install + ".relkit-old"
@@ -444,14 +558,16 @@ func unpackFirst(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan)
 		if err := unzip(src, out); err != nil {
 			return "", err
 		}
-		if runtime.GOOS == "darwin" {
-			if app := findAppBundle(out); app != "" {
-				return app, nil
-			}
-		}
 		return out, nil
 	}
 	return filepath.Dir(src), nil
+}
+
+func looksLikeAppBundle(path string) bool {
+	if strings.HasSuffix(strings.ToLower(path), ".app") {
+		return true
+	}
+	return findAppBundle(path) != ""
 }
 
 func findAppBundle(root string) string {
@@ -522,7 +638,19 @@ func copyTree(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(dst, rel)
+		target := dst
+		if rel != "." {
+			target = filepath.Join(dst, rel)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			_ = os.MkdirAll(filepath.Dir(target), 0o755)
+			_ = os.Remove(target)
+			return os.Symlink(link, target)
+		}
 		if info.IsDir() {
 			return os.MkdirAll(target, info.Mode())
 		}
@@ -536,8 +664,15 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
+	info, _ := in.Stat()
+	mode := os.FileMode(0o644)
+	if info != nil {
+		if perm := info.Mode() & os.ModePerm; perm != 0 {
+			mode = perm
+		}
+	}
 	_ = os.MkdirAll(filepath.Dir(dst), 0o755)
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}

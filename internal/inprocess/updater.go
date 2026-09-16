@@ -407,6 +407,109 @@ func (u *Updater) checkIndex(ctx context.Context) CheckResult {
 	}
 }
 
+// FetchExact loads a signed index and returns the artifact for exactCode.
+// The code may be older than CurrentCode (library install). Yanked codes fail.
+func (u *Updater) FetchExact(ctx context.Context, exactCode int64) CheckResult {
+	if u.Product == "" || u.Channel == "" {
+		return CheckResult{Err: fmt.Errorf("product and channel are required")}
+	}
+	if len(u.TrustedKeys) == 0 {
+		return CheckResult{Err: fmt.Errorf("trusted keys are required")}
+	}
+	if len(u.EntryURLs) == 0 && len(u.IndexURLs) == 0 {
+		return CheckResult{Err: fmt.Errorf("at least one entry URL or index URL is required")}
+	}
+
+	st := u.loadState()
+	candidates, _, attempts := u.resolveIndexPlan(ctx)
+	if len(candidates) == 0 {
+		return CheckResult{
+			Attempts: attempts,
+			Err:      fmt.Errorf("no usable directory/index source (%d attempted)", len(attempts)),
+		}
+	}
+
+	for _, cand := range candidates {
+		indexURL := bustCache(cand.URL)
+		body, err := u.fetcher().GetBytes(ctx, indexURL)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("%s: fetch: %v", cand.URL, err))
+			st.RecordSourceFailure(cand.PreferenceKey)
+			continue
+		}
+		env, err := rupv2.UnmarshalEnvelope(body)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("%s: envelope: %v", cand.URL, err))
+			st.RecordSourceFailure(cand.PreferenceKey)
+			continue
+		}
+		index, err := envelope.OpenEnvelope(env, u.TrustedKeys)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("%s: verify: %v", cand.URL, err))
+			st.RecordSourceFailure(cand.PreferenceKey)
+			continue
+		}
+		if index.Product != u.Product || index.Channel != u.Channel {
+			attempts = append(attempts, fmt.Sprintf("%s: product/channel mismatch", cand.URL))
+			st.RecordSourceFailure(cand.PreferenceKey)
+			continue
+		}
+		if !sdk.AcceptsSequence(index.Sequence, st.LastSeenSequence) {
+			attempts = append(attempts, fmt.Sprintf("%s: sequence %d older than last seen", cand.URL, index.Sequence))
+			continue
+		}
+
+		st.RecordSourceSuccess(cand.PreferenceKey, 0)
+		st.ObserveSequence(index.Sequence)
+
+		var target *rupv2.VersionNode
+		for _, v := range index.Versions {
+			if v != nil && v.Code == exactCode {
+				target = v
+				break
+			}
+		}
+		if target == nil {
+			return CheckResult{
+				Attempts: attempts,
+				Err:      fmt.Errorf("exact code %d not reachable", exactCode),
+				Sequence: index.Sequence,
+			}
+		}
+		if target.Yanked {
+			return CheckResult{
+				Attempts: attempts,
+				Err:      fmt.Errorf("exact code %d is yanked", exactCode),
+				Sequence: index.Sequence,
+			}
+		}
+		manifest, artifact, err := u.fetchTarget(ctx, index, target)
+		if err != nil {
+			attempts = append(attempts, fmt.Sprintf("%s: target: %v", cand.URL, err))
+			continue
+		}
+		t := *target
+		return CheckResult{
+			Available: &UpdateAvailable{
+				Target:            &t,
+				Manifest:          manifest,
+				Artifact:          artifact,
+				Mandatory:         false,
+				RemainingHops:     1,
+				Sequence:          index.Sequence,
+				PriorReleaseNotes: collectPriorReleaseNotes(index, u.CurrentCode),
+			},
+			CurrentIsYanked: currentIsYanked(index, u.CurrentCode),
+			Sequence:        index.Sequence,
+			Attempts:        attempts,
+		}
+	}
+	return CheckResult{
+		Attempts: attempts,
+		Err:      fmt.Errorf("exact code %d not reachable", exactCode),
+	}
+}
+
 func currentIsYanked(index *rupv2.Index, currentCode int) bool {
 	for _, v := range index.Versions {
 		if v != nil && int(v.Code) == currentCode {

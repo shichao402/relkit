@@ -24,7 +24,7 @@ class PublicKeyDocument extends $pb.GeneratedMessage {
     $core.String? alg,
     $core.List<$core.int>? publicKey,
   }) {
-    final result = create();
+    final result = PublicKeyDocument._();
     if (schema != null) result.schema = schema;
     if (keyId != null) result.keyId = keyId;
     if (alg != null) result.alg = alg;
@@ -36,15 +36,15 @@ class PublicKeyDocument extends $pb.GeneratedMessage {
 
   factory PublicKeyDocument.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      PublicKeyDocument()..mergeFromBuffer(data, registry);
   factory PublicKeyDocument.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      PublicKeyDocument()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PublicKeyDocument',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
-      createEmptyInstance: create)
+      createEmptyInstance: PublicKeyDocument.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'schema')
     ..aOS(2, _omitFieldNames ? '' : 'keyId')
     ..aOS(3, _omitFieldNames ? '' : 'alg')
@@ -63,12 +63,15 @@ class PublicKeyDocument extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PublicKeyDocument() / PublicKeyDocument.new instead')
   static PublicKeyDocument create() => PublicKeyDocument._();
+  static $pb.GeneratedMessage $_createMessage() => PublicKeyDocument._();
   @$core.override
-  PublicKeyDocument createEmptyInstance() => create();
+  PublicKeyDocument createEmptyInstance() => PublicKeyDocument._();
   @$core.pragma('dart2js:noInline')
-  static PublicKeyDocument getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<PublicKeyDocument>(create);
+  static PublicKeyDocument getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PublicKeyDocument>(
+          PublicKeyDocument.$_createMessage);
   static PublicKeyDocument? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -116,7 +119,7 @@ class PrivateKeyDocument extends $pb.GeneratedMessage {
     $core.String? alg,
     $core.List<$core.int>? seed,
   }) {
-    final result = create();
+    final result = PrivateKeyDocument._();
     if (schema != null) result.schema = schema;
     if (keyId != null) result.keyId = keyId;
     if (alg != null) result.alg = alg;
@@ -128,15 +131,15 @@ class PrivateKeyDocument extends $pb.GeneratedMessage {
 
   factory PrivateKeyDocument.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      PrivateKeyDocument()..mergeFromBuffer(data, registry);
   factory PrivateKeyDocument.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      PrivateKeyDocument()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PrivateKeyDocument',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
-      createEmptyInstance: create)
+      createEmptyInstance: PrivateKeyDocument.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'schema')
     ..aOS(2, _omitFieldNames ? '' : 'keyId')
     ..aOS(3, _omitFieldNames ? '' : 'alg')
@@ -155,12 +158,15 @@ class PrivateKeyDocument extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PrivateKeyDocument() / PrivateKeyDocument.new instead')
   static PrivateKeyDocument create() => PrivateKeyDocument._();
+  static $pb.GeneratedMessage $_createMessage() => PrivateKeyDocument._();
   @$core.override
-  PrivateKeyDocument createEmptyInstance() => create();
+  PrivateKeyDocument createEmptyInstance() => PrivateKeyDocument._();
   @$core.pragma('dart2js:noInline')
   static PrivateKeyDocument getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<PrivateKeyDocument>(create);
+      $pb.GeneratedMessage.$_defaultFor<PrivateKeyDocument>(
+          PrivateKeyDocument.$_createMessage);
   static PrivateKeyDocument? _defaultInstance;
 
   @$pb.TagNumber(1)

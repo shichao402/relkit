@@ -4,6 +4,6 @@ package updaterfacade
 
 const (
 	IPCMin     uint32 = 1
-	IPCMax     uint32 = 1
-	IPCCurrent uint32 = 1
+	IPCMax     uint32 = 2
+	IPCCurrent uint32 = 2
 )

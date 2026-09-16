@@ -30,7 +30,7 @@ class TrustedKey extends $pb.GeneratedMessage {
     $core.String? keyId,
     $core.List<$core.int>? publicKey,
   }) {
-    final result = create();
+    final result = TrustedKey._();
     if (keyId != null) result.keyId = keyId;
     if (publicKey != null) result.publicKey = publicKey;
     return result;
@@ -40,16 +40,16 @@ class TrustedKey extends $pb.GeneratedMessage {
 
   factory TrustedKey.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      TrustedKey()..mergeFromBuffer(data, registry);
   factory TrustedKey.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      TrustedKey()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'TrustedKey',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: TrustedKey.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'keyId')
     ..a<$core.List<$core.int>>(
         2, _omitFieldNames ? '' : 'publicKey', $pb.PbFieldType.OY)
@@ -65,12 +65,14 @@ class TrustedKey extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use TrustedKey() / TrustedKey.new instead')
   static TrustedKey create() => TrustedKey._();
+  static $pb.GeneratedMessage $_createMessage() => TrustedKey._();
   @$core.override
-  TrustedKey createEmptyInstance() => create();
+  TrustedKey createEmptyInstance() => TrustedKey._();
   @$core.pragma('dart2js:noInline')
   static TrustedKey getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<TrustedKey>(create);
+      $pb.GeneratedMessage.$_defaultFor<TrustedKey>(TrustedKey.$_createMessage);
   static TrustedKey? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -97,7 +99,7 @@ class RecoveryLink extends $pb.GeneratedMessage {
     $core.String? label,
     $core.String? url,
   }) {
-    final result = create();
+    final result = RecoveryLink._();
     if (label != null) result.label = label;
     if (url != null) result.url = url;
     return result;
@@ -107,16 +109,16 @@ class RecoveryLink extends $pb.GeneratedMessage {
 
   factory RecoveryLink.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      RecoveryLink()..mergeFromBuffer(data, registry);
   factory RecoveryLink.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      RecoveryLink()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RecoveryLink',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: RecoveryLink.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'label')
     ..aOS(2, _omitFieldNames ? '' : 'url')
     ..hasRequiredFields = false;
@@ -132,12 +134,15 @@ class RecoveryLink extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use RecoveryLink() / RecoveryLink.new instead')
   static RecoveryLink create() => RecoveryLink._();
+  static $pb.GeneratedMessage $_createMessage() => RecoveryLink._();
   @$core.override
-  RecoveryLink createEmptyInstance() => create();
+  RecoveryLink createEmptyInstance() => RecoveryLink._();
   @$core.pragma('dart2js:noInline')
-  static RecoveryLink getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<RecoveryLink>(create);
+  static RecoveryLink getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<RecoveryLink>(
+          RecoveryLink.$_createMessage);
   static RecoveryLink? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -164,7 +169,7 @@ class RecoveryHelp extends $pb.GeneratedMessage {
     $core.String? message,
     $core.Iterable<RecoveryLink>? links,
   }) {
-    final result = create();
+    final result = RecoveryHelp._();
     if (message != null) result.message = message;
     if (links != null) result.links.addAll(links);
     return result;
@@ -174,19 +179,19 @@ class RecoveryHelp extends $pb.GeneratedMessage {
 
   factory RecoveryHelp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      RecoveryHelp()..mergeFromBuffer(data, registry);
   factory RecoveryHelp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      RecoveryHelp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RecoveryHelp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: RecoveryHelp.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'message')
     ..pPM<RecoveryLink>(2, _omitFieldNames ? '' : 'links',
-        subBuilder: RecoveryLink.create)
+        subBuilder: RecoveryLink.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -200,12 +205,15 @@ class RecoveryHelp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use RecoveryHelp() / RecoveryHelp.new instead')
   static RecoveryHelp create() => RecoveryHelp._();
+  static $pb.GeneratedMessage $_createMessage() => RecoveryHelp._();
   @$core.override
-  RecoveryHelp createEmptyInstance() => create();
+  RecoveryHelp createEmptyInstance() => RecoveryHelp._();
   @$core.pragma('dart2js:noInline')
-  static RecoveryHelp getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<RecoveryHelp>(create);
+  static RecoveryHelp getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<RecoveryHelp>(
+          RecoveryHelp.$_createMessage);
   static RecoveryHelp? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -231,7 +239,7 @@ class ClientProfile extends $pb.GeneratedMessage {
     $core.Iterable<TrustedKey>? trustedKeys,
     RecoveryHelp? recovery,
   }) {
-    final result = create();
+    final result = ClientProfile._();
     if (product != null) result.product = product;
     if (allowedChannels != null) result.allowedChannels.addAll(allowedChannels);
     if (entryUrls != null) result.entryUrls.addAll(entryUrls);
@@ -246,25 +254,25 @@ class ClientProfile extends $pb.GeneratedMessage {
 
   factory ClientProfile.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ClientProfile()..mergeFromBuffer(data, registry);
   factory ClientProfile.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ClientProfile()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientProfile',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ClientProfile.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'product')
     ..pPS(2, _omitFieldNames ? '' : 'allowedChannels')
     ..pPS(3, _omitFieldNames ? '' : 'entryUrls')
     ..pPS(4, _omitFieldNames ? '' : 'indexUrls')
     ..pPS(5, _omitFieldNames ? '' : 'fallbackUrls')
     ..pPM<TrustedKey>(6, _omitFieldNames ? '' : 'trustedKeys',
-        subBuilder: TrustedKey.create)
+        subBuilder: TrustedKey.$_createMessage)
     ..aOM<RecoveryHelp>(7, _omitFieldNames ? '' : 'recovery',
-        subBuilder: RecoveryHelp.create)
+        subBuilder: RecoveryHelp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -278,12 +286,15 @@ class ClientProfile extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ClientProfile() / ClientProfile.new instead')
   static ClientProfile create() => ClientProfile._();
+  static $pb.GeneratedMessage $_createMessage() => ClientProfile._();
   @$core.override
-  ClientProfile createEmptyInstance() => create();
+  ClientProfile createEmptyInstance() => ClientProfile._();
   @$core.pragma('dart2js:noInline')
-  static ClientProfile getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ClientProfile>(create);
+  static ClientProfile getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ClientProfile>(
+          ClientProfile.$_createMessage);
   static ClientProfile? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -327,7 +338,7 @@ class FileSetEntry extends $pb.GeneratedMessage {
     $core.String? destRelpath,
     $core.String? artifactName,
   }) {
-    final result = create();
+    final result = FileSetEntry._();
     if (destRelpath != null) result.destRelpath = destRelpath;
     if (artifactName != null) result.artifactName = artifactName;
     return result;
@@ -337,16 +348,16 @@ class FileSetEntry extends $pb.GeneratedMessage {
 
   factory FileSetEntry.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      FileSetEntry()..mergeFromBuffer(data, registry);
   factory FileSetEntry.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      FileSetEntry()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'FileSetEntry',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: FileSetEntry.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'destRelpath')
     ..aOS(2, _omitFieldNames ? '' : 'artifactName')
     ..hasRequiredFields = false;
@@ -362,12 +373,15 @@ class FileSetEntry extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use FileSetEntry() / FileSetEntry.new instead')
   static FileSetEntry create() => FileSetEntry._();
+  static $pb.GeneratedMessage $_createMessage() => FileSetEntry._();
   @$core.override
-  FileSetEntry createEmptyInstance() => create();
+  FileSetEntry createEmptyInstance() => FileSetEntry._();
   @$core.pragma('dart2js:noInline')
-  static FileSetEntry getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<FileSetEntry>(create);
+  static FileSetEntry getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<FileSetEntry>(
+          FileSetEntry.$_createMessage);
   static FileSetEntry? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -399,8 +413,9 @@ class InstallSpec extends $pb.GeneratedMessage {
     $core.int? retain,
     $core.bool? relaunch,
     $core.Iterable<FileSetEntry>? fileSet,
+    $core.Iterable<$fixnum.Int64>? reservedCodes,
   }) {
-    final result = create();
+    final result = InstallSpec._();
     if (layout != null) result.layout = layout;
     if (installRoot != null) result.installRoot = installRoot;
     if (executableRelpath != null) result.executableRelpath = executableRelpath;
@@ -409,6 +424,7 @@ class InstallSpec extends $pb.GeneratedMessage {
     if (retain != null) result.retain = retain;
     if (relaunch != null) result.relaunch = relaunch;
     if (fileSet != null) result.fileSet.addAll(fileSet);
+    if (reservedCodes != null) result.reservedCodes.addAll(reservedCodes);
     return result;
   }
 
@@ -416,16 +432,16 @@ class InstallSpec extends $pb.GeneratedMessage {
 
   factory InstallSpec.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      InstallSpec()..mergeFromBuffer(data, registry);
   factory InstallSpec.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      InstallSpec()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'InstallSpec',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: InstallSpec.$_createMessage)
     ..aE<Layout>(1, _omitFieldNames ? '' : 'layout', enumValues: Layout.values)
     ..aOS(2, _omitFieldNames ? '' : 'installRoot')
     ..aOS(3, _omitFieldNames ? '' : 'executableRelpath')
@@ -434,7 +450,9 @@ class InstallSpec extends $pb.GeneratedMessage {
     ..aI(6, _omitFieldNames ? '' : 'retain')
     ..aOB(7, _omitFieldNames ? '' : 'relaunch')
     ..pPM<FileSetEntry>(8, _omitFieldNames ? '' : 'fileSet',
-        subBuilder: FileSetEntry.create)
+        subBuilder: FileSetEntry.$_createMessage)
+    ..p<$fixnum.Int64>(
+        9, _omitFieldNames ? '' : 'reservedCodes', $pb.PbFieldType.K6)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -448,12 +466,15 @@ class InstallSpec extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use InstallSpec() / InstallSpec.new instead')
   static InstallSpec create() => InstallSpec._();
+  static $pb.GeneratedMessage $_createMessage() => InstallSpec._();
   @$core.override
-  InstallSpec createEmptyInstance() => create();
+  InstallSpec createEmptyInstance() => InstallSpec._();
   @$core.pragma('dart2js:noInline')
-  static InstallSpec getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<InstallSpec>(create);
+  static InstallSpec getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<InstallSpec>(
+          InstallSpec.$_createMessage);
   static InstallSpec? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -515,6 +536,11 @@ class InstallSpec extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(8)
   $pb.PbList<FileSetEntry> get fileSet => $_getList(7);
+
+  /// Codes that prune must never delete (project pins). Engine does not
+  /// interpret how the host chose them.
+  @$pb.TagNumber(9)
+  $pb.PbList<$fixnum.Int64> get reservedCodes => $_getList(8);
 }
 
 class Runtime extends $pb.GeneratedMessage {
@@ -526,7 +552,7 @@ class Runtime extends $pb.GeneratedMessage {
     InstallSpec? install,
     $core.String? sidecarPath,
   }) {
-    final result = create();
+    final result = Runtime._();
     if (channel != null) result.channel = channel;
     if (currentCode != null) result.currentCode = currentCode;
     if (clientSelectors != null)
@@ -541,16 +567,16 @@ class Runtime extends $pb.GeneratedMessage {
 
   factory Runtime.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Runtime()..mergeFromBuffer(data, registry);
   factory Runtime.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Runtime()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Runtime',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Runtime.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'channel')
     ..aInt64(2, _omitFieldNames ? '' : 'currentCode')
     ..m<$core.String, $core.String>(3, _omitFieldNames ? '' : 'clientSelectors',
@@ -560,7 +586,7 @@ class Runtime extends $pb.GeneratedMessage {
         packageName: const $pb.PackageName('relkit.updater.v1'))
     ..aOS(4, _omitFieldNames ? '' : 'dataDir')
     ..aOM<InstallSpec>(5, _omitFieldNames ? '' : 'install',
-        subBuilder: InstallSpec.create)
+        subBuilder: InstallSpec.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'sidecarPath')
     ..hasRequiredFields = false;
 
@@ -574,12 +600,14 @@ class Runtime extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Runtime() / Runtime.new instead')
   static Runtime create() => Runtime._();
+  static $pb.GeneratedMessage $_createMessage() => Runtime._();
   @$core.override
-  Runtime createEmptyInstance() => create();
+  Runtime createEmptyInstance() => Runtime._();
   @$core.pragma('dart2js:noInline')
-  static Runtime getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Runtime>(create);
+  static Runtime getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Runtime>(Runtime.$_createMessage);
   static Runtime? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -638,7 +666,7 @@ class CheckPolicy extends $pb.GeneratedMessage {
     $0.Duration? afterSuccess,
     $0.Duration? afterFailure,
   }) {
-    final result = create();
+    final result = CheckPolicy._();
     if (afterSuccess != null) result.afterSuccess = afterSuccess;
     if (afterFailure != null) result.afterFailure = afterFailure;
     return result;
@@ -648,20 +676,20 @@ class CheckPolicy extends $pb.GeneratedMessage {
 
   factory CheckPolicy.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      CheckPolicy()..mergeFromBuffer(data, registry);
   factory CheckPolicy.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      CheckPolicy()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'CheckPolicy',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: CheckPolicy.$_createMessage)
     ..aOM<$0.Duration>(1, _omitFieldNames ? '' : 'afterSuccess',
-        subBuilder: $0.Duration.create)
+        subBuilder: $0.Duration.$_createMessage)
     ..aOM<$0.Duration>(2, _omitFieldNames ? '' : 'afterFailure',
-        subBuilder: $0.Duration.create)
+        subBuilder: $0.Duration.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -675,12 +703,15 @@ class CheckPolicy extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use CheckPolicy() / CheckPolicy.new instead')
   static CheckPolicy create() => CheckPolicy._();
+  static $pb.GeneratedMessage $_createMessage() => CheckPolicy._();
   @$core.override
-  CheckPolicy createEmptyInstance() => create();
+  CheckPolicy createEmptyInstance() => CheckPolicy._();
   @$core.pragma('dart2js:noInline')
-  static CheckPolicy getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<CheckPolicy>(create);
+  static CheckPolicy getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<CheckPolicy>(
+          CheckPolicy.$_createMessage);
   static CheckPolicy? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -712,7 +743,7 @@ class SchedulerConfig extends $pb.GeneratedMessage {
     $core.bool? forceOnStart,
     CheckPolicy? policy,
   }) {
-    final result = create();
+    final result = SchedulerConfig._();
     if (checkOnStart != null) result.checkOnStart = checkOnStart;
     if (forceOnStart != null) result.forceOnStart = forceOnStart;
     if (policy != null) result.policy = policy;
@@ -723,20 +754,20 @@ class SchedulerConfig extends $pb.GeneratedMessage {
 
   factory SchedulerConfig.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      SchedulerConfig()..mergeFromBuffer(data, registry);
   factory SchedulerConfig.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      SchedulerConfig()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'SchedulerConfig',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: SchedulerConfig.$_createMessage)
     ..aOB(1, _omitFieldNames ? '' : 'checkOnStart')
     ..aOB(2, _omitFieldNames ? '' : 'forceOnStart')
     ..aOM<CheckPolicy>(3, _omitFieldNames ? '' : 'policy',
-        subBuilder: CheckPolicy.create)
+        subBuilder: CheckPolicy.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -750,12 +781,15 @@ class SchedulerConfig extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SchedulerConfig() / SchedulerConfig.new instead')
   static SchedulerConfig create() => SchedulerConfig._();
+  static $pb.GeneratedMessage $_createMessage() => SchedulerConfig._();
   @$core.override
-  SchedulerConfig createEmptyInstance() => create();
+  SchedulerConfig createEmptyInstance() => SchedulerConfig._();
   @$core.pragma('dart2js:noInline')
-  static SchedulerConfig getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<SchedulerConfig>(create);
+  static SchedulerConfig getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SchedulerConfig>(
+          SchedulerConfig.$_createMessage);
   static SchedulerConfig? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -793,7 +827,7 @@ class ClientHello extends $pb.GeneratedMessage {
     $core.int? ipcMin,
     $core.int? ipcMax,
   }) {
-    final result = create();
+    final result = ClientHello._();
     if (ipcMin != null) result.ipcMin = ipcMin;
     if (ipcMax != null) result.ipcMax = ipcMax;
     return result;
@@ -803,16 +837,16 @@ class ClientHello extends $pb.GeneratedMessage {
 
   factory ClientHello.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ClientHello()..mergeFromBuffer(data, registry);
   factory ClientHello.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ClientHello()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientHello',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ClientHello.$_createMessage)
     ..aI(1, _omitFieldNames ? '' : 'ipcMin', fieldType: $pb.PbFieldType.OU3)
     ..aI(2, _omitFieldNames ? '' : 'ipcMax', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
@@ -828,12 +862,15 @@ class ClientHello extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ClientHello() / ClientHello.new instead')
   static ClientHello create() => ClientHello._();
+  static $pb.GeneratedMessage $_createMessage() => ClientHello._();
   @$core.override
-  ClientHello createEmptyInstance() => create();
+  ClientHello createEmptyInstance() => ClientHello._();
   @$core.pragma('dart2js:noInline')
-  static ClientHello getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ClientHello>(create);
+  static ClientHello getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ClientHello>(
+          ClientHello.$_createMessage);
   static ClientHello? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -864,7 +901,7 @@ class Capabilities extends $pb.GeneratedMessage {
     $0.Duration? planTtl,
     $core.String? engineVersion,
   }) {
-    final result = create();
+    final result = Capabilities._();
     if (ipc != null) result.ipc = ipc;
     if (operations != null) result.operations.addAll(operations);
     if (layouts != null) result.layouts.addAll(layouts);
@@ -878,16 +915,16 @@ class Capabilities extends $pb.GeneratedMessage {
 
   factory Capabilities.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Capabilities()..mergeFromBuffer(data, registry);
   factory Capabilities.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Capabilities()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Capabilities',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Capabilities.$_createMessage)
     ..aI(1, _omitFieldNames ? '' : 'ipc', fieldType: $pb.PbFieldType.OU3)
     ..pc<Operation>(2, _omitFieldNames ? '' : 'operations', $pb.PbFieldType.KE,
         valueOf: Operation.valueOf,
@@ -898,9 +935,9 @@ class Capabilities extends $pb.GeneratedMessage {
         enumValues: Layout.values,
         defaultEnumValue: Layout.LAYOUT_UNSPECIFIED)
     ..aOM<$0.Duration>(4, _omitFieldNames ? '' : 'minCheckInterval',
-        subBuilder: $0.Duration.create)
+        subBuilder: $0.Duration.$_createMessage)
     ..aOM<$0.Duration>(5, _omitFieldNames ? '' : 'planTtl',
-        subBuilder: $0.Duration.create)
+        subBuilder: $0.Duration.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'engineVersion')
     ..hasRequiredFields = false;
 
@@ -915,12 +952,15 @@ class Capabilities extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Capabilities() / Capabilities.new instead')
   static Capabilities create() => Capabilities._();
+  static $pb.GeneratedMessage $_createMessage() => Capabilities._();
   @$core.override
-  Capabilities createEmptyInstance() => create();
+  Capabilities createEmptyInstance() => Capabilities._();
   @$core.pragma('dart2js:noInline')
-  static Capabilities getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<Capabilities>(create);
+  static Capabilities getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Capabilities>(
+          Capabilities.$_createMessage);
   static Capabilities? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -976,7 +1016,7 @@ class CheckOp extends $pb.GeneratedMessage {
     $fixnum.Int64? exactCode,
     CheckPolicy? policy,
   }) {
-    final result = create();
+    final result = CheckOp._();
     if (force != null) result.force = force;
     if (exactCode != null) result.exactCode = exactCode;
     if (policy != null) result.policy = policy;
@@ -987,20 +1027,20 @@ class CheckOp extends $pb.GeneratedMessage {
 
   factory CheckOp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      CheckOp()..mergeFromBuffer(data, registry);
   factory CheckOp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      CheckOp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'CheckOp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: CheckOp.$_createMessage)
     ..aOB(1, _omitFieldNames ? '' : 'force')
     ..aInt64(2, _omitFieldNames ? '' : 'exactCode')
     ..aOM<CheckPolicy>(3, _omitFieldNames ? '' : 'policy',
-        subBuilder: CheckPolicy.create)
+        subBuilder: CheckPolicy.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1013,12 +1053,14 @@ class CheckOp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use CheckOp() / CheckOp.new instead')
   static CheckOp create() => CheckOp._();
+  static $pb.GeneratedMessage $_createMessage() => CheckOp._();
   @$core.override
-  CheckOp createEmptyInstance() => create();
+  CheckOp createEmptyInstance() => CheckOp._();
   @$core.pragma('dart2js:noInline')
-  static CheckOp getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<CheckOp>(create);
+  static CheckOp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<CheckOp>(CheckOp.$_createMessage);
   static CheckOp? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1055,7 +1097,7 @@ class SkipOp extends $pb.GeneratedMessage {
   factory SkipOp({
     $fixnum.Int64? code,
   }) {
-    final result = create();
+    final result = SkipOp._();
     if (code != null) result.code = code;
     return result;
   }
@@ -1064,16 +1106,16 @@ class SkipOp extends $pb.GeneratedMessage {
 
   factory SkipOp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      SkipOp()..mergeFromBuffer(data, registry);
   factory SkipOp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      SkipOp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'SkipOp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: SkipOp.$_createMessage)
     ..aInt64(1, _omitFieldNames ? '' : 'code')
     ..hasRequiredFields = false;
 
@@ -1087,12 +1129,14 @@ class SkipOp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SkipOp() / SkipOp.new instead')
   static SkipOp create() => SkipOp._();
+  static $pb.GeneratedMessage $_createMessage() => SkipOp._();
   @$core.override
-  SkipOp createEmptyInstance() => create();
+  SkipOp createEmptyInstance() => SkipOp._();
   @$core.pragma('dart2js:noInline')
-  static SkipOp getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SkipOp>(create);
+  static SkipOp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SkipOp>(SkipOp.$_createMessage);
   static SkipOp? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1109,7 +1153,7 @@ class DownloadOp extends $pb.GeneratedMessage {
   factory DownloadOp({
     $core.String? planId,
   }) {
-    final result = create();
+    final result = DownloadOp._();
     if (planId != null) result.planId = planId;
     return result;
   }
@@ -1118,16 +1162,16 @@ class DownloadOp extends $pb.GeneratedMessage {
 
   factory DownloadOp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      DownloadOp()..mergeFromBuffer(data, registry);
   factory DownloadOp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      DownloadOp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'DownloadOp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: DownloadOp.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'planId')
     ..hasRequiredFields = false;
 
@@ -1141,12 +1185,14 @@ class DownloadOp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DownloadOp() / DownloadOp.new instead')
   static DownloadOp create() => DownloadOp._();
+  static $pb.GeneratedMessage $_createMessage() => DownloadOp._();
   @$core.override
-  DownloadOp createEmptyInstance() => create();
+  DownloadOp createEmptyInstance() => DownloadOp._();
   @$core.pragma('dart2js:noInline')
   static DownloadOp getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<DownloadOp>(create);
+      $pb.GeneratedMessage.$_defaultFor<DownloadOp>(DownloadOp.$_createMessage);
   static DownloadOp? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1162,9 +1208,11 @@ class DownloadOp extends $pb.GeneratedMessage {
 class ApplyOp extends $pb.GeneratedMessage {
   factory ApplyOp({
     $core.String? planId,
+    $core.bool? installOnly,
   }) {
-    final result = create();
+    final result = ApplyOp._();
     if (planId != null) result.planId = planId;
+    if (installOnly != null) result.installOnly = installOnly;
     return result;
   }
 
@@ -1172,17 +1220,18 @@ class ApplyOp extends $pb.GeneratedMessage {
 
   factory ApplyOp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ApplyOp()..mergeFromBuffer(data, registry);
   factory ApplyOp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ApplyOp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ApplyOp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ApplyOp.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'planId')
+    ..aOB(2, _omitFieldNames ? '' : 'installOnly')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1195,12 +1244,14 @@ class ApplyOp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ApplyOp() / ApplyOp.new instead')
   static ApplyOp create() => ApplyOp._();
+  static $pb.GeneratedMessage $_createMessage() => ApplyOp._();
   @$core.override
-  ApplyOp createEmptyInstance() => create();
+  ApplyOp createEmptyInstance() => ApplyOp._();
   @$core.pragma('dart2js:noInline')
-  static ApplyOp getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ApplyOp>(create);
+  static ApplyOp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ApplyOp>(ApplyOp.$_createMessage);
   static ApplyOp? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1211,25 +1262,36 @@ class ApplyOp extends $pb.GeneratedMessage {
   $core.bool hasPlanId() => $_has(0);
   @$pb.TagNumber(1)
   void clearPlanId() => $_clearField(1);
+
+  /// When true, versionedDir copies into versions/ but does not rewrite
+  /// active.json. wholeRoot / fileSet ignore this flag.
+  @$pb.TagNumber(2)
+  $core.bool get installOnly => $_getBF(1);
+  @$pb.TagNumber(2)
+  set installOnly($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasInstallOnly() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearInstallOnly() => $_clearField(2);
 }
 
 class StatusOp extends $pb.GeneratedMessage {
-  factory StatusOp() => create();
+  factory StatusOp() => StatusOp._();
 
   StatusOp._();
 
   factory StatusOp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      StatusOp()..mergeFromBuffer(data, registry);
   factory StatusOp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      StatusOp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'StatusOp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: StatusOp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1242,32 +1304,34 @@ class StatusOp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use StatusOp() / StatusOp.new instead')
   static StatusOp create() => StatusOp._();
+  static $pb.GeneratedMessage $_createMessage() => StatusOp._();
   @$core.override
-  StatusOp createEmptyInstance() => create();
+  StatusOp createEmptyInstance() => StatusOp._();
   @$core.pragma('dart2js:noInline')
-  static StatusOp getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<StatusOp>(create);
+  static StatusOp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<StatusOp>(StatusOp.$_createMessage);
   static StatusOp? _defaultInstance;
 }
 
 class CleanupOp extends $pb.GeneratedMessage {
-  factory CleanupOp() => create();
+  factory CleanupOp() => CleanupOp._();
 
   CleanupOp._();
 
   factory CleanupOp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      CleanupOp()..mergeFromBuffer(data, registry);
   factory CleanupOp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      CleanupOp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'CleanupOp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: CleanupOp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1280,32 +1344,34 @@ class CleanupOp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use CleanupOp() / CleanupOp.new instead')
   static CleanupOp create() => CleanupOp._();
+  static $pb.GeneratedMessage $_createMessage() => CleanupOp._();
   @$core.override
-  CleanupOp createEmptyInstance() => create();
+  CleanupOp createEmptyInstance() => CleanupOp._();
   @$core.pragma('dart2js:noInline')
-  static CleanupOp getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<CleanupOp>(create);
+  static CleanupOp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<CleanupOp>(CleanupOp.$_createMessage);
   static CleanupOp? _defaultInstance;
 }
 
 class CancelOp extends $pb.GeneratedMessage {
-  factory CancelOp() => create();
+  factory CancelOp() => CancelOp._();
 
   CancelOp._();
 
   factory CancelOp.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      CancelOp()..mergeFromBuffer(data, registry);
   factory CancelOp.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      CancelOp()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'CancelOp',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: CancelOp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1318,13 +1384,326 @@ class CancelOp extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use CancelOp() / CancelOp.new instead')
   static CancelOp create() => CancelOp._();
+  static $pb.GeneratedMessage $_createMessage() => CancelOp._();
   @$core.override
-  CancelOp createEmptyInstance() => create();
+  CancelOp createEmptyInstance() => CancelOp._();
   @$core.pragma('dart2js:noInline')
-  static CancelOp getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<CancelOp>(create);
+  static CancelOp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<CancelOp>(CancelOp.$_createMessage);
   static CancelOp? _defaultInstance;
+}
+
+class ListInstalledOp extends $pb.GeneratedMessage {
+  factory ListInstalledOp() => ListInstalledOp._();
+
+  ListInstalledOp._();
+
+  factory ListInstalledOp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListInstalledOp()..mergeFromBuffer(data, registry);
+  factory ListInstalledOp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListInstalledOp()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListInstalledOp',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
+      createEmptyInstance: ListInstalledOp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListInstalledOp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListInstalledOp copyWith(void Function(ListInstalledOp) updates) =>
+      super.copyWith((message) => updates(message as ListInstalledOp))
+          as ListInstalledOp;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ListInstalledOp() / ListInstalledOp.new instead')
+  static ListInstalledOp create() => ListInstalledOp._();
+  static $pb.GeneratedMessage $_createMessage() => ListInstalledOp._();
+  @$core.override
+  ListInstalledOp createEmptyInstance() => ListInstalledOp._();
+  @$core.pragma('dart2js:noInline')
+  static ListInstalledOp getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ListInstalledOp>(
+          ListInstalledOp.$_createMessage);
+  static ListInstalledOp? _defaultInstance;
+}
+
+class SwitchActiveOp extends $pb.GeneratedMessage {
+  factory SwitchActiveOp({
+    $fixnum.Int64? code,
+  }) {
+    final result = SwitchActiveOp._();
+    if (code != null) result.code = code;
+    return result;
+  }
+
+  SwitchActiveOp._();
+
+  factory SwitchActiveOp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SwitchActiveOp()..mergeFromBuffer(data, registry);
+  factory SwitchActiveOp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SwitchActiveOp()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SwitchActiveOp',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
+      createEmptyInstance: SwitchActiveOp.$_createMessage)
+    ..aInt64(1, _omitFieldNames ? '' : 'code')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SwitchActiveOp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SwitchActiveOp copyWith(void Function(SwitchActiveOp) updates) =>
+      super.copyWith((message) => updates(message as SwitchActiveOp))
+          as SwitchActiveOp;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SwitchActiveOp() / SwitchActiveOp.new instead')
+  static SwitchActiveOp create() => SwitchActiveOp._();
+  static $pb.GeneratedMessage $_createMessage() => SwitchActiveOp._();
+  @$core.override
+  SwitchActiveOp createEmptyInstance() => SwitchActiveOp._();
+  @$core.pragma('dart2js:noInline')
+  static SwitchActiveOp getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SwitchActiveOp>(
+          SwitchActiveOp.$_createMessage);
+  static SwitchActiveOp? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get code => $_getI64(0);
+  @$pb.TagNumber(1)
+  set code($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCode() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCode() => $_clearField(1);
+}
+
+class RollbackOp extends $pb.GeneratedMessage {
+  factory RollbackOp() => RollbackOp._();
+
+  RollbackOp._();
+
+  factory RollbackOp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RollbackOp()..mergeFromBuffer(data, registry);
+  factory RollbackOp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RollbackOp()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RollbackOp',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
+      createEmptyInstance: RollbackOp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RollbackOp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RollbackOp copyWith(void Function(RollbackOp) updates) =>
+      super.copyWith((message) => updates(message as RollbackOp)) as RollbackOp;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use RollbackOp() / RollbackOp.new instead')
+  static RollbackOp create() => RollbackOp._();
+  static $pb.GeneratedMessage $_createMessage() => RollbackOp._();
+  @$core.override
+  RollbackOp createEmptyInstance() => RollbackOp._();
+  @$core.pragma('dart2js:noInline')
+  static RollbackOp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RollbackOp>(RollbackOp.$_createMessage);
+  static RollbackOp? _defaultInstance;
+}
+
+class InstalledVersion extends $pb.GeneratedMessage {
+  factory InstalledVersion({
+    $fixnum.Int64? code,
+    $core.String? version,
+    $core.String? path,
+    $core.String? executable,
+    $core.bool? active,
+  }) {
+    final result = InstalledVersion._();
+    if (code != null) result.code = code;
+    if (version != null) result.version = version;
+    if (path != null) result.path = path;
+    if (executable != null) result.executable = executable;
+    if (active != null) result.active = active;
+    return result;
+  }
+
+  InstalledVersion._();
+
+  factory InstalledVersion.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InstalledVersion()..mergeFromBuffer(data, registry);
+  factory InstalledVersion.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InstalledVersion()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'InstalledVersion',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
+      createEmptyInstance: InstalledVersion.$_createMessage)
+    ..aInt64(1, _omitFieldNames ? '' : 'code')
+    ..aOS(2, _omitFieldNames ? '' : 'version')
+    ..aOS(3, _omitFieldNames ? '' : 'path')
+    ..aOS(4, _omitFieldNames ? '' : 'executable')
+    ..aOB(5, _omitFieldNames ? '' : 'active')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InstalledVersion clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InstalledVersion copyWith(void Function(InstalledVersion) updates) =>
+      super.copyWith((message) => updates(message as InstalledVersion))
+          as InstalledVersion;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use InstalledVersion() / InstalledVersion.new instead')
+  static InstalledVersion create() => InstalledVersion._();
+  static $pb.GeneratedMessage $_createMessage() => InstalledVersion._();
+  @$core.override
+  InstalledVersion createEmptyInstance() => InstalledVersion._();
+  @$core.pragma('dart2js:noInline')
+  static InstalledVersion getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<InstalledVersion>(
+          InstalledVersion.$_createMessage);
+  static InstalledVersion? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get code => $_getI64(0);
+  @$pb.TagNumber(1)
+  set code($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCode() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCode() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get version => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set version($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasVersion() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearVersion() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get path => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set path($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPath() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPath() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get executable => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set executable($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasExecutable() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearExecutable() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.bool get active => $_getBF(4);
+  @$pb.TagNumber(5)
+  set active($core.bool value) => $_setBool(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasActive() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearActive() => $_clearField(5);
+}
+
+class InstalledList extends $pb.GeneratedMessage {
+  factory InstalledList({
+    $core.Iterable<InstalledVersion>? versions,
+    $fixnum.Int64? activeCode,
+  }) {
+    final result = InstalledList._();
+    if (versions != null) result.versions.addAll(versions);
+    if (activeCode != null) result.activeCode = activeCode;
+    return result;
+  }
+
+  InstalledList._();
+
+  factory InstalledList.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InstalledList()..mergeFromBuffer(data, registry);
+  factory InstalledList.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InstalledList()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'InstalledList',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
+      createEmptyInstance: InstalledList.$_createMessage)
+    ..pPM<InstalledVersion>(1, _omitFieldNames ? '' : 'versions',
+        subBuilder: InstalledVersion.$_createMessage)
+    ..aInt64(2, _omitFieldNames ? '' : 'activeCode')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InstalledList clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InstalledList copyWith(void Function(InstalledList) updates) =>
+      super.copyWith((message) => updates(message as InstalledList))
+          as InstalledList;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use InstalledList() / InstalledList.new instead')
+  static InstalledList create() => InstalledList._();
+  static $pb.GeneratedMessage $_createMessage() => InstalledList._();
+  @$core.override
+  InstalledList createEmptyInstance() => InstalledList._();
+  @$core.pragma('dart2js:noInline')
+  static InstalledList getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<InstalledList>(
+          InstalledList.$_createMessage);
+  static InstalledList? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<InstalledVersion> get versions => $_getList(0);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get activeCode => $_getI64(1);
+  @$pb.TagNumber(2)
+  set activeCode($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasActiveCode() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearActiveCode() => $_clearField(2);
 }
 
 enum UpdaterRequest_Op {
@@ -1335,6 +1714,9 @@ enum UpdaterRequest_Op {
   status,
   cleanup,
   cancel,
+  listInstalled,
+  switchActive,
+  rollback,
   notSet
 }
 
@@ -1350,8 +1732,11 @@ class UpdaterRequest extends $pb.GeneratedMessage {
     StatusOp? status,
     CleanupOp? cleanup,
     CancelOp? cancel,
+    ListInstalledOp? listInstalled,
+    SwitchActiveOp? switchActive,
+    RollbackOp? rollback,
   }) {
-    final result = create();
+    final result = UpdaterRequest._();
     if (hello != null) result.hello = hello;
     if (profile != null) result.profile = profile;
     if (runtime != null) result.runtime = runtime;
@@ -1362,6 +1747,9 @@ class UpdaterRequest extends $pb.GeneratedMessage {
     if (status != null) result.status = status;
     if (cleanup != null) result.cleanup = cleanup;
     if (cancel != null) result.cancel = cancel;
+    if (listInstalled != null) result.listInstalled = listInstalled;
+    if (switchActive != null) result.switchActive = switchActive;
+    if (rollback != null) result.rollback = rollback;
     return result;
   }
 
@@ -1369,10 +1757,10 @@ class UpdaterRequest extends $pb.GeneratedMessage {
 
   factory UpdaterRequest.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      UpdaterRequest()..mergeFromBuffer(data, registry);
   factory UpdaterRequest.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      UpdaterRequest()..mergeFromJson(json, registry);
 
   static const $core.Map<$core.int, UpdaterRequest_Op> _UpdaterRequest_OpByTag =
       {
@@ -1383,33 +1771,43 @@ class UpdaterRequest extends $pb.GeneratedMessage {
     14: UpdaterRequest_Op.status,
     15: UpdaterRequest_Op.cleanup,
     16: UpdaterRequest_Op.cancel,
+    17: UpdaterRequest_Op.listInstalled,
+    18: UpdaterRequest_Op.switchActive,
+    19: UpdaterRequest_Op.rollback,
     0: UpdaterRequest_Op.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'UpdaterRequest',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
-    ..oo(0, [10, 11, 12, 13, 14, 15, 16])
+      createEmptyInstance: UpdaterRequest.$_createMessage)
+    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
-        subBuilder: ClientHello.create)
+        subBuilder: ClientHello.$_createMessage)
     ..aOM<ClientProfile>(2, _omitFieldNames ? '' : 'profile',
-        subBuilder: ClientProfile.create)
+        subBuilder: ClientProfile.$_createMessage)
     ..aOM<Runtime>(3, _omitFieldNames ? '' : 'runtime',
-        subBuilder: Runtime.create)
+        subBuilder: Runtime.$_createMessage)
     ..aOM<CheckOp>(10, _omitFieldNames ? '' : 'check',
-        subBuilder: CheckOp.create)
-    ..aOM<SkipOp>(11, _omitFieldNames ? '' : 'skip', subBuilder: SkipOp.create)
+        subBuilder: CheckOp.$_createMessage)
+    ..aOM<SkipOp>(11, _omitFieldNames ? '' : 'skip',
+        subBuilder: SkipOp.$_createMessage)
     ..aOM<DownloadOp>(12, _omitFieldNames ? '' : 'download',
-        subBuilder: DownloadOp.create)
+        subBuilder: DownloadOp.$_createMessage)
     ..aOM<ApplyOp>(13, _omitFieldNames ? '' : 'apply',
-        subBuilder: ApplyOp.create)
+        subBuilder: ApplyOp.$_createMessage)
     ..aOM<StatusOp>(14, _omitFieldNames ? '' : 'status',
-        subBuilder: StatusOp.create)
+        subBuilder: StatusOp.$_createMessage)
     ..aOM<CleanupOp>(15, _omitFieldNames ? '' : 'cleanup',
-        subBuilder: CleanupOp.create)
+        subBuilder: CleanupOp.$_createMessage)
     ..aOM<CancelOp>(16, _omitFieldNames ? '' : 'cancel',
-        subBuilder: CancelOp.create)
+        subBuilder: CancelOp.$_createMessage)
+    ..aOM<ListInstalledOp>(17, _omitFieldNames ? '' : 'listInstalled',
+        subBuilder: ListInstalledOp.$_createMessage)
+    ..aOM<SwitchActiveOp>(18, _omitFieldNames ? '' : 'switchActive',
+        subBuilder: SwitchActiveOp.$_createMessage)
+    ..aOM<RollbackOp>(19, _omitFieldNames ? '' : 'rollback',
+        subBuilder: RollbackOp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1423,12 +1821,15 @@ class UpdaterRequest extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UpdaterRequest() / UpdaterRequest.new instead')
   static UpdaterRequest create() => UpdaterRequest._();
+  static $pb.GeneratedMessage $_createMessage() => UpdaterRequest._();
   @$core.override
-  UpdaterRequest createEmptyInstance() => create();
+  UpdaterRequest createEmptyInstance() => UpdaterRequest._();
   @$core.pragma('dart2js:noInline')
-  static UpdaterRequest getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<UpdaterRequest>(create);
+  static UpdaterRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<UpdaterRequest>(
+          UpdaterRequest.$_createMessage);
   static UpdaterRequest? _defaultInstance;
 
   @$pb.TagNumber(10)
@@ -1438,6 +1839,9 @@ class UpdaterRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(14)
   @$pb.TagNumber(15)
   @$pb.TagNumber(16)
+  @$pb.TagNumber(17)
+  @$pb.TagNumber(18)
+  @$pb.TagNumber(19)
   UpdaterRequest_Op whichOp() => _UpdaterRequest_OpByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(10)
   @$pb.TagNumber(11)
@@ -1446,6 +1850,9 @@ class UpdaterRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(14)
   @$pb.TagNumber(15)
   @$pb.TagNumber(16)
+  @$pb.TagNumber(17)
+  @$pb.TagNumber(18)
+  @$pb.TagNumber(19)
   void clearOp() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1557,6 +1964,39 @@ class UpdaterRequest extends $pb.GeneratedMessage {
   void clearCancel() => $_clearField(16);
   @$pb.TagNumber(16)
   CancelOp ensureCancel() => $_ensure(9);
+
+  @$pb.TagNumber(17)
+  ListInstalledOp get listInstalled => $_getN(10);
+  @$pb.TagNumber(17)
+  set listInstalled(ListInstalledOp value) => $_setField(17, value);
+  @$pb.TagNumber(17)
+  $core.bool hasListInstalled() => $_has(10);
+  @$pb.TagNumber(17)
+  void clearListInstalled() => $_clearField(17);
+  @$pb.TagNumber(17)
+  ListInstalledOp ensureListInstalled() => $_ensure(10);
+
+  @$pb.TagNumber(18)
+  SwitchActiveOp get switchActive => $_getN(11);
+  @$pb.TagNumber(18)
+  set switchActive(SwitchActiveOp value) => $_setField(18, value);
+  @$pb.TagNumber(18)
+  $core.bool hasSwitchActive() => $_has(11);
+  @$pb.TagNumber(18)
+  void clearSwitchActive() => $_clearField(18);
+  @$pb.TagNumber(18)
+  SwitchActiveOp ensureSwitchActive() => $_ensure(11);
+
+  @$pb.TagNumber(19)
+  RollbackOp get rollback => $_getN(12);
+  @$pb.TagNumber(19)
+  set rollback(RollbackOp value) => $_setField(19, value);
+  @$pb.TagNumber(19)
+  $core.bool hasRollback() => $_has(12);
+  @$pb.TagNumber(19)
+  void clearRollback() => $_clearField(19);
+  @$pb.TagNumber(19)
+  RollbackOp ensureRollback() => $_ensure(12);
 }
 
 class Error extends $pb.GeneratedMessage {
@@ -1567,7 +2007,7 @@ class Error extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? attempts,
     RecoveryHelp? recovery,
   }) {
-    final result = create();
+    final result = Error._();
     if (code != null) result.code = code;
     if (retryable != null) result.retryable = retryable;
     if (message != null) result.message = message;
@@ -1580,23 +2020,23 @@ class Error extends $pb.GeneratedMessage {
 
   factory Error.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Error()..mergeFromBuffer(data, registry);
   factory Error.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Error()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Error',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Error.$_createMessage)
     ..aE<ErrorCode>(1, _omitFieldNames ? '' : 'code',
         enumValues: ErrorCode.values)
     ..aOB(2, _omitFieldNames ? '' : 'retryable')
     ..aOS(3, _omitFieldNames ? '' : 'message')
     ..pPS(4, _omitFieldNames ? '' : 'attempts')
     ..aOM<RecoveryHelp>(5, _omitFieldNames ? '' : 'recovery',
-        subBuilder: RecoveryHelp.create)
+        subBuilder: RecoveryHelp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1609,12 +2049,14 @@ class Error extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Error() / Error.new instead')
   static Error create() => Error._();
+  static $pb.GeneratedMessage $_createMessage() => Error._();
   @$core.override
-  Error createEmptyInstance() => create();
+  Error createEmptyInstance() => Error._();
   @$core.pragma('dart2js:noInline')
-  static Error getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Error>(create);
+  static Error getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Error>(Error.$_createMessage);
   static Error? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1666,7 +2108,7 @@ class PriorReleaseNotes extends $pb.GeneratedMessage {
     $core.String? notes,
     $core.String? notesUrl,
   }) {
-    final result = create();
+    final result = PriorReleaseNotes._();
     if (version != null) result.version = version;
     if (code != null) result.code = code;
     if (notes != null) result.notes = notes;
@@ -1678,16 +2120,16 @@ class PriorReleaseNotes extends $pb.GeneratedMessage {
 
   factory PriorReleaseNotes.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      PriorReleaseNotes()..mergeFromBuffer(data, registry);
   factory PriorReleaseNotes.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      PriorReleaseNotes()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PriorReleaseNotes',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: PriorReleaseNotes.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'version')
     ..aInt64(2, _omitFieldNames ? '' : 'code')
     ..aOS(3, _omitFieldNames ? '' : 'notes')
@@ -1705,12 +2147,15 @@ class PriorReleaseNotes extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PriorReleaseNotes() / PriorReleaseNotes.new instead')
   static PriorReleaseNotes create() => PriorReleaseNotes._();
+  static $pb.GeneratedMessage $_createMessage() => PriorReleaseNotes._();
   @$core.override
-  PriorReleaseNotes createEmptyInstance() => create();
+  PriorReleaseNotes createEmptyInstance() => PriorReleaseNotes._();
   @$core.pragma('dart2js:noInline')
-  static PriorReleaseNotes getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<PriorReleaseNotes>(create);
+  static PriorReleaseNotes getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PriorReleaseNotes>(
+          PriorReleaseNotes.$_createMessage);
   static PriorReleaseNotes? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1756,7 +2201,7 @@ class ArtifactView extends $pb.GeneratedMessage {
     $fixnum.Int64? size,
     $core.List<$core.int>? sha256,
   }) {
-    final result = create();
+    final result = ArtifactView._();
     if (name != null) result.name = name;
     if (size != null) result.size = size;
     if (sha256 != null) result.sha256 = sha256;
@@ -1767,16 +2212,16 @@ class ArtifactView extends $pb.GeneratedMessage {
 
   factory ArtifactView.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ArtifactView()..mergeFromBuffer(data, registry);
   factory ArtifactView.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ArtifactView()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ArtifactView',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ArtifactView.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aInt64(2, _omitFieldNames ? '' : 'size')
     ..a<$core.List<$core.int>>(
@@ -1794,12 +2239,15 @@ class ArtifactView extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ArtifactView() / ArtifactView.new instead')
   static ArtifactView create() => ArtifactView._();
+  static $pb.GeneratedMessage $_createMessage() => ArtifactView._();
   @$core.override
-  ArtifactView createEmptyInstance() => create();
+  ArtifactView createEmptyInstance() => ArtifactView._();
   @$core.pragma('dart2js:noInline')
-  static ArtifactView getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ArtifactView>(create);
+  static ArtifactView getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ArtifactView>(
+          ArtifactView.$_createMessage);
   static ArtifactView? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1835,7 +2283,7 @@ class UpToDate extends $pb.GeneratedMessage {
     $fixnum.Int64? sequence,
     $core.bool? currentIsYanked,
   }) {
-    final result = create();
+    final result = UpToDate._();
     if (sequence != null) result.sequence = sequence;
     if (currentIsYanked != null) result.currentIsYanked = currentIsYanked;
     return result;
@@ -1845,16 +2293,16 @@ class UpToDate extends $pb.GeneratedMessage {
 
   factory UpToDate.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      UpToDate()..mergeFromBuffer(data, registry);
   factory UpToDate.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      UpToDate()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'UpToDate',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: UpToDate.$_createMessage)
     ..aInt64(1, _omitFieldNames ? '' : 'sequence')
     ..aOB(2, _omitFieldNames ? '' : 'currentIsYanked')
     ..hasRequiredFields = false;
@@ -1869,12 +2317,14 @@ class UpToDate extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UpToDate() / UpToDate.new instead')
   static UpToDate create() => UpToDate._();
+  static $pb.GeneratedMessage $_createMessage() => UpToDate._();
   @$core.override
-  UpToDate createEmptyInstance() => create();
+  UpToDate createEmptyInstance() => UpToDate._();
   @$core.pragma('dart2js:noInline')
-  static UpToDate getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<UpToDate>(create);
+  static UpToDate getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<UpToDate>(UpToDate.$_createMessage);
   static UpToDate? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -1910,7 +2360,7 @@ class UpdateAvailable extends $pb.GeneratedMessage {
     $core.Iterable<PriorReleaseNotes>? priorReleaseNotes,
     $core.Iterable<ArtifactView>? artifacts,
   }) {
-    final result = create();
+    final result = UpdateAvailable._();
     if (planId != null) result.planId = planId;
     if (promptKey != null) result.promptKey = promptKey;
     if (version != null) result.version = version;
@@ -1931,16 +2381,16 @@ class UpdateAvailable extends $pb.GeneratedMessage {
 
   factory UpdateAvailable.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      UpdateAvailable()..mergeFromBuffer(data, registry);
   factory UpdateAvailable.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      UpdateAvailable()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'UpdateAvailable',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: UpdateAvailable.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'planId')
     ..aOS(2, _omitFieldNames ? '' : 'promptKey')
     ..aOS(3, _omitFieldNames ? '' : 'version')
@@ -1951,9 +2401,9 @@ class UpdateAvailable extends $pb.GeneratedMessage {
     ..aOS(8, _omitFieldNames ? '' : 'releaseNotesMarkdown')
     ..aOS(9, _omitFieldNames ? '' : 'releaseNotesUrl')
     ..pPM<PriorReleaseNotes>(10, _omitFieldNames ? '' : 'priorReleaseNotes',
-        subBuilder: PriorReleaseNotes.create)
+        subBuilder: PriorReleaseNotes.$_createMessage)
     ..pPM<ArtifactView>(11, _omitFieldNames ? '' : 'artifacts',
-        subBuilder: ArtifactView.create)
+        subBuilder: ArtifactView.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1967,12 +2417,15 @@ class UpdateAvailable extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UpdateAvailable() / UpdateAvailable.new instead')
   static UpdateAvailable create() => UpdateAvailable._();
+  static $pb.GeneratedMessage $_createMessage() => UpdateAvailable._();
   @$core.override
-  UpdateAvailable createEmptyInstance() => create();
+  UpdateAvailable createEmptyInstance() => UpdateAvailable._();
   @$core.pragma('dart2js:noInline')
-  static UpdateAvailable getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<UpdateAvailable>(create);
+  static UpdateAvailable getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<UpdateAvailable>(
+          UpdateAvailable.$_createMessage);
   static UpdateAvailable? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2073,7 +2526,7 @@ class FallbackRequired extends $pb.GeneratedMessage {
     $fixnum.Int64? minCode,
     $fixnum.Int64? maxCode,
   }) {
-    final result = create();
+    final result = FallbackRequired._();
     if (promptKey != null) result.promptKey = promptKey;
     if (manualUrl != null) result.manualUrl = manualUrl;
     if (message != null) result.message = message;
@@ -2088,16 +2541,16 @@ class FallbackRequired extends $pb.GeneratedMessage {
 
   factory FallbackRequired.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      FallbackRequired()..mergeFromBuffer(data, registry);
   factory FallbackRequired.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      FallbackRequired()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'FallbackRequired',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: FallbackRequired.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'promptKey')
     ..aOS(2, _omitFieldNames ? '' : 'manualUrl')
     ..aOS(3, _omitFieldNames ? '' : 'message')
@@ -2118,12 +2571,15 @@ class FallbackRequired extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use FallbackRequired() / FallbackRequired.new instead')
   static FallbackRequired create() => FallbackRequired._();
+  static $pb.GeneratedMessage $_createMessage() => FallbackRequired._();
   @$core.override
-  FallbackRequired createEmptyInstance() => create();
+  FallbackRequired createEmptyInstance() => FallbackRequired._();
   @$core.pragma('dart2js:noInline')
-  static FallbackRequired getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<FallbackRequired>(create);
+  static FallbackRequired getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<FallbackRequired>(
+          FallbackRequired.$_createMessage);
   static FallbackRequired? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2194,7 +2650,7 @@ class Throttled extends $pb.GeneratedMessage {
   factory Throttled({
     $1.Timestamp? nextAllowedAt,
   }) {
-    final result = create();
+    final result = Throttled._();
     if (nextAllowedAt != null) result.nextAllowedAt = nextAllowedAt;
     return result;
   }
@@ -2203,18 +2659,18 @@ class Throttled extends $pb.GeneratedMessage {
 
   factory Throttled.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Throttled()..mergeFromBuffer(data, registry);
   factory Throttled.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Throttled()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Throttled',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Throttled.$_createMessage)
     ..aOM<$1.Timestamp>(1, _omitFieldNames ? '' : 'nextAllowedAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2227,12 +2683,14 @@ class Throttled extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Throttled() / Throttled.new instead')
   static Throttled create() => Throttled._();
+  static $pb.GeneratedMessage $_createMessage() => Throttled._();
   @$core.override
-  Throttled createEmptyInstance() => create();
+  Throttled createEmptyInstance() => Throttled._();
   @$core.pragma('dart2js:noInline')
-  static Throttled getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Throttled>(create);
+  static Throttled getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Throttled>(Throttled.$_createMessage);
   static Throttled? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2251,7 +2709,7 @@ class Failed extends $pb.GeneratedMessage {
   factory Failed({
     Error? error,
   }) {
-    final result = create();
+    final result = Failed._();
     if (error != null) result.error = error;
     return result;
   }
@@ -2260,17 +2718,18 @@ class Failed extends $pb.GeneratedMessage {
 
   factory Failed.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Failed()..mergeFromBuffer(data, registry);
   factory Failed.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Failed()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Failed',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
-    ..aOM<Error>(1, _omitFieldNames ? '' : 'error', subBuilder: Error.create)
+      createEmptyInstance: Failed.$_createMessage)
+    ..aOM<Error>(1, _omitFieldNames ? '' : 'error',
+        subBuilder: Error.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2283,12 +2742,14 @@ class Failed extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Failed() / Failed.new instead')
   static Failed create() => Failed._();
+  static $pb.GeneratedMessage $_createMessage() => Failed._();
   @$core.override
-  Failed createEmptyInstance() => create();
+  Failed createEmptyInstance() => Failed._();
   @$core.pragma('dart2js:noInline')
-  static Failed getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Failed>(create);
+  static Failed getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Failed>(Failed.$_createMessage);
   static Failed? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2320,7 +2781,7 @@ class CheckResult extends $pb.GeneratedMessage {
     Throttled? throttled,
     Failed? failed,
   }) {
-    final result = create();
+    final result = CheckResult._();
     if (upToDate != null) result.upToDate = upToDate;
     if (updateAvailable != null) result.updateAvailable = updateAvailable;
     if (fallbackRequired != null) result.fallbackRequired = fallbackRequired;
@@ -2333,10 +2794,10 @@ class CheckResult extends $pb.GeneratedMessage {
 
   factory CheckResult.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      CheckResult()..mergeFromBuffer(data, registry);
   factory CheckResult.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      CheckResult()..mergeFromJson(json, registry);
 
   static const $core.Map<$core.int, CheckResult_Kind> _CheckResult_KindByTag = {
     1: CheckResult_Kind.upToDate,
@@ -2350,17 +2811,18 @@ class CheckResult extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'CheckResult',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: CheckResult.$_createMessage)
     ..oo(0, [1, 2, 3, 4, 5])
     ..aOM<UpToDate>(1, _omitFieldNames ? '' : 'upToDate',
-        subBuilder: UpToDate.create)
+        subBuilder: UpToDate.$_createMessage)
     ..aOM<UpdateAvailable>(2, _omitFieldNames ? '' : 'updateAvailable',
-        subBuilder: UpdateAvailable.create)
+        subBuilder: UpdateAvailable.$_createMessage)
     ..aOM<FallbackRequired>(3, _omitFieldNames ? '' : 'fallbackRequired',
-        subBuilder: FallbackRequired.create)
+        subBuilder: FallbackRequired.$_createMessage)
     ..aOM<Throttled>(4, _omitFieldNames ? '' : 'throttled',
-        subBuilder: Throttled.create)
-    ..aOM<Failed>(5, _omitFieldNames ? '' : 'failed', subBuilder: Failed.create)
+        subBuilder: Throttled.$_createMessage)
+    ..aOM<Failed>(5, _omitFieldNames ? '' : 'failed',
+        subBuilder: Failed.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2374,12 +2836,15 @@ class CheckResult extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use CheckResult() / CheckResult.new instead')
   static CheckResult create() => CheckResult._();
+  static $pb.GeneratedMessage $_createMessage() => CheckResult._();
   @$core.override
-  CheckResult createEmptyInstance() => create();
+  CheckResult createEmptyInstance() => CheckResult._();
   @$core.pragma('dart2js:noInline')
-  static CheckResult getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<CheckResult>(create);
+  static CheckResult getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<CheckResult>(
+          CheckResult.$_createMessage);
   static CheckResult? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2456,7 +2921,7 @@ class Downloaded extends $pb.GeneratedMessage {
     $core.String? planId,
     $fixnum.Int64? bytes,
   }) {
-    final result = create();
+    final result = Downloaded._();
     if (planId != null) result.planId = planId;
     if (bytes != null) result.bytes = bytes;
     return result;
@@ -2466,16 +2931,16 @@ class Downloaded extends $pb.GeneratedMessage {
 
   factory Downloaded.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Downloaded()..mergeFromBuffer(data, registry);
   factory Downloaded.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Downloaded()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Downloaded',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Downloaded.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'planId')
     ..aInt64(2, _omitFieldNames ? '' : 'bytes')
     ..hasRequiredFields = false;
@@ -2490,12 +2955,14 @@ class Downloaded extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Downloaded() / Downloaded.new instead')
   static Downloaded create() => Downloaded._();
+  static $pb.GeneratedMessage $_createMessage() => Downloaded._();
   @$core.override
-  Downloaded createEmptyInstance() => create();
+  Downloaded createEmptyInstance() => Downloaded._();
   @$core.pragma('dart2js:noInline')
   static Downloaded getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<Downloaded>(create);
+      $pb.GeneratedMessage.$_defaultFor<Downloaded>(Downloaded.$_createMessage);
   static Downloaded? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2524,7 +2991,7 @@ class DownloadResult extends $pb.GeneratedMessage {
     Downloaded? downloaded,
     Failed? failed,
   }) {
-    final result = create();
+    final result = DownloadResult._();
     if (downloaded != null) result.downloaded = downloaded;
     if (failed != null) result.failed = failed;
     return result;
@@ -2534,10 +3001,10 @@ class DownloadResult extends $pb.GeneratedMessage {
 
   factory DownloadResult.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      DownloadResult()..mergeFromBuffer(data, registry);
   factory DownloadResult.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      DownloadResult()..mergeFromJson(json, registry);
 
   static const $core.Map<$core.int, DownloadResult_Kind>
       _DownloadResult_KindByTag = {
@@ -2549,11 +3016,12 @@ class DownloadResult extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'DownloadResult',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: DownloadResult.$_createMessage)
     ..oo(0, [1, 2])
     ..aOM<Downloaded>(1, _omitFieldNames ? '' : 'downloaded',
-        subBuilder: Downloaded.create)
-    ..aOM<Failed>(2, _omitFieldNames ? '' : 'failed', subBuilder: Failed.create)
+        subBuilder: Downloaded.$_createMessage)
+    ..aOM<Failed>(2, _omitFieldNames ? '' : 'failed',
+        subBuilder: Failed.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2567,12 +3035,15 @@ class DownloadResult extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DownloadResult() / DownloadResult.new instead')
   static DownloadResult create() => DownloadResult._();
+  static $pb.GeneratedMessage $_createMessage() => DownloadResult._();
   @$core.override
-  DownloadResult createEmptyInstance() => create();
+  DownloadResult createEmptyInstance() => DownloadResult._();
   @$core.pragma('dart2js:noInline')
-  static DownloadResult getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<DownloadResult>(create);
+  static DownloadResult getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<DownloadResult>(
+          DownloadResult.$_createMessage);
   static DownloadResult? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2612,7 +3083,7 @@ class ApplyAccepted extends $pb.GeneratedMessage {
     $core.String? planId,
     $core.bool? requiresHostExit,
   }) {
-    final result = create();
+    final result = ApplyAccepted._();
     if (sessionId != null) result.sessionId = sessionId;
     if (planId != null) result.planId = planId;
     if (requiresHostExit != null) result.requiresHostExit = requiresHostExit;
@@ -2623,16 +3094,16 @@ class ApplyAccepted extends $pb.GeneratedMessage {
 
   factory ApplyAccepted.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ApplyAccepted()..mergeFromBuffer(data, registry);
   factory ApplyAccepted.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ApplyAccepted()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ApplyAccepted',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ApplyAccepted.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'sessionId')
     ..aOS(2, _omitFieldNames ? '' : 'planId')
     ..aOB(3, _omitFieldNames ? '' : 'requiresHostExit')
@@ -2649,12 +3120,15 @@ class ApplyAccepted extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ApplyAccepted() / ApplyAccepted.new instead')
   static ApplyAccepted create() => ApplyAccepted._();
+  static $pb.GeneratedMessage $_createMessage() => ApplyAccepted._();
   @$core.override
-  ApplyAccepted createEmptyInstance() => create();
+  ApplyAccepted createEmptyInstance() => ApplyAccepted._();
   @$core.pragma('dart2js:noInline')
-  static ApplyAccepted getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ApplyAccepted>(create);
+  static ApplyAccepted getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ApplyAccepted>(
+          ApplyAccepted.$_createMessage);
   static ApplyAccepted? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2692,7 +3166,7 @@ class ApplyResult extends $pb.GeneratedMessage {
     ApplyAccepted? accepted,
     Failed? failed,
   }) {
-    final result = create();
+    final result = ApplyResult._();
     if (accepted != null) result.accepted = accepted;
     if (failed != null) result.failed = failed;
     return result;
@@ -2702,10 +3176,10 @@ class ApplyResult extends $pb.GeneratedMessage {
 
   factory ApplyResult.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ApplyResult()..mergeFromBuffer(data, registry);
   factory ApplyResult.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ApplyResult()..mergeFromJson(json, registry);
 
   static const $core.Map<$core.int, ApplyResult_Kind> _ApplyResult_KindByTag = {
     1: ApplyResult_Kind.accepted,
@@ -2716,11 +3190,12 @@ class ApplyResult extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'ApplyResult',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ApplyResult.$_createMessage)
     ..oo(0, [1, 2])
     ..aOM<ApplyAccepted>(1, _omitFieldNames ? '' : 'accepted',
-        subBuilder: ApplyAccepted.create)
-    ..aOM<Failed>(2, _omitFieldNames ? '' : 'failed', subBuilder: Failed.create)
+        subBuilder: ApplyAccepted.$_createMessage)
+    ..aOM<Failed>(2, _omitFieldNames ? '' : 'failed',
+        subBuilder: Failed.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2734,12 +3209,15 @@ class ApplyResult extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ApplyResult() / ApplyResult.new instead')
   static ApplyResult create() => ApplyResult._();
+  static $pb.GeneratedMessage $_createMessage() => ApplyResult._();
   @$core.override
-  ApplyResult createEmptyInstance() => create();
+  ApplyResult createEmptyInstance() => ApplyResult._();
   @$core.pragma('dart2js:noInline')
-  static ApplyResult getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ApplyResult>(create);
+  static ApplyResult getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ApplyResult>(
+          ApplyResult.$_createMessage);
   static ApplyResult? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2773,22 +3251,22 @@ class ApplyResult extends $pb.GeneratedMessage {
 }
 
 class Ok extends $pb.GeneratedMessage {
-  factory Ok() => create();
+  factory Ok() => Ok._();
 
   Ok._();
 
   factory Ok.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Ok()..mergeFromBuffer(data, registry);
   factory Ok.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Ok()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Ok',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Ok.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2801,12 +3279,14 @@ class Ok extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Ok() / Ok.new instead')
   static Ok create() => Ok._();
+  static $pb.GeneratedMessage $_createMessage() => Ok._();
   @$core.override
-  Ok createEmptyInstance() => create();
+  Ok createEmptyInstance() => Ok._();
   @$core.pragma('dart2js:noInline')
-  static Ok getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Ok>(create);
+  static Ok getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Ok>(Ok.$_createMessage);
   static Ok? _defaultInstance;
 }
 
@@ -2817,7 +3297,7 @@ class Result extends $pb.GeneratedMessage {
     Ok? ok,
     Failed? failed,
   }) {
-    final result = create();
+    final result = Result._();
     if (ok != null) result.ok = ok;
     if (failed != null) result.failed = failed;
     return result;
@@ -2827,10 +3307,10 @@ class Result extends $pb.GeneratedMessage {
 
   factory Result.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Result()..mergeFromBuffer(data, registry);
   factory Result.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Result()..mergeFromJson(json, registry);
 
   static const $core.Map<$core.int, Result_Kind> _Result_KindByTag = {
     1: Result_Kind.ok,
@@ -2841,10 +3321,11 @@ class Result extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'Result',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Result.$_createMessage)
     ..oo(0, [1, 2])
-    ..aOM<Ok>(1, _omitFieldNames ? '' : 'ok', subBuilder: Ok.create)
-    ..aOM<Failed>(2, _omitFieldNames ? '' : 'failed', subBuilder: Failed.create)
+    ..aOM<Ok>(1, _omitFieldNames ? '' : 'ok', subBuilder: Ok.$_createMessage)
+    ..aOM<Failed>(2, _omitFieldNames ? '' : 'failed',
+        subBuilder: Failed.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2857,12 +3338,14 @@ class Result extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Result() / Result.new instead')
   static Result create() => Result._();
+  static $pb.GeneratedMessage $_createMessage() => Result._();
   @$core.override
-  Result createEmptyInstance() => create();
+  Result createEmptyInstance() => Result._();
   @$core.pragma('dart2js:noInline')
-  static Result getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Result>(create);
+  static Result getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Result>(Result.$_createMessage);
   static Result? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2901,7 +3384,7 @@ class SidecarInfo extends $pb.GeneratedMessage {
     $core.int? ipc,
     $core.String? version,
   }) {
-    final result = create();
+    final result = SidecarInfo._();
     if (path != null) result.path = path;
     if (ipc != null) result.ipc = ipc;
     if (version != null) result.version = version;
@@ -2912,16 +3395,16 @@ class SidecarInfo extends $pb.GeneratedMessage {
 
   factory SidecarInfo.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      SidecarInfo()..mergeFromBuffer(data, registry);
   factory SidecarInfo.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      SidecarInfo()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'SidecarInfo',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: SidecarInfo.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'path')
     ..aI(2, _omitFieldNames ? '' : 'ipc', fieldType: $pb.PbFieldType.OU3)
     ..aOS(3, _omitFieldNames ? '' : 'version')
@@ -2938,12 +3421,15 @@ class SidecarInfo extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SidecarInfo() / SidecarInfo.new instead')
   static SidecarInfo create() => SidecarInfo._();
+  static $pb.GeneratedMessage $_createMessage() => SidecarInfo._();
   @$core.override
-  SidecarInfo createEmptyInstance() => create();
+  SidecarInfo createEmptyInstance() => SidecarInfo._();
   @$core.pragma('dart2js:noInline')
-  static SidecarInfo getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<SidecarInfo>(create);
+  static SidecarInfo getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SidecarInfo>(
+          SidecarInfo.$_createMessage);
   static SidecarInfo? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -2982,7 +3468,7 @@ class SessionView extends $pb.GeneratedMessage {
     $1.Timestamp? startedAt,
     Error? error,
   }) {
-    final result = create();
+    final result = SessionView._();
     if (sessionId != null) result.sessionId = sessionId;
     if (planId != null) result.planId = planId;
     if (phase != null) result.phase = phase;
@@ -2995,23 +3481,24 @@ class SessionView extends $pb.GeneratedMessage {
 
   factory SessionView.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      SessionView()..mergeFromBuffer(data, registry);
   factory SessionView.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      SessionView()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'SessionView',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: SessionView.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'sessionId')
     ..aOS(2, _omitFieldNames ? '' : 'planId')
     ..aE<SessionPhase>(3, _omitFieldNames ? '' : 'phase',
         enumValues: SessionPhase.values)
     ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'startedAt',
-        subBuilder: $1.Timestamp.create)
-    ..aOM<Error>(5, _omitFieldNames ? '' : 'error', subBuilder: Error.create)
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<Error>(5, _omitFieldNames ? '' : 'error',
+        subBuilder: Error.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3025,12 +3512,15 @@ class SessionView extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SessionView() / SessionView.new instead')
   static SessionView create() => SessionView._();
+  static $pb.GeneratedMessage $_createMessage() => SessionView._();
   @$core.override
-  SessionView createEmptyInstance() => create();
+  SessionView createEmptyInstance() => SessionView._();
   @$core.pragma('dart2js:noInline')
-  static SessionView getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<SessionView>(create);
+  static SessionView getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SessionView>(
+          SessionView.$_createMessage);
   static SessionView? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3093,7 +3583,7 @@ class StatusSnapshot extends $pb.GeneratedMessage {
     SessionView? activeSession,
     SidecarInfo? sidecar,
   }) {
-    final result = create();
+    final result = StatusSnapshot._();
     if (lastCheckAt != null) result.lastCheckAt = lastCheckAt;
     if (lastResult != null) result.lastResult = lastResult;
     if (nextAllowedAt != null) result.nextAllowedAt = nextAllowedAt;
@@ -3108,29 +3598,29 @@ class StatusSnapshot extends $pb.GeneratedMessage {
 
   factory StatusSnapshot.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      StatusSnapshot()..mergeFromBuffer(data, registry);
   factory StatusSnapshot.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      StatusSnapshot()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'StatusSnapshot',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: StatusSnapshot.$_createMessage)
     ..aOM<$1.Timestamp>(1, _omitFieldNames ? '' : 'lastCheckAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..aE<LastResult>(2, _omitFieldNames ? '' : 'lastResult',
         enumValues: LastResult.values)
     ..aOM<$1.Timestamp>(3, _omitFieldNames ? '' : 'nextAllowedAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..aInt64(4, _omitFieldNames ? '' : 'lastSeenSequence')
     ..p<$fixnum.Int64>(
         5, _omitFieldNames ? '' : 'skippedCodes', $pb.PbFieldType.K6)
     ..aOM<SessionView>(6, _omitFieldNames ? '' : 'activeSession',
-        subBuilder: SessionView.create)
+        subBuilder: SessionView.$_createMessage)
     ..aOM<SidecarInfo>(7, _omitFieldNames ? '' : 'sidecar',
-        subBuilder: SidecarInfo.create)
+        subBuilder: SidecarInfo.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3144,12 +3634,15 @@ class StatusSnapshot extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use StatusSnapshot() / StatusSnapshot.new instead')
   static StatusSnapshot create() => StatusSnapshot._();
+  static $pb.GeneratedMessage $_createMessage() => StatusSnapshot._();
   @$core.override
-  StatusSnapshot createEmptyInstance() => create();
+  StatusSnapshot createEmptyInstance() => StatusSnapshot._();
   @$core.pragma('dart2js:noInline')
-  static StatusSnapshot getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<StatusSnapshot>(create);
+  static StatusSnapshot getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<StatusSnapshot>(
+          StatusSnapshot.$_createMessage);
   static StatusSnapshot? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3224,7 +3717,7 @@ class Progress extends $pb.GeneratedMessage {
     $fixnum.Int64? bytesTotal,
     $fixnum.Int64? bytesPerSecond,
   }) {
-    final result = create();
+    final result = Progress._();
     if (bytesReceived != null) result.bytesReceived = bytesReceived;
     if (bytesTotal != null) result.bytesTotal = bytesTotal;
     if (bytesPerSecond != null) result.bytesPerSecond = bytesPerSecond;
@@ -3235,16 +3728,16 @@ class Progress extends $pb.GeneratedMessage {
 
   factory Progress.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Progress()..mergeFromBuffer(data, registry);
   factory Progress.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Progress()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Progress',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Progress.$_createMessage)
     ..aInt64(1, _omitFieldNames ? '' : 'bytesReceived')
     ..aInt64(2, _omitFieldNames ? '' : 'bytesTotal')
     ..aInt64(3, _omitFieldNames ? '' : 'bytesPerSecond')
@@ -3260,12 +3753,14 @@ class Progress extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Progress() / Progress.new instead')
   static Progress create() => Progress._();
+  static $pb.GeneratedMessage $_createMessage() => Progress._();
   @$core.override
-  Progress createEmptyInstance() => create();
+  Progress createEmptyInstance() => Progress._();
   @$core.pragma('dart2js:noInline')
-  static Progress getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Progress>(create);
+  static Progress getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Progress>(Progress.$_createMessage);
   static Progress? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3301,7 +3796,7 @@ class ApplyProgress extends $pb.GeneratedMessage {
     $core.String? sessionId,
     SessionPhase? phase,
   }) {
-    final result = create();
+    final result = ApplyProgress._();
     if (sessionId != null) result.sessionId = sessionId;
     if (phase != null) result.phase = phase;
     return result;
@@ -3311,16 +3806,16 @@ class ApplyProgress extends $pb.GeneratedMessage {
 
   factory ApplyProgress.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ApplyProgress()..mergeFromBuffer(data, registry);
   factory ApplyProgress.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ApplyProgress()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ApplyProgress',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ApplyProgress.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'sessionId')
     ..aE<SessionPhase>(2, _omitFieldNames ? '' : 'phase',
         enumValues: SessionPhase.values)
@@ -3337,12 +3832,15 @@ class ApplyProgress extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ApplyProgress() / ApplyProgress.new instead')
   static ApplyProgress create() => ApplyProgress._();
+  static $pb.GeneratedMessage $_createMessage() => ApplyProgress._();
   @$core.override
-  ApplyProgress createEmptyInstance() => create();
+  ApplyProgress createEmptyInstance() => ApplyProgress._();
   @$core.pragma('dart2js:noInline')
-  static ApplyProgress getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ApplyProgress>(create);
+  static ApplyProgress getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ApplyProgress>(
+          ApplyProgress.$_createMessage);
   static ApplyProgress? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3368,7 +3866,7 @@ class Log extends $pb.GeneratedMessage {
   factory Log({
     $core.String? message,
   }) {
-    final result = create();
+    final result = Log._();
     if (message != null) result.message = message;
     return result;
   }
@@ -3377,16 +3875,16 @@ class Log extends $pb.GeneratedMessage {
 
   factory Log.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Log()..mergeFromBuffer(data, registry);
   factory Log.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Log()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Log',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: Log.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'message')
     ..hasRequiredFields = false;
 
@@ -3400,12 +3898,14 @@ class Log extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Log() / Log.new instead')
   static Log create() => Log._();
+  static $pb.GeneratedMessage $_createMessage() => Log._();
   @$core.override
-  Log createEmptyInstance() => create();
+  Log createEmptyInstance() => Log._();
   @$core.pragma('dart2js:noInline')
-  static Log getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Log>(create);
+  static Log getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Log>(Log.$_createMessage);
   static Log? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3429,6 +3929,7 @@ enum UpdaterEvent_Kind {
   result,
   status,
   failed,
+  installed,
   notSet
 }
 
@@ -3444,8 +3945,9 @@ class UpdaterEvent extends $pb.GeneratedMessage {
     Result? result,
     StatusSnapshot? status,
     Failed? failed,
+    InstalledList? installed,
   }) {
-    final result$ = create();
+    final result$ = UpdaterEvent._();
     if (capabilities != null) result$.capabilities = capabilities;
     if (progress != null) result$.progress = progress;
     if (applyProgress != null) result$.applyProgress = applyProgress;
@@ -3456,6 +3958,7 @@ class UpdaterEvent extends $pb.GeneratedMessage {
     if (result != null) result$.result = result;
     if (status != null) result$.status = status;
     if (failed != null) result$.failed = failed;
+    if (installed != null) result$.installed = installed;
     return result$;
   }
 
@@ -3463,10 +3966,10 @@ class UpdaterEvent extends $pb.GeneratedMessage {
 
   factory UpdaterEvent.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      UpdaterEvent()..mergeFromBuffer(data, registry);
   factory UpdaterEvent.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      UpdaterEvent()..mergeFromJson(json, registry);
 
   static const $core.Map<$core.int, UpdaterEvent_Kind> _UpdaterEvent_KindByTag =
       {
@@ -3480,33 +3983,36 @@ class UpdaterEvent extends $pb.GeneratedMessage {
     13: UpdaterEvent_Kind.result,
     14: UpdaterEvent_Kind.status,
     15: UpdaterEvent_Kind.failed,
+    16: UpdaterEvent_Kind.installed,
     0: UpdaterEvent_Kind.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'UpdaterEvent',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
-    ..oo(0, [1, 2, 3, 4, 10, 11, 12, 13, 14, 15])
+      createEmptyInstance: UpdaterEvent.$_createMessage)
+    ..oo(0, [1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 16])
     ..aOM<Capabilities>(1, _omitFieldNames ? '' : 'capabilities',
-        subBuilder: Capabilities.create)
+        subBuilder: Capabilities.$_createMessage)
     ..aOM<Progress>(2, _omitFieldNames ? '' : 'progress',
-        subBuilder: Progress.create)
+        subBuilder: Progress.$_createMessage)
     ..aOM<ApplyProgress>(3, _omitFieldNames ? '' : 'applyProgress',
-        subBuilder: ApplyProgress.create)
-    ..aOM<Log>(4, _omitFieldNames ? '' : 'log', subBuilder: Log.create)
+        subBuilder: ApplyProgress.$_createMessage)
+    ..aOM<Log>(4, _omitFieldNames ? '' : 'log', subBuilder: Log.$_createMessage)
     ..aOM<CheckResult>(10, _omitFieldNames ? '' : 'check',
-        subBuilder: CheckResult.create)
+        subBuilder: CheckResult.$_createMessage)
     ..aOM<DownloadResult>(11, _omitFieldNames ? '' : 'download',
-        subBuilder: DownloadResult.create)
+        subBuilder: DownloadResult.$_createMessage)
     ..aOM<ApplyResult>(12, _omitFieldNames ? '' : 'apply',
-        subBuilder: ApplyResult.create)
+        subBuilder: ApplyResult.$_createMessage)
     ..aOM<Result>(13, _omitFieldNames ? '' : 'result',
-        subBuilder: Result.create)
+        subBuilder: Result.$_createMessage)
     ..aOM<StatusSnapshot>(14, _omitFieldNames ? '' : 'status',
-        subBuilder: StatusSnapshot.create)
+        subBuilder: StatusSnapshot.$_createMessage)
     ..aOM<Failed>(15, _omitFieldNames ? '' : 'failed',
-        subBuilder: Failed.create)
+        subBuilder: Failed.$_createMessage)
+    ..aOM<InstalledList>(16, _omitFieldNames ? '' : 'installed',
+        subBuilder: InstalledList.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3520,12 +4026,15 @@ class UpdaterEvent extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UpdaterEvent() / UpdaterEvent.new instead')
   static UpdaterEvent create() => UpdaterEvent._();
+  static $pb.GeneratedMessage $_createMessage() => UpdaterEvent._();
   @$core.override
-  UpdaterEvent createEmptyInstance() => create();
+  UpdaterEvent createEmptyInstance() => UpdaterEvent._();
   @$core.pragma('dart2js:noInline')
-  static UpdaterEvent getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<UpdaterEvent>(create);
+  static UpdaterEvent getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<UpdaterEvent>(
+          UpdaterEvent.$_createMessage);
   static UpdaterEvent? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3538,6 +4047,7 @@ class UpdaterEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(13)
   @$pb.TagNumber(14)
   @$pb.TagNumber(15)
+  @$pb.TagNumber(16)
   UpdaterEvent_Kind whichKind() => _UpdaterEvent_KindByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
   @$pb.TagNumber(2)
@@ -3549,6 +4059,7 @@ class UpdaterEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(13)
   @$pb.TagNumber(14)
   @$pb.TagNumber(15)
+  @$pb.TagNumber(16)
   void clearKind() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -3660,6 +4171,17 @@ class UpdaterEvent extends $pb.GeneratedMessage {
   void clearFailed() => $_clearField(15);
   @$pb.TagNumber(15)
   Failed ensureFailed() => $_ensure(9);
+
+  @$pb.TagNumber(16)
+  InstalledList get installed => $_getN(10);
+  @$pb.TagNumber(16)
+  set installed(InstalledList value) => $_setField(16, value);
+  @$pb.TagNumber(16)
+  $core.bool hasInstalled() => $_has(10);
+  @$pb.TagNumber(16)
+  void clearInstalled() => $_clearField(16);
+  @$pb.TagNumber(16)
+  InstalledList ensureInstalled() => $_ensure(10);
 }
 
 class ArtifactTarget extends $pb.GeneratedMessage {
@@ -3667,7 +4189,7 @@ class ArtifactTarget extends $pb.GeneratedMessage {
     $core.String? name,
     $core.Iterable<$core.MapEntry<$core.String, $core.String>>? selectors,
   }) {
-    final result = create();
+    final result = ArtifactTarget._();
     if (name != null) result.name = name;
     if (selectors != null) result.selectors.addEntries(selectors);
     return result;
@@ -3677,16 +4199,16 @@ class ArtifactTarget extends $pb.GeneratedMessage {
 
   factory ArtifactTarget.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ArtifactTarget()..mergeFromBuffer(data, registry);
   factory ArtifactTarget.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ArtifactTarget()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ArtifactTarget',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ArtifactTarget.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..m<$core.String, $core.String>(2, _omitFieldNames ? '' : 'selectors',
         entryClassName: 'ArtifactTarget.SelectorsEntry',
@@ -3706,12 +4228,15 @@ class ArtifactTarget extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ArtifactTarget() / ArtifactTarget.new instead')
   static ArtifactTarget create() => ArtifactTarget._();
+  static $pb.GeneratedMessage $_createMessage() => ArtifactTarget._();
   @$core.override
-  ArtifactTarget createEmptyInstance() => create();
+  ArtifactTarget createEmptyInstance() => ArtifactTarget._();
   @$core.pragma('dart2js:noInline')
-  static ArtifactTarget getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ArtifactTarget>(create);
+  static ArtifactTarget getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ArtifactTarget>(
+          ArtifactTarget.$_createMessage);
   static ArtifactTarget? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3737,7 +4262,7 @@ class PlannedFile extends $pb.GeneratedMessage {
     $core.String? localPath,
     $core.bool? downloaded,
   }) {
-    final result = create();
+    final result = PlannedFile._();
     if (name != null) result.name = name;
     if (size != null) result.size = size;
     if (sha256Hex != null) result.sha256Hex = sha256Hex;
@@ -3752,16 +4277,16 @@ class PlannedFile extends $pb.GeneratedMessage {
 
   factory PlannedFile.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      PlannedFile()..mergeFromBuffer(data, registry);
   factory PlannedFile.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      PlannedFile()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PlannedFile',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: PlannedFile.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aInt64(2, _omitFieldNames ? '' : 'size')
     ..aOS(3, _omitFieldNames ? '' : 'sha256Hex')
@@ -3782,12 +4307,15 @@ class PlannedFile extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PlannedFile() / PlannedFile.new instead')
   static PlannedFile create() => PlannedFile._();
+  static $pb.GeneratedMessage $_createMessage() => PlannedFile._();
   @$core.override
-  PlannedFile createEmptyInstance() => create();
+  PlannedFile createEmptyInstance() => PlannedFile._();
   @$core.pragma('dart2js:noInline')
-  static PlannedFile getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<PlannedFile>(create);
+  static PlannedFile getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PlannedFile>(
+          PlannedFile.$_createMessage);
   static PlannedFile? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -3866,7 +4394,7 @@ class UpdatePlan extends $pb.GeneratedMessage {
     $1.Timestamp? expiresAt,
     $core.List<$core.int>? planHmac,
   }) {
-    final result = create();
+    final result = UpdatePlan._();
     if (planId != null) result.planId = planId;
     if (product != null) result.product = product;
     if (channel != null) result.channel = channel;
@@ -3891,16 +4419,16 @@ class UpdatePlan extends $pb.GeneratedMessage {
 
   factory UpdatePlan.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      UpdatePlan()..mergeFromBuffer(data, registry);
   factory UpdatePlan.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      UpdatePlan()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'UpdatePlan',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: UpdatePlan.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'planId')
     ..aOS(2, _omitFieldNames ? '' : 'product')
     ..aOS(3, _omitFieldNames ? '' : 'channel')
@@ -3912,13 +4440,13 @@ class UpdatePlan extends $pb.GeneratedMessage {
     ..aOS(9, _omitFieldNames ? '' : 'releaseNotesMarkdown')
     ..aOS(10, _omitFieldNames ? '' : 'releaseNotesUrl')
     ..pPM<PriorReleaseNotes>(11, _omitFieldNames ? '' : 'priorReleaseNotes',
-        subBuilder: PriorReleaseNotes.create)
+        subBuilder: PriorReleaseNotes.$_createMessage)
     ..pPM<PlannedFile>(12, _omitFieldNames ? '' : 'files',
-        subBuilder: PlannedFile.create)
+        subBuilder: PlannedFile.$_createMessage)
     ..aOM<$1.Timestamp>(13, _omitFieldNames ? '' : 'createdAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..aOM<$1.Timestamp>(14, _omitFieldNames ? '' : 'expiresAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..a<$core.List<$core.int>>(
         15, _omitFieldNames ? '' : 'planHmac', $pb.PbFieldType.OY)
     ..hasRequiredFields = false;
@@ -3933,12 +4461,14 @@ class UpdatePlan extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UpdatePlan() / UpdatePlan.new instead')
   static UpdatePlan create() => UpdatePlan._();
+  static $pb.GeneratedMessage $_createMessage() => UpdatePlan._();
   @$core.override
-  UpdatePlan createEmptyInstance() => create();
+  UpdatePlan createEmptyInstance() => UpdatePlan._();
   @$core.pragma('dart2js:noInline')
   static UpdatePlan getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<UpdatePlan>(create);
+      $pb.GeneratedMessage.$_defaultFor<UpdatePlan>(UpdatePlan.$_createMessage);
   static UpdatePlan? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -4078,7 +4608,7 @@ class PersistedState extends $pb.GeneratedMessage {
     $fixnum.Int64? lastSeenFallbackSequence,
     $core.Iterable<$fixnum.Int64>? skippedCodes,
   }) {
-    final result = create();
+    final result = PersistedState._();
     if (lastCheckAt != null) result.lastCheckAt = lastCheckAt;
     if (lastResult != null) result.lastResult = lastResult;
     if (lastSeenSequence != null) result.lastSeenSequence = lastSeenSequence;
@@ -4094,18 +4624,18 @@ class PersistedState extends $pb.GeneratedMessage {
 
   factory PersistedState.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      PersistedState()..mergeFromBuffer(data, registry);
   factory PersistedState.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      PersistedState()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PersistedState',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: PersistedState.$_createMessage)
     ..aOM<$1.Timestamp>(1, _omitFieldNames ? '' : 'lastCheckAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..aE<LastResult>(2, _omitFieldNames ? '' : 'lastResult',
         enumValues: LastResult.values)
     ..aInt64(3, _omitFieldNames ? '' : 'lastSeenSequence')
@@ -4126,12 +4656,15 @@ class PersistedState extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PersistedState() / PersistedState.new instead')
   static PersistedState create() => PersistedState._();
+  static $pb.GeneratedMessage $_createMessage() => PersistedState._();
   @$core.override
-  PersistedState createEmptyInstance() => create();
+  PersistedState createEmptyInstance() => PersistedState._();
   @$core.pragma('dart2js:noInline')
-  static PersistedState getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<PersistedState>(create);
+  static PersistedState getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PersistedState>(
+          PersistedState.$_createMessage);
   static PersistedState? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -4205,8 +4738,10 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     $core.int? retain,
     $core.Iterable<FileSetEntry>? fileSet,
     $core.String? sidecarRelpath,
+    $core.bool? installOnly,
+    $core.Iterable<$fixnum.Int64>? reservedCodes,
   }) {
-    final result = create();
+    final result = ApplySessionRecord._();
     if (sessionId != null) result.sessionId = sessionId;
     if (planId != null) result.planId = planId;
     if (phase != null) result.phase = phase;
@@ -4225,6 +4760,8 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     if (retain != null) result.retain = retain;
     if (fileSet != null) result.fileSet.addAll(fileSet);
     if (sidecarRelpath != null) result.sidecarRelpath = sidecarRelpath;
+    if (installOnly != null) result.installOnly = installOnly;
+    if (reservedCodes != null) result.reservedCodes.addAll(reservedCodes);
     return result;
   }
 
@@ -4232,29 +4769,30 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
 
   factory ApplySessionRecord.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ApplySessionRecord()..mergeFromBuffer(data, registry);
   factory ApplySessionRecord.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ApplySessionRecord()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ApplySessionRecord',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ApplySessionRecord.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'sessionId')
     ..aOS(2, _omitFieldNames ? '' : 'planId')
     ..aE<SessionPhase>(3, _omitFieldNames ? '' : 'phase',
         enumValues: SessionPhase.values)
     ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'startedAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..aOM<$1.Timestamp>(5, _omitFieldNames ? '' : 'heartbeatAt',
-        subBuilder: $1.Timestamp.create)
+        subBuilder: $1.Timestamp.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'installRoot')
     ..aOS(7, _omitFieldNames ? '' : 'stagedRoot')
     ..aInt64(8, _omitFieldNames ? '' : 'targetCode')
     ..aOS(9, _omitFieldNames ? '' : 'targetVersion')
-    ..aOM<Error>(10, _omitFieldNames ? '' : 'error', subBuilder: Error.create)
+    ..aOM<Error>(10, _omitFieldNames ? '' : 'error',
+        subBuilder: Error.$_createMessage)
     ..aI(11, _omitFieldNames ? '' : 'pid')
     ..aE<Layout>(12, _omitFieldNames ? '' : 'layout', enumValues: Layout.values)
     ..aOB(13, _omitFieldNames ? '' : 'relaunch')
@@ -4262,8 +4800,11 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     ..pPS(15, _omitFieldNames ? '' : 'preserve')
     ..aI(16, _omitFieldNames ? '' : 'retain')
     ..pPM<FileSetEntry>(17, _omitFieldNames ? '' : 'fileSet',
-        subBuilder: FileSetEntry.create)
+        subBuilder: FileSetEntry.$_createMessage)
     ..aOS(18, _omitFieldNames ? '' : 'sidecarRelpath')
+    ..aOB(19, _omitFieldNames ? '' : 'installOnly')
+    ..p<$fixnum.Int64>(
+        20, _omitFieldNames ? '' : 'reservedCodes', $pb.PbFieldType.K6)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -4277,12 +4818,15 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ApplySessionRecord() / ApplySessionRecord.new instead')
   static ApplySessionRecord create() => ApplySessionRecord._();
+  static $pb.GeneratedMessage $_createMessage() => ApplySessionRecord._();
   @$core.override
-  ApplySessionRecord createEmptyInstance() => create();
+  ApplySessionRecord createEmptyInstance() => ApplySessionRecord._();
   @$core.pragma('dart2js:noInline')
   static ApplySessionRecord getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ApplySessionRecord>(create);
+      $pb.GeneratedMessage.$_defaultFor<ApplySessionRecord>(
+          ApplySessionRecord.$_createMessage);
   static ApplySessionRecord? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -4440,6 +4984,18 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
   $core.bool hasSidecarRelpath() => $_has(17);
   @$pb.TagNumber(18)
   void clearSidecarRelpath() => $_clearField(18);
+
+  @$pb.TagNumber(19)
+  $core.bool get installOnly => $_getBF(18);
+  @$pb.TagNumber(19)
+  set installOnly($core.bool value) => $_setBool(18, value);
+  @$pb.TagNumber(19)
+  $core.bool hasInstallOnly() => $_has(18);
+  @$pb.TagNumber(19)
+  void clearInstallOnly() => $_clearField(19);
+
+  @$pb.TagNumber(20)
+  $pb.PbList<$fixnum.Int64> get reservedCodes => $_getList(19);
 }
 
 class JournalEntry extends $pb.GeneratedMessage {
@@ -4448,7 +5004,7 @@ class JournalEntry extends $pb.GeneratedMessage {
     $core.String? backupPath,
     $core.String? sourcePath,
   }) {
-    final result = create();
+    final result = JournalEntry._();
     if (destPath != null) result.destPath = destPath;
     if (backupPath != null) result.backupPath = backupPath;
     if (sourcePath != null) result.sourcePath = sourcePath;
@@ -4459,16 +5015,16 @@ class JournalEntry extends $pb.GeneratedMessage {
 
   factory JournalEntry.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      JournalEntry()..mergeFromBuffer(data, registry);
   factory JournalEntry.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      JournalEntry()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'JournalEntry',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: JournalEntry.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'destPath')
     ..aOS(2, _omitFieldNames ? '' : 'backupPath')
     ..aOS(3, _omitFieldNames ? '' : 'sourcePath')
@@ -4485,12 +5041,15 @@ class JournalEntry extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use JournalEntry() / JournalEntry.new instead')
   static JournalEntry create() => JournalEntry._();
+  static $pb.GeneratedMessage $_createMessage() => JournalEntry._();
   @$core.override
-  JournalEntry createEmptyInstance() => create();
+  JournalEntry createEmptyInstance() => JournalEntry._();
   @$core.pragma('dart2js:noInline')
-  static JournalEntry getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<JournalEntry>(create);
+  static JournalEntry getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<JournalEntry>(
+          JournalEntry.$_createMessage);
   static JournalEntry? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -4527,7 +5086,7 @@ class ApplyJournal extends $pb.GeneratedMessage {
     $core.Iterable<JournalEntry>? entries,
     $core.bool? committed,
   }) {
-    final result = create();
+    final result = ApplyJournal._();
     if (sessionId != null) result.sessionId = sessionId;
     if (entries != null) result.entries.addAll(entries);
     if (committed != null) result.committed = committed;
@@ -4538,19 +5097,19 @@ class ApplyJournal extends $pb.GeneratedMessage {
 
   factory ApplyJournal.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      ApplyJournal()..mergeFromBuffer(data, registry);
   factory ApplyJournal.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      ApplyJournal()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ApplyJournal',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: create)
+      createEmptyInstance: ApplyJournal.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'sessionId')
     ..pPM<JournalEntry>(2, _omitFieldNames ? '' : 'entries',
-        subBuilder: JournalEntry.create)
+        subBuilder: JournalEntry.$_createMessage)
     ..aOB(3, _omitFieldNames ? '' : 'committed')
     ..hasRequiredFields = false;
 
@@ -4565,12 +5124,15 @@ class ApplyJournal extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ApplyJournal() / ApplyJournal.new instead')
   static ApplyJournal create() => ApplyJournal._();
+  static $pb.GeneratedMessage $_createMessage() => ApplyJournal._();
   @$core.override
-  ApplyJournal createEmptyInstance() => create();
+  ApplyJournal createEmptyInstance() => ApplyJournal._();
   @$core.pragma('dart2js:noInline')
-  static ApplyJournal getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ApplyJournal>(create);
+  static ApplyJournal getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ApplyJournal>(
+          ApplyJournal.$_createMessage);
   static ApplyJournal? _defaultInstance;
 
   @$pb.TagNumber(1)

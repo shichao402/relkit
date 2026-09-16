@@ -9,20 +9,20 @@ void main() {
     expect(defaultInstallLayoutFor('macos'), InstallLayout.wholeRoot);
   });
 
-  test('macOS rejects versionedDir', () {
+  test('macOS allows versionedDir (complete .app copy)', () {
     expect(
       isInstallLayoutSupported(
         operatingSystem: 'macos',
         layout: InstallLayout.versionedDir,
       ),
-      isFalse,
+      isTrue,
     );
     expect(
       () => ensureInstallLayoutSupported(
         operatingSystem: 'macos',
         layout: InstallLayout.versionedDir,
       ),
-      throwsArgumentError,
+      returnsNormally,
     );
   });
 

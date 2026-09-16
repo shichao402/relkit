@@ -10,8 +10,10 @@ import "google/protobuf/timestamp.proto";
 // IPC window for this schema. Facade generators embed these as compile-time
 // constants. Products MUST NOT declare a different window in ClientProfile.
 //
-// Current: [1, 1]
+// Current: [1, 2]
 // Framing: 4-byte big-endian length + protobuf bytes on stdout.
+// Window 2 adds list/switch/rollback ops, ApplyOp.install_only, and
+// InstallSpec.reserved_codes. Window 1 hosts remain compatible.
 
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
@@ -64,6 +66,9 @@ enum Operation {
   OPERATION_CLEANUP = 6;
   OPERATION_CANCEL = 7;
   OPERATION_SCHEDULER = 8;
+  OPERATION_LIST_INSTALLED = 9;
+  OPERATION_SWITCH_ACTIVE = 10;
+  OPERATION_ROLLBACK = 11;
 }
 
 enum SessionPhase {
@@ -116,6 +121,9 @@ message InstallSpec {
   int32 retain = 6; // 0 means current + previous
   bool relaunch = 7;
   repeated FileSetEntry file_set = 8;
+  // Codes that prune must never delete (project pins). Engine does not
+  // interpret how the host chose them.
+  repeated int64 reserved_codes = 9;
 }
 
 message Runtime {
@@ -168,6 +176,9 @@ message DownloadOp {
 
 message ApplyOp {
   string plan_id = 1;
+  // When true, versionedDir copies into versions/ but does not rewrite
+  // active.json. wholeRoot / fileSet ignore this flag.
+  bool install_only = 2;
 }
 
 message StatusOp {}
@@ -175,6 +186,27 @@ message StatusOp {}
 message CleanupOp {}
 
 message CancelOp {}
+
+message ListInstalledOp {}
+
+message SwitchActiveOp {
+  int64 code = 1;
+}
+
+message RollbackOp {}
+
+message InstalledVersion {
+  int64 code = 1;
+  string version = 2;
+  string path = 3;
+  string executable = 4;
+  bool active = 5;
+}
+
+message InstalledList {
+  repeated InstalledVersion versions = 1;
+  int64 active_code = 2;
+}
 
 message UpdaterRequest {
   ClientHello hello = 1;
@@ -188,6 +220,9 @@ message UpdaterRequest {
     StatusOp status = 14;
     CleanupOp cleanup = 15;
     CancelOp cancel = 16;
+    ListInstalledOp list_installed = 17;
+    SwitchActiveOp switch_active = 18;
+    RollbackOp rollback = 19;
   }
 }
 
@@ -344,6 +379,7 @@ message UpdaterEvent {
     Result result = 13;
     StatusSnapshot status = 14;
     Failed failed = 15;
+    InstalledList installed = 16;
   }
 }
 
@@ -408,6 +444,8 @@ message ApplySessionRecord {
   int32 retain = 16;
   repeated FileSetEntry file_set = 17;
   string sidecar_relpath = 18;
+  bool install_only = 19;
+  repeated int64 reserved_codes = 20;
 }
 
 message JournalEntry {

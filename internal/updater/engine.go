@@ -55,6 +55,9 @@ func (e *Engine) capabilities() *updaterv1.Capabilities {
 			updaterv1.Operation_OPERATION_CLEANUP,
 			updaterv1.Operation_OPERATION_CANCEL,
 			updaterv1.Operation_OPERATION_SCHEDULER,
+			updaterv1.Operation_OPERATION_LIST_INSTALLED,
+			updaterv1.Operation_OPERATION_SWITCH_ACTIVE,
+			updaterv1.Operation_OPERATION_ROLLBACK,
 		},
 		Layouts: []updaterv1.Layout{
 			updaterv1.Layout_LAYOUT_WHOLE_ROOT,
@@ -150,7 +153,7 @@ func (e *Engine) HandleRequest(ctx context.Context, req *updaterv1.UpdaterReques
 			return e.emit(failedEvent(verr.Code, verr.Retryable, verr.Message, nil))
 		}
 		switch req.GetOp().(type) {
-		case *updaterv1.UpdaterRequest_Status, *updaterv1.UpdaterRequest_Cleanup:
+		case *updaterv1.UpdaterRequest_Status, *updaterv1.UpdaterRequest_Cleanup, *updaterv1.UpdaterRequest_ListInstalled:
 			if req.GetRuntime() == nil || req.GetRuntime().DataDir == "" {
 				return e.emit(failedEvent(verr.Code, verr.Retryable, verr.Message, nil))
 			}
@@ -177,6 +180,12 @@ func (e *Engine) HandleRequest(ctx context.Context, req *updaterv1.UpdaterReques
 		return e.emit(&updaterv1.UpdaterEvent{
 			Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}},
 		})
+	case *updaterv1.UpdaterRequest_ListInstalled:
+		return e.handleListInstalled(req)
+	case *updaterv1.UpdaterRequest_SwitchActive:
+		return e.handleSwitchActive(req, op.SwitchActive)
+	case *updaterv1.UpdaterRequest_Rollback:
+		return e.handleRollback(req)
 	default:
 		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "missing operation", nil))
 	}

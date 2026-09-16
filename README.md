@@ -129,6 +129,7 @@ sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve
 | 一致性夹具 | [`conformance/`](conformance/) |
 | 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md) |
 | 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |
+| 安装布局（宿主接入必读） | [`docs/design/install-layouts.md`](docs/design/install-layouts.md) —— `wholeRoot` / `versionedDir` / `fileSet` 的落盘契约、launcher 归属、宿主退出时序、`retain` 取值 |
 | 装机 / 换二进制 | [`scripts/deploy/README.md`](scripts/deploy/README.md) · [`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md) |
 
 ## 客户端 SDK

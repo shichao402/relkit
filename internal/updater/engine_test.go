@@ -112,18 +112,17 @@ func TestFrameRoundTrip(t *testing.T) {
 
 func TestNegotiateWindow(t *testing.T) {
 	if negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 1}) != nil {
-		t.Fatal("current window")
+		t.Fatal("window 1 host")
 	}
-	if negotiate(&updaterv1.ClientHello{IpcMin: 2, IpcMax: 2}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_OLD {
+	if negotiate(&updaterv1.ClientHello{IpcMin: 2, IpcMax: 2}) != nil {
+		t.Fatal("window 2 host")
+	}
+	if negotiate(&updaterv1.ClientHello{IpcMin: 3, IpcMax: 3}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_OLD {
 		t.Fatal("too new host")
 	}
-	if negotiate(&updaterv1.ClientHello{IpcMin: 0, IpcMax: 0}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW &&
-		negotiate(&updaterv1.ClientHello{IpcMax: 0}).Code != updaterv1.ErrorCode_ERROR_CODE_PROTOCOL_MISMATCH {
-		// ipc max 0 < IPCMin → too new (host older)
-		got := negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 0})
-		if got == nil {
-			t.Fatal("expected error")
-		}
+	got := negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 0})
+	if got == nil {
+		t.Fatal("expected error")
 	}
 }
 
@@ -325,3 +324,117 @@ func TestHandleRequestMissingHello(t *testing.T) {
 		t.Fatalf("expected hello failure, got %v", ev2)
 	}
 }
+
+func TestInstallOnlyLeavesActive(t *testing.T) {
+	root := t.TempDir()
+	stage := t.TempDir()
+	payload := filepath.Join(stage, "unpacked")
+	_ = os.MkdirAll(filepath.Join(payload, "bin"), 0o755)
+	_ = os.WriteFile(filepath.Join(payload, "bin", "app.exe"), []byte("a"), 0o644)
+	first := &updaterv1.UpdatePlan{
+		Version: "1.0.0+1",
+		Code:    1,
+		Files:   []*updaterv1.PlannedFile{{Name: "app.exe", LocalPath: filepath.Join(payload, "bin", "app.exe")}},
+	}
+	sess := &updaterv1.ApplySessionRecord{
+		InstallRoot:       root,
+		StagedRoot:        stage,
+		ExecutableRelpath: "bin/app.exe",
+		Retain:            2,
+	}
+	if err := applyVersionedDir(sess, first); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(payload, "bin", "app.exe"), []byte("b"), 0o644)
+	second := &updaterv1.UpdatePlan{
+		Version: "1.0.1+2",
+		Code:    2,
+		Files:   []*updaterv1.PlannedFile{{Name: "app.exe", LocalPath: filepath.Join(payload, "bin", "app.exe")}},
+	}
+	sess.InstallOnly = true
+	if err := applyVersionedDir(sess, second); err != nil {
+		t.Fatal(err)
+	}
+	ptr := readActive(root)
+	if ptr == nil || ptr.Code != 1 {
+		t.Fatalf("active moved: %+v", ptr)
+	}
+	list := listInstalled(root)
+	if len(list.Versions) != 2 {
+		t.Fatalf("want 2 installed, got %d", len(list.Versions))
+	}
+	if err := switchActive(root, 2); err != nil {
+		t.Fatal(err)
+	}
+	if readActive(root).Code != 2 {
+		t.Fatal("switch failed")
+	}
+	if err := rollbackActive(root); err != nil {
+		t.Fatal(err)
+	}
+	if readActive(root).Code != 1 {
+		t.Fatal("rollback failed")
+	}
+}
+
+func TestPruneKeepsReservedCodes(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "versions")
+	for _, name := range []string{"0.1.0+1", "0.1.1+2", "0.1.2+3"} {
+		dir := filepath.Join(base, name)
+		_ = os.MkdirAll(dir, 0o755)
+	}
+	_ = writeVersionMeta(filepath.Join(base, "0.1.0+1"), versionMeta{Code: 1, Path: "versions/0.1.0+1"})
+	_ = writeVersionMeta(filepath.Join(base, "0.1.1+2"), versionMeta{Code: 2, Path: "versions/0.1.1+2"})
+	_ = writeVersionMeta(filepath.Join(base, "0.1.2+3"), versionMeta{Code: 3, Path: "versions/0.1.2+3"})
+	pruneVersions(root, activePointer{Code: 3, Path: "versions/0.1.2+3"}, 2, []int64{1}, "versions/0.1.2+3")
+	if _, err := os.Stat(filepath.Join(base, "0.1.0+1")); err != nil {
+		t.Fatal("reserved code 1 was pruned")
+	}
+	if _, err := os.Stat(filepath.Join(base, "0.1.1+2")); err == nil {
+		t.Fatal("unreserved previous should be pruned when retain=2 already has current+reserved")
+	}
+}
+
+func TestVersionedDirKeepsAppBundle(t *testing.T) {
+	root := t.TempDir()
+	stage := t.TempDir()
+	app := filepath.Join(stage, "unpacked", "Loom Editor.app", "Contents", "MacOS")
+	_ = os.MkdirAll(app, 0o755)
+	_ = os.WriteFile(filepath.Join(app, "loom"), []byte("bin"), 0o755)
+	payloadFile := filepath.Join(stage, "unpacked", "marker.bin")
+	_ = os.WriteFile(payloadFile, []byte("x"), 0o644)
+	plan := &updaterv1.UpdatePlan{
+		Version: "0.2.2+21",
+		Code:    21,
+		Files:   []*updaterv1.PlannedFile{{Name: "marker.bin", LocalPath: payloadFile}},
+	}
+	sess := &updaterv1.ApplySessionRecord{
+		InstallRoot:       root,
+		StagedRoot:        stage,
+		ExecutableRelpath: "Loom Editor.app/Contents/MacOS/loom",
+		Retain:            2,
+	}
+	if err := applyVersionedDir(sess, plan); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, "versions", "0.2.2+21", "Loom Editor.app", "Contents", "MacOS", "loom")
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("bundle not preserved: %v", err)
+	}
+}
+
+func TestApplyLockRejectsSecondHolder(t *testing.T) {
+	root := t.TempDir()
+	if err := acquireApplyLock(root, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireApplyLock(root, "b"); err == nil {
+		t.Fatal("second lock should fail")
+	}
+	releaseApplyLock(root)
+	if err := acquireApplyLock(root, "b"); err != nil {
+		t.Fatal(err)
+	}
+}
+

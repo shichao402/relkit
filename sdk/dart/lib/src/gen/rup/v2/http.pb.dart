@@ -22,7 +22,7 @@ class Health extends $pb.GeneratedMessage {
     $core.String? status,
     $core.String? version,
   }) {
-    final result = create();
+    final result = Health._();
     if (status != null) result.status = status;
     if (version != null) result.version = version;
     return result;
@@ -32,15 +32,15 @@ class Health extends $pb.GeneratedMessage {
 
   factory Health.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Health()..mergeFromBuffer(data, registry);
   factory Health.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Health()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Health',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
-      createEmptyInstance: create)
+      createEmptyInstance: Health.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'status')
     ..aOS(2, _omitFieldNames ? '' : 'version')
     ..hasRequiredFields = false;
@@ -55,12 +55,14 @@ class Health extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Health() / Health.new instead')
   static Health create() => Health._();
+  static $pb.GeneratedMessage $_createMessage() => Health._();
   @$core.override
-  Health createEmptyInstance() => create();
+  Health createEmptyInstance() => Health._();
   @$core.pragma('dart2js:noInline')
-  static Health getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Health>(create);
+  static Health getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Health>(Health.$_createMessage);
   static Health? _defaultInstance;
 
   @$pb.TagNumber(1)
@@ -88,7 +90,7 @@ class Error extends $pb.GeneratedMessage {
     $core.String? code,
     $core.String? message,
   }) {
-    final result = create();
+    final result = Error._();
     if (code != null) result.code = code;
     if (message != null) result.message = message;
     return result;
@@ -98,15 +100,15 @@ class Error extends $pb.GeneratedMessage {
 
   factory Error.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromBuffer(data, registry);
+      Error()..mergeFromBuffer(data, registry);
   factory Error.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      create()..mergeFromJson(json, registry);
+      Error()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'Error',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'rup.v2'),
-      createEmptyInstance: create)
+      createEmptyInstance: Error.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'code')
     ..aOS(2, _omitFieldNames ? '' : 'message')
     ..hasRequiredFields = false;
@@ -121,12 +123,14 @@ class Error extends $pb.GeneratedMessage {
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Error() / Error.new instead')
   static Error create() => Error._();
+  static $pb.GeneratedMessage $_createMessage() => Error._();
   @$core.override
-  Error createEmptyInstance() => create();
+  Error createEmptyInstance() => Error._();
   @$core.pragma('dart2js:noInline')
-  static Error getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Error>(create);
+  static Error getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Error>(Error.$_createMessage);
   static Error? _defaultInstance;
 
   @$pb.TagNumber(1)

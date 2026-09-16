@@ -108,6 +108,9 @@ const Operation$json = {
     {'1': 'OPERATION_CLEANUP', '2': 6},
     {'1': 'OPERATION_CANCEL', '2': 7},
     {'1': 'OPERATION_SCHEDULER', '2': 8},
+    {'1': 'OPERATION_LIST_INSTALLED', '2': 9},
+    {'1': 'OPERATION_SWITCH_ACTIVE', '2': 10},
+    {'1': 'OPERATION_ROLLBACK', '2': 11},
   ],
 };
 
@@ -116,7 +119,9 @@ final $typed_data.Uint8List operationDescriptor = $convert.base64Decode(
     'CglPcGVyYXRpb24SGQoVT1BFUkFUSU9OX1VOU1BFQ0lGSUVEEAASEwoPT1BFUkFUSU9OX0NIRU'
     'NLEAESEgoOT1BFUkFUSU9OX1NLSVAQAhIWChJPUEVSQVRJT05fRE9XTkxPQUQQAxITCg9PUEVS'
     'QVRJT05fQVBQTFkQBBIUChBPUEVSQVRJT05fU1RBVFVTEAUSFQoRT1BFUkFUSU9OX0NMRUFOVV'
-    'AQBhIUChBPUEVSQVRJT05fQ0FOQ0VMEAcSFwoTT1BFUkFUSU9OX1NDSEVEVUxFUhAI');
+    'AQBhIUChBPUEVSQVRJT05fQ0FOQ0VMEAcSFwoTT1BFUkFUSU9OX1NDSEVEVUxFUhAIEhwKGE9Q'
+    'RVJBVElPTl9MSVNUX0lOU1RBTExFRBAJEhsKF09QRVJBVElPTl9TV0lUQ0hfQUNUSVZFEAoSFg'
+    'oST1BFUkFUSU9OX1JPTExCQUNLEAs=');
 
 @$core.Deprecated('Use sessionPhaseDescriptor instead')
 const SessionPhase$json = {
@@ -272,6 +277,7 @@ const InstallSpec$json = {
       '6': '.relkit.updater.v1.FileSetEntry',
       '10': 'fileSet'
     },
+    {'1': 'reserved_codes', '3': 9, '4': 3, '5': 3, '10': 'reservedCodes'},
   ],
 };
 
@@ -282,7 +288,8 @@ final $typed_data.Uint8List installSpecDescriptor = $convert.base64Decode(
     'bGVfcmVscGF0aBgDIAEoCVIRZXhlY3V0YWJsZVJlbHBhdGgSJwoPc2lkZWNhcl9yZWxwYXRoGA'
     'QgASgJUg5zaWRlY2FyUmVscGF0aBIaCghwcmVzZXJ2ZRgFIAMoCVIIcHJlc2VydmUSFgoGcmV0'
     'YWluGAYgASgFUgZyZXRhaW4SGgoIcmVsYXVuY2gYByABKAhSCHJlbGF1bmNoEjoKCGZpbGVfc2'
-    'V0GAggAygLMh8ucmVsa2l0LnVwZGF0ZXIudjEuRmlsZVNldEVudHJ5UgdmaWxlU2V0');
+    'V0GAggAygLMh8ucmVsa2l0LnVwZGF0ZXIudjEuRmlsZVNldEVudHJ5UgdmaWxlU2V0EiUKDnJl'
+    'c2VydmVkX2NvZGVzGAkgAygDUg1yZXNlcnZlZENvZGVz');
 
 @$core.Deprecated('Use runtimeDescriptor instead')
 const Runtime$json = {
@@ -500,12 +507,14 @@ const ApplyOp$json = {
   '1': 'ApplyOp',
   '2': [
     {'1': 'plan_id', '3': 1, '4': 1, '5': 9, '10': 'planId'},
+    {'1': 'install_only', '3': 2, '4': 1, '5': 8, '10': 'installOnly'},
   ],
 };
 
 /// Descriptor for `ApplyOp`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List applyOpDescriptor =
-    $convert.base64Decode('CgdBcHBseU9wEhcKB3BsYW5faWQYASABKAlSBnBsYW5JZA==');
+final $typed_data.Uint8List applyOpDescriptor = $convert.base64Decode(
+    'CgdBcHBseU9wEhcKB3BsYW5faWQYASABKAlSBnBsYW5JZBIhCgxpbnN0YWxsX29ubHkYAiABKA'
+    'hSC2luc3RhbGxPbmx5');
 
 @$core.Deprecated('Use statusOpDescriptor instead')
 const StatusOp$json = {
@@ -533,6 +542,76 @@ const CancelOp$json = {
 /// Descriptor for `CancelOp`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List cancelOpDescriptor =
     $convert.base64Decode('CghDYW5jZWxPcA==');
+
+@$core.Deprecated('Use listInstalledOpDescriptor instead')
+const ListInstalledOp$json = {
+  '1': 'ListInstalledOp',
+};
+
+/// Descriptor for `ListInstalledOp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List listInstalledOpDescriptor =
+    $convert.base64Decode('Cg9MaXN0SW5zdGFsbGVkT3A=');
+
+@$core.Deprecated('Use switchActiveOpDescriptor instead')
+const SwitchActiveOp$json = {
+  '1': 'SwitchActiveOp',
+  '2': [
+    {'1': 'code', '3': 1, '4': 1, '5': 3, '10': 'code'},
+  ],
+};
+
+/// Descriptor for `SwitchActiveOp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List switchActiveOpDescriptor =
+    $convert.base64Decode('Cg5Td2l0Y2hBY3RpdmVPcBISCgRjb2RlGAEgASgDUgRjb2Rl');
+
+@$core.Deprecated('Use rollbackOpDescriptor instead')
+const RollbackOp$json = {
+  '1': 'RollbackOp',
+};
+
+/// Descriptor for `RollbackOp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List rollbackOpDescriptor =
+    $convert.base64Decode('CgpSb2xsYmFja09w');
+
+@$core.Deprecated('Use installedVersionDescriptor instead')
+const InstalledVersion$json = {
+  '1': 'InstalledVersion',
+  '2': [
+    {'1': 'code', '3': 1, '4': 1, '5': 3, '10': 'code'},
+    {'1': 'version', '3': 2, '4': 1, '5': 9, '10': 'version'},
+    {'1': 'path', '3': 3, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'executable', '3': 4, '4': 1, '5': 9, '10': 'executable'},
+    {'1': 'active', '3': 5, '4': 1, '5': 8, '10': 'active'},
+  ],
+};
+
+/// Descriptor for `InstalledVersion`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List installedVersionDescriptor = $convert.base64Decode(
+    'ChBJbnN0YWxsZWRWZXJzaW9uEhIKBGNvZGUYASABKANSBGNvZGUSGAoHdmVyc2lvbhgCIAEoCV'
+    'IHdmVyc2lvbhISCgRwYXRoGAMgASgJUgRwYXRoEh4KCmV4ZWN1dGFibGUYBCABKAlSCmV4ZWN1'
+    'dGFibGUSFgoGYWN0aXZlGAUgASgIUgZhY3RpdmU=');
+
+@$core.Deprecated('Use installedListDescriptor instead')
+const InstalledList$json = {
+  '1': 'InstalledList',
+  '2': [
+    {
+      '1': 'versions',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.relkit.updater.v1.InstalledVersion',
+      '10': 'versions'
+    },
+    {'1': 'active_code', '3': 2, '4': 1, '5': 3, '10': 'activeCode'},
+  ],
+};
+
+/// Descriptor for `InstalledList`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List installedListDescriptor = $convert.base64Decode(
+    'Cg1JbnN0YWxsZWRMaXN0Ej8KCHZlcnNpb25zGAEgAygLMiMucmVsa2l0LnVwZGF0ZXIudjEuSW'
+    '5zdGFsbGVkVmVyc2lvblIIdmVyc2lvbnMSHwoLYWN0aXZlX2NvZGUYAiABKANSCmFjdGl2ZUNv'
+    'ZGU=');
 
 @$core.Deprecated('Use updaterRequestDescriptor instead')
 const UpdaterRequest$json = {
@@ -625,6 +704,33 @@ const UpdaterRequest$json = {
       '9': 0,
       '10': 'cancel'
     },
+    {
+      '1': 'list_installed',
+      '3': 17,
+      '4': 1,
+      '5': 11,
+      '6': '.relkit.updater.v1.ListInstalledOp',
+      '9': 0,
+      '10': 'listInstalled'
+    },
+    {
+      '1': 'switch_active',
+      '3': 18,
+      '4': 1,
+      '5': 11,
+      '6': '.relkit.updater.v1.SwitchActiveOp',
+      '9': 0,
+      '10': 'switchActive'
+    },
+    {
+      '1': 'rollback',
+      '3': 19,
+      '4': 1,
+      '5': 11,
+      '6': '.relkit.updater.v1.RollbackOp',
+      '9': 0,
+      '10': 'rollback'
+    },
   ],
   '8': [
     {'1': 'op'},
@@ -643,7 +749,11 @@ final $typed_data.Uint8List updaterRequestDescriptor = $convert.base64Decode(
     'BIAFIFYXBwbHkSNQoGc3RhdHVzGA4gASgLMhsucmVsa2l0LnVwZGF0ZXIudjEuU3RhdHVzT3BI'
     'AFIGc3RhdHVzEjgKB2NsZWFudXAYDyABKAsyHC5yZWxraXQudXBkYXRlci52MS5DbGVhbnVwT3'
     'BIAFIHY2xlYW51cBI1CgZjYW5jZWwYECABKAsyGy5yZWxraXQudXBkYXRlci52MS5DYW5jZWxP'
-    'cEgAUgZjYW5jZWxCBAoCb3A=');
+    'cEgAUgZjYW5jZWwSSwoObGlzdF9pbnN0YWxsZWQYESABKAsyIi5yZWxraXQudXBkYXRlci52MS'
+    '5MaXN0SW5zdGFsbGVkT3BIAFINbGlzdEluc3RhbGxlZBJICg1zd2l0Y2hfYWN0aXZlGBIgASgL'
+    'MiEucmVsa2l0LnVwZGF0ZXIudjEuU3dpdGNoQWN0aXZlT3BIAFIMc3dpdGNoQWN0aXZlEjsKCH'
+    'JvbGxiYWNrGBMgASgLMh0ucmVsa2l0LnVwZGF0ZXIudjEuUm9sbGJhY2tPcEgAUghyb2xsYmFj'
+    'a0IECgJvcA==');
 
 @$core.Deprecated('Use errorDescriptor instead')
 const Error$json = {
@@ -1310,6 +1420,15 @@ const UpdaterEvent$json = {
       '9': 0,
       '10': 'failed'
     },
+    {
+      '1': 'installed',
+      '3': 16,
+      '4': 1,
+      '5': 11,
+      '6': '.relkit.updater.v1.InstalledList',
+      '9': 0,
+      '10': 'installed'
+    },
   ],
   '8': [
     {'1': 'kind'},
@@ -1328,8 +1447,9 @@ final $typed_data.Uint8List updaterEventDescriptor = $convert.base64Decode(
     'FwcGx5GAwgASgLMh4ucmVsa2l0LnVwZGF0ZXIudjEuQXBwbHlSZXN1bHRIAFIFYXBwbHkSMwoG'
     'cmVzdWx0GA0gASgLMhkucmVsa2l0LnVwZGF0ZXIudjEuUmVzdWx0SABSBnJlc3VsdBI7CgZzdG'
     'F0dXMYDiABKAsyIS5yZWxraXQudXBkYXRlci52MS5TdGF0dXNTbmFwc2hvdEgAUgZzdGF0dXMS'
-    'MwoGZmFpbGVkGA8gASgLMhkucmVsa2l0LnVwZGF0ZXIudjEuRmFpbGVkSABSBmZhaWxlZEIGCg'
-    'RraW5k');
+    'MwoGZmFpbGVkGA8gASgLMhkucmVsa2l0LnVwZGF0ZXIudjEuRmFpbGVkSABSBmZhaWxlZBJACg'
+    'lpbnN0YWxsZWQYECABKAsyIC5yZWxraXQudXBkYXRlci52MS5JbnN0YWxsZWRMaXN0SABSCWlu'
+    'c3RhbGxlZEIGCgRraW5k');
 
 @$core.Deprecated('Use artifactTargetDescriptor instead')
 const ArtifactTarget$json = {
@@ -1588,6 +1708,8 @@ const ApplySessionRecord$json = {
       '10': 'fileSet'
     },
     {'1': 'sidecar_relpath', '3': 18, '4': 1, '5': 9, '10': 'sidecarRelpath'},
+    {'1': 'install_only', '3': 19, '4': 1, '5': 8, '10': 'installOnly'},
+    {'1': 'reserved_codes', '3': 20, '4': 3, '5': 3, '10': 'reservedCodes'},
   ],
 };
 
@@ -1606,7 +1728,8 @@ final $typed_data.Uint8List applySessionRecordDescriptor = $convert.base64Decode
     'bHBhdGgYDiABKAlSEWV4ZWN1dGFibGVSZWxwYXRoEhoKCHByZXNlcnZlGA8gAygJUghwcmVzZX'
     'J2ZRIWCgZyZXRhaW4YECABKAVSBnJldGFpbhI6CghmaWxlX3NldBgRIAMoCzIfLnJlbGtpdC51'
     'cGRhdGVyLnYxLkZpbGVTZXRFbnRyeVIHZmlsZVNldBInCg9zaWRlY2FyX3JlbHBhdGgYEiABKA'
-    'lSDnNpZGVjYXJSZWxwYXRo');
+    'lSDnNpZGVjYXJSZWxwYXRoEiEKDGluc3RhbGxfb25seRgTIAEoCFILaW5zdGFsbE9ubHkSJQoO'
+    'cmVzZXJ2ZWRfY29kZXMYFCADKANSDXJlc2VydmVkQ29kZXM=');
 
 @$core.Deprecated('Use journalEntryDescriptor instead')
 const JournalEntry$json = {

@@ -37,9 +37,6 @@ bool isInstallLayoutSupported({
   required String operatingSystem,
   required InstallLayout layout,
 }) {
-  if (operatingSystem == 'macos' && layout == InstallLayout.versionedDir) {
-    return false;
-  }
   return true;
 }
 

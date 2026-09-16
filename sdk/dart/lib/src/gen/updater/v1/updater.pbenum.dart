@@ -168,6 +168,12 @@ class Operation extends $pb.ProtobufEnum {
       Operation._(7, _omitEnumNames ? '' : 'OPERATION_CANCEL');
   static const Operation OPERATION_SCHEDULER =
       Operation._(8, _omitEnumNames ? '' : 'OPERATION_SCHEDULER');
+  static const Operation OPERATION_LIST_INSTALLED =
+      Operation._(9, _omitEnumNames ? '' : 'OPERATION_LIST_INSTALLED');
+  static const Operation OPERATION_SWITCH_ACTIVE =
+      Operation._(10, _omitEnumNames ? '' : 'OPERATION_SWITCH_ACTIVE');
+  static const Operation OPERATION_ROLLBACK =
+      Operation._(11, _omitEnumNames ? '' : 'OPERATION_ROLLBACK');
 
   static const $core.List<Operation> values = <Operation>[
     OPERATION_UNSPECIFIED,
@@ -179,10 +185,13 @@ class Operation extends $pb.ProtobufEnum {
     OPERATION_CLEANUP,
     OPERATION_CANCEL,
     OPERATION_SCHEDULER,
+    OPERATION_LIST_INSTALLED,
+    OPERATION_SWITCH_ACTIVE,
+    OPERATION_ROLLBACK,
   ];
 
   static final $core.List<Operation?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 8);
+      $pb.ProtobufEnum.$_initByValueList(values, 11);
   static Operation? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 

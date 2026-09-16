@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file rup/v2/envelope.proto.
  */
 export const file_rup_v2_envelope: GenFile = /*@__PURE__*/
-  fileDesc("ChVydXAvdjIvZW52ZWxvcGUucHJvdG8SBnJ1cC52MiI1CglTaWduYXR1cmUSDgoGa2V5X2lkGAEgASgJEgsKA2FsZxgCIAEoCRILCgNzaWcYAyABKAwiUgoIRW52ZWxvcGUSDgoGc2NoZW1hGAEgASgJEg8KB3BheWxvYWQYAiABKAwSJQoKc2lnbmF0dXJlcxgDIAMoCzIRLnJ1cC52Mi5TaWduYXR1cmVCLVorY25iLmNvb2wvc2hpY2hhbzQwMi9yZWxraXQvYXBpL3J1cC92MjtydXB2MmIGcHJvdG8z");
+  fileDesc("ChVydXAvdjIvZW52ZWxvcGUucHJvdG8SBnJ1cC52MiI1CglTaWduYXR1cmUSDgoGa2V5X2lkGAEgASgJEgsKA2FsZxgCIAEoCRILCgNzaWcYAyABKAwiUgoIRW52ZWxvcGUSDgoGc2NoZW1hGAEgASgJEg8KB3BheWxvYWQYAiABKAwSJQoKc2lnbmF0dXJlcxgDIAMoCzIRLnJ1cC52Mi5TaWduYXR1cmVCKVonZ28uZmlyb3lhbmcuY29tL3JlbGtpdC9hcGkvcnVwL3YyO3J1cHYyYgZwcm90bzM");
 
 /**
  * Signature is one Ed25519 signature over Envelope.payload bytes.

@@ -17,9 +17,12 @@ import {
   DownloadResultSchema,
   ErrorSchema,
   FailedSchema,
+  ListInstalledOpSchema,
   ResultSchema,
+  RollbackOpSchema,
   SkipOpSchema,
   StatusOpSchema,
+  SwitchActiveOpSchema,
   UpdaterEventSchema,
   UpdaterRequestSchema,
   type Capabilities,
@@ -37,8 +40,8 @@ import {
 } from "./gen/updater/v1/updater_pb.js";
 
 export const ipcMin = 1;
-export const ipcMax = 1;
-export const ipcCurrent = 1;
+export const ipcMax = 2;
+export const ipcCurrent = 2;
 
 const facadeError = (code: number, message: string, retryable = false): Error =>
   create(ErrorSchema, { code, retryable, message, attempts: [] });
@@ -183,8 +186,8 @@ export class Updater {
     });
   }
 
-  async apply(opts: { planId: string }, onEvent?: (e: UpdaterEvent) => void): Promise<ApplyResult> {
-    for await (const ev of this.call({ op: { case: "apply", value: create(ApplyOpSchema, { planId: opts.planId }) } })) {
+  async apply(opts: { planId: string; installOnly?: boolean }, onEvent?: (e: UpdaterEvent) => void): Promise<ApplyResult> {
+    for await (const ev of this.call({ op: { case: "apply", value: create(ApplyOpSchema, { planId: opts.planId, installOnly: !!opts.installOnly }) } })) {
       onEvent?.(ev);
       if (ev.kind.case === "apply") return ev.kind.value;
     }
@@ -210,6 +213,27 @@ export class Updater {
   }
 
   async cancel(): Promise<Result> {
+    return create(ResultSchema, { kind: { case: "ok", value: {} } });
+  }
+
+  async listInstalled(): Promise<import("./gen/updater/v1/updater_pb.js").InstalledList> {
+    for await (const ev of this.call({ op: { case: "listInstalled", value: create(ListInstalledOpSchema) } })) {
+      if (ev.kind.case === "installed") return ev.kind.value;
+    }
+    return { versions: [], activeCode: 0n } as import("./gen/updater/v1/updater_pb.js").InstalledList;
+  }
+
+  async switchActive(opts: { code: bigint }): Promise<Result> {
+    for await (const ev of this.call({ op: { case: "switchActive", value: create(SwitchActiveOpSchema, { code: opts.code }) } })) {
+      if (ev.kind.case === "result") return ev.kind.value;
+    }
+    return create(ResultSchema, { kind: { case: "ok", value: {} } });
+  }
+
+  async rollback(): Promise<Result> {
+    for await (const ev of this.call({ op: { case: "rollback", value: create(RollbackOpSchema) } })) {
+      if (ev.kind.case === "result") return ev.kind.value;
+    }
     return create(ResultSchema, { kind: { case: "ok", value: {} } });
   }
 }

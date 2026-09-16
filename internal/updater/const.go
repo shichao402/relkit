@@ -4,8 +4,8 @@ import "time"
 
 const (
 	IPCMin     uint32 = 1
-	IPCMax     uint32 = 1
-	IPCCurrent uint32 = 1
+	IPCMax     uint32 = 2
+	IPCCurrent uint32 = 2
 
 	MinCheckInterval = 5 * time.Minute
 	DefaultSuccess   = 24 * time.Hour
@@ -20,6 +20,8 @@ const (
 	JSONSessionName  = "update_apply.json"
 	ActivePointer    = "active.json"
 	RetainRecordName = "retain.json"
+	VersionMetaName  = "relkit-version.json"
+	ApplyLockName    = ".relkit-apply.lock"
 )
 
-var DefaultOperations = []int32{1, 2, 3, 4, 5, 6, 7, 8} // Operation enum values
+var DefaultOperations = []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} // Operation enum values

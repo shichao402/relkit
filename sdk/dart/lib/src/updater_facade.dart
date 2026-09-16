@@ -11,8 +11,8 @@ import 'package:protobuf/protobuf.dart';
 import 'gen/updater/v1/updater.pb.dart';
 
 const int ipcMin = 1;
-const int ipcMax = 1;
-const int ipcCurrent = 1;
+const int ipcMax = 2;
+const int ipcCurrent = 2;
 
 abstract class Glue {
   Future<String> locate(Runtime runtime);
@@ -195,9 +195,11 @@ class Updater {
 
   Future<ApplyResult> apply({
     required String planId,
+    bool installOnly = false,
     void Function(UpdaterEvent event)? onEvent,
   }) async {
-    final req = UpdaterRequest()..apply = ApplyOp(planId: planId);
+    final req = UpdaterRequest()
+      ..apply = ApplyOp(planId: planId, installOnly: installOnly);
     await for (final ev in _call(req)) {
       onEvent?.call(ev);
       if (ev.hasApply()) return ev.apply;
@@ -225,6 +227,30 @@ class Updater {
   }
 
   Future<Result> cancel() async {
+    return Result()..ok = Ok();
+  }
+
+  Future<InstalledList> listInstalled() async {
+    final req = UpdaterRequest()..listInstalled = ListInstalledOp();
+    await for (final ev in _call(req)) {
+      if (ev.hasInstalled()) return ev.installed;
+    }
+    return InstalledList();
+  }
+
+  Future<Result> switchActive({required Int64 code}) async {
+    final req = UpdaterRequest()..switchActive = SwitchActiveOp(code: code);
+    await for (final ev in _call(req)) {
+      if (ev.hasResult()) return ev.result;
+    }
+    return Result()..ok = Ok();
+  }
+
+  Future<Result> rollback() async {
+    final req = UpdaterRequest()..rollback = RollbackOp();
+    await for (final ev in _call(req)) {
+      if (ev.hasResult()) return ev.result;
+    }
     return Result()..ok = Ok();
   }
 }
