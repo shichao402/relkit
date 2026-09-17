@@ -42,7 +42,7 @@ jobs:
         working-directory: dist
         run: sha256sum * > SHA256SUMS
       - name: Publish Dec provides
-        uses: shichao402/Dec/.github/actions/publish-provides@main
+        uses: shichao402/Dec/.github/actions/publish-provides@32c2705f859266e7ddacf5ea435d3e26e691ccf0
         with:
           project-root: ${{ github.workspace }}
           ref: ${{ github.ref_name }}
