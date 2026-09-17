@@ -1303,6 +1303,23 @@ class RetrospectTests(unittest.TestCase):
             self.assertTrue(any("relkit_host.py retrospect" in item for item in failures))
             self.assertTrue(any("reading RETROSPECT.md" in item for item in failures))
 
+    def test_retrospect_rejects_command_only_skill_without_conversation_review(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            skill = root / "skills" / "relkit-ops" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text(
+                "先展示 evidence.topology 与 evidence.remote。\n"
+                "`blocked` 中的决策本轮禁止询问；operatorTokenPresent=true 不代表产品 token。\n"
+                "最后运行 python scripts/host/relkit_host.py retrospect。\n",
+                encoding="utf-8",
+            )
+            report = host.retrospect_report(root)
+        todo = {item["check"]: item for item in report["groups"]["todo"]}
+        check = "skill-conversation-retrospect:skills/relkit-ops/SKILL.md"
+        self.assertIn(check, todo)
+        self.assertIn("command-only retrospect", todo[check]["actual"])
+
     def test_retrospect_requires_cache_ignore_but_tracks_onboarding(self) -> None:
         self.assertIn(".relkit/cache/", host.GITIGNORE_RELKIT)
         self.assertNotIn(".relkit/onboarding.json", host.GITIGNORE_RELKIT)

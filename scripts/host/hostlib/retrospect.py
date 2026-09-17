@@ -404,6 +404,26 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
             ),
             evidence_first,
         )
+        conversation_retrospect = (
+            "命令退出码为 0 不能替代会话复盘" in text
+            and "用户对目标、范围或前提的纠正" in text
+            and "命令成功但交付结果不对" in text
+            and "换成任意无关产品" in text
+            and "现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动" in text
+            and "不得拿当前产品的专用测试或配置当通用流程优化" in text
+            and "前一次 verified 已过期" in text
+        )
+        check(
+            f"skill-conversation-retrospect:{display_path}",
+            display_path,
+            "skill reviews user corrections and successful-but-wrong outcomes before the mechanical gate",
+            (
+                "conversation review separates generic relkit escapes, product bugs and agent scope errors"
+                if conversation_retrospect
+                else "skill still permits command-only retrospect or product-specific answers to generic workflow gaps"
+            ),
+            conversation_retrospect,
+        )
 
     encountered, digested, undigested = classify_ops_journal(root)
     return {
