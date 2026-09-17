@@ -4,6 +4,11 @@
 - Date: 2026-09-09
 - Relates: [0003](0003-protobuf-v2-wire-format.md)（线上 RUP）、[0009](0009-publisher-protocol-negotiation.md)（窗口协商模式）
 
+> Layout、apply 管线和 IPC `[1,1]` 的历史描述已由
+> [ADR 0013](0013-internal-update-payload.md) 与
+> [ADR 0014](0014-placement-and-version-library.md) 取代；单引擎与 facade
+> 决策继续有效。
+
 ## 背景
 
 Go / Dart / Node 三套 SDK 各自实现 check、下载与（部分）apply，行为已经漂移：skip 是否生效、可变指针是否 cache-bust、index 验签成功后 manifest 失败是否换源、`lastResult` 字符串、scheduler 间隔。`relkit-apply` 只覆盖 Windows `versionedDir`，与 Dart `wholeRoot` 不对齐。

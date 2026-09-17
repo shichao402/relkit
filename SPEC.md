@@ -26,8 +26,8 @@
 
 ### 1.2 非目标
 
-1. **不做文件级增量（delta / patch）。** 本版本只支持整包替换。协议为将来扩展预留了 `artifacts[].kind` 与 `schema` 版本位，但 v1 实现**禁止**产出增量产物。
-2. **不定义"如何安装"。** 替换二进制、唤起系统安装器、解压覆盖资源目录，这些完全由宿主决定，协议只负责把正确的字节和元数据交到宿主手里。
+1. **不做二进制增量（delta / patch）。** 内部更新 payload 携带目标版本的完整文件，不携带字节差分，也不把每个文件变成独立 artifact。
+2. **不定义完整安装包如何安装。** exe / dmg / deb 等仍由宿主交给平台安装流程；结构化 payload 的应用由 `relkit-updater` 本机协议定义，见 §12.5 与 ADR 0013。
 3. **不做服务端灰度分流。** v1 的 index 是一份对所有客户端相同的静态文档。`rollout` 字段已预留，但 v1 **禁止**依赖它。
 4. **~~不提供多语言运行时 SDK~~（已撤销）。** v2 起提供官方 Go / Dart SDK；结构以 Protobuf 生成代码为唯一读写入口，各语言只实现编排逻辑。
 5. **不依赖付费智能 DNS / Anycast / 全球 CDN 做就近调度。** 多区域可达性由 directory 列表 + 客户端对真实下载历史的排序解决（§12.7）；协议**禁止**把「每次检查前的专用连通性探测 / 测速下载」规定为选源前提。
@@ -235,7 +235,7 @@ directory（§16）中列出的多个 `index_url` **必须**指向上述**同一
 
 ```json
 {
-  "schema": "rup.manifest/1",
+  "schema": "rup.manifest/3",
   "product": "myapp",
   "version": "1.5.0",
   "code": 150,
@@ -270,7 +270,7 @@ directory（§16）中列出的多个 `index_url` **必须**指向上述**同一
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `schema` | string | 是 | 固定 `"rup.manifest/2"` |
+| `schema` | string | 是 | 固定 `"rup.manifest/3"` |
 | `product` | string | 是 | **必须**与 index 的 `product` 一致，客户端**必须**校验 |
 | `version` | string | 是 | **必须**与对应 index 节点的 `version` 一致，客户端**必须**校验 |
 | `code` | integer | 是 | **必须**与对应 index 节点的 `code` 一致，客户端**必须**校验 |
@@ -286,7 +286,7 @@ directory（§16）中列出的多个 `index_url` **必须**指向上述**同一
 | `filename` | string | 是 | 建议的落盘文件名。**禁止**包含路径分隔符、`..`、控制字符。客户端**必须**在落盘前校验，见 §14.4 |
 | `size` | integer ≥ 0 | 是 | 字节数 |
 | `sha256` | string | 是 | 64 位小写十六进制 |
-| `kind` | string | 是 | 见 §6.2 |
+| `kind` | `ArtifactKind` enum | 是 | 见 §6.2 |
 | `selectors` | object | 是 | 字符串到字符串的映射，见 §11。允许为空对象 `{}`，表示适用于所有客户端 |
 | `urls` | array\<string\> | 是 | 长度 ≥ 1 |
 | `meta` | object | 否 | 宿主自定义的透传数据。协议**禁止**解释其内容 |
@@ -299,8 +299,9 @@ directory（§16）中列出的多个 `index_url` **必须**指向上述**同一
 | `installer` | 安装包（dmg / exe / msi / apk / pkg），宿主需交给系统安装器 |
 | `binary` | 单个可执行文件，宿主直接替换 |
 | `blob` | 无语义的数据文件（配置、资源） |
+| `payload` | `files.pb` + `files/` + 可选 `scripts/` 的标准内部更新包 |
 
-`kind` 只是给宿主的提示，协议本身对不同 `kind` 的处理没有差异。宿主遇到无法识别的 `kind` **应该**忽略该 artifact 而不是报错，以便协议将来扩展。
+`archive` / `installer` / `binary` / `blob` 描述完整安装或兼容产物；`payload` 是有结构约束的协议类型，不是提示。stage 与 publish **必须**按 `relkit.payload/1` 校验其文件表、正文和脚本。客户端遇到无法识别的 enum 值**必须**跳过该 artifact。
 
 ### 6.3 `meta` 的定位
 
@@ -314,7 +315,7 @@ directory（§16）中列出的多个 `index_url` **必须**指向上述**同一
 
 ```json
 {
-  "schema": "rup.staged/1",
+  "schema": "rup.staged/3",
   "product": "myapp",
   "version": "1.5.0",
   "code": 150,
@@ -490,7 +491,12 @@ index 会随发布次数增长。每个节点约 300 字节，1000 次发布约 
 
 **匹配规则：** artifact `A` 匹配客户端集合 `S`，当且仅当 `A.selectors` 中**每一个**键值对 `(k, v)` 都满足 `S[k] == v`。`A.selectors` 中未出现的键一律忽略；`S` 中多出的键一律忽略。空的 `selectors` 匹配任何客户端。
 
-**多个匹配时：** 客户端**必须**取匹配结果中 `id` 字典序最小的那一个，并**可以**记录一条警告。同时，发布工具在 stage 阶段**必须**校验同一 manifest 内不存在两个 `selectors` 完全相同的 artifact。把仲裁规则定死（而不是「取第一个」）是为了让不同语言实现在异常输入下也给出一致结果。
+**多个匹配时：** 若客户端声明了 `S["apply"]`，且匹配结果中存在显式声明同一
+`apply` 值的 artifact，客户端**必须**先把候选集收窄到这些 artifact；这样新
+updater 优先 payload，而旧 updater 仍能选不带 `apply` 的完整安装包。若没有
+这种候选，回退到全部匹配项，以兼容尚未发布 payload 的旧版本。随后客户端
+**必须**取候选中 `id` 字典序最小的一个，并**可以**记录警告。发布工具在 stage
+阶段**必须**校验同一 manifest 内不存在两个 `selectors` 完全相同的 artifact。
 
 ### 11.1 标准选择器键
 
@@ -565,9 +571,21 @@ index 会随发布次数增长。每个节点约 300 字节，1000 次发布约 
 
 ### 12.5 应用更新
 
-协议**不定义**如何安装。协议的职责终止于「把一个哈希校验通过的本地文件路径，连同它的 `kind`、`filename`、`meta` 一起交给宿主」。
+完整安装 artifact 的协议职责终止于「把一个哈希校验通过的本地文件路径，
+连同 `kind`、`filename`、`meta` 和 `FULL_INSTALL` disposition 交给宿主」。
+宿主负责唤起平台安装流程。
 
-宿主**应该**为自己的安装方式实现失败回滚。参考 Dec 的做法：替换二进制前先把原文件重命名为 `.bak`，复制失败则从 `.bak` 恢复。
+`payload` 的 disposition 为 `INTERNAL`，宿主**禁止**自行解压。它必须交给
+`relkit-updater`，由引擎校验 `relkit.payload/1` 文件表并执行统一事务：
+
+1. 解析并验证 files/scripts 与表一一对应；
+2. 由上次成功基线与本次表计算增加、覆盖、删除；
+3. 删除用户修改过的旧文件时跳过，`preserve` 命中路径不覆盖、不删除；
+4. pre 脚本成功后才动文件，post 失败按 journal 回滚；
+5. 成功后原子写入新基线。
+
+基线不存在或损坏时**禁止**推测性删除，只增/覆并重建基线。payload 脚本不提权，
+且只允许 IDL 声明的白名单解释器。完整规则见 ADR 0013。
 
 ### 12.6 Fallback 检查（规范性）
 
@@ -718,7 +736,7 @@ CAS 凭据文档对每个 blob 给出 `requests[]`。每个请求**必须**包�
 - `schema` 字段的格式是 `<对象名>/<主版本>`。主版本变化表示不兼容变更。
 - 客户端遇到**无法识别的主版本**时**必须**拒绝该文档并保持当前版本，**禁止**猜测性解析。
 - 客户端遇到**无法识别的字段**时**必须**忽略它。因此在同一主版本内新增可选字段是向后兼容的。
-- 客户端遇到无法识别的 `kind` 或 `selectors` 键时，**应该**跳过该 artifact 而非报错。
+- 客户端遇到无法识别的 `ArtifactKind` enum 值或无法满足的 `selectors` 键时，**必须**跳过该 artifact 而非报错。
 - 一致性用例（`conformance/`）的目录名带版本号。任何对规范性行为的修改都**必须**同时更新用例。
 
 ---
@@ -788,21 +806,21 @@ Channel：v2 首版 directory **可以**为每个 `(product)` 提供面向默认
 
 ---
 
-## 附录 B：安装布局（本机能力，非 RUP）
+## 附录 B：内容与落点（本机能力，非 RUP）
 
-§1.2 明确：**如何安装不是协议。** 布局由 `relkit.updater.v1.InstallSpec` 声明，**禁止**当作签名 index/manifest 字段。权威实现是 `relkit-updater`（ADR 0010）。
+签名 manifest 只声明 Content：`payload` 是内部更新，其他 kind 是完整安装或兼容
+内容。安装落点由 `relkit.updater.v1.InstallSpec.placement` 声明，**禁止**写进
+index/manifest：
 
-| 名称 | 行为 | 默认平台 |
-|------|------|----------|
-| `wholeRoot` | 整安装根替换（便携目录 / `.app`） | macOS / Linux |
-| `versionedDir` | 写入 `versions/<version>/`，原子切换 `active.json`；也可扩展为按项目选版本的安装库 | Windows；macOS 需保留完整 `.app` bundle |
-| `fileSet` | 多文件 journal 事务（同版本全套提交或全套回滚） | Dec 套件 |
+| Placement | 行为 |
+|---|---|
+| `IN_PLACE` | 按文件表事务化写入 `install_root`，使用基线差分删除 |
+| `LIBRARY` | 写入 `versions/<version>/`，成功后原子切换 `active.json` |
 
-引擎 **必须**拒绝自己尚未正确实现的平台 / 布局组合，不能静默落出不可启动的目录。
-`versionedDir` 在 darwin 上把完整 `.app` 拷进 `versions/<id>/<Product>.app`，不再剥外层。
-payload 里没有 `.app` 时 apply 失败。`retain` 缺省为当前 + 上一版；`reserved_codes` 保护项目 pin。
-`ApplyOp.install_only` 只入库不改 `active.json`。IPC 窗口 `[1, 2]`：list / switch / rollback 为窗口 2。
+`LibraryPolicy` 承载 `retain` 与保护项目 pin 的 `reserved_codes`；
+`ApplyOp.install_only` 只入库不切换。是否要求宿主退出按本次对账结果决定，不再
+由 Placement 常量决定。IPC 窗口为 `[3,3]`。
 
-落盘契约（版本目录形状、`active.json` 字段、**launcher 由产品提供**、宿主退出与重启时序、
-`retain` 取值、sidecar 刷新位置、接入 checklist）见
-[`docs/design/install-layouts.md`](docs/design/install-layouts.md)。这张表只分类，不足以照着接入。
+完整落盘与迁移裁决见 ADR 0013、ADR 0014。历史背景见
+[`docs/design/install-layouts.md`](docs/design/install-layouts.md)，其中旧 Layout
+API 已被 ADR 0014 取代。

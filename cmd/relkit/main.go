@@ -763,9 +763,9 @@ func parseStageArgs(args []string) (*stageArgs, error) {
 			opts.notesURL = mustValue(args, i, "--notes-url")
 		case arg == "--link":
 			opts.link = true
-		case arg == "--add":
+		case arg == "--install" || arg == "--payload" || arg == "--add":
 			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--add requires a path")
+				return nil, fmt.Errorf("%s requires a path", arg)
 			}
 			pathValue := args[i+1]
 			i++
@@ -774,7 +774,13 @@ func parseStageArgs(args []string) (*stageArgs, error) {
 				pairs = args[i+1]
 				i++
 			}
-			opts.adds = append(opts.adds, stage.AddSpec{Path: pathValue, PairsText: pairs})
+			track := ""
+			if arg == "--install" {
+				track = "install"
+			} else if arg == "--payload" {
+				track = "payload"
+			}
+			opts.adds = append(opts.adds, stage.AddSpec{Path: pathValue, PairsText: pairs, Track: track})
 		case strings.HasPrefix(arg, "-"):
 			return nil, fmt.Errorf("unknown flag %q", arg)
 		case opts.version == "":

@@ -15,7 +15,11 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 
+import 'objects.pbenum.dart';
+
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
+
+export 'objects.pbenum.dart';
 
 /// Selector is one key/value match constraint.
 /// Signed messages MUST NOT use map<>; encode helpers sort by key before Marshal.
@@ -527,7 +531,7 @@ class Artifact extends $pb.GeneratedMessage {
     $core.String? filename,
     $fixnum.Int64? size,
     $core.String? sha256,
-    $core.String? kind,
+    ArtifactKind? kind,
     $core.Iterable<Selector>? selectors,
     $core.Iterable<$core.String>? urls,
     $core.Iterable<MetaEntry>? meta,
@@ -561,7 +565,8 @@ class Artifact extends $pb.GeneratedMessage {
     ..aOS(2, _omitFieldNames ? '' : 'filename')
     ..aInt64(3, _omitFieldNames ? '' : 'size')
     ..aOS(4, _omitFieldNames ? '' : 'sha256')
-    ..aOS(5, _omitFieldNames ? '' : 'kind')
+    ..aE<ArtifactKind>(5, _omitFieldNames ? '' : 'kind',
+        enumValues: ArtifactKind.values)
     ..pPM<Selector>(6, _omitFieldNames ? '' : 'selectors',
         subBuilder: Selector.$_createMessage)
     ..pPS(7, _omitFieldNames ? '' : 'urls')
@@ -626,9 +631,9 @@ class Artifact extends $pb.GeneratedMessage {
   void clearSha256() => $_clearField(4);
 
   @$pb.TagNumber(5)
-  $core.String get kind => $_getSZ(4);
+  ArtifactKind get kind => $_getN(4);
   @$pb.TagNumber(5)
-  set kind($core.String value) => $_setString(4, value);
+  set kind(ArtifactKind value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasKind() => $_has(4);
   @$pb.TagNumber(5)
@@ -644,7 +649,7 @@ class Artifact extends $pb.GeneratedMessage {
   $pb.PbList<MetaEntry> get meta => $_getList(7);
 }
 
-/// Manifest describes all artifacts for one version (schema rup.manifest/2).
+/// Manifest describes all artifacts for one version (schema rup.manifest/3).
 class Manifest extends $pb.GeneratedMessage {
   factory Manifest({
     $core.String? schema,
@@ -774,7 +779,7 @@ class StagedArtifact extends $pb.GeneratedMessage {
     $core.String? filename,
     $fixnum.Int64? size,
     $core.String? sha256,
-    $core.String? kind,
+    ArtifactKind? kind,
     $core.Iterable<Selector>? selectors,
     $core.Iterable<MetaEntry>? meta,
     $core.String? sourcePath,
@@ -808,7 +813,8 @@ class StagedArtifact extends $pb.GeneratedMessage {
     ..aOS(2, _omitFieldNames ? '' : 'filename')
     ..aInt64(3, _omitFieldNames ? '' : 'size')
     ..aOS(4, _omitFieldNames ? '' : 'sha256')
-    ..aOS(5, _omitFieldNames ? '' : 'kind')
+    ..aE<ArtifactKind>(5, _omitFieldNames ? '' : 'kind',
+        enumValues: ArtifactKind.values)
     ..pPM<Selector>(6, _omitFieldNames ? '' : 'selectors',
         subBuilder: Selector.$_createMessage)
     ..pPM<MetaEntry>(7, _omitFieldNames ? '' : 'meta',
@@ -875,9 +881,9 @@ class StagedArtifact extends $pb.GeneratedMessage {
   void clearSha256() => $_clearField(4);
 
   @$pb.TagNumber(5)
-  $core.String get kind => $_getSZ(4);
+  ArtifactKind get kind => $_getN(4);
   @$pb.TagNumber(5)
-  set kind($core.String value) => $_setString(4, value);
+  set kind(ArtifactKind value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasKind() => $_has(4);
   @$pb.TagNumber(5)
@@ -899,7 +905,7 @@ class StagedArtifact extends $pb.GeneratedMessage {
   void clearSourcePath() => $_clearField(8);
 }
 
-/// Staged is the offline stage product (schema rup.staged/2).
+/// Staged is the offline stage product (schema rup.staged/3).
 class Staged extends $pb.GeneratedMessage {
   factory Staged({
     $core.String? schema,

@@ -42,6 +42,7 @@ type Artifact struct {
 	Filename  string            `json:"filename"`
 	Size      int64             `json:"size"`
 	Sha256    string            `json:"sha256"`
+	Kind      string            `json:"kind"`
 	Selectors map[string]string `json:"selectors,omitempty"`
 	URLs      []string          `json:"urls"`
 }
@@ -110,6 +111,9 @@ func ArtifactsFromManifest(manifest *rupv2.Manifest) []Artifact {
 		if item == nil {
 			continue
 		}
+		if item.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
+			continue
+		}
 		selectors := make(map[string]string, len(item.Selectors))
 		for _, selector := range item.Selectors {
 			if selector != nil {
@@ -121,11 +125,27 @@ func ArtifactsFromManifest(manifest *rupv2.Manifest) []Artifact {
 			Filename:  item.Filename,
 			Size:      item.Size,
 			Sha256:    item.Sha256,
+			Kind:      kindString(item.Kind),
 			Selectors: selectors,
 			URLs:      append([]string(nil), item.Urls...),
 		})
 	}
 	return out
+}
+
+func kindString(kind rupv2.ArtifactKind) string {
+	switch kind {
+	case rupv2.ArtifactKind_ARTIFACT_KIND_ARCHIVE:
+		return "archive"
+	case rupv2.ArtifactKind_ARTIFACT_KIND_INSTALLER:
+		return "installer"
+	case rupv2.ArtifactKind_ARTIFACT_KIND_BINARY:
+		return "binary"
+	case rupv2.ArtifactKind_ARTIFACT_KIND_BLOB:
+		return "blob"
+	default:
+		return ""
+	}
 }
 
 func marshal(value any) ([]byte, error) {

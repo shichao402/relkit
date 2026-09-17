@@ -42,6 +42,9 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if err != nil {
 		return nil, err
 	}
+	if err := stage.ValidateStagedPolicy(staged); err != nil {
+		return nil, err
+	}
 	channel := staged.Channel
 	mismatches := stage.VerifyPresentStagedHashes(cfg, staged)
 	if len(mismatches) > 0 {

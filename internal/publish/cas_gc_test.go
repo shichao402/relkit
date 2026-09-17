@@ -48,7 +48,7 @@ func mustManifest(t *testing.T, version, digest string) []byte {
 		Product: "demo",
 		Version: version,
 		Artifacts: []*rupv2.Artifact{{
-			Id: "app", Filename: "app.bin", Size: 1, Sha256: digest, Kind: "binary",
+			Id: "app", Filename: "app.bin", Size: 1, Sha256: digest, Kind: rupv2.ArtifactKind_ARTIFACT_KIND_BINARY,
 		}},
 	})
 	if err != nil {

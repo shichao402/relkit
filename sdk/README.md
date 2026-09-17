@@ -24,4 +24,4 @@ u.download(planId)
 u.apply(planId)  // if requiresHostExit, exit
 ```
 
-IPC window is a compile-time constant on the facade (`ipcMin`/`ipcMax` = 1), not a product config field.
+IPC window is a compile-time constant on the facade (`ipcMin`/`ipcMax` = 3), not a product config field.

@@ -1,0 +1,53 @@
+{
+  "name": "apply-track",
+  "description": "新 updater 优先选择显式匹配 apply selector 的 payload；老 updater 与尚未提供 payload 的旧平台继续回退完整安装包。",
+  "manifest": {
+    "schema": "rup.manifest/3",
+    "product": "conformance",
+    "version": "2.0.0",
+    "code": 200,
+    "artifacts": [
+      {
+        "id": "a-windows-installer",
+        "filename": "setup.exe",
+        "size": 1,
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "installer",
+        "selectors": { "os": "windows" },
+        "urls": ["https://x.invalid/setup.exe"]
+      },
+      {
+        "id": "z-windows-payload",
+        "filename": "update.zip",
+        "size": 1,
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "kind": "payload",
+        "selectors": { "os": "windows", "apply": "relkit-payload" },
+        "urls": ["https://x.invalid/update.zip"]
+      },
+      {
+        "id": "linux-installer",
+        "filename": "setup.deb",
+        "size": 1,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "kind": "installer",
+        "selectors": { "os": "linux" },
+        "urls": ["https://x.invalid/setup.deb"]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "clientSelectors": { "os": "windows" },
+      "expectArtifactId": "a-windows-installer"
+    },
+    {
+      "clientSelectors": { "os": "windows", "apply": "relkit-payload" },
+      "expectArtifactId": "z-windows-payload"
+    },
+    {
+      "clientSelectors": { "os": "linux", "apply": "relkit-payload" },
+      "expectArtifactId": "linux-installer"
+    }
+  ]
+}

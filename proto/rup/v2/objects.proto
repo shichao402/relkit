@@ -52,21 +52,30 @@ message Index {
   repeated VersionNode versions = 9;
 }
 
+enum ArtifactKind {
+  ARTIFACT_KIND_UNSPECIFIED = 0;
+  ARTIFACT_KIND_ARCHIVE = 1;
+  ARTIFACT_KIND_INSTALLER = 2;
+  ARTIFACT_KIND_BINARY = 3;
+  ARTIFACT_KIND_BLOB = 4;
+  ARTIFACT_KIND_PAYLOAD = 5;
+}
+
 // Artifact describes one downloadable file inside a Manifest.
 message Artifact {
   string id = 1;
   string filename = 2;
   int64 size = 3;
   string sha256 = 4;
-  string kind = 5; // archive|installer|binary|blob
+  ArtifactKind kind = 5;
   repeated Selector selectors = 6; // sorted by key when encoded
   repeated string urls = 7;
   repeated MetaEntry meta = 8; // sorted by key when encoded
 }
 
-// Manifest describes all artifacts for one version (schema rup.manifest/2).
+// Manifest describes all artifacts for one version (schema rup.manifest/3).
 message Manifest {
-  string schema = 1; // must be "rup.manifest/2"
+  string schema = 1; // must be "rup.manifest/3"
   string product = 2;
   string version = 3;
   int64 code = 4;
@@ -81,15 +90,15 @@ message StagedArtifact {
   string filename = 2;
   int64 size = 3;
   string sha256 = 4;
-  string kind = 5;
+  ArtifactKind kind = 5;
   repeated Selector selectors = 6;
   repeated MetaEntry meta = 7;
   string source_path = 8; // discarded at publish
 }
 
-// Staged is the offline stage product (schema rup.staged/2).
+// Staged is the offline stage product (schema rup.staged/3).
 message Staged {
-  string schema = 1; // must be "rup.staged/2"
+  string schema = 1; // must be "rup.staged/3"
   string product = 2;
   string version = 3;
   int64 code = 4;

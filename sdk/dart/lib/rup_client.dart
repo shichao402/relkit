@@ -7,13 +7,6 @@ library;
 
 export 'package:fixnum/fixnum.dart' show Int64;
 
-export 'src/apply/apply.dart';
-export 'src/apply/swap.dart';
-export 'src/apply/unpack.dart'
-    show
-        expandInnerInstallerIfPresent,
-        selectInstallRootContainingExecutable,
-        unpackUpdatePackage;
 export 'src/chain.dart';
 export 'src/download.dart';
 export 'src/envelope.dart';
@@ -35,6 +28,7 @@ export 'src/gen/rup/v2/objects.pb.dart'
         StagedArtifact,
         UpdateDirectory,
         VersionNode;
+export 'src/gen/rup/v2/objects.pbenum.dart' show ArtifactKind;
 export 'src/models.dart';
 export 'src/preference.dart';
 export 'src/release_notes.dart';

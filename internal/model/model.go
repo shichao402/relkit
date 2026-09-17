@@ -44,7 +44,7 @@ type ManifestRef = rupv2.DigestRef
 type Selector = rupv2.Selector
 type MetaEntry = rupv2.MetaEntry
 
-var Kinds = []string{"archive", "installer", "binary", "blob"}
+var Kinds = []string{"archive", "installer", "binary", "blob", "payload"}
 
 var (
 	identifierPattern  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
@@ -392,7 +392,7 @@ func NewStagedArtifact(artifactID, filename string, size int64, digest, kind str
 		Filename:  filename,
 		Size:      size,
 		Sha256:    digest,
-		Kind:      kind,
+		Kind:      ParseArtifactKind(kind),
 		Selectors: SelectorsFromMap(selectors),
 	}
 	if len(metaEntries) > 0 {
@@ -592,6 +592,40 @@ func containsKind(kind string) bool {
 		}
 	}
 	return false
+}
+
+func ParseArtifactKind(kind string) rupv2.ArtifactKind {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "archive":
+		return rupv2.ArtifactKind_ARTIFACT_KIND_ARCHIVE
+	case "installer":
+		return rupv2.ArtifactKind_ARTIFACT_KIND_INSTALLER
+	case "binary":
+		return rupv2.ArtifactKind_ARTIFACT_KIND_BINARY
+	case "blob":
+		return rupv2.ArtifactKind_ARTIFACT_KIND_BLOB
+	case "payload":
+		return rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD
+	default:
+		return rupv2.ArtifactKind_ARTIFACT_KIND_UNSPECIFIED
+	}
+}
+
+func ArtifactKindString(kind rupv2.ArtifactKind) string {
+	switch kind {
+	case rupv2.ArtifactKind_ARTIFACT_KIND_ARCHIVE:
+		return "archive"
+	case rupv2.ArtifactKind_ARTIFACT_KIND_INSTALLER:
+		return "installer"
+	case rupv2.ArtifactKind_ARTIFACT_KIND_BINARY:
+		return "binary"
+	case rupv2.ArtifactKind_ARTIFACT_KIND_BLOB:
+		return "blob"
+	case rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD:
+		return "payload"
+	default:
+		return ""
+	}
 }
 
 func nonEmptyOr(value, fallback string) string {

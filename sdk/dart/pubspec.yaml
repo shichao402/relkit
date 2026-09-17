@@ -1,8 +1,8 @@
 name: rup_client
 description: >-
   A RUP (Release & Update Protocol) client: fetches a signed index, verifies it,
-  picks the next version along the upgrade chain, and downloads a hash-verified
-  artifact. Applying the update is left to the host.
+  picks the next version along the upgrade chain, and exposes the generated
+  relkit-updater facade for verified download and apply.
 version: 0.4.0
 repository: https://github.com/shichao402/relkit/tree/main/sdk/dart
 homepage: https://github.com/shichao402/relkit/tree/main/sdk/dart
@@ -23,8 +23,7 @@ dependencies:
   # (small-order points, non-canonical encodings) that are invisible in tests
   # built from valid signatures.
   cryptography: ^2.7.0
-  archive: ^4.0.9
-  protobuf: ^6.0.0
+  protobuf: ^6.1.0
   fixnum: ^1.1.1
 
 dev_dependencies:

@@ -15,6 +15,26 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
+@$core.Deprecated('Use artifactKindDescriptor instead')
+const ArtifactKind$json = {
+  '1': 'ArtifactKind',
+  '2': [
+    {'1': 'ARTIFACT_KIND_UNSPECIFIED', '2': 0},
+    {'1': 'ARTIFACT_KIND_ARCHIVE', '2': 1},
+    {'1': 'ARTIFACT_KIND_INSTALLER', '2': 2},
+    {'1': 'ARTIFACT_KIND_BINARY', '2': 3},
+    {'1': 'ARTIFACT_KIND_BLOB', '2': 4},
+    {'1': 'ARTIFACT_KIND_PAYLOAD', '2': 5},
+  ],
+};
+
+/// Descriptor for `ArtifactKind`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List artifactKindDescriptor = $convert.base64Decode(
+    'CgxBcnRpZmFjdEtpbmQSHQoZQVJUSUZBQ1RfS0lORF9VTlNQRUNJRklFRBAAEhkKFUFSVElGQU'
+    'NUX0tJTkRfQVJDSElWRRABEhsKF0FSVElGQUNUX0tJTkRfSU5TVEFMTEVSEAISGAoUQVJUSUZB'
+    'Q1RfS0lORF9CSU5BUlkQAxIWChJBUlRJRkFDVF9LSU5EX0JMT0IQBBIZChVBUlRJRkFDVF9LSU'
+    '5EX1BBWUxPQUQQBQ==');
+
 @$core.Deprecated('Use selectorDescriptor instead')
 const Selector$json = {
   '1': 'Selector',
@@ -126,7 +146,14 @@ const Artifact$json = {
     {'1': 'filename', '3': 2, '4': 1, '5': 9, '10': 'filename'},
     {'1': 'size', '3': 3, '4': 1, '5': 3, '10': 'size'},
     {'1': 'sha256', '3': 4, '4': 1, '5': 9, '10': 'sha256'},
-    {'1': 'kind', '3': 5, '4': 1, '5': 9, '10': 'kind'},
+    {
+      '1': 'kind',
+      '3': 5,
+      '4': 1,
+      '5': 14,
+      '6': '.rup.v2.ArtifactKind',
+      '10': 'kind'
+    },
     {
       '1': 'selectors',
       '3': 6,
@@ -150,10 +177,10 @@ const Artifact$json = {
 /// Descriptor for `Artifact`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List artifactDescriptor = $convert.base64Decode(
     'CghBcnRpZmFjdBIOCgJpZBgBIAEoCVICaWQSGgoIZmlsZW5hbWUYAiABKAlSCGZpbGVuYW1lEh'
-    'IKBHNpemUYAyABKANSBHNpemUSFgoGc2hhMjU2GAQgASgJUgZzaGEyNTYSEgoEa2luZBgFIAEo'
-    'CVIEa2luZBIuCglzZWxlY3RvcnMYBiADKAsyEC5ydXAudjIuU2VsZWN0b3JSCXNlbGVjdG9ycx'
-    'ISCgR1cmxzGAcgAygJUgR1cmxzEiUKBG1ldGEYCCADKAsyES5ydXAudjIuTWV0YUVudHJ5UgRt'
-    'ZXRh');
+    'IKBHNpemUYAyABKANSBHNpemUSFgoGc2hhMjU2GAQgASgJUgZzaGEyNTYSKAoEa2luZBgFIAEo'
+    'DjIULnJ1cC52Mi5BcnRpZmFjdEtpbmRSBGtpbmQSLgoJc2VsZWN0b3JzGAYgAygLMhAucnVwLn'
+    'YyLlNlbGVjdG9yUglzZWxlY3RvcnMSEgoEdXJscxgHIAMoCVIEdXJscxIlCgRtZXRhGAggAygL'
+    'MhEucnVwLnYyLk1ldGFFbnRyeVIEbWV0YQ==');
 
 @$core.Deprecated('Use manifestDescriptor instead')
 const Manifest$json = {
@@ -191,7 +218,14 @@ const StagedArtifact$json = {
     {'1': 'filename', '3': 2, '4': 1, '5': 9, '10': 'filename'},
     {'1': 'size', '3': 3, '4': 1, '5': 3, '10': 'size'},
     {'1': 'sha256', '3': 4, '4': 1, '5': 9, '10': 'sha256'},
-    {'1': 'kind', '3': 5, '4': 1, '5': 9, '10': 'kind'},
+    {
+      '1': 'kind',
+      '3': 5,
+      '4': 1,
+      '5': 14,
+      '6': '.rup.v2.ArtifactKind',
+      '10': 'kind'
+    },
     {
       '1': 'selectors',
       '3': 6,
@@ -215,10 +249,10 @@ const StagedArtifact$json = {
 /// Descriptor for `StagedArtifact`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List stagedArtifactDescriptor = $convert.base64Decode(
     'Cg5TdGFnZWRBcnRpZmFjdBIOCgJpZBgBIAEoCVICaWQSGgoIZmlsZW5hbWUYAiABKAlSCGZpbG'
-    'VuYW1lEhIKBHNpemUYAyABKANSBHNpemUSFgoGc2hhMjU2GAQgASgJUgZzaGEyNTYSEgoEa2lu'
-    'ZBgFIAEoCVIEa2luZBIuCglzZWxlY3RvcnMYBiADKAsyEC5ydXAudjIuU2VsZWN0b3JSCXNlbG'
-    'VjdG9ycxIlCgRtZXRhGAcgAygLMhEucnVwLnYyLk1ldGFFbnRyeVIEbWV0YRIfCgtzb3VyY2Vf'
-    'cGF0aBgIIAEoCVIKc291cmNlUGF0aA==');
+    'VuYW1lEhIKBHNpemUYAyABKANSBHNpemUSFgoGc2hhMjU2GAQgASgJUgZzaGEyNTYSKAoEa2lu'
+    'ZBgFIAEoDjIULnJ1cC52Mi5BcnRpZmFjdEtpbmRSBGtpbmQSLgoJc2VsZWN0b3JzGAYgAygLMh'
+    'AucnVwLnYyLlNlbGVjdG9yUglzZWxlY3RvcnMSJQoEbWV0YRgHIAMoCzIRLnJ1cC52Mi5NZXRh'
+    'RW50cnlSBG1ldGESHwoLc291cmNlX3BhdGgYCCABKAlSCnNvdXJjZVBhdGg=');
 
 @$core.Deprecated('Use stagedDescriptor instead')
 const Staged$json = {

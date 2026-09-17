@@ -6,8 +6,12 @@ category: design
 created: 2026-09-16
 updated: 2026-09-16
 status: approved
-related: SPEC.md 附录 B, ADR 0010, internal/updater/apply.go, sdk/dart/lib/src/apply/swap.dart
+related: SPEC.md 附录 B, ADR 0010, ADR 0014, internal/updater/pipeline.go
 ---
+
+> 历史设计。Layout API 与多份 apply 实现已由
+> [ADR 0014](../adr/0014-placement-and-version-library.md) 取代；本页仅保留
+> 版本目录、launcher 与 `.app` bundle 的背景说明。
 
 ## 1. 这篇要解决什么
 
@@ -23,8 +27,8 @@ SPEC 附录 B 用一张三行表列出了 `wholeRoot` / `versionedDir` / `fileSe
 「装的时候谁开着都无所谓」的模型，据此规划多实例并发更新方案。**实际不是**（见 §4）。
 这篇把三种布局的落盘行为写全，作为 SPEC 附录 B 的展开。
 
-权威实现是 Go 引擎 `internal/updater/apply.go`（`relkit-updater` 二进制，ADR 0010）。
-Dart SDK `sdk/dart/lib/src/apply/swap.dart` 是同一语义的第二实现，差异见 §6。
+权威实现是 Go 引擎 `internal/updater/pipeline.go`（`relkit-updater` 二进制，ADR 0010 / 0014）。
+Dart 第二实现已删除；宿主只通过 facade 调 sidecar。
 
 ## 2. 三种布局对照
 

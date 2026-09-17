@@ -2,15 +2,15 @@
 // @generated from file rup/v2/objects.proto (package rup.v2, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file rup/v2/objects.proto.
  */
 export const file_rup_v2_objects: GenFile = /*@__PURE__*/
-  fileDesc("ChRydXAvdjIvb2JqZWN0cy5wcm90bxIGcnVwLnYyIiYKCFNlbGVjdG9yEgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCSInCglNZXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJIjcKCURpZ2VzdFJlZhIOCgZzaGEyNTYYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgR1cmxzGAMgAygJIqoBCgtWZXJzaW9uTm9kZRIPCgd2ZXJzaW9uGAEgASgJEgwKBGNvZGUYAiABKAMSEAoIbWluX2Zyb20YAyABKAMSDgoGeWFua2VkGAQgASgIEiMKCG1hbmlmZXN0GAUgASgLMhEucnVwLnYyLkRpZ2VzdFJlZhITCgtyZWxlYXNlZF9hdBgGIAEoCRINCgVub3RlcxgHIAEoCRIRCglub3Rlc191cmwYCCABKAkizgEKBUluZGV4Eg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEg8KB2NoYW5uZWwYAyABKAkSEAoIc2VxdWVuY2UYBCABKAMSFAoMZ2VuZXJhdGVkX2F0GAUgASgJEhUKDW1pbl9zdXBwb3J0ZWQYBiABKAMSGQoRaGFzX21pbl9zdXBwb3J0ZWQYByABKAgSEgoKZXhwaXJlc19hdBgIIAEoCRIlCgh2ZXJzaW9ucxgJIAMoCzITLnJ1cC52Mi5WZXJzaW9uTm9kZSKoAQoIQXJ0aWZhY3QSCgoCaWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSDAoEc2l6ZRgDIAEoAxIOCgZzaGEyNTYYBCABKAkSDAoEa2luZBgFIAEoCRIjCglzZWxlY3RvcnMYBiADKAsyEC5ydXAudjIuU2VsZWN0b3ISDAoEdXJscxgHIAMoCRIfCgRtZXRhGAggAygLMhEucnVwLnYyLk1ldGFFbnRyeSKTAQoITWFuaWZlc3QSDgoGc2NoZW1hGAEgASgJEg8KB3Byb2R1Y3QYAiABKAkSDwoHdmVyc2lvbhgDIAEoCRIMCgRjb2RlGAQgASgDEhMKC3JlbGVhc2VkX2F0GAUgASgJEg0KBW5vdGVzGAYgASgJEiMKCWFydGlmYWN0cxgHIAMoCzIQLnJ1cC52Mi5BcnRpZmFjdCK1AQoOU3RhZ2VkQXJ0aWZhY3QSCgoCaWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSDAoEc2l6ZRgDIAEoAxIOCgZzaGEyNTYYBCABKAkSDAoEa2luZBgFIAEoCRIjCglzZWxlY3RvcnMYBiADKAsyEC5ydXAudjIuU2VsZWN0b3ISHwoEbWV0YRgHIAMoCzIRLnJ1cC52Mi5NZXRhRW50cnkSEwoLc291cmNlX3BhdGgYCCABKAkizAEKBlN0YWdlZBIOCgZzY2hlbWEYASABKAkSDwoHcHJvZHVjdBgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJEgwKBGNvZGUYBCABKAMSEAoIbWluX2Zyb20YBSABKAMSDwoHY2hhbm5lbBgGIAEoCRISCgpjcmVhdGVkX2F0GAcgASgJEg0KBW5vdGVzGAggASgJEikKCWFydGlmYWN0cxgJIAMoCzIWLnJ1cC52Mi5TdGFnZWRBcnRpZmFjdBIRCglub3Rlc191cmwYCiABKAkijwEKDEZhbGxiYWNrUnVsZRIQCghtaW5fY29kZRgBIAEoAxIQCghtYXhfY29kZRgCIAEoAxISCgptYW51YWxfdXJsGAMgASgJEg8KB21lc3NhZ2UYBCABKAkSEQoJbWFuZGF0b3J5GAUgASgIEiMKCXNlbGVjdG9ycxgGIAMoCzIQLnJ1cC52Mi5TZWxlY3RvciJ4CghGYWxsYmFjaxIOCgZzY2hlbWEYASABKAkSDwoHcHJvZHVjdBgCIAEoCRIQCghzZXF1ZW5jZRgDIAEoAxIUCgxnZW5lcmF0ZWRfYXQYBCABKAkSIwoFcnVsZXMYBSADKAsyFC5ydXAudjIuRmFsbGJhY2tSdWxlImoKEERpcmVjdG9yeVNlcnZpY2USCgoCaWQYASABKAkSEAoIcHJpb3JpdHkYAiABKAUSEQoJaW5kZXhfdXJsGAMgASgJEhQKDGZhbGxiYWNrX3VybBgEIAEoCRIPCgdjaGFubmVsGAUgASgJIo4BCg9VcGRhdGVEaXJlY3RvcnkSDgoGc2NoZW1hGAEgASgJEg8KB3Byb2R1Y3QYAiABKAkSGgoSZGlyZWN0b3J5X3NlcXVlbmNlGAMgASgDEhIKCnVwZGF0ZWRfYXQYBCABKAkSKgoIc2VydmljZXMYBSADKAsyGC5ydXAudjIuRGlyZWN0b3J5U2VydmljZUIpWidnby5maXJveWFuZy5jb20vcmVsa2l0L2FwaS9ydXAvdjI7cnVwdjJiBnByb3RvMw");
+  fileDesc("ChRydXAvdjIvb2JqZWN0cy5wcm90bxIGcnVwLnYyIiYKCFNlbGVjdG9yEgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCSInCglNZXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJIjcKCURpZ2VzdFJlZhIOCgZzaGEyNTYYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgR1cmxzGAMgAygJIqoBCgtWZXJzaW9uTm9kZRIPCgd2ZXJzaW9uGAEgASgJEgwKBGNvZGUYAiABKAMSEAoIbWluX2Zyb20YAyABKAMSDgoGeWFua2VkGAQgASgIEiMKCG1hbmlmZXN0GAUgASgLMhEucnVwLnYyLkRpZ2VzdFJlZhITCgtyZWxlYXNlZF9hdBgGIAEoCRINCgVub3RlcxgHIAEoCRIRCglub3Rlc191cmwYCCABKAkizgEKBUluZGV4Eg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEg8KB2NoYW5uZWwYAyABKAkSEAoIc2VxdWVuY2UYBCABKAMSFAoMZ2VuZXJhdGVkX2F0GAUgASgJEhUKDW1pbl9zdXBwb3J0ZWQYBiABKAMSGQoRaGFzX21pbl9zdXBwb3J0ZWQYByABKAgSEgoKZXhwaXJlc19hdBgIIAEoCRIlCgh2ZXJzaW9ucxgJIAMoCzITLnJ1cC52Mi5WZXJzaW9uTm9kZSK+AQoIQXJ0aWZhY3QSCgoCaWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSDAoEc2l6ZRgDIAEoAxIOCgZzaGEyNTYYBCABKAkSIgoEa2luZBgFIAEoDjIULnJ1cC52Mi5BcnRpZmFjdEtpbmQSIwoJc2VsZWN0b3JzGAYgAygLMhAucnVwLnYyLlNlbGVjdG9yEgwKBHVybHMYByADKAkSHwoEbWV0YRgIIAMoCzIRLnJ1cC52Mi5NZXRhRW50cnkikwEKCE1hbmlmZXN0Eg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEg8KB3ZlcnNpb24YAyABKAkSDAoEY29kZRgEIAEoAxITCgtyZWxlYXNlZF9hdBgFIAEoCRINCgVub3RlcxgGIAEoCRIjCglhcnRpZmFjdHMYByADKAsyEC5ydXAudjIuQXJ0aWZhY3QiywEKDlN0YWdlZEFydGlmYWN0EgoKAmlkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEgwKBHNpemUYAyABKAMSDgoGc2hhMjU2GAQgASgJEiIKBGtpbmQYBSABKA4yFC5ydXAudjIuQXJ0aWZhY3RLaW5kEiMKCXNlbGVjdG9ycxgGIAMoCzIQLnJ1cC52Mi5TZWxlY3RvchIfCgRtZXRhGAcgAygLMhEucnVwLnYyLk1ldGFFbnRyeRITCgtzb3VyY2VfcGF0aBgIIAEoCSLMAQoGU3RhZ2VkEg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEg8KB3ZlcnNpb24YAyABKAkSDAoEY29kZRgEIAEoAxIQCghtaW5fZnJvbRgFIAEoAxIPCgdjaGFubmVsGAYgASgJEhIKCmNyZWF0ZWRfYXQYByABKAkSDQoFbm90ZXMYCCABKAkSKQoJYXJ0aWZhY3RzGAkgAygLMhYucnVwLnYyLlN0YWdlZEFydGlmYWN0EhEKCW5vdGVzX3VybBgKIAEoCSKPAQoMRmFsbGJhY2tSdWxlEhAKCG1pbl9jb2RlGAEgASgDEhAKCG1heF9jb2RlGAIgASgDEhIKCm1hbnVhbF91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCRIRCgltYW5kYXRvcnkYBSABKAgSIwoJc2VsZWN0b3JzGAYgAygLMhAucnVwLnYyLlNlbGVjdG9yIngKCEZhbGxiYWNrEg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEhAKCHNlcXVlbmNlGAMgASgDEhQKDGdlbmVyYXRlZF9hdBgEIAEoCRIjCgVydWxlcxgFIAMoCzIULnJ1cC52Mi5GYWxsYmFja1J1bGUiagoQRGlyZWN0b3J5U2VydmljZRIKCgJpZBgBIAEoCRIQCghwcmlvcml0eRgCIAEoBRIRCglpbmRleF91cmwYAyABKAkSFAoMZmFsbGJhY2tfdXJsGAQgASgJEg8KB2NoYW5uZWwYBSABKAkijgEKD1VwZGF0ZURpcmVjdG9yeRIOCgZzY2hlbWEYASABKAkSDwoHcHJvZHVjdBgCIAEoCRIaChJkaXJlY3Rvcnlfc2VxdWVuY2UYAyABKAMSEgoKdXBkYXRlZF9hdBgEIAEoCRIqCghzZXJ2aWNlcxgFIAMoCzIYLnJ1cC52Mi5EaXJlY3RvcnlTZXJ2aWNlKrIBCgxBcnRpZmFjdEtpbmQSHQoZQVJUSUZBQ1RfS0lORF9VTlNQRUNJRklFRBAAEhkKFUFSVElGQUNUX0tJTkRfQVJDSElWRRABEhsKF0FSVElGQUNUX0tJTkRfSU5TVEFMTEVSEAISGAoUQVJUSUZBQ1RfS0lORF9CSU5BUlkQAxIWChJBUlRJRkFDVF9LSU5EX0JMT0IQBBIZChVBUlRJRkFDVF9LSU5EX1BBWUxPQUQQBUIpWidnby5maXJveWFuZy5jb20vcmVsa2l0L2FwaS9ydXAvdjI7cnVwdjJiBnByb3RvMw");
 
 /**
  * Selector is one key/value match constraint.
@@ -250,11 +250,9 @@ export type Artifact = Message<"rup.v2.Artifact"> & {
   sha256: string;
 
   /**
-   * archive|installer|binary|blob
-   *
-   * @generated from field: string kind = 5;
+   * @generated from field: rup.v2.ArtifactKind kind = 5;
    */
-  kind: string;
+  kind: ArtifactKind;
 
   /**
    * sorted by key when encoded
@@ -284,13 +282,13 @@ export const ArtifactSchema: GenMessage<Artifact> = /*@__PURE__*/
   messageDesc(file_rup_v2_objects, 5);
 
 /**
- * Manifest describes all artifacts for one version (schema rup.manifest/2).
+ * Manifest describes all artifacts for one version (schema rup.manifest/3).
  *
  * @generated from message rup.v2.Manifest
  */
 export type Manifest = Message<"rup.v2.Manifest"> & {
   /**
-   * must be "rup.manifest/2"
+   * must be "rup.manifest/3"
    *
    * @generated from field: string schema = 1;
    */
@@ -361,9 +359,9 @@ export type StagedArtifact = Message<"rup.v2.StagedArtifact"> & {
   sha256: string;
 
   /**
-   * @generated from field: string kind = 5;
+   * @generated from field: rup.v2.ArtifactKind kind = 5;
    */
-  kind: string;
+  kind: ArtifactKind;
 
   /**
    * @generated from field: repeated rup.v2.Selector selectors = 6;
@@ -391,13 +389,13 @@ export const StagedArtifactSchema: GenMessage<StagedArtifact> = /*@__PURE__*/
   messageDesc(file_rup_v2_objects, 7);
 
 /**
- * Staged is the offline stage product (schema rup.staged/2).
+ * Staged is the offline stage product (schema rup.staged/3).
  *
  * @generated from message rup.v2.Staged
  */
 export type Staged = Message<"rup.v2.Staged"> & {
   /**
-   * must be "rup.staged/2"
+   * must be "rup.staged/3"
    *
    * @generated from field: string schema = 1;
    */
@@ -658,4 +656,45 @@ export type UpdateDirectory = Message<"rup.v2.UpdateDirectory"> & {
  */
 export const UpdateDirectorySchema: GenMessage<UpdateDirectory> = /*@__PURE__*/
   messageDesc(file_rup_v2_objects, 12);
+
+/**
+ * @generated from enum rup.v2.ArtifactKind
+ */
+export enum ArtifactKind {
+  /**
+   * @generated from enum value: ARTIFACT_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ARTIFACT_KIND_ARCHIVE = 1;
+   */
+  ARCHIVE = 1,
+
+  /**
+   * @generated from enum value: ARTIFACT_KIND_INSTALLER = 2;
+   */
+  INSTALLER = 2,
+
+  /**
+   * @generated from enum value: ARTIFACT_KIND_BINARY = 3;
+   */
+  BINARY = 3,
+
+  /**
+   * @generated from enum value: ARTIFACT_KIND_BLOB = 4;
+   */
+  BLOB = 4,
+
+  /**
+   * @generated from enum value: ARTIFACT_KIND_PAYLOAD = 5;
+   */
+  PAYLOAD = 5,
+}
+
+/**
+ * Describes the enum rup.v2.ArtifactKind.
+ */
+export const ArtifactKindSchema: GenEnum<ArtifactKind> = /*@__PURE__*/
+  enumDesc(file_rup_v2_objects, 0);
 

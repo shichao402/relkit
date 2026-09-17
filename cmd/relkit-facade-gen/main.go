@@ -53,5 +53,5 @@ func main() {
 const signatures = `methods: open capabilities check skip download apply status cleanup cancel scheduler listInstalled switchActive rollback
 results: upToDate updateAvailable fallbackRequired throttled failed
 errors: network signature rollbackRejected selectorNoMatch disk permissionDenied occupied protocolMismatch updaterTooOld updaterTooNew planTampered planExpired planUnknown planNotDownloaded skipDenied profileInvalid channelNotAllowed canceled sidecarNotFound layoutUnsupported
-ipc: 2
+ipc: 3
 `

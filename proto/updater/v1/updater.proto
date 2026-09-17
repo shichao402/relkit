@@ -10,8 +10,11 @@ import "google/protobuf/timestamp.proto";
 // IPC window for this schema. Facade generators embed these as compile-time
 // constants. Products MUST NOT declare a different window in ClientProfile.
 //
-// Current: [1, 2]
+// Current: [3, 3]
 // Framing: 4-byte big-endian length + protobuf bytes on stdout.
+// Window 3 replaces Layout with Placement, adds payload apply disposition,
+// and moves version-library retention into LibraryPolicy. Because field
+// meanings changed rather than only growing, windows 1-2 are not compatible.
 // Window 2 adds list/switch/rollback ops, ApplyOp.install_only, and
 // InstallSpec.reserved_codes. Window 1 hosts remain compatible.
 
@@ -49,11 +52,16 @@ enum LastResult {
   LAST_RESULT_APPLIED = 6;
 }
 
-enum Layout {
-  LAYOUT_UNSPECIFIED = 0;
-  LAYOUT_WHOLE_ROOT = 1;
-  LAYOUT_VERSIONED_DIR = 2;
-  LAYOUT_FILE_SET = 3;
+enum Placement {
+  PLACEMENT_UNSPECIFIED = 0;
+  PLACEMENT_IN_PLACE = 1;
+  PLACEMENT_LIBRARY = 2;
+}
+
+enum ApplyDisposition {
+  APPLY_DISPOSITION_UNSPECIFIED = 0;
+  APPLY_DISPOSITION_INTERNAL = 1;
+  APPLY_DISPOSITION_FULL_INSTALL = 2;
 }
 
 enum Operation {
@@ -107,23 +115,20 @@ message ClientProfile {
   RecoveryHelp recovery = 7;
 }
 
-message FileSetEntry {
-  string dest_relpath = 1;
-  string artifact_name = 2;
+message LibraryPolicy {
+  int32 retain = 1; // 0 means current + previous
+  repeated int64 reserved_codes = 2;
 }
 
 message InstallSpec {
-  Layout layout = 1;
+  Placement placement = 1;
   string install_root = 2;
   string executable_relpath = 3;
   string sidecar_relpath = 4;
   repeated string preserve = 5;
-  int32 retain = 6; // 0 means current + previous
+  reserved 6, 8, 9; // retired retain, file_set, reserved_codes
   bool relaunch = 7;
-  repeated FileSetEntry file_set = 8;
-  // Codes that prune must never delete (project pins). Engine does not
-  // interpret how the host chose them.
-  repeated int64 reserved_codes = 9;
+  LibraryPolicy library = 10;
 }
 
 message Runtime {
@@ -154,7 +159,7 @@ message ClientHello {
 message Capabilities {
   uint32 ipc = 1;
   repeated Operation operations = 2;
-  repeated Layout layouts = 3;
+  repeated Placement placements = 3;
   google.protobuf.Duration min_check_interval = 4;
   google.protobuf.Duration plan_ttl = 5;
   string engine_version = 6;
@@ -176,8 +181,8 @@ message DownloadOp {
 
 message ApplyOp {
   string plan_id = 1;
-  // When true, versionedDir copies into versions/ but does not rewrite
-  // active.json. wholeRoot / fileSet ignore this flag.
+  // When true, LIBRARY installs into versions/ but does not rewrite
+  // active.json. IN_PLACE ignores this flag.
   bool install_only = 2;
 }
 
@@ -264,6 +269,7 @@ message UpdateAvailable {
   string release_notes_url = 9;
   repeated PriorReleaseNotes prior_release_notes = 10;
   repeated ArtifactView artifacts = 11;
+  ApplyDisposition apply_disposition = 12;
 }
 
 message FallbackRequired {
@@ -396,6 +402,7 @@ message PlannedFile {
   string dest_relpath = 5;
   string local_path = 6;
   bool downloaded = 7;
+  string kind = 8;
 }
 
 message UpdatePlan {
@@ -437,15 +444,15 @@ message ApplySessionRecord {
   string target_version = 9;
   Error error = 10;
   int32 pid = 11;
-  Layout layout = 12;
+  Placement placement = 12;
   bool relaunch = 13;
   string executable_relpath = 14;
   repeated string preserve = 15;
-  int32 retain = 16;
-  repeated FileSetEntry file_set = 17;
+  reserved 16, 17, 20; // retired retain, file_set, reserved_codes
   string sidecar_relpath = 18;
   bool install_only = 19;
-  repeated int64 reserved_codes = 20;
+  bool requires_host_exit = 21;
+  LibraryPolicy library = 22;
 }
 
 message JournalEntry {

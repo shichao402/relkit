@@ -14,6 +14,7 @@ import (
 	"go.firoyang.com/relkit/internal/config"
 	"go.firoyang.com/relkit/internal/jsonio"
 	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/payload"
 	"go.firoyang.com/relkit/internal/selectors"
 )
 
@@ -37,6 +38,7 @@ func (e Error) Error() string {
 type AddSpec struct {
 	Path      string
 	PairsText string
+	Track     string // "install" or "payload"; empty is the legacy API
 }
 
 type Printer func(string)
@@ -239,11 +241,17 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 	}
 
 	if len(adds) == 0 {
-		return nil, Error{Message: "at least one --add is required"}
+		return nil, Error{Message: "at least one --install or --payload is required"}
 	}
 
 	var report []string
 	artifacts := make([]*model.StagedArtifact, 0, len(adds))
+	var temporary []string
+	defer func() {
+		for _, path := range temporary {
+			_ = os.Remove(path)
+		}
+	}()
 	for _, add := range adds {
 		pairs := map[string]string{}
 		if add.PairsText != "" {
@@ -252,7 +260,39 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 				return nil, err
 			}
 		}
-		artifact, err := BuildArtifact(add.Path, pairs, &report)
+		source := add.Path
+		if add.Track == "payload" {
+			if kind := pairs["kind"]; kind != "" && kind != "payload" {
+				return nil, Error{Message: "--payload kind is always payload"}
+			}
+			pairs["kind"] = "payload"
+			if pairs["apply"] != "" && pairs["apply"] != "relkit-payload" {
+				return nil, Error{Message: "--payload reserves selector apply=relkit-payload"}
+			}
+			pairs["apply"] = "relkit-payload"
+			if pairs["filename"] == "" {
+				pairs["filename"] = fmt.Sprintf("%s-%s-payload.zip", cfg.Product, version)
+			}
+			tmp, err := os.CreateTemp("", "relkit-payload-*.zip")
+			if err != nil {
+				return nil, err
+			}
+			source = tmp.Name()
+			if err := tmp.Close(); err != nil {
+				return nil, err
+			}
+			temporary = append(temporary, source)
+			table, err := payload.Build(source, payload.BuildOptions{Tree: add.Path})
+			if err != nil {
+				return nil, Error{Message: err.Error()}
+			}
+			report = append(report, fmt.Sprintf("  payload contains %d file(s), %d script(s)", len(table.Files), len(table.Scripts)))
+		} else if add.Track == "install" {
+			if pairs["kind"] == "payload" {
+				return nil, Error{Message: "--install cannot use kind=payload"}
+			}
+		}
+		artifact, err := BuildArtifact(source, pairs, &report)
 		if err != nil {
 			return nil, err
 		}
@@ -266,6 +306,9 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 	if duplicates := selectors.FindDuplicateSelectors(artifacts); len(duplicates) > 0 {
 		first := duplicates[0]
 		return nil, Error{Message: fmt.Sprintf("artifacts %q and %q declare identical selectors %v, so one of them could never be chosen (SPEC.md 11)", first.FirstID, first.SecondID, first.Selectors)}
+	}
+	if err := requireInstallCounterparts(artifacts); err != nil {
+		return nil, err
 	}
 
 	staged, err := model.NewStagedDocument(cfg.Product, version, code, minFrom, resolvedChannel, artifacts, notes, notesURL, "")
@@ -329,6 +372,18 @@ func VerifyStagedHashes(cfg *config.Config, staged *model.StagedDocument) []stri
 	return verifyStagedHashes(cfg, staged, false)
 }
 
+func ValidateStagedPolicy(staged *model.StagedDocument) error {
+	if staged == nil {
+		return Error{Message: "staged document is nil"}
+	}
+	for _, artifact := range staged.Artifacts {
+		if artifact == nil || model.ArtifactKindString(artifact.GetKind()) == "" {
+			return Error{Message: "staged artifact has unknown or unspecified kind"}
+		}
+	}
+	return requireInstallCounterparts(staged.Artifacts)
+}
+
 // VerifyPresentStagedHashes verifies every artifact that is present locally,
 // while allowing a thin staged tree whose bytes were uploaded to CAS first.
 func VerifyPresentStagedHashes(cfg *config.Config, staged *model.StagedDocument) []string {
@@ -363,9 +418,51 @@ func verifyStagedHashes(cfg *config.Config, staged *model.StagedDocument, allowM
 				expectedPrefix = expectedPrefix[:12]
 			}
 			mismatches = append(mismatches, fmt.Sprintf("%s: staged tree has %s (%d bytes), staged.pb records %s (%d bytes)", artifact.Filename, actualPrefix, size, expectedPrefix, artifact.Size))
+			continue
+		}
+		if artifact.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
+			if _, err := payload.Validate(path); err != nil {
+				mismatches = append(mismatches, fmt.Sprintf("%s: invalid payload: %v", artifact.Filename, err))
+			}
 		}
 	}
 	return mismatches
+}
+
+func requireInstallCounterparts(artifacts []*model.StagedArtifact) error {
+	for _, artifact := range artifacts {
+		if artifact == nil || artifact.Kind != rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
+			continue
+		}
+		want := model.SelectorsToMap(artifact.Selectors)
+		delete(want, "apply")
+		found := false
+		for _, candidate := range artifacts {
+			if candidate == nil || candidate.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
+				continue
+			}
+			if mapsEqual(want, model.SelectorsToMap(candidate.Selectors)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return Error{Message: fmt.Sprintf("payload %q requires a full-install artifact with the same selectors (excluding apply=relkit-payload)", artifact.Id)}
+		}
+	}
+	return nil
+}
+
+func mapsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func materialize(source, target string, useLink bool) error {

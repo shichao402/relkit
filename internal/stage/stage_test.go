@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	rupv2 "go.firoyang.com/relkit/api/rup/v2"
 	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/payload"
 )
 
 func TestRunWritesNormalizedReleasePolicy(t *testing.T) {
@@ -84,5 +86,48 @@ func TestRunWritesNormalizedReleasePolicy(t *testing.T) {
 func TestLoadReleasePolicyReportsMissingFile(t *testing.T) {
 	if _, err := LoadReleasePolicy(t.TempDir(), "missing"); err == nil {
 		t.Fatal("expected missing release policy error")
+	}
+}
+
+func TestRunBuildsPayloadAndRequiresInstallCounterpart(t *testing.T) {
+	root := t.TempDir()
+	tree := filepath.Join(root, "tree")
+	if err := os.MkdirAll(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "app.exe"), []byte("app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installer := filepath.Join(root, "setup.exe")
+	if err := os.WriteFile(installer, []byte("setup"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Root: root, Product: "demo", DefaultChannel: "stable", Channels: []string{"stable"},
+		CodeStrategy: "explicit",
+	}
+	if _, err := Run(cfg, "1.0.0", 1, 0, []AddSpec{{
+		Path: tree, Track: "payload", PairsText: "os=windows",
+	}}, "", "", "", "", false, nil); err == nil {
+		t.Fatal("payload without full installer must fail")
+	}
+	staged, err := Run(cfg, "1.0.0", 1, 0, []AddSpec{
+		{Path: tree, Track: "payload", PairsText: "os=windows"},
+		{Path: installer, Track: "install", PairsText: "kind=installer,os=windows"},
+	}, "", "", "", "", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payloadArtifact *rupv2.StagedArtifact
+	for _, artifact := range staged.Artifacts {
+		if artifact.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
+			payloadArtifact = artifact
+		}
+	}
+	if payloadArtifact == nil {
+		t.Fatal("payload artifact missing")
+	}
+	if _, err := payload.Validate(filepath.Join(ArtifactsDir(root, "1.0.0"), payloadArtifact.Filename)); err != nil {
+		t.Fatal(err)
 	}
 }

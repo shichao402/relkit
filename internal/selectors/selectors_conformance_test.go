@@ -121,7 +121,7 @@ func decodeLegacyManifest(data []byte) (*model.ManifestDocument, error) {
 			Filename:  artifact.Filename,
 			Size:      artifact.Size,
 			Sha256:    artifact.SHA256,
-			Kind:      artifact.Kind,
+			Kind:      model.ParseArtifactKind(artifact.Kind),
 			Selectors: model.SelectorsFromMap(artifact.Selectors),
 			Urls:      append([]string(nil), artifact.URLs...),
 			Meta:      metaEntries,
@@ -135,6 +135,32 @@ func equalSelectorString(a, b *string) bool {
 		return a == nil && b == nil
 	}
 	return *a == *b
+}
+
+func TestApplySelectorPrefersPayloadButFallsBack(t *testing.T) {
+	manifest := &model.ManifestDocument{Artifacts: []*model.ManifestArtifact{
+		{Id: "installer", Selectors: model.SelectorsFromMap(map[string]string{"os": "windows"})},
+		{Id: "payload", Selectors: model.SelectorsFromMap(map[string]string{
+			"os": "windows", "apply": "relkit-payload",
+		})},
+	}}
+	oldClient := selectors.SelectArtifact(manifest, map[string]string{"os": "windows"})
+	if oldClient == nil || oldClient.Id != "installer" {
+		t.Fatalf("old client selected %+v", oldClient)
+	}
+	newClient := selectors.SelectArtifact(manifest, map[string]string{
+		"os": "windows", "apply": "relkit-payload",
+	})
+	if newClient == nil || newClient.Id != "payload" {
+		t.Fatalf("new client selected %+v", newClient)
+	}
+	oldRelease := &model.ManifestDocument{Artifacts: manifest.Artifacts[:1]}
+	fallback := selectors.SelectArtifact(oldRelease, map[string]string{
+		"os": "windows", "apply": "relkit-payload",
+	})
+	if fallback == nil || fallback.Id != "installer" {
+		t.Fatalf("new client did not fall back on old release: %+v", fallback)
+	}
 }
 
 func derefSelectorString(value *string) any {

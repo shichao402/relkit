@@ -67,7 +67,7 @@ func manifestDoc(product, version string, code int, artifactURL string) []byte {
 				Filename: "app.zip",
 				Size:     3,
 				Sha256:   strings.Repeat("b", 64),
-				Kind:     "archive",
+				Kind:     rupv2.ArtifactKind_ARTIFACT_KIND_ARCHIVE,
 				Urls:     []string{artifactURL},
 			},
 		},

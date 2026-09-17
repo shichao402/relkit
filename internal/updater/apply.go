@@ -42,6 +42,9 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 			return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "downloaded file size mismatch")
 		}
 	}
+	if len(plan.Files) == 0 || plan.Files[0].Kind != "" && plan.Files[0].Kind != "payload" && plan.Files[0].Kind != "archive" {
+		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "artifact requires the full installation flow")
+	}
 	inst := req.GetRuntime().GetInstall()
 	if inst == nil {
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "install spec required")
@@ -58,6 +61,11 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 	if err := acquireApplyLock(inst.InstallRoot, sessionID); err != nil {
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, err.Error())
 	}
+	requiresHostExit, err := planRequiresHostExit(inst, plan)
+	if err != nil {
+		releaseApplyLock(inst.InstallRoot)
+		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, err.Error())
+	}
 	sess := &updaterv1.ApplySessionRecord{
 		SessionId:         sessionID,
 		PlanId:            plan.PlanId,
@@ -69,15 +77,14 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 		TargetCode:        plan.Code,
 		TargetVersion:     plan.Version,
 		Pid:               int32(os.Getppid()),
-		Layout:            inst.Layout,
+		Placement:         inst.Placement,
 		Relaunch:          inst.Relaunch && !op.InstallOnly,
 		ExecutableRelpath: inst.ExecutableRelpath,
 		Preserve:          inst.Preserve,
-		Retain:            inst.Retain,
-		FileSet:           inst.FileSet,
 		SidecarRelpath:    inst.SidecarRelpath,
 		InstallOnly:       op.InstallOnly,
-		ReservedCodes:     inst.ReservedCodes,
+		Library:           inst.Library,
+		RequiresHostExit:  requiresHostExit,
 	}
 	if err := st.saveSession(sess); err != nil {
 		releaseApplyLock(inst.InstallRoot)
@@ -102,7 +109,7 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 			Kind: &updaterv1.ApplyResult_Accepted{Accepted: &updaterv1.ApplyAccepted{
 				SessionId:        sessionID,
 				PlanId:           plan.PlanId,
-				RequiresHostExit: layoutRequiresHostExit(inst.Layout),
+				RequiresHostExit: requiresHostExit,
 			}},
 		}},
 	})
@@ -180,7 +187,7 @@ func writeLegacyJSONSession(installRoot string, sess *updaterv1.ApplySessionReco
 
 func writeCompatibilitySession(dataDir string, sess *updaterv1.ApplySessionRecord) error {
 	root := dataDir
-	if sess.Layout == updaterv1.Layout_LAYOUT_VERSIONED_DIR {
+	if sess.Placement == updaterv1.Placement_PLACEMENT_LIBRARY {
 		root = sess.InstallRoot
 	}
 	return writeLegacyJSONSession(root, sess)
@@ -205,28 +212,21 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		_ = st.saveSession(sess)
 		_ = writeCompatibilitySession(dataDir, sess)
 	}
-	if err := waitForHostExit(int(sess.Pid), 5*time.Minute, func() {
-		setPhase(updaterv1.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, nil)
-	}); err != nil {
-		setPhase(
-			updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
-			newError(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil),
-		)
-		releaseApplyLock(sess.InstallRoot)
-		return err
+	if sess.RequiresHostExit {
+		if err := waitForHostExit(int(sess.Pid), 5*time.Minute, func() {
+			setPhase(updaterv1.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, nil)
+		}); err != nil {
+			setPhase(
+				updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
+				newError(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil),
+			)
+			releaseApplyLock(sess.InstallRoot)
+			return err
+		}
 	}
 	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COPYING, nil)
 
-	switch sess.Layout {
-	case updaterv1.Layout_LAYOUT_VERSIONED_DIR:
-		err = applyVersionedDir(sess, plan)
-	case updaterv1.Layout_LAYOUT_WHOLE_ROOT:
-		err = applyWholeRoot(sess, plan)
-	case updaterv1.Layout_LAYOUT_FILE_SET:
-		err = applyFileSet(sess, plan)
-	default:
-		err = fmt.Errorf("unsupported layout")
-	}
+	err = applyPlan(dataDir, sess, plan)
 	if err != nil {
 		attn := strings.Contains(err.Error(), "INCOMPLETE")
 		phase := updaterv1.SessionPhase_SESSION_PHASE_ROLLED_BACK
@@ -240,7 +240,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
 		setPhase(updaterv1.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
 		exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
-		if sess.Layout == updaterv1.Layout_LAYOUT_VERSIONED_DIR {
+		if sess.Placement == updaterv1.Placement_PLACEMENT_LIBRARY {
 			if ptr := readActive(sess.InstallRoot); ptr != nil && ptr.Executable != "" {
 				exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Executable))
 			} else if ptr != nil {
@@ -328,76 +328,6 @@ type versionMeta struct {
 	Executable string `json:"executable,omitempty"`
 }
 
-func applyVersionedDir(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) error {
-	id := strings.ReplaceAll(plan.Version, "/", "_")
-	if id == "" {
-		id = fmt.Sprintf("code-%d", plan.Code)
-	}
-	dest := filepath.Join(sess.InstallRoot, "versions", id)
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
-	}
-	payload, err := unpackFirst(sess, plan)
-	if err != nil {
-		return err
-	}
-	copySrc := payload
-	if runtime.GOOS == "darwin" || looksLikeAppBundle(payload) {
-		app := payload
-		if !strings.HasSuffix(payload, ".app") {
-			app = findAppBundle(payload)
-		}
-		if app == "" {
-			if runtime.GOOS == "darwin" {
-				_ = os.RemoveAll(dest)
-				return fmt.Errorf("macos versionedDir requires a complete .app bundle")
-			}
-		} else {
-			copySrc = app
-			dest = filepath.Join(dest, filepath.Base(app))
-		}
-	}
-	if err := copyTree(copySrc, dest); err != nil {
-		_ = os.RemoveAll(filepath.Join(sess.InstallRoot, "versions", id))
-		return err
-	}
-	versionRel := filepath.ToSlash(filepath.Join("versions", id))
-	exeRel := filepath.ToSlash(filepath.Join("versions", id, sess.ExecutableRelpath))
-	meta := versionMeta{
-		Code:       plan.Code,
-		Version:    plan.Version,
-		Path:       versionRel,
-		Executable: exeRel,
-	}
-	if err := writeVersionMeta(filepath.Join(sess.InstallRoot, "versions", id), meta); err != nil {
-		return err
-	}
-	prev := readActive(sess.InstallRoot)
-	ptr := activePointer{
-		Code:       plan.Code,
-		Version:    plan.Version,
-		Path:       versionRel,
-		Executable: exeRel,
-	}
-	if prev != nil {
-		ptr.Previous = prev.Path
-	}
-	if !sess.InstallOnly {
-		if err := writeActive(sess.InstallRoot, ptr); err != nil {
-			return err
-		}
-	} else if prev != nil {
-		ptr = *prev
-	}
-	retain := int(sess.Retain)
-	if retain <= 0 {
-		retain = 2
-	}
-	pruneVersions(sess.InstallRoot, ptr, retain, sess.ReservedCodes, versionRel)
-	refreshSidecar(sess, payload)
-	return nil
-}
-
 func pruneVersions(root string, current activePointer, retain int, reserved []int64, extraKeep string) {
 	if retain <= 0 {
 		retain = 2
@@ -458,86 +388,6 @@ func pruneVersions(root string, current activePointer, retain int, reserved []in
 	}
 }
 
-func applyWholeRoot(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) error {
-	payload, err := unpackFirst(sess, plan)
-	if err != nil {
-		return err
-	}
-	if runtime.GOOS == "darwin" {
-		if app := findAppBundle(payload); app != "" {
-			payload = app
-		}
-	}
-	install := sess.InstallRoot
-	backup := install + ".relkit-old"
-	_ = os.RemoveAll(backup)
-	if err := waitRename(install, backup, 60*time.Second); err != nil {
-		return fmt.Errorf("occupied: %w", err)
-	}
-	if err := copyTree(payload, install); err != nil {
-		_ = os.RemoveAll(install)
-		if rerr := os.Rename(backup, install); rerr != nil {
-			return fmt.Errorf("INCOMPLETE: restore failed: %v (original at %s)", rerr, backup)
-		}
-		return err
-	}
-	for _, rel := range sess.Preserve {
-		src := filepath.Join(backup, filepath.FromSlash(rel))
-		dst := filepath.Join(install, filepath.FromSlash(rel))
-		if _, err := os.Stat(src); err == nil {
-			_ = copyTree(src, dst)
-		}
-	}
-	_ = os.RemoveAll(backup)
-	return nil
-}
-
-func applyFileSet(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) error {
-	journalPath := filepath.Join(sess.StagedRoot, "journal.pb")
-	j := &updaterv1.ApplyJournal{SessionId: sess.SessionId}
-	byName := map[string]*updaterv1.PlannedFile{}
-	for _, f := range plan.Files {
-		byName[f.Name] = f
-	}
-	for _, ent := range sess.FileSet {
-		srcFile := byName[ent.ArtifactName]
-		if srcFile == nil || srcFile.LocalPath == "" {
-			rollbackJournal(j)
-			return fmt.Errorf("missing artifact %s", ent.ArtifactName)
-		}
-		dest := filepath.Join(sess.InstallRoot, filepath.FromSlash(ent.DestRelpath))
-		backup := dest + ".relkit-bak"
-		_ = os.MkdirAll(filepath.Dir(dest), 0o755)
-		_ = os.Remove(backup)
-		if _, err := os.Stat(dest); err == nil {
-			if err := os.Rename(dest, backup); err != nil {
-				rollbackJournal(j)
-				return err
-			}
-		}
-		if err := copyFile(srcFile.LocalPath, dest); err != nil {
-			rollbackJournal(j)
-			if _, e2 := os.Stat(backup); e2 == nil {
-				_ = os.Rename(backup, dest)
-			}
-			return err
-		}
-		_ = os.Chmod(dest, 0o755)
-		j.Entries = append(j.Entries, &updaterv1.JournalEntry{
-			DestPath:   dest,
-			BackupPath: backup,
-			SourcePath: srcFile.LocalPath,
-		})
-		_ = writeJournal(journalPath, j)
-	}
-	j.Committed = true
-	_ = writeJournal(journalPath, j)
-	for _, ent := range j.Entries {
-		_ = os.Remove(ent.BackupPath)
-	}
-	return nil
-}
-
 func rollbackJournal(j *updaterv1.ApplyJournal) {
 	for i := len(j.Entries) - 1; i >= 0; i-- {
 		ent := j.Entries[i]
@@ -548,7 +398,7 @@ func rollbackJournal(j *updaterv1.ApplyJournal) {
 	}
 }
 
-func unpackFirst(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) (string, error) {
+func unpackLegacyArchive(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) (string, error) {
 	if len(plan.Files) == 0 {
 		return "", fmt.Errorf("plan has no files")
 	}
@@ -561,13 +411,6 @@ func unpackFirst(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan)
 		return out, nil
 	}
 	return filepath.Dir(src), nil
-}
-
-func looksLikeAppBundle(path string) bool {
-	if strings.HasSuffix(strings.ToLower(path), ".app") {
-		return true
-	}
-	return findAppBundle(path) != ""
 }
 
 func findAppBundle(root string) string {
@@ -629,35 +472,6 @@ func unzip(src, dest string) error {
 	return nil
 }
 
-func copyTree(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := dst
-		if rel != "." {
-			target = filepath.Join(dst, rel)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			_ = os.MkdirAll(filepath.Dir(target), 0o755)
-			_ = os.Remove(target)
-			return os.Symlink(link, target)
-		}
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
-		}
-		return copyFile(path, target)
-	})
-}
-
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -682,22 +496,6 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return cerr
-}
-
-func waitRename(from, to string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var last error
-	for time.Now().Before(deadline) {
-		last = os.Rename(from, to)
-		if last == nil {
-			return nil
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	if last == nil {
-		last = fmt.Errorf("timeout")
-	}
-	return last
 }
 
 func refreshSidecar(sess *updaterv1.ApplySessionRecord, payload string) {

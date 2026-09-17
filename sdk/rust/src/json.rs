@@ -113,6 +113,7 @@ mod tests {
                 release_notes_url: String::new(),
                 prior_release_notes: Vec::new(),
                 artifacts: Vec::new(),
+                apply_disposition: 0,
             })),
         }
     }

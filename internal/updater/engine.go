@@ -59,10 +59,9 @@ func (e *Engine) capabilities() *updaterv1.Capabilities {
 			updaterv1.Operation_OPERATION_SWITCH_ACTIVE,
 			updaterv1.Operation_OPERATION_ROLLBACK,
 		},
-		Layouts: []updaterv1.Layout{
-			updaterv1.Layout_LAYOUT_WHOLE_ROOT,
-			updaterv1.Layout_LAYOUT_VERSIONED_DIR,
-			updaterv1.Layout_LAYOUT_FILE_SET,
+		Placements: []updaterv1.Placement{
+			updaterv1.Placement_PLACEMENT_IN_PLACE,
+			updaterv1.Placement_PLACEMENT_LIBRARY,
 		},
 		MinCheckInterval: minCheckDurationPB(),
 		PlanTtl:          planTTLDurationPB(),
@@ -119,8 +118,8 @@ func validateOpen(profile *updaterv1.ClientProfile, runtime *updaterv1.Runtime) 
 		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "dataDir required", nil)
 	}
 	if inst := runtime.Install; inst != nil {
-		if inst.Layout == updaterv1.Layout_LAYOUT_UNSPECIFIED {
-			return newError(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, false, "layout required", nil)
+		if inst.Placement == updaterv1.Placement_PLACEMENT_UNSPECIFIED {
+			return newError(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, false, "placement required", nil)
 		}
 	}
 	return nil
@@ -247,10 +246,6 @@ func recoveryFrom(profile *updaterv1.ClientProfile) *updaterv1.RecoveryHelp {
 		return nil
 	}
 	return profile.Recovery
-}
-
-func layoutRequiresHostExit(layout updaterv1.Layout) bool {
-	return layout == updaterv1.Layout_LAYOUT_WHOLE_ROOT || layout == updaterv1.Layout_LAYOUT_VERSIONED_DIR
 }
 
 func (e *Engine) fetcher() sdk.Fetcher {

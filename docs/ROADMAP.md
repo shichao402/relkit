@@ -2,25 +2,11 @@
 
 尚未排期的意向，不等于已接受的 ADR。落地前再写决策。
 
-内容寻址有两个方向，不要混成一条：
+内容寻址只保留发布侧去重：stage 之后往 COS/ingest 推产物时，blob 已存在则
+不重复上传。客户端不再规划把已装路径伪装成 `destPath` 来跳过整 artifact；
+内部更新采用 ADR 0013 的完整 payload 文件表。
 
-- **A（下载）**：已装客户端，本地已有且哈希一致 → 不下载。见下节。
-- **B（上传）**：发布侧，stage 之后往 COS/ingest 推产物时，blob 已存在 → 不重复上传。见 [发布侧：未变 blob 不重复上传](#发布侧未变-blob-不重复上传b)。「构建完成后发布：没变的东西不必上传」就是 **B，不是 A**。
-
-## SDK：按 sha256 跳过未变 artifact（A）
-
-- **状态**：SDK 捷径已在；缺口在宿主用法。可单独改宿主，**不依赖**再扩 B。
-- **目标**：已装客户端：本地目标已存在且内容与 manifest 一致则不下载。多组件套件不要「版本新就全下」——只对哈希变了的 artifact 走网络。
-- **macOS DMG**：不拆。现有 DMG 继续当 Console 产物 / 人页安装器。Mac 上 OTA 若仍是整份 dmg，A 几乎省不了下载——接受「省不了就省不了」。**不要**把「Console 必须拆成可 `ReplaceFile` 的 app 二进制、DMG 只留人页」当成要做的事。
-- **与现网（Go SDK 为主，Dart / Node 同形）**：
-  - `DownloadArtifact` 在拉网前就会对 **`destPath`** 调 `fileMatches`：一致则直接返回 `VerifiedFile`，不 GET。
-  - 校验是 **先 size 后 sha256**：长度不同不算哈希。size 相同才流式读整文件 SHA-256。
-  - **缺口**：套件循环常把 Download 指到新临时路径，已装文件对不上 `destPath`，短路打不中。会话内刚校验过的路径再次 `Download` 仍会再扫一遍（无 mtime 缓存）。
-- **大文件 sha256**：size 相同才全文件哈希；跳过判断与下载验收共用同一套。mtime/size 只可作 CPU 短路，不是安全证据。失败或 mismatch → 当需要下载。
-- **宿主后续（Dec 等）**：套件 Download 把已装路径交给 `destPath`；构建去掉污染哈希的 `BuildTime`，否则 A/B 都当新文件。
-- **明确不依赖**：CI `cas/credentials`、拆 DMG。协议不变（整 artifact + size/sha256，无 patch kind）。
-
-## 发布侧：未变 blob 不重复上传（B）
+## 发布侧：未变 blob 不重复上传
 
 - **状态**：agent 侧 `PutArtifactCAS`、Head + Promote、按 live sha256 收 cas 已落地（`8bbf755`）；CI `cas/credentials`、`relkit cas-put`、瘦 staged tar 与 `Materialize` 也已落地。整包 `PUT /v1/staged` 仍可用。
 - **目标**：同一内容只 PUT 一次。blob 已存在 → 跳过上传，Promote 到本版 `artifact/`。
@@ -29,18 +15,18 @@
 - **cas 回收**：仍被任意 channel 的 index → manifest 点名的 sha256 保留。`relkit-serve` GC 扫 `cas/`。`publish.Run` 在写完 index 后，只删本产品本轮裁掉且其他 channel 也不再引用的 cas（不 List 整棵 `cas/`）。删除失败只打日志。
 - **未走**：已有可 GET URL 的 artifact 直接申报、`artifactTo` / `pointerTo` 拆分，以及宿主 CI 切换到 `relkit cas-put`。设计见 [`design/publish-agent.md`](design/publish-agent.md)。
 - **未变判定**：sha256（及 size），不是文件名、不是版本号。
-- **产品构建**：宿主每次把 `BuildTime` 打进二进制，哈希会变，B 也跳不过。relkit 不替宿主改编译。
+- **产品构建**：宿主每次把 `BuildTime` 打进二进制，哈希会变，发布侧也跳不过。relkit 不替宿主改编译。
 - **落点**：`internal/backends` + `publish.Run` + serve GC。客户端契约不变。不改 SPEC 去做 delta/patch。
 
 ## 更新流量：整文件内容寻址，不做包内差分 / 跨平台拆库
 
-- **状态**：方向已拍。B 的 agent 路径已落地；A 的宿主用法与产物稳定哈希在产品仓。
+- **状态**：方向已拍。发布侧 agent CAS 已落地；标准内部更新见 ADR 0013。
 - **背景**：曾讨论包内差分、拆 dll/so、Win/Mac 共用原生库。已否定。
 - **macOS DMG 不拆（已拍）**。
 - **做**：
-  1. **A**：SDK 已有 `destPath` 短路；宿主把已装路径对上。见上节。
-  2. **B**：agent CAS 已落地；CI `requests[]` 已落地。见上节。
-  3. **产物哈希可稳定（产品侧）**。
+  1. agent CAS 去重上传；CI `requests[]` 已落地。
+  2. payload 内仍传完整文件，不做二进制差分。
+  3. 产物哈希可稳定（产品侧）。
 - **不做**：文件级 delta / patch；为差分拆 dll/so；强迫拆 DMG；跨 OS 共用原生库；在 `.app` 里打补丁换已签名文件。Windows 换单个 exe 仍须 rename-aside。
 - **与现网关系**：Download 对同一 `destPath` 已短路。发布：Ingest 后端 Head+Promote+cas GC；CI 仍可整包 staged-put。
 
