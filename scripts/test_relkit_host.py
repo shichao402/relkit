@@ -621,6 +621,41 @@ class SshGuardTests(unittest.TestCase):
         )
         self.assertEqual(host.parse_list_products(text), ["loom", "svn-auto-merge"])
 
+    def test_parse_product_token_files_ignores_agent_product_roots(self) -> None:
+        text = (
+            "config /etc/relkit-agent/relkit-agent.json\n"
+            "uploadTokens\n"
+            "  svn-auto-merge,loom      tokens/svn-auto-merge.token\n"
+            "products\n"
+            "  loom                     /srv/relkit/loom  profile=products/loom.json\n"
+            "  svn-auto-merge           /srv/relkit/svn-auto-merge  profile=products/svn-auto-merge.json\n"
+        )
+        self.assertEqual(
+            host.parse_product_token_files(text),
+            {
+                "svn-auto-merge": "tokens/svn-auto-merge.token",
+                "loom": "tokens/svn-auto-merge.token",
+            },
+        )
+        self.assertEqual(
+            host.listed_product_token_path(
+                "/etc/relkit-agent", text, "svn-auto-merge"
+            ),
+            "/etc/relkit-agent/tokens/svn-auto-merge.token",
+        )
+
+    def test_listed_token_path_does_not_guess_from_share_with(self) -> None:
+        text = (
+            "products\n"
+            "  loom,svn-auto-merge      tokens/shared.token\n"
+        )
+        self.assertEqual(
+            host.listed_product_token_path("/etc/relkit-serve", text, "svn-auto-merge"),
+            "/etc/relkit-serve/tokens/shared.token",
+        )
+        with self.assertRaisesRegex(host.Fail, "not guessing"):
+            host.listed_product_token_path("/etc/relkit-serve", text, "missing")
+
 
 class UpgradeManifestTests(unittest.TestCase):
     def test_commit_comes_from_release_manifest_not_github_api(self) -> None:
@@ -924,11 +959,39 @@ class InstallGateTests(unittest.TestCase):
 
 
 class AgentProvisionTests(unittest.TestCase):
-    def test_rewrites_public_https_to_agent_origin(self) -> None:
+    def test_upload_url_rewrites_public_https_to_agent_origin(self) -> None:
         self.assertEqual(
-            host.rewrite_agent_backend_url("https://update.devcloud.woa.com/"),
+            host.agent_upload_url("https://update.devcloud.woa.com/"),
             "http://update.devcloud.woa.com:8080/",
         )
+
+    def test_agent_backend_keeps_product_base_url_and_box_credentials(self) -> None:
+        backend = {
+            "type": "relkit-compatible",
+            "baseUrl": "https://update.devcloud.woa.com/",
+            "tokenEnv": "RELKIT_UPLOAD_TOKEN",
+        }
+        host.to_agent_backend(backend)
+        self.assertEqual(backend["baseUrl"], "https://update.devcloud.woa.com/")
+        self.assertEqual(backend["uploadUrl"], "http://update.devcloud.woa.com:8080/")
+        self.assertEqual(backend["tokenEnv"], "RELKIT_SERVE_TOKEN")
+
+    def test_agent_backend_inherits_box_credentials_over_defaults(self) -> None:
+        backend = {
+            "type": "relkit-compatible",
+            "baseUrl": "https://update.devcloud.woa.com/",
+            "tokenEnv": "RELKIT_UPLOAD_TOKEN",
+        }
+        host.to_agent_backend(
+            backend,
+            {
+                "uploadUrl": "http://10.0.0.5:30341/",
+                "tokenEnv": "RELKIT_BOX_TOKEN",
+            },
+        )
+        self.assertEqual(backend["baseUrl"], "https://update.devcloud.woa.com/")
+        self.assertEqual(backend["uploadUrl"], "http://10.0.0.5:30341/")
+        self.assertEqual(backend["tokenEnv"], "RELKIT_BOX_TOKEN")
 
     def test_machine_config_injects_private_key_path(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1031,7 +1094,8 @@ class AgentProvisionTests(unittest.TestCase):
             def fake_ssh(_host, command, **_kwargs):
                 stdout = ""
                 if command[:2] == ["sudo", "cat"]:
-                    stdout = written[command[2]].decode("utf-8")
+                    path = command[2]
+                    stdout = written[path].decode("utf-8") if path in written else ""
                 return subprocess.CompletedProcess(command, 0, stdout, "")
 
             args = host.build_parser().parse_args(
@@ -1046,6 +1110,79 @@ class AgentProvisionTests(unittest.TestCase):
 
             saved = host.load_state(root)
             self.assertEqual(saved["steps"]["signing.keys"]["status"], "verified")
+
+    def test_provision_keeps_the_token_env_the_box_actually_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / ".relkit-keys").mkdir()
+            (root / ".relkit-keys" / "k1.private.pb").write_bytes(b"private")
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "loom",
+                        "signing": {"keyId": "k1"},
+                        "backends": {
+                            "intranet": {
+                                "type": "relkit-compatible",
+                                "baseUrl": "https://update.devcloud.woa.com/",
+                                "tokenEnv": "RELKIT_UPLOAD_TOKEN",
+                            }
+                        },
+                        "publishTo": ["intranet"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "product.id", "confirmed", "loom", "test")
+            host.set_step(state, "signing.keys", "stale", "k1", "test")
+            host.save_state(root, state)
+
+            installed = json.dumps(
+                {
+                    "product": "loom",
+                    "signing": {
+                        "keyId": "k1",
+                        "privateKeyPath": ".relkit-keys/k1.private.pb",
+                    },
+                    "backends": {
+                        "intranet": {
+                            "type": "relkit-compatible",
+                            "baseUrl": "http://update.devcloud.woa.com:8080/",
+                            "uploadUrl": "http://update.devcloud.woa.com:8080/",
+                            "tokenEnv": "RELKIT_SERVE_TOKEN",
+                        }
+                    },
+                    "publishTo": ["intranet"],
+                }
+            )
+            written: dict[str, bytes] = {}
+
+            def fake_write(_host, path, data):
+                written[path] = data
+
+            def fake_ssh(_host, command, **_kwargs):
+                stdout = ""
+                if command[:2] == ["sudo", "cat"]:
+                    path = command[2]
+                    stdout = written[path].decode("utf-8") if path in written else installed
+                return subprocess.CompletedProcess(command, 0, stdout, "")
+
+            args = host.build_parser().parse_args(
+                ["agent", "provision", "--host", "box", "--execute"]
+            )
+            with (
+                patch("relkit_host.ssh_path_exists", return_value=True),
+                patch("relkit_host.ssh_write", side_effect=fake_write),
+                patch("relkit_host.ssh_run", side_effect=fake_ssh),
+            ):
+                self.assertEqual(host.cmd_agent_provision(root, args), 0)
+
+            profile = json.loads(next(iter(written.values())).decode("utf-8"))
+            backend = profile["backends"]["intranet"]
+            self.assertEqual(backend["tokenEnv"], "RELKIT_SERVE_TOKEN")
+            self.assertEqual(backend["baseUrl"], "https://update.devcloud.woa.com/")
+            self.assertEqual(backend["uploadUrl"], "http://update.devcloud.woa.com:8080/")
 
 
 class SshQuotingTests(unittest.TestCase):
@@ -1623,21 +1760,17 @@ class ReconcileTests(unittest.TestCase):
         self.assertIn("-share-with", source)
         self.assertIn("share-with does not print a token", source)
 
-    def test_share_with_token_path_is_the_owner_file(self) -> None:
+    def test_share_with_token_path_is_the_listed_file(self) -> None:
         self.assertEqual(
-            host.serve_token_path("/etc/relkit-serve", "svn-auto-merge", "loom"),
-            "/etc/relkit-serve/tokens/loom.token",
+            host.serve_token_path("/etc/relkit-serve", "tokens/shared.token"),
+            "/etc/relkit-serve/tokens/shared.token",
         )
         self.assertEqual(
-            host.serve_token_path("/etc/relkit-serve", "svn-auto-merge", None),
-            "/etc/relkit-serve/tokens/svn-auto-merge.token",
-        )
-        self.assertEqual(
-            host.agent_token_path("svn-auto-merge", "loom"),
-            "/etc/relkit-agent/tokens/loom.token",
+            host.agent_token_path("tokens/svn-auto-merge.token"),
+            "/etc/relkit-agent/tokens/svn-auto-merge.token",
         )
 
-    def test_serve_add_share_with_chowns_owner_token_not_new_product(self) -> None:
+    def test_serve_add_share_with_chowns_listed_token_not_share_with_name(self) -> None:
         import argparse
 
         with tempfile.TemporaryDirectory() as raw:
@@ -1650,10 +1783,17 @@ class ReconcileTests(unittest.TestCase):
                 argv = list(remote)
                 remotes.append(argv)
                 stdout = ""
-                if "init" in argv:
+                if "-list-products" in argv:
                     stdout = (
                         "config /etc/relkit-serve/relkit-serve.json\n"
-                        "token  tokens/loom.token (shared; products now include svn-auto-merge)\n"
+                        "operator relkit-serve.token (full tree)\n"
+                        "products\n"
+                        "  loom,svn-auto-merge      tokens/svn-auto-merge.token\n"
+                    )
+                elif "init" in argv:
+                    stdout = (
+                        "config /etc/relkit-serve/relkit-serve.json\n"
+                        "token  tokens/svn-auto-merge.token (shared; products now include svn-auto-merge)\n"
                     )
                 return subprocess.CompletedProcess(argv, 0, stdout, "")
 
@@ -1682,12 +1822,12 @@ class ReconcileTests(unittest.TestCase):
                         "sudo",
                         "chown",
                         "relkit:relkit",
-                        "/etc/relkit-serve/tokens/loom.token",
+                        "/etc/relkit-serve/tokens/svn-auto-merge.token",
                     ]
                 ],
             )
             self.assertFalse(
-                any("svn-auto-merge.token" in part for cmd in remotes for part in cmd)
+                any("loom.token" in part for cmd in remotes for part in cmd)
             )
             self.assertIn(["sudo", "systemctl", "restart", "relkit-serve"], remotes)
             self.assertFalse((root / host.SECRET_NOTE).is_file())
@@ -1695,7 +1835,7 @@ class ReconcileTests(unittest.TestCase):
             self.assertEqual(saved["serve"]["shareWith"], "loom")
             self.assertEqual(saved["steps"]["serve.register"]["status"], "applied")
 
-    def test_serve_restart_share_with_chowns_owner_token(self) -> None:
+    def test_serve_restart_chowns_listed_token_not_share_with_name(self) -> None:
         import argparse
 
         with tempfile.TemporaryDirectory() as raw:
@@ -1711,7 +1851,13 @@ class ReconcileTests(unittest.TestCase):
             def fake_ssh(_remote_host: str, remote, **_kwargs):
                 argv = list(remote)
                 remotes.append(argv)
-                return subprocess.CompletedProcess(argv, 0, "", "")
+                stdout = ""
+                if "-list-products" in argv:
+                    stdout = (
+                        "products\n"
+                        "  svn-auto-merge,loom      tokens/svn-auto-merge.token\n"
+                    )
+                return subprocess.CompletedProcess(argv, 0, stdout, "")
 
             args = argparse.Namespace(execute=True, restart=True, host=None)
             with patch("relkit_host.ssh_run", side_effect=fake_ssh), patch(
@@ -1719,11 +1865,65 @@ class ReconcileTests(unittest.TestCase):
             ):
                 self.assertEqual(host.cmd_serve_restart(root, args), 0)
             self.assertIn(
-                ["sudo", "chown", "relkit:relkit", "/etc/relkit-serve/tokens/loom.token"],
+                [
+                    "sudo",
+                    "chown",
+                    "relkit:relkit",
+                    "/etc/relkit-serve/tokens/svn-auto-merge.token",
+                ],
                 remotes,
             )
             self.assertFalse(
-                any("svn-auto-merge.token" in part for cmd in remotes for part in cmd)
+                any("loom.token" in part for cmd in remotes for part in cmd)
+            )
+            self.assertTrue(
+                any("-list-products" in cmd for cmd in remotes)
+            )
+
+    def test_agent_restart_chowns_listed_token_not_share_with_name(self) -> None:
+        import argparse
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            state["product"] = "svn-auto-merge"
+            state["serve"]["shareWith"] = "loom"
+            state["agent"]["sshHost"] = "box"
+            state["agent"]["configPath"] = "/etc/relkit-agent/relkit-agent.json"
+            host.save_state(root, state)
+            remotes: list[list[str]] = []
+
+            def fake_ssh(_remote_host: str, remote, **_kwargs):
+                argv = list(remote)
+                remotes.append(argv)
+                stdout = ""
+                if "-list-products" in argv:
+                    stdout = (
+                        "uploadTokens\n"
+                        "  svn-auto-merge,loom      tokens/svn-auto-merge.token\n"
+                        "products\n"
+                        "  loom                     /srv/relkit/loom  profile=products/loom.json\n"
+                    )
+                return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+            args = argparse.Namespace(
+                execute=True, restart=True, host=None, product=None, root_path=None, config=None
+            )
+            with patch("relkit_host.ssh_run", side_effect=fake_ssh), patch(
+                "builtins.print"
+            ):
+                self.assertEqual(host.cmd_agent_restart(root, args), 0)
+            self.assertIn(
+                [
+                    "sudo",
+                    "chown",
+                    "relkit:relkit",
+                    "/etc/relkit-agent/tokens/svn-auto-merge.token",
+                ],
+                remotes,
+            )
+            self.assertFalse(
+                any("loom.token" in part for cmd in remotes for part in cmd)
             )
 
     def test_release_reads_version_via_get(self) -> None:

@@ -494,6 +494,10 @@ func runInitShareProduct(out io.Writer, configPath, product, with string) error 
 	if err != nil {
 		return err
 	}
+	relFile, err = promoteSharedTokenFile(configPath, cfg, relFile)
+	if err != nil {
+		return err
+	}
 	if err := writeFileConfig(configPath, cfg); err != nil {
 		return err
 	}

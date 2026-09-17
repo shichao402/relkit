@@ -631,14 +631,14 @@ def _impl_cmd_fake_verify(root: Path, version: Optional[str]) -> int:
     print(f"verified fake.release={resolved}")
     return 0
 
-def _impl_serve_token_path(
-    config_dir: str, product: str, share_with: Optional[str] = None
-) -> str:
-    """On-disk token after init. -share-with keeps the existing owner's file."""
-    owner = (share_with or product or "").strip()
-    if not owner:
-        raise Fail("token owner product id is required")
-    return str(Path(config_dir) / "tokens" / f"{owner}.token").replace("\\", "/")
+def _impl_serve_token_path(config_dir: str, rel: str) -> str:
+    """Absolute path for a token file taken from init -list-products."""
+    rel = (rel or "").strip()
+    if not rel:
+        raise Fail("token file path is empty")
+    if rel.startswith("/"):
+        return rel
+    return str(Path(config_dir) / rel).replace("\\", "/")
 
 def _impl_cmd_keys_gen(root: Path, args: argparse.Namespace) -> int:
     require_execute(args, "keys gen")

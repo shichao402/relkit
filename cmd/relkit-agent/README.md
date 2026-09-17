@@ -9,13 +9,13 @@
 | 路径 | 作用 |
 |---|---|
 | `/etc/relkit-agent/relkit-agent.json` | 监听地址、`uploadTokens`、`products` map |
-| `/etc/relkit-agent/tokens/<id>.token` | **该产品**的上传 Bearer（0600）。CI 环境变量名是 `RELKIT_UPLOAD_TOKEN` |
+| `/etc/relkit-agent/tokens/<id>.token` | 独占产品的上传 Bearer（0600）。共用家族改名为 `tokens/shared.token`（冲突则 `shared-N`）。路径以 `init -list-products` 为准，不要用 share-with 的产品 id 去猜。CI 环境变量名是 `RELKIT_UPLOAD_TOKEN` |
 | `/etc/relkit-agent/env` | `RELKIT_PRIVATE_KEY`、`COS_SECRET_ID`、`COS_SECRET_KEY` 等（systemd `EnvironmentFile`） |
 | `/etc/relkit-agent/products/<id>.json` | 本机 **publish profile**（缺省；可用 `products.<id>.profile` 覆盖） |
 | `/srv/relkit/<id>/` | 产品树根：私钥文件、`.relkit/cache/staged/<version>/` |
 | `/var/lib/relkit-agent` | 幂等回放等状态 |
 
-**没有**实例级 `/etc/relkit-agent/token`，也 **没有** `RELKIT_AGENT_TOKEN`。配置里出现 `uploadToken` / `uploadTokenFile`、或进程环境里出现 `RELKIT_AGENT_TOKEN`，agent **拒绝启动**。默认一条 token 文件对应一个 product id；家族产品可用 `init -product <id> -share-with <existing>` 把多个 id 挂到**同一份** token 文件（一条 `uploadTokens` 条目）。两份文件不得写同一段 secret（启动失败）。路径仍按请求里的 product id 隔离：Bearer 对但产品不在该条目的 `products` 里是 **403**。
+**没有**实例级 `/etc/relkit-agent/token`，也 **没有** `RELKIT_AGENT_TOKEN`。配置里出现 `uploadToken` / `uploadTokenFile`、或进程环境里出现 `RELKIT_AGENT_TOKEN`，agent **拒绝启动**。默认一条 token 文件对应一个 product id（`tokens/<id>.token`）；家族产品可用 `init -product <id> -share-with <existing>` 把多个 id 挂到**同一份** token 文件（一条 `uploadTokens` 条目），文件同时改名为 `tokens/shared.token`。两份文件不得写同一段 secret（启动失败）。路径仍按请求里的 product id 隔离：Bearer 对但产品不在该条目的 `products` 里是 **403**。chown / restart 读 `-list-products` 打出来的文件名，不要拼 `{share-with}.token`。
 
 `products.<id>.root` 永远是产品根；不以 JSON 文档里的路径为准。
 

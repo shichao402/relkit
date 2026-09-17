@@ -219,9 +219,10 @@ DNS：`publish.firoyang.com` A → 发布机公网 IP。Agent 只听本机；TLS
 
 实装说明（2026-08）：发布机上已有 nginx 占用 `:80`，因此 HTTPS 用 **nginx + certbot** 反代 `127.0.0.1:8787`，而不是再起 Caddy。若主机是空机，仍可用 `scripts/deploy/Caddyfile.relkit-agent.example`。
 
-产品清单不要手改 `uploadTokens`。默认每个产品一张 token 文件：
-`tokens/<id>.token`；同一发布方管理的产品可显式 `--share-with <existing-id>`，
-让一条 token 条目授权多个产品。CI 环境变量名固定为
+产品清单不要手改 `uploadTokens`。独占产品默认 `tokens/<id>.token`；同一发布方
+管理的产品可显式 `--share-with <existing-id>`，让一条 token 条目授权多个产品，
+文件改名为 `tokens/shared.token`（已占用则 `shared-N`）。运维脚本以
+`-list-products` 打出的路径为准，不要用某个产品 id 去猜文件名。CI 环境变量名固定为
 `RELKIT_UPLOAD_TOKEN`。**禁止**实例级 `uploadTokenFile` /
 `RELKIT_AGENT_TOKEN`。产品增删走产品仓：
 
@@ -261,6 +262,14 @@ python scripts/host/relkit_host.py agent remove --execute
 1. 在箱上安装 `relkit-agent`（`python3 scripts/deploy/relkit.py install agent --binary …`），配置见 `scripts/deploy/relkit-agent.intranet.example.json`。已有实例用 `python scripts/deploy/relkit.py upgrade --host <Host>`。
 2. 每个产品的 **publish profile** 把 `ingest`、`artifactTo`、`pointerTo` 都指到 `relkit-compatible`；`baseUrl` 为客户端匿名下载地址，`uploadUrl` 必须是 **CI 与 agent 都能访问的 serve 写入端点**，禁止填只因同机才可用的 loopback。serve 应像 COS endpoint 一样独立对外监听，上传正文不经过 agent 的 nginx；`baseUrl` 可以等于该 endpoint，也可以另用只读域名/CDN。`tokenEnv` 为 `RELKIT_SERVE_TOKEN`。样例：`scripts/deploy/relkit-intranet-product.example.json`。旧机若产品根还留着整份配置，可先 `-migrate-profile`。
 3. 私钥只在这台机上。CI 只持 **该产品** 的 `RELKIT_UPLOAD_TOKEN`。
+
+   发布是两段接力，两段各有一张 token，不要混：CI 用 `RELKIT_UPLOAD_TOKEN` 把
+   staged 树交给 agent；agent 再用 profile `tokenEnv` 指向的变量（本形态是
+   `RELKIT_SERVE_TOKEN`，由 systemd `EnvironmentFile` 提供）写 serve 数据面。
+   因此 `tokenEnv` 与 `uploadUrl` 是**箱上事实**，产品仓 `relkit.json` 里同名字段
+   描述的是 CI 直连后端的场景。`relkit_host.py agent provision` 生成 profile 时从
+   箱上已装 profile 继承这两个字段，只有首次创建才用默认值；`baseUrl` 相反，始终
+   以产品仓为准，因为它是要写进签名 manifest 的客户端下载地址。
 4. `relkit-serve` 对外提供完整数据面 API：正式对象继续匿名 Range GET；普通 PUT / COPY / HEAD / DELETE 由运营方 Bearer 保护，CAS PUT 由短期对象能力签名保护。和 COS 一样，公开可达不等于匿名可写。
 
 Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某产品的 token 发给无关仓库。不要用实例级 Bearer 当「同机共享」。

@@ -827,7 +827,10 @@ func TestInitShareProductReusesTokenFile(t *testing.T) {
 	if !strings.Contains(buf.String(), "shared") {
 		t.Errorf("expected a shared-token explanation, got:\n%s", buf.String())
 	}
-	after, err := os.ReadFile(tokenPath)
+	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
+		t.Errorf("product-named token should be renamed away: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "tokens", "shared.token"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -848,6 +851,9 @@ func TestInitShareProductReusesTokenFile(t *testing.T) {
 	got := cfg.UploadTokens[0].Products
 	if len(got) != 2 || got[0] != "suite-a" || got[1] != "suite-b" {
 		t.Errorf("products = %v, want [suite-a suite-b]", got)
+	}
+	if cfg.UploadTokens[0].File != "tokens/shared.token" {
+		t.Errorf("file = %s, want tokens/shared.token", cfg.UploadTokens[0].File)
 	}
 
 	if err := runInit(io.Discard, []string{"-out", dir, "-product", "suite-b", "-share-with", "suite-a"}); err == nil {

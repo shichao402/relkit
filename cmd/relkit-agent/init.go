@@ -15,6 +15,7 @@ import (
 
 	relkitconfig "go.firoyang.com/relkit/internal/config"
 	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/uploadtoken"
 )
 
 const defaultProductRootPrefix = "/srv/relkit"
@@ -151,6 +152,10 @@ func runInitShareProduct(out io.Writer, configPath, product, with, root string) 
 	if err != nil {
 		return err
 	}
+	relFile, err = promoteSharedTokenFile(configPath, cfg, relFile)
+	if err != nil {
+		return err
+	}
 	cfg.stripInstanceToken()
 	if err := writeFileConfig(configPath, cfg); err != nil {
 		return err
@@ -230,7 +235,31 @@ func runInitListProducts(out io.Writer, configPath string) error {
 }
 
 func productTokenRelPath(product string) string {
-	return "tokens/" + product + ".token"
+	return uploadtoken.ProductRelPath(product)
+}
+
+func promoteSharedTokenFile(configPath string, cfg *FileConfig, rel string) (string, error) {
+	var (
+		products []string
+		used     []string
+		idx      = -1
+	)
+	for i, entry := range cfg.UploadTokens {
+		used = append(used, entry.File)
+		if entry.File == rel {
+			products = entry.Products
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return rel, nil
+	}
+	dest, err := uploadtoken.PromoteFile(configPath, rel, products, used)
+	if err != nil {
+		return "", err
+	}
+	cfg.UploadTokens[idx].File = dest
+	return dest, nil
 }
 
 func writeTokenFile(path string) (string, error) {

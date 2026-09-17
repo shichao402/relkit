@@ -28,6 +28,13 @@ AGENT_ORIGIN_HOST = "update.devcloud.woa.com"
 
 AGENT_ORIGIN_NETLOC = "update.devcloud.woa.com:8080"
 
+# The agent writes to its backends with the operator credential systemd puts in
+# its own environment. Which variable holds it is a fact about the box, not
+# about any product repository: CI's RELKIT_UPLOAD_TOKEN only reaches the
+# agent's HTTP API and is never in the agent process environment. Used to seed
+# a brand new profile; an existing profile on the box wins over it.
+AGENT_BACKEND_TOKEN_ENV = "RELKIT_SERVE_TOKEN"
+
 GITHUB_REPO = os.environ.get("RELKIT_RELEASE_REPO", "shichao402/relkit")
 
 TOKEN_ENV = "RELKIT_UPLOAD_TOKEN"

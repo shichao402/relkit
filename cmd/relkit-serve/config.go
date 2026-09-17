@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/uploadtoken"
 )
 
 // ConfigName is looked for next to the binary and in /etc when -config is
@@ -456,7 +457,31 @@ func writeFileConfig(path string, cfg *FileConfig) error {
 }
 
 func productTokenRelPath(product string) string {
-	return "tokens/" + product + ".token"
+	return uploadtoken.ProductRelPath(product)
+}
+
+func promoteSharedTokenFile(configPath string, cfg *FileConfig, rel string) (string, error) {
+	var (
+		products []string
+		used     []string
+		idx      = -1
+	)
+	for i, entry := range cfg.UploadTokens {
+		used = append(used, entry.File)
+		if entry.File == rel {
+			products = entry.Products
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return rel, nil
+	}
+	dest, err := uploadtoken.PromoteFile(configPath, rel, products, used)
+	if err != nil {
+		return "", err
+	}
+	cfg.UploadTokens[idx].File = dest
+	return dest, nil
 }
 
 func (c *FileConfig) upsertProductToken(product, relFile string) {

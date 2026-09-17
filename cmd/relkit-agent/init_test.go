@@ -160,7 +160,11 @@ func TestInitShareProductReusesTokenFile(t *testing.T) {
 	if !strings.Contains(out, "shared") {
 		t.Fatalf("expected a shared-token explanation, got:\n%s", out)
 	}
-	after, err := os.ReadFile(tokenPath)
+	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
+		t.Fatalf("product-named token should be renamed away: %v", err)
+	}
+	sharedPath := filepath.Join(dir, "tokens", "shared.token")
+	after, err := os.ReadFile(sharedPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +185,9 @@ func TestInitShareProductReusesTokenFile(t *testing.T) {
 	got := cfg.UploadTokens[0].Products
 	if len(got) != 2 || got[0] != "suite-a" || got[1] != "suite-b" {
 		t.Errorf("products = %v, want [suite-a suite-b]", got)
+	}
+	if cfg.UploadTokens[0].File != "tokens/shared.token" {
+		t.Errorf("file = %s, want tokens/shared.token", cfg.UploadTokens[0].File)
 	}
 	if _, err := LoadConfig(path); err != nil {
 		t.Fatalf("agent should start with a shared token: %v", err)
@@ -231,6 +238,9 @@ func TestInitShareConvertsExclusiveToken(t *testing.T) {
 	}
 	if len(cfg.UploadTokens) != 1 || len(cfg.UploadTokens[0].Products) != 2 {
 		t.Fatalf("uploadTokens = %+v", cfg.UploadTokens)
+	}
+	if cfg.UploadTokens[0].File != "tokens/shared.token" {
+		t.Fatalf("shared file = %s", cfg.UploadTokens[0].File)
 	}
 	if cfg.Products["suite-b"].Root != rootB {
 		t.Fatalf("convert must keep product root: %+v", cfg.Products)
