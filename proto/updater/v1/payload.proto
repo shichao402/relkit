@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package relkit.updater.v1;
+
+option go_package = "go.firoyang.com/relkit/api/updater/v1;updaterv1";
+
+import "google/protobuf/duration.proto";
+
+// FileTable is stored as files.pb at the root of a payload artifact.
+// It is the complete set of files owned by this release. Deletions are derived
+// by comparing this table with the last successfully applied baseline.
+message FileTable {
+  string schema = 1; // must be "relkit.payload/1"
+  repeated FileEntry files = 2;
+  repeated ScriptEntry scripts = 3;
+  repeated string preserve = 4;
+}
+
+message FileEntry {
+  string relpath = 1;
+  int64 size = 2;
+  string sha256 = 3; // 64 lowercase hex chars
+  uint32 mode = 4;   // portable permission bits; 0 means use 0644
+}
+
+enum ScriptPhase {
+  SCRIPT_PHASE_UNSPECIFIED = 0;
+  SCRIPT_PHASE_PRE_APPLY = 1;
+  SCRIPT_PHASE_POST_APPLY = 2;
+}
+
+enum ScriptInterpreter {
+  SCRIPT_INTERPRETER_UNSPECIFIED = 0;
+  SCRIPT_INTERPRETER_DIRECT = 1;
+  SCRIPT_INTERPRETER_SH = 2;
+  SCRIPT_INTERPRETER_POWERSHELL = 3;
+}
+
+message ScriptEntry {
+  ScriptPhase phase = 1;
+  string relpath = 2; // relative to scripts/
+  int64 size = 3;
+  string sha256 = 4;
+  google.protobuf.Duration timeout = 5;
+  ScriptInterpreter interpreter = 6;
+  repeated string args = 7;
+}
+
+// Baseline is local engine state and is never published.
+message Baseline {
+  string schema = 1; // must be "relkit.baseline/1"
+  int64 code = 2;
+  string version = 3;
+  repeated BaselineEntry files = 4;
+}
+
+message BaselineEntry {
+  string relpath = 1;
+  string sha256 = 2;
+}

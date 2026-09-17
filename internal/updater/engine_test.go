@@ -11,6 +11,8 @@ import (
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
 	"go.firoyang.com/relkit/internal/ipc"
+	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/payload"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -111,14 +113,14 @@ func TestFrameRoundTrip(t *testing.T) {
 }
 
 func TestNegotiateWindow(t *testing.T) {
-	if negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 1}) != nil {
-		t.Fatal("window 1 host")
+	if negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 1}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW {
+		t.Fatal("window 1 host must be rejected")
 	}
-	if negotiate(&updaterv1.ClientHello{IpcMin: 2, IpcMax: 2}) != nil {
-		t.Fatal("window 2 host")
+	if negotiate(&updaterv1.ClientHello{IpcMin: 2, IpcMax: 2}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW {
+		t.Fatal("window 2 host must be rejected")
 	}
-	if negotiate(&updaterv1.ClientHello{IpcMin: 3, IpcMax: 3}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_OLD {
-		t.Fatal("too new host")
+	if negotiate(&updaterv1.ClientHello{IpcMin: 3, IpcMax: 3}) != nil {
+		t.Fatal("window 3 host")
 	}
 	got := negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 0})
 	if got == nil {
@@ -203,7 +205,7 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 		Runtime: &updaterv1.Runtime{
 			DataDir: dataDir,
 			Install: &updaterv1.InstallSpec{
-				Layout:      updaterv1.Layout_LAYOUT_VERSIONED_DIR,
+				Placement:   updaterv1.Placement_PLACEMENT_LIBRARY,
 				InstallRoot: installRoot,
 			},
 		},
@@ -228,39 +230,40 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 	}
 }
 
-func TestFileSetRollback(t *testing.T) {
+func TestBaselineDeletionProtectsModifiedFiles(t *testing.T) {
 	root := t.TempDir()
-	oldA := filepath.Join(root, "a.exe")
-	oldB := filepath.Join(root, "b.exe")
-	if err := os.WriteFile(oldA, []byte("old-a"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(oldB, []byte("old-b"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dataDir := t.TempDir()
 	stage := t.TempDir()
-	newA := filepath.Join(stage, "a.exe")
-	newB := filepath.Join(stage, "b.exe")
-	_ = os.WriteFile(newA, []byte("new-a"), 0o644)
-	_ = os.WriteFile(newB, []byte("new-b"), 0o644)
+	filesRoot := filepath.Join(stage, "files")
+	_ = os.MkdirAll(filesRoot, 0o755)
+	_ = os.WriteFile(filepath.Join(root, "stale.txt"), []byte("user-edited"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "remove.txt"), []byte("old"), 0o644)
+	oldDigest := model.Sha256Bytes([]byte("old"))
+	if err := saveBaseline(filepath.Join(dataDir, baselineFileName), &updaterv1.Baseline{
+		Schema: baselineSchema,
+		Files: []*updaterv1.BaselineEntry{
+			{Relpath: "stale.txt", Sha256: oldDigest},
+			{Relpath: "remove.txt", Sha256: oldDigest},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	sess := &updaterv1.ApplySessionRecord{
 		InstallRoot: root,
 		StagedRoot:  stage,
-		FileSet: []*updaterv1.FileSetEntry{
-			{DestRelpath: "a.exe", ArtifactName: "a.exe"},
-			{DestRelpath: "missing.exe", ArtifactName: "nope.exe"},
-		},
 	}
-	plan := &updaterv1.UpdatePlan{Files: []*updaterv1.PlannedFile{
-		{Name: "a.exe", LocalPath: newA},
-		{Name: "b.exe", LocalPath: newB},
-	}}
-	if err := applyFileSet(sess, plan); err == nil {
-		t.Fatal("expected missing artifact to fail")
+	content := &applyContent{
+		table:     &updaterv1.FileTable{Schema: payload.Schema},
+		filesRoot: filesRoot,
 	}
-	got, _ := os.ReadFile(oldA)
-	if string(got) != "old-a" {
-		t.Fatalf("partial apply leaked: %s", got)
+	if err := applyContentTable(dataDir, sess, &updaterv1.UpdatePlan{Code: 2}, content, root, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "remove.txt")); !os.IsNotExist(err) {
+		t.Fatal("unmodified stale file was not deleted")
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "stale.txt")); string(got) != "user-edited" {
+		t.Fatal("modified stale file was deleted")
 	}
 }
 
@@ -279,10 +282,11 @@ func TestVersionedDirAtomicActive(t *testing.T) {
 	sess := &updaterv1.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
+		Placement:         updaterv1.Placement_PLACEMENT_LIBRARY,
 		ExecutableRelpath: "bin/app.exe",
-		Retain:            2,
+		Library:           &updaterv1.LibraryPolicy{Retain: 2},
 	}
-	if err := applyVersionedDir(sess, plan); err != nil {
+	if err := applyPlan(t.TempDir(), sess, plan); err != nil {
 		t.Fatal(err)
 	}
 	ptr := readActive(root)
@@ -339,10 +343,11 @@ func TestInstallOnlyLeavesActive(t *testing.T) {
 	sess := &updaterv1.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
+		Placement:         updaterv1.Placement_PLACEMENT_LIBRARY,
 		ExecutableRelpath: "bin/app.exe",
-		Retain:            2,
+		Library:           &updaterv1.LibraryPolicy{Retain: 2},
 	}
-	if err := applyVersionedDir(sess, first); err != nil {
+	if err := applyPlan(t.TempDir(), sess, first); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.WriteFile(filepath.Join(payload, "bin", "app.exe"), []byte("b"), 0o644)
@@ -352,7 +357,7 @@ func TestInstallOnlyLeavesActive(t *testing.T) {
 		Files:   []*updaterv1.PlannedFile{{Name: "app.exe", LocalPath: filepath.Join(payload, "bin", "app.exe")}},
 	}
 	sess.InstallOnly = true
-	if err := applyVersionedDir(sess, second); err != nil {
+	if err := applyPlan(t.TempDir(), sess, second); err != nil {
 		t.Fatal(err)
 	}
 	ptr := readActive(root)
@@ -412,10 +417,11 @@ func TestVersionedDirKeepsAppBundle(t *testing.T) {
 	sess := &updaterv1.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
-		ExecutableRelpath: "Loom Editor.app/Contents/MacOS/loom",
-		Retain:            2,
+		Placement:         updaterv1.Placement_PLACEMENT_LIBRARY,
+		ExecutableRelpath: "Contents/MacOS/loom",
+		Library:           &updaterv1.LibraryPolicy{Retain: 2},
 	}
-	if err := applyVersionedDir(sess, plan); err != nil {
+	if err := applyPlan(t.TempDir(), sess, plan); err != nil {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(root, "versions", "0.2.2+21", "Loom Editor.app", "Contents", "MacOS", "loom")
@@ -437,4 +443,3 @@ func TestApplyLockRejectsSecondHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-

@@ -100,31 +100,33 @@ export type ClientProfile = Message<"relkit.updater.v1.ClientProfile"> & {
  */
 export declare const ClientProfileSchema: GenMessage<ClientProfile>;
 /**
- * @generated from message relkit.updater.v1.FileSetEntry
+ * @generated from message relkit.updater.v1.LibraryPolicy
  */
-export type FileSetEntry = Message<"relkit.updater.v1.FileSetEntry"> & {
+export type LibraryPolicy = Message<"relkit.updater.v1.LibraryPolicy"> & {
     /**
-     * @generated from field: string dest_relpath = 1;
+     * 0 means current + previous
+     *
+     * @generated from field: int32 retain = 1;
      */
-    destRelpath: string;
+    retain: number;
     /**
-     * @generated from field: string artifact_name = 2;
+     * @generated from field: repeated int64 reserved_codes = 2;
      */
-    artifactName: string;
+    reservedCodes: bigint[];
 };
 /**
- * Describes the message relkit.updater.v1.FileSetEntry.
- * Use `create(FileSetEntrySchema)` to create a new message.
+ * Describes the message relkit.updater.v1.LibraryPolicy.
+ * Use `create(LibraryPolicySchema)` to create a new message.
  */
-export declare const FileSetEntrySchema: GenMessage<FileSetEntry>;
+export declare const LibraryPolicySchema: GenMessage<LibraryPolicy>;
 /**
  * @generated from message relkit.updater.v1.InstallSpec
  */
 export type InstallSpec = Message<"relkit.updater.v1.InstallSpec"> & {
     /**
-     * @generated from field: relkit.updater.v1.Layout layout = 1;
+     * @generated from field: relkit.updater.v1.Placement placement = 1;
      */
-    layout: Layout;
+    placement: Placement;
     /**
      * @generated from field: string install_root = 2;
      */
@@ -142,19 +144,13 @@ export type InstallSpec = Message<"relkit.updater.v1.InstallSpec"> & {
      */
     preserve: string[];
     /**
-     * 0 means current + previous
-     *
-     * @generated from field: int32 retain = 6;
-     */
-    retain: number;
-    /**
      * @generated from field: bool relaunch = 7;
      */
     relaunch: boolean;
     /**
-     * @generated from field: repeated relkit.updater.v1.FileSetEntry file_set = 8;
+     * @generated from field: relkit.updater.v1.LibraryPolicy library = 10;
      */
-    fileSet: FileSetEntry[];
+    library?: LibraryPolicy | undefined;
 };
 /**
  * Describes the message relkit.updater.v1.InstallSpec.
@@ -270,9 +266,9 @@ export type Capabilities = Message<"relkit.updater.v1.Capabilities"> & {
      */
     operations: Operation[];
     /**
-     * @generated from field: repeated relkit.updater.v1.Layout layouts = 3;
+     * @generated from field: repeated relkit.updater.v1.Placement placements = 3;
      */
-    layouts: Layout[];
+    placements: Placement[];
     /**
      * @generated from field: google.protobuf.Duration min_check_interval = 4;
      */
@@ -349,6 +345,13 @@ export type ApplyOp = Message<"relkit.updater.v1.ApplyOp"> & {
      * @generated from field: string plan_id = 1;
      */
     planId: string;
+    /**
+     * When true, versionedDir copies into versions/ but does not rewrite
+     * active.json. wholeRoot / fileSet ignore this flag.
+     *
+     * @generated from field: bool install_only = 2;
+     */
+    installOnly: boolean;
 };
 /**
  * Describes the message relkit.updater.v1.ApplyOp.
@@ -382,6 +385,86 @@ export type CancelOp = Message<"relkit.updater.v1.CancelOp"> & {};
  * Use `create(CancelOpSchema)` to create a new message.
  */
 export declare const CancelOpSchema: GenMessage<CancelOp>;
+/**
+ * @generated from message relkit.updater.v1.ListInstalledOp
+ */
+export type ListInstalledOp = Message<"relkit.updater.v1.ListInstalledOp"> & {};
+/**
+ * Describes the message relkit.updater.v1.ListInstalledOp.
+ * Use `create(ListInstalledOpSchema)` to create a new message.
+ */
+export declare const ListInstalledOpSchema: GenMessage<ListInstalledOp>;
+/**
+ * @generated from message relkit.updater.v1.SwitchActiveOp
+ */
+export type SwitchActiveOp = Message<"relkit.updater.v1.SwitchActiveOp"> & {
+    /**
+     * @generated from field: int64 code = 1;
+     */
+    code: bigint;
+};
+/**
+ * Describes the message relkit.updater.v1.SwitchActiveOp.
+ * Use `create(SwitchActiveOpSchema)` to create a new message.
+ */
+export declare const SwitchActiveOpSchema: GenMessage<SwitchActiveOp>;
+/**
+ * @generated from message relkit.updater.v1.RollbackOp
+ */
+export type RollbackOp = Message<"relkit.updater.v1.RollbackOp"> & {};
+/**
+ * Describes the message relkit.updater.v1.RollbackOp.
+ * Use `create(RollbackOpSchema)` to create a new message.
+ */
+export declare const RollbackOpSchema: GenMessage<RollbackOp>;
+/**
+ * @generated from message relkit.updater.v1.InstalledVersion
+ */
+export type InstalledVersion = Message<"relkit.updater.v1.InstalledVersion"> & {
+    /**
+     * @generated from field: int64 code = 1;
+     */
+    code: bigint;
+    /**
+     * @generated from field: string version = 2;
+     */
+    version: string;
+    /**
+     * @generated from field: string path = 3;
+     */
+    path: string;
+    /**
+     * @generated from field: string executable = 4;
+     */
+    executable: string;
+    /**
+     * @generated from field: bool active = 5;
+     */
+    active: boolean;
+};
+/**
+ * Describes the message relkit.updater.v1.InstalledVersion.
+ * Use `create(InstalledVersionSchema)` to create a new message.
+ */
+export declare const InstalledVersionSchema: GenMessage<InstalledVersion>;
+/**
+ * @generated from message relkit.updater.v1.InstalledList
+ */
+export type InstalledList = Message<"relkit.updater.v1.InstalledList"> & {
+    /**
+     * @generated from field: repeated relkit.updater.v1.InstalledVersion versions = 1;
+     */
+    versions: InstalledVersion[];
+    /**
+     * @generated from field: int64 active_code = 2;
+     */
+    activeCode: bigint;
+};
+/**
+ * Describes the message relkit.updater.v1.InstalledList.
+ * Use `create(InstalledListSchema)` to create a new message.
+ */
+export declare const InstalledListSchema: GenMessage<InstalledList>;
 /**
  * @generated from message relkit.updater.v1.UpdaterRequest
  */
@@ -443,6 +526,24 @@ export type UpdaterRequest = Message<"relkit.updater.v1.UpdaterRequest"> & {
          */
         value: CancelOp;
         case: "cancel";
+    } | {
+        /**
+         * @generated from field: relkit.updater.v1.ListInstalledOp list_installed = 17;
+         */
+        value: ListInstalledOp;
+        case: "listInstalled";
+    } | {
+        /**
+         * @generated from field: relkit.updater.v1.SwitchActiveOp switch_active = 18;
+         */
+        value: SwitchActiveOp;
+        case: "switchActive";
+    } | {
+        /**
+         * @generated from field: relkit.updater.v1.RollbackOp rollback = 19;
+         */
+        value: RollbackOp;
+        case: "rollback";
     } | {
         case: undefined;
         value?: undefined;
@@ -597,6 +698,10 @@ export type UpdateAvailable = Message<"relkit.updater.v1.UpdateAvailable"> & {
      * @generated from field: repeated relkit.updater.v1.ArtifactView artifacts = 11;
      */
     artifacts: ArtifactView[];
+    /**
+     * @generated from field: relkit.updater.v1.ApplyDisposition apply_disposition = 12;
+     */
+    applyDisposition: ApplyDisposition;
 };
 /**
  * Describes the message relkit.updater.v1.UpdateAvailable.
@@ -1064,6 +1169,12 @@ export type UpdaterEvent = Message<"relkit.updater.v1.UpdaterEvent"> & {
         value: Failed;
         case: "failed";
     } | {
+        /**
+         * @generated from field: relkit.updater.v1.InstalledList installed = 16;
+         */
+        value: InstalledList;
+        case: "installed";
+    } | {
         case: undefined;
         value?: undefined;
     };
@@ -1125,6 +1236,10 @@ export type PlannedFile = Message<"relkit.updater.v1.PlannedFile"> & {
      * @generated from field: bool downloaded = 7;
      */
     downloaded: boolean;
+    /**
+     * @generated from field: string kind = 8;
+     */
+    kind: string;
 };
 /**
  * Describes the message relkit.updater.v1.PlannedFile.
@@ -1284,9 +1399,9 @@ export type ApplySessionRecord = Message<"relkit.updater.v1.ApplySessionRecord">
      */
     pid: number;
     /**
-     * @generated from field: relkit.updater.v1.Layout layout = 12;
+     * @generated from field: relkit.updater.v1.Placement placement = 12;
      */
-    layout: Layout;
+    placement: Placement;
     /**
      * @generated from field: bool relaunch = 13;
      */
@@ -1300,17 +1415,21 @@ export type ApplySessionRecord = Message<"relkit.updater.v1.ApplySessionRecord">
      */
     preserve: string[];
     /**
-     * @generated from field: int32 retain = 16;
-     */
-    retain: number;
-    /**
-     * @generated from field: repeated relkit.updater.v1.FileSetEntry file_set = 17;
-     */
-    fileSet: FileSetEntry[];
-    /**
      * @generated from field: string sidecar_relpath = 18;
      */
     sidecarRelpath: string;
+    /**
+     * @generated from field: bool install_only = 19;
+     */
+    installOnly: boolean;
+    /**
+     * @generated from field: bool requires_host_exit = 21;
+     */
+    requiresHostExit: boolean;
+    /**
+     * @generated from field: relkit.updater.v1.LibraryPolicy library = 22;
+     */
+    library?: LibraryPolicy | undefined;
 };
 /**
  * Describes the message relkit.updater.v1.ApplySessionRecord.
@@ -1492,30 +1611,47 @@ export declare enum LastResult {
  */
 export declare const LastResultSchema: GenEnum<LastResult>;
 /**
- * @generated from enum relkit.updater.v1.Layout
+ * @generated from enum relkit.updater.v1.Placement
  */
-export declare enum Layout {
+export declare enum Placement {
     /**
-     * @generated from enum value: LAYOUT_UNSPECIFIED = 0;
+     * @generated from enum value: PLACEMENT_UNSPECIFIED = 0;
      */
     UNSPECIFIED = 0,
     /**
-     * @generated from enum value: LAYOUT_WHOLE_ROOT = 1;
+     * @generated from enum value: PLACEMENT_IN_PLACE = 1;
      */
-    WHOLE_ROOT = 1,
+    IN_PLACE = 1,
     /**
-     * @generated from enum value: LAYOUT_VERSIONED_DIR = 2;
+     * @generated from enum value: PLACEMENT_LIBRARY = 2;
      */
-    VERSIONED_DIR = 2,
-    /**
-     * @generated from enum value: LAYOUT_FILE_SET = 3;
-     */
-    FILE_SET = 3
+    LIBRARY = 2
 }
 /**
- * Describes the enum relkit.updater.v1.Layout.
+ * Describes the enum relkit.updater.v1.Placement.
  */
-export declare const LayoutSchema: GenEnum<Layout>;
+export declare const PlacementSchema: GenEnum<Placement>;
+/**
+ * @generated from enum relkit.updater.v1.ApplyDisposition
+ */
+export declare enum ApplyDisposition {
+    /**
+     * @generated from enum value: APPLY_DISPOSITION_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from enum value: APPLY_DISPOSITION_INTERNAL = 1;
+     */
+    INTERNAL = 1,
+    /**
+     * @generated from enum value: APPLY_DISPOSITION_FULL_INSTALL = 2;
+     */
+    FULL_INSTALL = 2
+}
+/**
+ * Describes the enum relkit.updater.v1.ApplyDisposition.
+ */
+export declare const ApplyDispositionSchema: GenEnum<ApplyDisposition>;
 /**
  * @generated from enum relkit.updater.v1.Operation
  */
@@ -1555,7 +1691,19 @@ export declare enum Operation {
     /**
      * @generated from enum value: OPERATION_SCHEDULER = 8;
      */
-    SCHEDULER = 8
+    SCHEDULER = 8,
+    /**
+     * @generated from enum value: OPERATION_LIST_INSTALLED = 9;
+     */
+    LIST_INSTALLED = 9,
+    /**
+     * @generated from enum value: OPERATION_SWITCH_ACTIVE = 10;
+     */
+    SWITCH_ACTIVE = 10,
+    /**
+     * @generated from enum value: OPERATION_ROLLBACK = 11;
+     */
+    ROLLBACK = 11
 }
 /**
  * Describes the enum relkit.updater.v1.Operation.

@@ -11,6 +11,7 @@ import (
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
 	"go.firoyang.com/relkit/internal/inprocess"
+	"go.firoyang.com/relkit/internal/model"
 	"go.firoyang.com/relkit/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -86,6 +87,11 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 	}
 
 	sdkState := engineStateToSDK(state)
+	clientSelectors := make(map[string]string, len(runtime.ClientSelectors)+1)
+	for key, value := range runtime.ClientSelectors {
+		clientSelectors[key] = value
+	}
+	clientSelectors["apply"] = "relkit-payload"
 	u := &inprocess.Updater{
 		Product:         profile.Product,
 		Channel:         runtime.Channel,
@@ -94,7 +100,7 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 		EntryURLs:       profile.EntryUrls,
 		FallbackURLs:    profile.FallbackUrls,
 		TrustedKeys:     keys,
-		ClientSelectors: runtime.ClientSelectors,
+		ClientSelectors: clientSelectors,
 		Fetcher:         e.fetcher(),
 		StateStore:      sdk.NewMemoryStateStore(sdkState),
 	}
@@ -203,6 +209,13 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 				NotesUrl: p.NotesURL,
 			})
 		}
+		disposition := updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL
+		if av.Artifact != nil {
+			kind := model.ArtifactKindString(av.Artifact.Kind)
+			if kind == "payload" || kind == "archive" {
+				disposition = updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL
+			}
+		}
 		return e.emit(&updaterv1.UpdaterEvent{
 			Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
 				Kind: &updaterv1.CheckResult_UpdateAvailable{UpdateAvailable: &updaterv1.UpdateAvailable{
@@ -217,6 +230,7 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 					ReleaseNotesUrl:      av.Target.NotesUrl,
 					PriorReleaseNotes:    priors,
 					Artifacts:            view,
+					ApplyDisposition:     disposition,
 				}},
 			}},
 		})
@@ -295,39 +309,8 @@ func (e *Engine) buildPlan(st store, profile *updaterv1.ClientProfile, runtime *
 			Size:      av.Artifact.Size,
 			Sha256Hex: av.Artifact.Sha256,
 			Urls:      append([]string{}, av.Artifact.Urls...),
+			Kind:      model.ArtifactKindString(av.Artifact.Kind),
 		})
-	}
-	// fileSet: one plan must include every named artifact of the same version.
-	if runtime.GetInstall().GetLayout() == updaterv1.Layout_LAYOUT_FILE_SET {
-		want := map[string]string{}
-		for _, ent := range runtime.GetInstall().GetFileSet() {
-			want[ent.ArtifactName] = ent.DestRelpath
-		}
-		if av.Manifest != nil {
-			files = nil
-			for _, art := range av.Manifest.Artifacts {
-				if art == nil {
-					continue
-				}
-				dest, ok := want[art.Filename]
-				if !ok {
-					continue
-				}
-				if err := ValidateArtifactFilename(art.Filename); err != nil {
-					return nil, err
-				}
-				files = append(files, &updaterv1.PlannedFile{
-					Name:        art.Filename,
-					Size:        art.Size,
-					Sha256Hex:   art.Sha256,
-					Urls:        append([]string{}, art.Urls...),
-					DestRelpath: dest,
-				})
-			}
-			if len(files) != len(want) {
-				return nil, fmt.Errorf("fileSet plan missing artifacts")
-			}
-		}
 	}
 	plan := &updaterv1.UpdatePlan{
 		PlanId:               id,

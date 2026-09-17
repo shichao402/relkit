@@ -40,12 +40,12 @@ class RupFormatException implements Exception {
 
 const envelopeSchemaId = 'rup.envelope/2';
 const indexSchemaId = 'rup.index/2';
-const manifestSchemaId = 'rup.manifest/2';
+const manifestSchemaId = 'rup.manifest/3';
 const fallbackSchemaId = 'rup.fallback/2';
 const directorySchemaId = 'rup.directory/2';
 const publicKeySchemaId = 'rup.publickey/2';
 const privateKeySchemaId = 'rup.privatekey/2';
-const stagedSchemaId = 'rup.staged/2';
+const stagedSchemaId = 'rup.staged/3';
 
 final _hex64 = RegExp(r'^[0-9a-f]{64}$');
 

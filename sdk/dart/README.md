@@ -46,9 +46,6 @@ Generated types: `lib/src/gen/rup/v2/` (re-exported by `package:rup_client/rup_c
 
 - `Updater` (facade) — spawn `relkit-updater` for check/download/apply
 - protocol helpers — envelope, chain, selectors, hash-verified download
-- `src/apply/` — optional install helpers: `wholeRoot` (directory swap) and
-  `versionedDir` (`versions/<id>/` + atomic `active.json`). Defaults:
-  Windows `versionedDir`, macOS `wholeRoot`. Not protocol; see SPEC appendix B.
 
 In-process `RupUpdater` / `UpdateScheduler` stay in this repo for engine tests
 and are not exported or packed into host zips.

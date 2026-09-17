@@ -17,6 +17,7 @@ import {
   DownloadResultSchema,
   ErrorSchema,
   FailedSchema,
+  InstalledListSchema,
   ListInstalledOpSchema,
   ResultSchema,
   RollbackOpSchema,
@@ -39,9 +40,9 @@ import {
   type Result,
 } from "./gen/updater/v1/updater_pb.js";
 
-export const ipcMin = 1;
-export const ipcMax = 2;
-export const ipcCurrent = 2;
+export const ipcMin = 3;
+export const ipcMax = 3;
+export const ipcCurrent = 3;
 
 const facadeError = (code: number, message: string, retryable = false): Error =>
   create(ErrorSchema, { code, retryable, message, attempts: [] });
@@ -220,7 +221,7 @@ export class Updater {
     for await (const ev of this.call({ op: { case: "listInstalled", value: create(ListInstalledOpSchema) } })) {
       if (ev.kind.case === "installed") return ev.kind.value;
     }
-    return { versions: [], activeCode: 0n } as import("./gen/updater/v1/updater_pb.js").InstalledList;
+    return create(InstalledListSchema, { versions: [], activeCode: 0n });
   }
 
   async switchActive(opts: { code: bigint }): Promise<Result> {

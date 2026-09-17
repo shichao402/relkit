@@ -21,6 +21,64 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ArtifactKind int32
+
+const (
+	ArtifactKind_ARTIFACT_KIND_UNSPECIFIED ArtifactKind = 0
+	ArtifactKind_ARTIFACT_KIND_ARCHIVE     ArtifactKind = 1
+	ArtifactKind_ARTIFACT_KIND_INSTALLER   ArtifactKind = 2
+	ArtifactKind_ARTIFACT_KIND_BINARY      ArtifactKind = 3
+	ArtifactKind_ARTIFACT_KIND_BLOB        ArtifactKind = 4
+	ArtifactKind_ARTIFACT_KIND_PAYLOAD     ArtifactKind = 5
+)
+
+// Enum value maps for ArtifactKind.
+var (
+	ArtifactKind_name = map[int32]string{
+		0: "ARTIFACT_KIND_UNSPECIFIED",
+		1: "ARTIFACT_KIND_ARCHIVE",
+		2: "ARTIFACT_KIND_INSTALLER",
+		3: "ARTIFACT_KIND_BINARY",
+		4: "ARTIFACT_KIND_BLOB",
+		5: "ARTIFACT_KIND_PAYLOAD",
+	}
+	ArtifactKind_value = map[string]int32{
+		"ARTIFACT_KIND_UNSPECIFIED": 0,
+		"ARTIFACT_KIND_ARCHIVE":     1,
+		"ARTIFACT_KIND_INSTALLER":   2,
+		"ARTIFACT_KIND_BINARY":      3,
+		"ARTIFACT_KIND_BLOB":        4,
+		"ARTIFACT_KIND_PAYLOAD":     5,
+	}
+)
+
+func (x ArtifactKind) Enum() *ArtifactKind {
+	p := new(ArtifactKind)
+	*p = x
+	return p
+}
+
+func (x ArtifactKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ArtifactKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_rup_v2_objects_proto_enumTypes[0].Descriptor()
+}
+
+func (ArtifactKind) Type() protoreflect.EnumType {
+	return &file_rup_v2_objects_proto_enumTypes[0]
+}
+
+func (x ArtifactKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ArtifactKind.Descriptor instead.
+func (ArtifactKind) EnumDescriptor() ([]byte, []int) {
+	return file_rup_v2_objects_proto_rawDescGZIP(), []int{0}
+}
+
 // Selector is one key/value match constraint.
 // Signed messages MUST NOT use map<>; encode helpers sort by key before Marshal.
 type Selector struct {
@@ -406,7 +464,7 @@ type Artifact struct {
 	Filename      string                 `protobuf:"bytes,2,opt,name=filename,proto3" json:"filename,omitempty"`
 	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
 	Sha256        string                 `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
-	Kind          string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`           // archive|installer|binary|blob
+	Kind          ArtifactKind           `protobuf:"varint,5,opt,name=kind,proto3,enum=rup.v2.ArtifactKind" json:"kind,omitempty"`
 	Selectors     []*Selector            `protobuf:"bytes,6,rep,name=selectors,proto3" json:"selectors,omitempty"` // sorted by key when encoded
 	Urls          []string               `protobuf:"bytes,7,rep,name=urls,proto3" json:"urls,omitempty"`
 	Meta          []*MetaEntry           `protobuf:"bytes,8,rep,name=meta,proto3" json:"meta,omitempty"` // sorted by key when encoded
@@ -472,11 +530,11 @@ func (x *Artifact) GetSha256() string {
 	return ""
 }
 
-func (x *Artifact) GetKind() string {
+func (x *Artifact) GetKind() ArtifactKind {
 	if x != nil {
 		return x.Kind
 	}
-	return ""
+	return ArtifactKind_ARTIFACT_KIND_UNSPECIFIED
 }
 
 func (x *Artifact) GetSelectors() []*Selector {
@@ -500,10 +558,10 @@ func (x *Artifact) GetMeta() []*MetaEntry {
 	return nil
 }
 
-// Manifest describes all artifacts for one version (schema rup.manifest/2).
+// Manifest describes all artifacts for one version (schema rup.manifest/3).
 type Manifest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.manifest/2"
+	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.manifest/3"
 	Product       string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
 	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
 	Code          int64                  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`
@@ -600,7 +658,7 @@ type StagedArtifact struct {
 	Filename      string                 `protobuf:"bytes,2,opt,name=filename,proto3" json:"filename,omitempty"`
 	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
 	Sha256        string                 `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
-	Kind          string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind          ArtifactKind           `protobuf:"varint,5,opt,name=kind,proto3,enum=rup.v2.ArtifactKind" json:"kind,omitempty"`
 	Selectors     []*Selector            `protobuf:"bytes,6,rep,name=selectors,proto3" json:"selectors,omitempty"`
 	Meta          []*MetaEntry           `protobuf:"bytes,7,rep,name=meta,proto3" json:"meta,omitempty"`
 	SourcePath    string                 `protobuf:"bytes,8,opt,name=source_path,json=sourcePath,proto3" json:"source_path,omitempty"` // discarded at publish
@@ -666,11 +724,11 @@ func (x *StagedArtifact) GetSha256() string {
 	return ""
 }
 
-func (x *StagedArtifact) GetKind() string {
+func (x *StagedArtifact) GetKind() ArtifactKind {
 	if x != nil {
 		return x.Kind
 	}
-	return ""
+	return ArtifactKind_ARTIFACT_KIND_UNSPECIFIED
 }
 
 func (x *StagedArtifact) GetSelectors() []*Selector {
@@ -694,10 +752,10 @@ func (x *StagedArtifact) GetSourcePath() string {
 	return ""
 }
 
-// Staged is the offline stage product (schema rup.staged/2).
+// Staged is the offline stage product (schema rup.staged/3).
 type Staged struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
-	Schema    string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.staged/2"
+	Schema    string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.staged/3"
 	Product   string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
 	Version   string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
 	Code      int64                  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`
@@ -1170,13 +1228,13 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\x11has_min_supported\x18\a \x01(\bR\x0fhasMinSupported\x12\x1d\n" +
 	"\n" +
 	"expires_at\x18\b \x01(\tR\texpiresAt\x12/\n" +
-	"\bversions\x18\t \x03(\v2\x13.rup.v2.VersionNodeR\bversions\"\xe1\x01\n" +
+	"\bversions\x18\t \x03(\v2\x13.rup.v2.VersionNodeR\bversions\"\xf7\x01\n" +
 	"\bArtifact\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x12\n" +
 	"\x04size\x18\x03 \x01(\x03R\x04size\x12\x16\n" +
-	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x12\n" +
-	"\x04kind\x18\x05 \x01(\tR\x04kind\x12.\n" +
+	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12(\n" +
+	"\x04kind\x18\x05 \x01(\x0e2\x14.rup.v2.ArtifactKindR\x04kind\x12.\n" +
 	"\tselectors\x18\x06 \x03(\v2\x10.rup.v2.SelectorR\tselectors\x12\x12\n" +
 	"\x04urls\x18\a \x03(\tR\x04urls\x12%\n" +
 	"\x04meta\x18\b \x03(\v2\x11.rup.v2.MetaEntryR\x04meta\"\xd1\x01\n" +
@@ -1188,13 +1246,13 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\vreleased_at\x18\x05 \x01(\tR\n" +
 	"releasedAt\x12\x14\n" +
 	"\x05notes\x18\x06 \x01(\tR\x05notes\x12.\n" +
-	"\tartifacts\x18\a \x03(\v2\x10.rup.v2.ArtifactR\tartifacts\"\xf4\x01\n" +
+	"\tartifacts\x18\a \x03(\v2\x10.rup.v2.ArtifactR\tartifacts\"\x8a\x02\n" +
 	"\x0eStagedArtifact\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x12\n" +
 	"\x04size\x18\x03 \x01(\x03R\x04size\x12\x16\n" +
-	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x12\n" +
-	"\x04kind\x18\x05 \x01(\tR\x04kind\x12.\n" +
+	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12(\n" +
+	"\x04kind\x18\x05 \x01(\x0e2\x14.rup.v2.ArtifactKindR\x04kind\x12.\n" +
 	"\tselectors\x18\x06 \x03(\v2\x10.rup.v2.SelectorR\tselectors\x12%\n" +
 	"\x04meta\x18\a \x03(\v2\x11.rup.v2.MetaEntryR\x04meta\x12\x1f\n" +
 	"\vsource_path\x18\b \x01(\tR\n" +
@@ -1238,7 +1296,14 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\x12directory_sequence\x18\x03 \x01(\x03R\x11directorySequence\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x04 \x01(\tR\tupdatedAt\x124\n" +
-	"\bservices\x18\x05 \x03(\v2\x18.rup.v2.DirectoryServiceR\bservicesB|\n" +
+	"\bservices\x18\x05 \x03(\v2\x18.rup.v2.DirectoryServiceR\bservices*\xb2\x01\n" +
+	"\fArtifactKind\x12\x1d\n" +
+	"\x19ARTIFACT_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15ARTIFACT_KIND_ARCHIVE\x10\x01\x12\x1b\n" +
+	"\x17ARTIFACT_KIND_INSTALLER\x10\x02\x12\x18\n" +
+	"\x14ARTIFACT_KIND_BINARY\x10\x03\x12\x16\n" +
+	"\x12ARTIFACT_KIND_BLOB\x10\x04\x12\x19\n" +
+	"\x15ARTIFACT_KIND_PAYLOAD\x10\x05B|\n" +
 	"\n" +
 	"com.rup.v2B\fObjectsProtoP\x01Z'go.firoyang.com/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
 
@@ -1254,39 +1319,43 @@ func file_rup_v2_objects_proto_rawDescGZIP() []byte {
 	return file_rup_v2_objects_proto_rawDescData
 }
 
+var file_rup_v2_objects_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_rup_v2_objects_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_rup_v2_objects_proto_goTypes = []any{
-	(*Selector)(nil),         // 0: rup.v2.Selector
-	(*MetaEntry)(nil),        // 1: rup.v2.MetaEntry
-	(*DigestRef)(nil),        // 2: rup.v2.DigestRef
-	(*VersionNode)(nil),      // 3: rup.v2.VersionNode
-	(*Index)(nil),            // 4: rup.v2.Index
-	(*Artifact)(nil),         // 5: rup.v2.Artifact
-	(*Manifest)(nil),         // 6: rup.v2.Manifest
-	(*StagedArtifact)(nil),   // 7: rup.v2.StagedArtifact
-	(*Staged)(nil),           // 8: rup.v2.Staged
-	(*FallbackRule)(nil),     // 9: rup.v2.FallbackRule
-	(*Fallback)(nil),         // 10: rup.v2.Fallback
-	(*DirectoryService)(nil), // 11: rup.v2.DirectoryService
-	(*UpdateDirectory)(nil),  // 12: rup.v2.UpdateDirectory
+	(ArtifactKind)(0),        // 0: rup.v2.ArtifactKind
+	(*Selector)(nil),         // 1: rup.v2.Selector
+	(*MetaEntry)(nil),        // 2: rup.v2.MetaEntry
+	(*DigestRef)(nil),        // 3: rup.v2.DigestRef
+	(*VersionNode)(nil),      // 4: rup.v2.VersionNode
+	(*Index)(nil),            // 5: rup.v2.Index
+	(*Artifact)(nil),         // 6: rup.v2.Artifact
+	(*Manifest)(nil),         // 7: rup.v2.Manifest
+	(*StagedArtifact)(nil),   // 8: rup.v2.StagedArtifact
+	(*Staged)(nil),           // 9: rup.v2.Staged
+	(*FallbackRule)(nil),     // 10: rup.v2.FallbackRule
+	(*Fallback)(nil),         // 11: rup.v2.Fallback
+	(*DirectoryService)(nil), // 12: rup.v2.DirectoryService
+	(*UpdateDirectory)(nil),  // 13: rup.v2.UpdateDirectory
 }
 var file_rup_v2_objects_proto_depIdxs = []int32{
-	2,  // 0: rup.v2.VersionNode.manifest:type_name -> rup.v2.DigestRef
-	3,  // 1: rup.v2.Index.versions:type_name -> rup.v2.VersionNode
-	0,  // 2: rup.v2.Artifact.selectors:type_name -> rup.v2.Selector
-	1,  // 3: rup.v2.Artifact.meta:type_name -> rup.v2.MetaEntry
-	5,  // 4: rup.v2.Manifest.artifacts:type_name -> rup.v2.Artifact
-	0,  // 5: rup.v2.StagedArtifact.selectors:type_name -> rup.v2.Selector
-	1,  // 6: rup.v2.StagedArtifact.meta:type_name -> rup.v2.MetaEntry
-	7,  // 7: rup.v2.Staged.artifacts:type_name -> rup.v2.StagedArtifact
-	0,  // 8: rup.v2.FallbackRule.selectors:type_name -> rup.v2.Selector
-	9,  // 9: rup.v2.Fallback.rules:type_name -> rup.v2.FallbackRule
-	11, // 10: rup.v2.UpdateDirectory.services:type_name -> rup.v2.DirectoryService
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	3,  // 0: rup.v2.VersionNode.manifest:type_name -> rup.v2.DigestRef
+	4,  // 1: rup.v2.Index.versions:type_name -> rup.v2.VersionNode
+	0,  // 2: rup.v2.Artifact.kind:type_name -> rup.v2.ArtifactKind
+	1,  // 3: rup.v2.Artifact.selectors:type_name -> rup.v2.Selector
+	2,  // 4: rup.v2.Artifact.meta:type_name -> rup.v2.MetaEntry
+	6,  // 5: rup.v2.Manifest.artifacts:type_name -> rup.v2.Artifact
+	0,  // 6: rup.v2.StagedArtifact.kind:type_name -> rup.v2.ArtifactKind
+	1,  // 7: rup.v2.StagedArtifact.selectors:type_name -> rup.v2.Selector
+	2,  // 8: rup.v2.StagedArtifact.meta:type_name -> rup.v2.MetaEntry
+	8,  // 9: rup.v2.Staged.artifacts:type_name -> rup.v2.StagedArtifact
+	1,  // 10: rup.v2.FallbackRule.selectors:type_name -> rup.v2.Selector
+	10, // 11: rup.v2.Fallback.rules:type_name -> rup.v2.FallbackRule
+	12, // 12: rup.v2.UpdateDirectory.services:type_name -> rup.v2.DirectoryService
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_rup_v2_objects_proto_init() }
@@ -1299,13 +1368,14 @@ func file_rup_v2_objects_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_rup_v2_objects_proto_rawDesc), len(file_rup_v2_objects_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_rup_v2_objects_proto_goTypes,
 		DependencyIndexes: file_rup_v2_objects_proto_depIdxs,
+		EnumInfos:         file_rup_v2_objects_proto_enumTypes,
 		MessageInfos:      file_rup_v2_objects_proto_msgTypes,
 	}.Build()
 	File_rup_v2_objects_proto = out.File

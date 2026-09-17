@@ -23,6 +23,15 @@ function matches(
   return matchesSelectors(selectorsToMap(artifact.selectors), clientSelectors);
 }
 
+function prefersApply(
+  artifact: Artifact,
+  clientSelectors: Record<string, string>,
+): boolean {
+  const wanted = clientSelectors.apply;
+  return wanted !== undefined &&
+    selectorsToMap(artifact.selectors).apply === wanted;
+}
+
 /**
  * The artifact this client should download, or null if none fits.
  *
@@ -43,6 +52,12 @@ export function selectArtifact(
   let best: Artifact | null = null;
   for (const artifact of manifest.artifacts) {
     if (!matches(artifact, clientSelectors)) continue;
+    if (best !== null &&
+        prefersApply(artifact, clientSelectors) !==
+          prefersApply(best, clientSelectors)) {
+      if (prefersApply(artifact, clientSelectors)) best = artifact;
+      continue;
+    }
     // Lowest id wins. Fixing the tie-break rather than taking the first match
     // is what makes every implementation agree on malformed input; publishing
     // side already refuses two artifacts with identical selectors.
@@ -61,5 +76,9 @@ export function matchingArtifacts(
 ): Artifact[] {
   return manifest.artifacts
     .filter((artifact) => matches(artifact, clientSelectors))
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort((a, b) => {
+      const preferred = Number(prefersApply(b, clientSelectors)) -
+        Number(prefersApply(a, clientSelectors));
+      return preferred || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    });
 }

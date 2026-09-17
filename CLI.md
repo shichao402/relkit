@@ -87,13 +87,14 @@ relkit stage 1.5.0 \
   --code 150 \
   --min-from 120 \
   --notes-file NOTES.md \
-  --add dist/app-win-x64.zip    os=windows,arch=x64 \
-  --add dist/app-mac-arm64.zip  os=macos,arch=arm64 \
-  --add dist/app-mac-x64.zip    os=macos,arch=x64 \
-  --add dist/server.apk         target=server,os=android,kind=installer
+  --install dist/app-win-x64.zip    kind=archive,os=windows,arch=x64 \
+  --install dist/app-mac-arm64.zip  kind=archive,os=macos,arch=arm64 \
+  --install dist/app-mac-x64.zip    kind=archive,os=macos,arch=x64 \
+  --install dist/server.apk         kind=installer,target=server,os=android \
+  --payload dist/app-payload        os=windows,arch=x64
 ```
 
-`--add <璺緞> [k=v,...]`锛岄敭鍊煎垪琛ㄤ腑浠ヤ笅閿悕涓轰繚鐣欐帶鍒跺瓧娈碉紝鍏朵綑涓€寰嬩綔涓?`selectors`锛?
+`--install` is the full-install track (exe/dmg/deb/zip). `--payload` packs a directory into a `kind=payload` zip (`files.pb` + `files/` + optional `scripts/`) and injects `apply=relkit-payload`. `--add` remains a legacy alias of `--install`. Each flag takes `<path> [k=v,...]`. Reserved keys:
 
 | 淇濈暀閿?| 浣滅敤 | 缂虹渷 |
 |---|---|---|
@@ -431,8 +432,9 @@ CI **不持**签名私钥，也 **不持**长期 COS 写密钥。Runner 可在 `
   run: |
     relkit stage "${VERSION}" --code "${GITHUB_RUN_NUMBER}" \
       --min-from "${MIN_FROM}" \
-      --add dist/app-win-x64.zip   os=windows,arch=x64 \
-      --add dist/app-mac-arm64.zip os=macos,arch=arm64
+      --install dist/app-win-x64.zip   kind=archive,os=windows,arch=x64 \
+      --install dist/app-mac-arm64.zip kind=archive,os=macos,arch=arm64 \
+      --payload dist/app-payload       os=windows,arch=x64
     tar -C ".relkit/cache/staged/${VERSION}" -czf staged.tar.gz .
 
 - name: Publish via agent

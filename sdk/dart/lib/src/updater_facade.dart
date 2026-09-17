@@ -10,9 +10,9 @@ import 'package:protobuf/protobuf.dart';
 
 import 'gen/updater/v1/updater.pb.dart';
 
-const int ipcMin = 1;
-const int ipcMax = 2;
-const int ipcCurrent = 2;
+const int ipcMin = 3;
+const int ipcMax = 3;
+const int ipcCurrent = 3;
 
 abstract class Glue {
   Future<String> locate(Runtime runtime);

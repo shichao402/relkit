@@ -124,29 +124,50 @@ class LastResult extends $pb.ProtobufEnum {
   const LastResult._(super.value, super.name);
 }
 
-class Layout extends $pb.ProtobufEnum {
-  static const Layout LAYOUT_UNSPECIFIED =
-      Layout._(0, _omitEnumNames ? '' : 'LAYOUT_UNSPECIFIED');
-  static const Layout LAYOUT_WHOLE_ROOT =
-      Layout._(1, _omitEnumNames ? '' : 'LAYOUT_WHOLE_ROOT');
-  static const Layout LAYOUT_VERSIONED_DIR =
-      Layout._(2, _omitEnumNames ? '' : 'LAYOUT_VERSIONED_DIR');
-  static const Layout LAYOUT_FILE_SET =
-      Layout._(3, _omitEnumNames ? '' : 'LAYOUT_FILE_SET');
+class Placement extends $pb.ProtobufEnum {
+  static const Placement PLACEMENT_UNSPECIFIED =
+      Placement._(0, _omitEnumNames ? '' : 'PLACEMENT_UNSPECIFIED');
+  static const Placement PLACEMENT_IN_PLACE =
+      Placement._(1, _omitEnumNames ? '' : 'PLACEMENT_IN_PLACE');
+  static const Placement PLACEMENT_LIBRARY =
+      Placement._(2, _omitEnumNames ? '' : 'PLACEMENT_LIBRARY');
 
-  static const $core.List<Layout> values = <Layout>[
-    LAYOUT_UNSPECIFIED,
-    LAYOUT_WHOLE_ROOT,
-    LAYOUT_VERSIONED_DIR,
-    LAYOUT_FILE_SET,
+  static const $core.List<Placement> values = <Placement>[
+    PLACEMENT_UNSPECIFIED,
+    PLACEMENT_IN_PLACE,
+    PLACEMENT_LIBRARY,
   ];
 
-  static final $core.List<Layout?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 3);
-  static Layout? valueOf($core.int value) =>
+  static final $core.List<Placement?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 2);
+  static Placement? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 
-  const Layout._(super.value, super.name);
+  const Placement._(super.value, super.name);
+}
+
+class ApplyDisposition extends $pb.ProtobufEnum {
+  static const ApplyDisposition APPLY_DISPOSITION_UNSPECIFIED =
+      ApplyDisposition._(
+          0, _omitEnumNames ? '' : 'APPLY_DISPOSITION_UNSPECIFIED');
+  static const ApplyDisposition APPLY_DISPOSITION_INTERNAL =
+      ApplyDisposition._(1, _omitEnumNames ? '' : 'APPLY_DISPOSITION_INTERNAL');
+  static const ApplyDisposition APPLY_DISPOSITION_FULL_INSTALL =
+      ApplyDisposition._(
+          2, _omitEnumNames ? '' : 'APPLY_DISPOSITION_FULL_INSTALL');
+
+  static const $core.List<ApplyDisposition> values = <ApplyDisposition>[
+    APPLY_DISPOSITION_UNSPECIFIED,
+    APPLY_DISPOSITION_INTERNAL,
+    APPLY_DISPOSITION_FULL_INSTALL,
+  ];
+
+  static final $core.List<ApplyDisposition?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 2);
+  static ApplyDisposition? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const ApplyDisposition._(super.value, super.name);
 }
 
 class Operation extends $pb.ProtobufEnum {

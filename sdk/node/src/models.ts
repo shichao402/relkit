@@ -29,6 +29,7 @@ import {
 } from "./gen/rup/v2/objects_pb.js";
 
 export {
+  ArtifactKind,
   ArtifactSchema,
   DigestRefSchema,
   DirectoryServiceSchema,
@@ -71,12 +72,12 @@ export type {
 
 export const envelopeSchemaId = "rup.envelope/2";
 export const indexSchemaId = "rup.index/2";
-export const manifestSchemaId = "rup.manifest/2";
+export const manifestSchemaId = "rup.manifest/3";
 export const fallbackSchemaId = "rup.fallback/2";
 export const directorySchemaId = "rup.directory/2";
 export const publicKeySchemaId = "rup.publickey/2";
 export const privateKeySchemaId = "rup.privatekey/2";
-export const stagedSchemaId = "rup.staged/2";
+export const stagedSchemaId = "rup.staged/3";
 
 /**
  * A document that does not conform to the protocol.

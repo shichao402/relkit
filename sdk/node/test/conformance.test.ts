@@ -27,6 +27,7 @@ import {
 } from "../src/chain.js";
 import { openEnvelope, describeEnvelopeResult, TrustedKeys } from "../src/envelope.js";
 import {
+  ArtifactKind,
   ArtifactSchema,
   DigestRefSchema,
   EnvelopeSchema,
@@ -148,13 +149,24 @@ function manifestFromFixture(json: Record<string, unknown>): Manifest {
         filename: String(artifact.filename),
         size: BigInt(Number(artifact.size)),
         sha256: String(artifact.sha256),
-        kind: typeof artifact.kind === "string" ? artifact.kind : "",
+        kind: artifactKindFromFixture(artifact.kind),
         selectors: selectorsFromFixture(artifact.selectors),
         urls: asArray(artifact.urls).map(String),
         meta: metaFromFixture(artifact.meta),
       }) satisfies Artifact;
     }),
   });
+}
+
+function artifactKindFromFixture(value: unknown): ArtifactKind {
+  switch (value) {
+    case "archive": return ArtifactKind.ARCHIVE;
+    case "installer": return ArtifactKind.INSTALLER;
+    case "binary": return ArtifactKind.BINARY;
+    case "blob": return ArtifactKind.BLOB;
+    case "payload": return ArtifactKind.PAYLOAD;
+    default: return ArtifactKind.UNSPECIFIED;
+  }
 }
 
 function envelopeBytesFromFixture(raw: Record<string, unknown>): Uint8Array {
@@ -187,7 +199,7 @@ function envelopeBytesFromFixture(raw: Record<string, unknown>): Uint8Array {
 let casesChecked = 0;
 
 /** 8 version-select files, 3 selector files, 2 signature files. */
-const EXPECTED_CASES = 65;
+const EXPECTED_CASES = 68;
 
 after(() => {
   assert.equal(
@@ -245,7 +257,7 @@ describe("version-select (SPEC.md section 9)", () => {
 });
 
 describe("selector (SPEC.md section 11)", () => {
-  const files = ["ambiguous", "os-arch", "target-dimension"];
+  const files = ["ambiguous", "apply-track", "os-arch", "target-dimension"];
 
   for (const name of files) {
     test(name, () => {

@@ -1,1 +1,1 @@
-{"updateAvailable":{"artifacts":[],"code":"1","mandatory":false,"planId":"plan","priorReleaseNotes":[],"promptKey":"code:1","releaseNotesMarkdown":"","releaseNotesUrl":"","remainingHops":1,"sequence":"7","version":"1.0.0"}}
+{"updateAvailable":{"applyDisposition":"APPLY_DISPOSITION_UNSPECIFIED","artifacts":[],"code":"1","mandatory":false,"planId":"plan","priorReleaseNotes":[],"promptKey":"code:1","releaseNotesMarkdown":"","releaseNotesUrl":"","remainingHops":1,"sequence":"7","version":"1.0.0"}}

@@ -68,7 +68,11 @@ Future<void> settle() => Future<void>.delayed(Duration.zero);
 
 UpdateAvailable _updateAvailable({int code = 110}) => UpdateAvailable(
       target: VersionNode(version: '1.1.0', code: Int64(code)),
-      artifact: Artifact(id: 'app', filename: 'app.zip', kind: 'archive'),
+      artifact: Artifact(
+        id: 'app',
+        filename: 'app.zip',
+        kind: ArtifactKind.ARTIFACT_KIND_ARCHIVE,
+      ),
       manifest: Manifest(
         schema: manifestSchemaId,
         product: 'demo',

@@ -333,98 +333,89 @@ class ClientProfile extends $pb.GeneratedMessage {
   RecoveryHelp ensureRecovery() => $_ensure(6);
 }
 
-class FileSetEntry extends $pb.GeneratedMessage {
-  factory FileSetEntry({
-    $core.String? destRelpath,
-    $core.String? artifactName,
+class LibraryPolicy extends $pb.GeneratedMessage {
+  factory LibraryPolicy({
+    $core.int? retain,
+    $core.Iterable<$fixnum.Int64>? reservedCodes,
   }) {
-    final result = FileSetEntry._();
-    if (destRelpath != null) result.destRelpath = destRelpath;
-    if (artifactName != null) result.artifactName = artifactName;
+    final result = LibraryPolicy._();
+    if (retain != null) result.retain = retain;
+    if (reservedCodes != null) result.reservedCodes.addAll(reservedCodes);
     return result;
   }
 
-  FileSetEntry._();
+  LibraryPolicy._();
 
-  factory FileSetEntry.fromBuffer($core.List<$core.int> data,
+  factory LibraryPolicy.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      FileSetEntry()..mergeFromBuffer(data, registry);
-  factory FileSetEntry.fromJson($core.String json,
+      LibraryPolicy()..mergeFromBuffer(data, registry);
+  factory LibraryPolicy.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      FileSetEntry()..mergeFromJson(json, registry);
+      LibraryPolicy()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'FileSetEntry',
+      _omitMessageNames ? '' : 'LibraryPolicy',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: FileSetEntry.$_createMessage)
-    ..aOS(1, _omitFieldNames ? '' : 'destRelpath')
-    ..aOS(2, _omitFieldNames ? '' : 'artifactName')
+      createEmptyInstance: LibraryPolicy.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'retain')
+    ..p<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'reservedCodes', $pb.PbFieldType.K6)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  FileSetEntry clone() => deepCopy();
+  LibraryPolicy clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  FileSetEntry copyWith(void Function(FileSetEntry) updates) =>
-      super.copyWith((message) => updates(message as FileSetEntry))
-          as FileSetEntry;
+  LibraryPolicy copyWith(void Function(LibraryPolicy) updates) =>
+      super.copyWith((message) => updates(message as LibraryPolicy))
+          as LibraryPolicy;
 
   @$core.override
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
-  @$core.Deprecated('Use FileSetEntry() / FileSetEntry.new instead')
-  static FileSetEntry create() => FileSetEntry._();
-  static $pb.GeneratedMessage $_createMessage() => FileSetEntry._();
+  @$core.Deprecated('Use LibraryPolicy() / LibraryPolicy.new instead')
+  static LibraryPolicy create() => LibraryPolicy._();
+  static $pb.GeneratedMessage $_createMessage() => LibraryPolicy._();
   @$core.override
-  FileSetEntry createEmptyInstance() => FileSetEntry._();
+  LibraryPolicy createEmptyInstance() => LibraryPolicy._();
   @$core.pragma('dart2js:noInline')
-  static FileSetEntry getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<FileSetEntry>(
-          FileSetEntry.$_createMessage);
-  static FileSetEntry? _defaultInstance;
+  static LibraryPolicy getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<LibraryPolicy>(
+          LibraryPolicy.$_createMessage);
+  static LibraryPolicy? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $core.String get destRelpath => $_getSZ(0);
+  $core.int get retain => $_getIZ(0);
   @$pb.TagNumber(1)
-  set destRelpath($core.String value) => $_setString(0, value);
+  set retain($core.int value) => $_setSignedInt32(0, value);
   @$pb.TagNumber(1)
-  $core.bool hasDestRelpath() => $_has(0);
+  $core.bool hasRetain() => $_has(0);
   @$pb.TagNumber(1)
-  void clearDestRelpath() => $_clearField(1);
+  void clearRetain() => $_clearField(1);
 
   @$pb.TagNumber(2)
-  $core.String get artifactName => $_getSZ(1);
-  @$pb.TagNumber(2)
-  set artifactName($core.String value) => $_setString(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasArtifactName() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearArtifactName() => $_clearField(2);
+  $pb.PbList<$fixnum.Int64> get reservedCodes => $_getList(1);
 }
 
 class InstallSpec extends $pb.GeneratedMessage {
   factory InstallSpec({
-    Layout? layout,
+    Placement? placement,
     $core.String? installRoot,
     $core.String? executableRelpath,
     $core.String? sidecarRelpath,
     $core.Iterable<$core.String>? preserve,
-    $core.int? retain,
     $core.bool? relaunch,
-    $core.Iterable<FileSetEntry>? fileSet,
-    $core.Iterable<$fixnum.Int64>? reservedCodes,
+    LibraryPolicy? library,
   }) {
     final result = InstallSpec._();
-    if (layout != null) result.layout = layout;
+    if (placement != null) result.placement = placement;
     if (installRoot != null) result.installRoot = installRoot;
     if (executableRelpath != null) result.executableRelpath = executableRelpath;
     if (sidecarRelpath != null) result.sidecarRelpath = sidecarRelpath;
     if (preserve != null) result.preserve.addAll(preserve);
-    if (retain != null) result.retain = retain;
     if (relaunch != null) result.relaunch = relaunch;
-    if (fileSet != null) result.fileSet.addAll(fileSet);
-    if (reservedCodes != null) result.reservedCodes.addAll(reservedCodes);
+    if (library != null) result.library = library;
     return result;
   }
 
@@ -442,17 +433,15 @@ class InstallSpec extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
       createEmptyInstance: InstallSpec.$_createMessage)
-    ..aE<Layout>(1, _omitFieldNames ? '' : 'layout', enumValues: Layout.values)
+    ..aE<Placement>(1, _omitFieldNames ? '' : 'placement',
+        enumValues: Placement.values)
     ..aOS(2, _omitFieldNames ? '' : 'installRoot')
     ..aOS(3, _omitFieldNames ? '' : 'executableRelpath')
     ..aOS(4, _omitFieldNames ? '' : 'sidecarRelpath')
     ..pPS(5, _omitFieldNames ? '' : 'preserve')
-    ..aI(6, _omitFieldNames ? '' : 'retain')
     ..aOB(7, _omitFieldNames ? '' : 'relaunch')
-    ..pPM<FileSetEntry>(8, _omitFieldNames ? '' : 'fileSet',
-        subBuilder: FileSetEntry.$_createMessage)
-    ..p<$fixnum.Int64>(
-        9, _omitFieldNames ? '' : 'reservedCodes', $pb.PbFieldType.K6)
+    ..aOM<LibraryPolicy>(10, _omitFieldNames ? '' : 'library',
+        subBuilder: LibraryPolicy.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -478,13 +467,13 @@ class InstallSpec extends $pb.GeneratedMessage {
   static InstallSpec? _defaultInstance;
 
   @$pb.TagNumber(1)
-  Layout get layout => $_getN(0);
+  Placement get placement => $_getN(0);
   @$pb.TagNumber(1)
-  set layout(Layout value) => $_setField(1, value);
+  set placement(Placement value) => $_setField(1, value);
   @$pb.TagNumber(1)
-  $core.bool hasLayout() => $_has(0);
+  $core.bool hasPlacement() => $_has(0);
   @$pb.TagNumber(1)
-  void clearLayout() => $_clearField(1);
+  void clearPlacement() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get installRoot => $_getSZ(1);
@@ -516,31 +505,25 @@ class InstallSpec extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   $pb.PbList<$core.String> get preserve => $_getList(4);
 
-  @$pb.TagNumber(6)
-  $core.int get retain => $_getIZ(5);
-  @$pb.TagNumber(6)
-  set retain($core.int value) => $_setSignedInt32(5, value);
-  @$pb.TagNumber(6)
-  $core.bool hasRetain() => $_has(5);
-  @$pb.TagNumber(6)
-  void clearRetain() => $_clearField(6);
-
   @$pb.TagNumber(7)
-  $core.bool get relaunch => $_getBF(6);
+  $core.bool get relaunch => $_getBF(5);
   @$pb.TagNumber(7)
-  set relaunch($core.bool value) => $_setBool(6, value);
+  set relaunch($core.bool value) => $_setBool(5, value);
   @$pb.TagNumber(7)
-  $core.bool hasRelaunch() => $_has(6);
+  $core.bool hasRelaunch() => $_has(5);
   @$pb.TagNumber(7)
   void clearRelaunch() => $_clearField(7);
 
-  @$pb.TagNumber(8)
-  $pb.PbList<FileSetEntry> get fileSet => $_getList(7);
-
-  /// Codes that prune must never delete (project pins). Engine does not
-  /// interpret how the host chose them.
-  @$pb.TagNumber(9)
-  $pb.PbList<$fixnum.Int64> get reservedCodes => $_getList(8);
+  @$pb.TagNumber(10)
+  LibraryPolicy get library => $_getN(6);
+  @$pb.TagNumber(10)
+  set library(LibraryPolicy value) => $_setField(10, value);
+  @$pb.TagNumber(10)
+  $core.bool hasLibrary() => $_has(6);
+  @$pb.TagNumber(10)
+  void clearLibrary() => $_clearField(10);
+  @$pb.TagNumber(10)
+  LibraryPolicy ensureLibrary() => $_ensure(6);
 }
 
 class Runtime extends $pb.GeneratedMessage {
@@ -896,7 +879,7 @@ class Capabilities extends $pb.GeneratedMessage {
   factory Capabilities({
     $core.int? ipc,
     $core.Iterable<Operation>? operations,
-    $core.Iterable<Layout>? layouts,
+    $core.Iterable<Placement>? placements,
     $0.Duration? minCheckInterval,
     $0.Duration? planTtl,
     $core.String? engineVersion,
@@ -904,7 +887,7 @@ class Capabilities extends $pb.GeneratedMessage {
     final result = Capabilities._();
     if (ipc != null) result.ipc = ipc;
     if (operations != null) result.operations.addAll(operations);
-    if (layouts != null) result.layouts.addAll(layouts);
+    if (placements != null) result.placements.addAll(placements);
     if (minCheckInterval != null) result.minCheckInterval = minCheckInterval;
     if (planTtl != null) result.planTtl = planTtl;
     if (engineVersion != null) result.engineVersion = engineVersion;
@@ -930,10 +913,10 @@ class Capabilities extends $pb.GeneratedMessage {
         valueOf: Operation.valueOf,
         enumValues: Operation.values,
         defaultEnumValue: Operation.OPERATION_UNSPECIFIED)
-    ..pc<Layout>(3, _omitFieldNames ? '' : 'layouts', $pb.PbFieldType.KE,
-        valueOf: Layout.valueOf,
-        enumValues: Layout.values,
-        defaultEnumValue: Layout.LAYOUT_UNSPECIFIED)
+    ..pc<Placement>(3, _omitFieldNames ? '' : 'placements', $pb.PbFieldType.KE,
+        valueOf: Placement.valueOf,
+        enumValues: Placement.values,
+        defaultEnumValue: Placement.PLACEMENT_UNSPECIFIED)
     ..aOM<$0.Duration>(4, _omitFieldNames ? '' : 'minCheckInterval',
         subBuilder: $0.Duration.$_createMessage)
     ..aOM<$0.Duration>(5, _omitFieldNames ? '' : 'planTtl',
@@ -976,7 +959,7 @@ class Capabilities extends $pb.GeneratedMessage {
   $pb.PbList<Operation> get operations => $_getList(1);
 
   @$pb.TagNumber(3)
-  $pb.PbList<Layout> get layouts => $_getList(2);
+  $pb.PbList<Placement> get placements => $_getList(2);
 
   @$pb.TagNumber(4)
   $0.Duration get minCheckInterval => $_getN(3);
@@ -2359,6 +2342,7 @@ class UpdateAvailable extends $pb.GeneratedMessage {
     $core.String? releaseNotesUrl,
     $core.Iterable<PriorReleaseNotes>? priorReleaseNotes,
     $core.Iterable<ArtifactView>? artifacts,
+    ApplyDisposition? applyDisposition,
   }) {
     final result = UpdateAvailable._();
     if (planId != null) result.planId = planId;
@@ -2374,6 +2358,7 @@ class UpdateAvailable extends $pb.GeneratedMessage {
     if (priorReleaseNotes != null)
       result.priorReleaseNotes.addAll(priorReleaseNotes);
     if (artifacts != null) result.artifacts.addAll(artifacts);
+    if (applyDisposition != null) result.applyDisposition = applyDisposition;
     return result;
   }
 
@@ -2404,6 +2389,8 @@ class UpdateAvailable extends $pb.GeneratedMessage {
         subBuilder: PriorReleaseNotes.$_createMessage)
     ..pPM<ArtifactView>(11, _omitFieldNames ? '' : 'artifacts',
         subBuilder: ArtifactView.$_createMessage)
+    ..aE<ApplyDisposition>(12, _omitFieldNames ? '' : 'applyDisposition',
+        enumValues: ApplyDisposition.values)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2514,6 +2501,15 @@ class UpdateAvailable extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(11)
   $pb.PbList<ArtifactView> get artifacts => $_getList(10);
+
+  @$pb.TagNumber(12)
+  ApplyDisposition get applyDisposition => $_getN(11);
+  @$pb.TagNumber(12)
+  set applyDisposition(ApplyDisposition value) => $_setField(12, value);
+  @$pb.TagNumber(12)
+  $core.bool hasApplyDisposition() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearApplyDisposition() => $_clearField(12);
 }
 
 class FallbackRequired extends $pb.GeneratedMessage {
@@ -4261,6 +4257,7 @@ class PlannedFile extends $pb.GeneratedMessage {
     $core.String? destRelpath,
     $core.String? localPath,
     $core.bool? downloaded,
+    $core.String? kind,
   }) {
     final result = PlannedFile._();
     if (name != null) result.name = name;
@@ -4270,6 +4267,7 @@ class PlannedFile extends $pb.GeneratedMessage {
     if (destRelpath != null) result.destRelpath = destRelpath;
     if (localPath != null) result.localPath = localPath;
     if (downloaded != null) result.downloaded = downloaded;
+    if (kind != null) result.kind = kind;
     return result;
   }
 
@@ -4294,6 +4292,7 @@ class PlannedFile extends $pb.GeneratedMessage {
     ..aOS(5, _omitFieldNames ? '' : 'destRelpath')
     ..aOS(6, _omitFieldNames ? '' : 'localPath')
     ..aOB(7, _omitFieldNames ? '' : 'downloaded')
+    ..aOS(8, _omitFieldNames ? '' : 'kind')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -4374,6 +4373,15 @@ class PlannedFile extends $pb.GeneratedMessage {
   $core.bool hasDownloaded() => $_has(6);
   @$pb.TagNumber(7)
   void clearDownloaded() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $core.String get kind => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set kind($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasKind() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearKind() => $_clearField(8);
 }
 
 class UpdatePlan extends $pb.GeneratedMessage {
@@ -4731,15 +4739,14 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     $core.String? targetVersion,
     Error? error,
     $core.int? pid,
-    Layout? layout,
+    Placement? placement,
     $core.bool? relaunch,
     $core.String? executableRelpath,
     $core.Iterable<$core.String>? preserve,
-    $core.int? retain,
-    $core.Iterable<FileSetEntry>? fileSet,
     $core.String? sidecarRelpath,
     $core.bool? installOnly,
-    $core.Iterable<$fixnum.Int64>? reservedCodes,
+    $core.bool? requiresHostExit,
+    LibraryPolicy? library,
   }) {
     final result = ApplySessionRecord._();
     if (sessionId != null) result.sessionId = sessionId;
@@ -4753,15 +4760,14 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     if (targetVersion != null) result.targetVersion = targetVersion;
     if (error != null) result.error = error;
     if (pid != null) result.pid = pid;
-    if (layout != null) result.layout = layout;
+    if (placement != null) result.placement = placement;
     if (relaunch != null) result.relaunch = relaunch;
     if (executableRelpath != null) result.executableRelpath = executableRelpath;
     if (preserve != null) result.preserve.addAll(preserve);
-    if (retain != null) result.retain = retain;
-    if (fileSet != null) result.fileSet.addAll(fileSet);
     if (sidecarRelpath != null) result.sidecarRelpath = sidecarRelpath;
     if (installOnly != null) result.installOnly = installOnly;
-    if (reservedCodes != null) result.reservedCodes.addAll(reservedCodes);
+    if (requiresHostExit != null) result.requiresHostExit = requiresHostExit;
+    if (library != null) result.library = library;
     return result;
   }
 
@@ -4794,17 +4800,16 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     ..aOM<Error>(10, _omitFieldNames ? '' : 'error',
         subBuilder: Error.$_createMessage)
     ..aI(11, _omitFieldNames ? '' : 'pid')
-    ..aE<Layout>(12, _omitFieldNames ? '' : 'layout', enumValues: Layout.values)
+    ..aE<Placement>(12, _omitFieldNames ? '' : 'placement',
+        enumValues: Placement.values)
     ..aOB(13, _omitFieldNames ? '' : 'relaunch')
     ..aOS(14, _omitFieldNames ? '' : 'executableRelpath')
     ..pPS(15, _omitFieldNames ? '' : 'preserve')
-    ..aI(16, _omitFieldNames ? '' : 'retain')
-    ..pPM<FileSetEntry>(17, _omitFieldNames ? '' : 'fileSet',
-        subBuilder: FileSetEntry.$_createMessage)
     ..aOS(18, _omitFieldNames ? '' : 'sidecarRelpath')
     ..aOB(19, _omitFieldNames ? '' : 'installOnly')
-    ..p<$fixnum.Int64>(
-        20, _omitFieldNames ? '' : 'reservedCodes', $pb.PbFieldType.K6)
+    ..aOB(21, _omitFieldNames ? '' : 'requiresHostExit')
+    ..aOM<LibraryPolicy>(22, _omitFieldNames ? '' : 'library',
+        subBuilder: LibraryPolicy.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -4935,13 +4940,13 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
   void clearPid() => $_clearField(11);
 
   @$pb.TagNumber(12)
-  Layout get layout => $_getN(11);
+  Placement get placement => $_getN(11);
   @$pb.TagNumber(12)
-  set layout(Layout value) => $_setField(12, value);
+  set placement(Placement value) => $_setField(12, value);
   @$pb.TagNumber(12)
-  $core.bool hasLayout() => $_has(11);
+  $core.bool hasPlacement() => $_has(11);
   @$pb.TagNumber(12)
-  void clearLayout() => $_clearField(12);
+  void clearPlacement() => $_clearField(12);
 
   @$pb.TagNumber(13)
   $core.bool get relaunch => $_getBF(12);
@@ -4964,38 +4969,43 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
   @$pb.TagNumber(15)
   $pb.PbList<$core.String> get preserve => $_getList(14);
 
-  @$pb.TagNumber(16)
-  $core.int get retain => $_getIZ(15);
-  @$pb.TagNumber(16)
-  set retain($core.int value) => $_setSignedInt32(15, value);
-  @$pb.TagNumber(16)
-  $core.bool hasRetain() => $_has(15);
-  @$pb.TagNumber(16)
-  void clearRetain() => $_clearField(16);
-
-  @$pb.TagNumber(17)
-  $pb.PbList<FileSetEntry> get fileSet => $_getList(16);
-
   @$pb.TagNumber(18)
-  $core.String get sidecarRelpath => $_getSZ(17);
+  $core.String get sidecarRelpath => $_getSZ(15);
   @$pb.TagNumber(18)
-  set sidecarRelpath($core.String value) => $_setString(17, value);
+  set sidecarRelpath($core.String value) => $_setString(15, value);
   @$pb.TagNumber(18)
-  $core.bool hasSidecarRelpath() => $_has(17);
+  $core.bool hasSidecarRelpath() => $_has(15);
   @$pb.TagNumber(18)
   void clearSidecarRelpath() => $_clearField(18);
 
   @$pb.TagNumber(19)
-  $core.bool get installOnly => $_getBF(18);
+  $core.bool get installOnly => $_getBF(16);
   @$pb.TagNumber(19)
-  set installOnly($core.bool value) => $_setBool(18, value);
+  set installOnly($core.bool value) => $_setBool(16, value);
   @$pb.TagNumber(19)
-  $core.bool hasInstallOnly() => $_has(18);
+  $core.bool hasInstallOnly() => $_has(16);
   @$pb.TagNumber(19)
   void clearInstallOnly() => $_clearField(19);
 
-  @$pb.TagNumber(20)
-  $pb.PbList<$fixnum.Int64> get reservedCodes => $_getList(19);
+  @$pb.TagNumber(21)
+  $core.bool get requiresHostExit => $_getBF(17);
+  @$pb.TagNumber(21)
+  set requiresHostExit($core.bool value) => $_setBool(17, value);
+  @$pb.TagNumber(21)
+  $core.bool hasRequiresHostExit() => $_has(17);
+  @$pb.TagNumber(21)
+  void clearRequiresHostExit() => $_clearField(21);
+
+  @$pb.TagNumber(22)
+  LibraryPolicy get library => $_getN(18);
+  @$pb.TagNumber(22)
+  set library(LibraryPolicy value) => $_setField(22, value);
+  @$pb.TagNumber(22)
+  $core.bool hasLibrary() => $_has(18);
+  @$pb.TagNumber(22)
+  void clearLibrary() => $_clearField(22);
+  @$pb.TagNumber(22)
+  LibraryPolicy ensureLibrary() => $_ensure(18);
 }
 
 class JournalEntry extends $pb.GeneratedMessage {

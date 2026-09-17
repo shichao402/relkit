@@ -116,12 +116,21 @@ Artifact artifactFromFixture(Map<String, dynamic> json) => Artifact(
       filename: json['filename'] as String,
       size: Int64(json['size'] as int),
       sha256: json['sha256'] as String,
-      kind: json['kind'] as String? ?? '',
+      kind: artifactKindFromFixture(json['kind']),
       selectors:
           selectorsFromFixture((json['selectors'] as Map<dynamic, dynamic>?)),
       urls: (json['urls'] as List).cast<String>(),
       meta: metaFromFixture(json['meta'] as Map<dynamic, dynamic>?),
     );
+
+ArtifactKind artifactKindFromFixture(Object? value) => switch (value) {
+      'archive' => ArtifactKind.ARTIFACT_KIND_ARCHIVE,
+      'installer' => ArtifactKind.ARTIFACT_KIND_INSTALLER,
+      'binary' => ArtifactKind.ARTIFACT_KIND_BINARY,
+      'blob' => ArtifactKind.ARTIFACT_KIND_BLOB,
+      'payload' => ArtifactKind.ARTIFACT_KIND_PAYLOAD,
+      _ => ArtifactKind.ARTIFACT_KIND_UNSPECIFIED,
+    };
 
 Manifest manifestFromFixture(Map<String, dynamic> json) => Manifest(
       schema: manifestSchemaId,
@@ -164,7 +173,7 @@ void main() {
   final root = findConformanceDir();
 
   // 8 version-select files, 3 selector files, 2 signature files.
-  const expectedCases = 65;
+  const expectedCases = 68;
 
   tearDownAll(() {
     expect(_casesChecked, expectedCases,
@@ -215,7 +224,7 @@ void main() {
   });
 
   group('selector (SPEC.md section 11)', () {
-    const files = ['ambiguous', 'os-arch', 'target-dimension'];
+    const files = ['ambiguous', 'apply-track', 'os-arch', 'target-dimension'];
 
     for (final name in files) {
       test(name, () {

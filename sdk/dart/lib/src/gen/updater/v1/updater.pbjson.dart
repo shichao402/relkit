@@ -79,21 +79,36 @@ final $typed_data.Uint8List lastResultDescriptor = $convert.base64Decode(
     'X1JFU1VMVF9GQUxMQkFDS19SRVFVSVJFRBADEhkKFUxBU1RfUkVTVUxUX1RIUk9UVExFRBAEEh'
     'YKEkxBU1RfUkVTVUxUX0ZBSUxFRBAFEhcKE0xBU1RfUkVTVUxUX0FQUExJRUQQBg==');
 
-@$core.Deprecated('Use layoutDescriptor instead')
-const Layout$json = {
-  '1': 'Layout',
+@$core.Deprecated('Use placementDescriptor instead')
+const Placement$json = {
+  '1': 'Placement',
   '2': [
-    {'1': 'LAYOUT_UNSPECIFIED', '2': 0},
-    {'1': 'LAYOUT_WHOLE_ROOT', '2': 1},
-    {'1': 'LAYOUT_VERSIONED_DIR', '2': 2},
-    {'1': 'LAYOUT_FILE_SET', '2': 3},
+    {'1': 'PLACEMENT_UNSPECIFIED', '2': 0},
+    {'1': 'PLACEMENT_IN_PLACE', '2': 1},
+    {'1': 'PLACEMENT_LIBRARY', '2': 2},
   ],
 };
 
-/// Descriptor for `Layout`. Decode as a `google.protobuf.EnumDescriptorProto`.
-final $typed_data.Uint8List layoutDescriptor = $convert.base64Decode(
-    'CgZMYXlvdXQSFgoSTEFZT1VUX1VOU1BFQ0lGSUVEEAASFQoRTEFZT1VUX1dIT0xFX1JPT1QQAR'
-    'IYChRMQVlPVVRfVkVSU0lPTkVEX0RJUhACEhMKD0xBWU9VVF9GSUxFX1NFVBAD');
+/// Descriptor for `Placement`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List placementDescriptor = $convert.base64Decode(
+    'CglQbGFjZW1lbnQSGQoVUExBQ0VNRU5UX1VOU1BFQ0lGSUVEEAASFgoSUExBQ0VNRU5UX0lOX1'
+    'BMQUNFEAESFQoRUExBQ0VNRU5UX0xJQlJBUlkQAg==');
+
+@$core.Deprecated('Use applyDispositionDescriptor instead')
+const ApplyDisposition$json = {
+  '1': 'ApplyDisposition',
+  '2': [
+    {'1': 'APPLY_DISPOSITION_UNSPECIFIED', '2': 0},
+    {'1': 'APPLY_DISPOSITION_INTERNAL', '2': 1},
+    {'1': 'APPLY_DISPOSITION_FULL_INSTALL', '2': 2},
+  ],
+};
+
+/// Descriptor for `ApplyDisposition`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List applyDispositionDescriptor = $convert.base64Decode(
+    'ChBBcHBseURpc3Bvc2l0aW9uEiEKHUFQUExZX0RJU1BPU0lUSU9OX1VOU1BFQ0lGSUVEEAASHg'
+    'oaQVBQTFlfRElTUE9TSVRJT05fSU5URVJOQUwQARIiCh5BUFBMWV9ESVNQT1NJVElPTl9GVUxM'
+    'X0lOU1RBTEwQAg==');
 
 @$core.Deprecated('Use operationDescriptor instead')
 const Operation$json = {
@@ -231,31 +246,31 @@ final $typed_data.Uint8List clientProfileDescriptor = $convert.base64Decode(
     'LnYxLlRydXN0ZWRLZXlSC3RydXN0ZWRLZXlzEjsKCHJlY292ZXJ5GAcgASgLMh8ucmVsa2l0Ln'
     'VwZGF0ZXIudjEuUmVjb3ZlcnlIZWxwUghyZWNvdmVyeQ==');
 
-@$core.Deprecated('Use fileSetEntryDescriptor instead')
-const FileSetEntry$json = {
-  '1': 'FileSetEntry',
+@$core.Deprecated('Use libraryPolicyDescriptor instead')
+const LibraryPolicy$json = {
+  '1': 'LibraryPolicy',
   '2': [
-    {'1': 'dest_relpath', '3': 1, '4': 1, '5': 9, '10': 'destRelpath'},
-    {'1': 'artifact_name', '3': 2, '4': 1, '5': 9, '10': 'artifactName'},
+    {'1': 'retain', '3': 1, '4': 1, '5': 5, '10': 'retain'},
+    {'1': 'reserved_codes', '3': 2, '4': 3, '5': 3, '10': 'reservedCodes'},
   ],
 };
 
-/// Descriptor for `FileSetEntry`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List fileSetEntryDescriptor = $convert.base64Decode(
-    'CgxGaWxlU2V0RW50cnkSIQoMZGVzdF9yZWxwYXRoGAEgASgJUgtkZXN0UmVscGF0aBIjCg1hcn'
-    'RpZmFjdF9uYW1lGAIgASgJUgxhcnRpZmFjdE5hbWU=');
+/// Descriptor for `LibraryPolicy`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List libraryPolicyDescriptor = $convert.base64Decode(
+    'Cg1MaWJyYXJ5UG9saWN5EhYKBnJldGFpbhgBIAEoBVIGcmV0YWluEiUKDnJlc2VydmVkX2NvZG'
+    'VzGAIgAygDUg1yZXNlcnZlZENvZGVz');
 
 @$core.Deprecated('Use installSpecDescriptor instead')
 const InstallSpec$json = {
   '1': 'InstallSpec',
   '2': [
     {
-      '1': 'layout',
+      '1': 'placement',
       '3': 1,
       '4': 1,
       '5': 14,
-      '6': '.relkit.updater.v1.Layout',
-      '10': 'layout'
+      '6': '.relkit.updater.v1.Placement',
+      '10': 'placement'
     },
     {'1': 'install_root', '3': 2, '4': 1, '5': 9, '10': 'installRoot'},
     {
@@ -267,29 +282,31 @@ const InstallSpec$json = {
     },
     {'1': 'sidecar_relpath', '3': 4, '4': 1, '5': 9, '10': 'sidecarRelpath'},
     {'1': 'preserve', '3': 5, '4': 3, '5': 9, '10': 'preserve'},
-    {'1': 'retain', '3': 6, '4': 1, '5': 5, '10': 'retain'},
     {'1': 'relaunch', '3': 7, '4': 1, '5': 8, '10': 'relaunch'},
     {
-      '1': 'file_set',
-      '3': 8,
-      '4': 3,
+      '1': 'library',
+      '3': 10,
+      '4': 1,
       '5': 11,
-      '6': '.relkit.updater.v1.FileSetEntry',
-      '10': 'fileSet'
+      '6': '.relkit.updater.v1.LibraryPolicy',
+      '10': 'library'
     },
-    {'1': 'reserved_codes', '3': 9, '4': 3, '5': 3, '10': 'reservedCodes'},
+  ],
+  '9': [
+    {'1': 6, '2': 7},
+    {'1': 8, '2': 9},
+    {'1': 9, '2': 10},
   ],
 };
 
 /// Descriptor for `InstallSpec`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List installSpecDescriptor = $convert.base64Decode(
-    'CgtJbnN0YWxsU3BlYxIxCgZsYXlvdXQYASABKA4yGS5yZWxraXQudXBkYXRlci52MS5MYXlvdX'
-    'RSBmxheW91dBIhCgxpbnN0YWxsX3Jvb3QYAiABKAlSC2luc3RhbGxSb290Ei0KEmV4ZWN1dGFi'
-    'bGVfcmVscGF0aBgDIAEoCVIRZXhlY3V0YWJsZVJlbHBhdGgSJwoPc2lkZWNhcl9yZWxwYXRoGA'
-    'QgASgJUg5zaWRlY2FyUmVscGF0aBIaCghwcmVzZXJ2ZRgFIAMoCVIIcHJlc2VydmUSFgoGcmV0'
-    'YWluGAYgASgFUgZyZXRhaW4SGgoIcmVsYXVuY2gYByABKAhSCHJlbGF1bmNoEjoKCGZpbGVfc2'
-    'V0GAggAygLMh8ucmVsa2l0LnVwZGF0ZXIudjEuRmlsZVNldEVudHJ5UgdmaWxlU2V0EiUKDnJl'
-    'c2VydmVkX2NvZGVzGAkgAygDUg1yZXNlcnZlZENvZGVz');
+    'CgtJbnN0YWxsU3BlYxI6CglwbGFjZW1lbnQYASABKA4yHC5yZWxraXQudXBkYXRlci52MS5QbG'
+    'FjZW1lbnRSCXBsYWNlbWVudBIhCgxpbnN0YWxsX3Jvb3QYAiABKAlSC2luc3RhbGxSb290Ei0K'
+    'EmV4ZWN1dGFibGVfcmVscGF0aBgDIAEoCVIRZXhlY3V0YWJsZVJlbHBhdGgSJwoPc2lkZWNhcl'
+    '9yZWxwYXRoGAQgASgJUg5zaWRlY2FyUmVscGF0aBIaCghwcmVzZXJ2ZRgFIAMoCVIIcHJlc2Vy'
+    'dmUSGgoIcmVsYXVuY2gYByABKAhSCHJlbGF1bmNoEjoKB2xpYnJhcnkYCiABKAsyIC5yZWxraX'
+    'QudXBkYXRlci52MS5MaWJyYXJ5UG9saWN5UgdsaWJyYXJ5SgQIBhAHSgQICBAJSgQICRAK');
 
 @$core.Deprecated('Use runtimeDescriptor instead')
 const Runtime$json = {
@@ -419,12 +436,12 @@ const Capabilities$json = {
       '10': 'operations'
     },
     {
-      '1': 'layouts',
+      '1': 'placements',
       '3': 3,
       '4': 3,
       '5': 14,
-      '6': '.relkit.updater.v1.Layout',
-      '10': 'layouts'
+      '6': '.relkit.updater.v1.Placement',
+      '10': 'placements'
     },
     {
       '1': 'min_check_interval',
@@ -449,11 +466,11 @@ const Capabilities$json = {
 /// Descriptor for `Capabilities`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List capabilitiesDescriptor = $convert.base64Decode(
     'CgxDYXBhYmlsaXRpZXMSEAoDaXBjGAEgASgNUgNpcGMSPAoKb3BlcmF0aW9ucxgCIAMoDjIcLn'
-    'JlbGtpdC51cGRhdGVyLnYxLk9wZXJhdGlvblIKb3BlcmF0aW9ucxIzCgdsYXlvdXRzGAMgAygO'
-    'MhkucmVsa2l0LnVwZGF0ZXIudjEuTGF5b3V0UgdsYXlvdXRzEkcKEm1pbl9jaGVja19pbnRlcn'
-    'ZhbBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvblIQbWluQ2hlY2tJbnRlcnZhbBI0'
-    'CghwbGFuX3R0bBgFIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvblIHcGxhblR0bBIlCg'
-    '5lbmdpbmVfdmVyc2lvbhgGIAEoCVINZW5naW5lVmVyc2lvbg==');
+    'JlbGtpdC51cGRhdGVyLnYxLk9wZXJhdGlvblIKb3BlcmF0aW9ucxI8CgpwbGFjZW1lbnRzGAMg'
+    'AygOMhwucmVsa2l0LnVwZGF0ZXIudjEuUGxhY2VtZW50UgpwbGFjZW1lbnRzEkcKEm1pbl9jaG'
+    'Vja19pbnRlcnZhbBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvblIQbWluQ2hlY2tJ'
+    'bnRlcnZhbBI0CghwbGFuX3R0bBgFIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvblIHcG'
+    'xhblR0bBIlCg5lbmdpbmVfdmVyc2lvbhgGIAEoCVINZW5naW5lVmVyc2lvbg==');
 
 @$core.Deprecated('Use checkOpDescriptor instead')
 const CheckOp$json = {
@@ -869,6 +886,14 @@ const UpdateAvailable$json = {
       '6': '.relkit.updater.v1.ArtifactView',
       '10': 'artifacts'
     },
+    {
+      '1': 'apply_disposition',
+      '3': 12,
+      '4': 1,
+      '5': 14,
+      '6': '.relkit.updater.v1.ApplyDisposition',
+      '10': 'applyDisposition'
+    },
   ],
 };
 
@@ -882,7 +907,8 @@ final $typed_data.Uint8List updateAvailableDescriptor = $convert.base64Decode(
     'Vhc2Vfbm90ZXNfdXJsGAkgASgJUg9yZWxlYXNlTm90ZXNVcmwSVAoTcHJpb3JfcmVsZWFzZV9u'
     'b3RlcxgKIAMoCzIkLnJlbGtpdC51cGRhdGVyLnYxLlByaW9yUmVsZWFzZU5vdGVzUhFwcmlvcl'
     'JlbGVhc2VOb3RlcxI9CglhcnRpZmFjdHMYCyADKAsyHy5yZWxraXQudXBkYXRlci52MS5BcnRp'
-    'ZmFjdFZpZXdSCWFydGlmYWN0cw==');
+    'ZmFjdFZpZXdSCWFydGlmYWN0cxJQChFhcHBseV9kaXNwb3NpdGlvbhgMIAEoDjIjLnJlbGtpdC'
+    '51cGRhdGVyLnYxLkFwcGx5RGlzcG9zaXRpb25SEGFwcGx5RGlzcG9zaXRpb24=');
 
 @$core.Deprecated('Use fallbackRequiredDescriptor instead')
 const FallbackRequired$json = {
@@ -1496,6 +1522,7 @@ const PlannedFile$json = {
     {'1': 'dest_relpath', '3': 5, '4': 1, '5': 9, '10': 'destRelpath'},
     {'1': 'local_path', '3': 6, '4': 1, '5': 9, '10': 'localPath'},
     {'1': 'downloaded', '3': 7, '4': 1, '5': 8, '10': 'downloaded'},
+    {'1': 'kind', '3': 8, '4': 1, '5': 9, '10': 'kind'},
   ],
 };
 
@@ -1504,7 +1531,7 @@ final $typed_data.Uint8List plannedFileDescriptor = $convert.base64Decode(
     'CgtQbGFubmVkRmlsZRISCgRuYW1lGAEgASgJUgRuYW1lEhIKBHNpemUYAiABKANSBHNpemUSHQ'
     'oKc2hhMjU2X2hleBgDIAEoCVIJc2hhMjU2SGV4EhIKBHVybHMYBCADKAlSBHVybHMSIQoMZGVz'
     'dF9yZWxwYXRoGAUgASgJUgtkZXN0UmVscGF0aBIdCgpsb2NhbF9wYXRoGAYgASgJUglsb2NhbF'
-    'BhdGgSHgoKZG93bmxvYWRlZBgHIAEoCFIKZG93bmxvYWRlZA==');
+    'BhdGgSHgoKZG93bmxvYWRlZBgHIAEoCFIKZG93bmxvYWRlZBISCgRraW5kGAggASgJUgRraW5k');
 
 @$core.Deprecated('Use updatePlanDescriptor instead')
 const UpdatePlan$json = {
@@ -1682,12 +1709,12 @@ const ApplySessionRecord$json = {
     },
     {'1': 'pid', '3': 11, '4': 1, '5': 5, '10': 'pid'},
     {
-      '1': 'layout',
+      '1': 'placement',
       '3': 12,
       '4': 1,
       '5': 14,
-      '6': '.relkit.updater.v1.Layout',
-      '10': 'layout'
+      '6': '.relkit.updater.v1.Placement',
+      '10': 'placement'
     },
     {'1': 'relaunch', '3': 13, '4': 1, '5': 8, '10': 'relaunch'},
     {
@@ -1698,18 +1725,28 @@ const ApplySessionRecord$json = {
       '10': 'executableRelpath'
     },
     {'1': 'preserve', '3': 15, '4': 3, '5': 9, '10': 'preserve'},
-    {'1': 'retain', '3': 16, '4': 1, '5': 5, '10': 'retain'},
-    {
-      '1': 'file_set',
-      '3': 17,
-      '4': 3,
-      '5': 11,
-      '6': '.relkit.updater.v1.FileSetEntry',
-      '10': 'fileSet'
-    },
     {'1': 'sidecar_relpath', '3': 18, '4': 1, '5': 9, '10': 'sidecarRelpath'},
     {'1': 'install_only', '3': 19, '4': 1, '5': 8, '10': 'installOnly'},
-    {'1': 'reserved_codes', '3': 20, '4': 3, '5': 3, '10': 'reservedCodes'},
+    {
+      '1': 'requires_host_exit',
+      '3': 21,
+      '4': 1,
+      '5': 8,
+      '10': 'requiresHostExit'
+    },
+    {
+      '1': 'library',
+      '3': 22,
+      '4': 1,
+      '5': 11,
+      '6': '.relkit.updater.v1.LibraryPolicy',
+      '10': 'library'
+    },
+  ],
+  '9': [
+    {'1': 16, '2': 17},
+    {'1': 17, '2': 18},
+    {'1': 20, '2': 21},
   ],
 };
 
@@ -1723,13 +1760,13 @@ final $typed_data.Uint8List applySessionRecordDescriptor = $convert.base64Decode
     'luc3RhbGxSb290Eh8KC3N0YWdlZF9yb290GAcgASgJUgpzdGFnZWRSb290Eh8KC3RhcmdldF9j'
     'b2RlGAggASgDUgp0YXJnZXRDb2RlEiUKDnRhcmdldF92ZXJzaW9uGAkgASgJUg10YXJnZXRWZX'
     'JzaW9uEi4KBWVycm9yGAogASgLMhgucmVsa2l0LnVwZGF0ZXIudjEuRXJyb3JSBWVycm9yEhAK'
-    'A3BpZBgLIAEoBVIDcGlkEjEKBmxheW91dBgMIAEoDjIZLnJlbGtpdC51cGRhdGVyLnYxLkxheW'
-    '91dFIGbGF5b3V0EhoKCHJlbGF1bmNoGA0gASgIUghyZWxhdW5jaBItChJleGVjdXRhYmxlX3Jl'
-    'bHBhdGgYDiABKAlSEWV4ZWN1dGFibGVSZWxwYXRoEhoKCHByZXNlcnZlGA8gAygJUghwcmVzZX'
-    'J2ZRIWCgZyZXRhaW4YECABKAVSBnJldGFpbhI6CghmaWxlX3NldBgRIAMoCzIfLnJlbGtpdC51'
-    'cGRhdGVyLnYxLkZpbGVTZXRFbnRyeVIHZmlsZVNldBInCg9zaWRlY2FyX3JlbHBhdGgYEiABKA'
-    'lSDnNpZGVjYXJSZWxwYXRoEiEKDGluc3RhbGxfb25seRgTIAEoCFILaW5zdGFsbE9ubHkSJQoO'
-    'cmVzZXJ2ZWRfY29kZXMYFCADKANSDXJlc2VydmVkQ29kZXM=');
+    'A3BpZBgLIAEoBVIDcGlkEjoKCXBsYWNlbWVudBgMIAEoDjIcLnJlbGtpdC51cGRhdGVyLnYxLl'
+    'BsYWNlbWVudFIJcGxhY2VtZW50EhoKCHJlbGF1bmNoGA0gASgIUghyZWxhdW5jaBItChJleGVj'
+    'dXRhYmxlX3JlbHBhdGgYDiABKAlSEWV4ZWN1dGFibGVSZWxwYXRoEhoKCHByZXNlcnZlGA8gAy'
+    'gJUghwcmVzZXJ2ZRInCg9zaWRlY2FyX3JlbHBhdGgYEiABKAlSDnNpZGVjYXJSZWxwYXRoEiEK'
+    'DGluc3RhbGxfb25seRgTIAEoCFILaW5zdGFsbE9ubHkSLAoScmVxdWlyZXNfaG9zdF9leGl0GB'
+    'UgASgIUhByZXF1aXJlc0hvc3RFeGl0EjoKB2xpYnJhcnkYFiABKAsyIC5yZWxraXQudXBkYXRl'
+    'ci52MS5MaWJyYXJ5UG9saWN5UgdsaWJyYXJ5SgQIEBARSgQIERASSgQIFBAV');
 
 @$core.Deprecated('Use journalEntryDescriptor instead')
 const JournalEntry$json = {

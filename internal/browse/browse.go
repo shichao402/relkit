@@ -143,6 +143,9 @@ func productFromData(input ProductData) Product {
 func humanArtifacts(all []webmeta.Artifact) []webmeta.Artifact {
 	var userFacing []webmeta.Artifact
 	for _, artifact := range all {
+		if artifact.Kind == "payload" {
+			continue
+		}
 		if artifact.Selectors["audience"] == "user" {
 			userFacing = append(userFacing, artifact)
 		}
@@ -152,7 +155,13 @@ func humanArtifacts(all []webmeta.Artifact) []webmeta.Artifact {
 	}
 	// Old releases have no audience selector. Preserve their existing page
 	// rather than rendering an empty product.
-	return append([]webmeta.Artifact(nil), all...)
+	var compatible []webmeta.Artifact
+	for _, artifact := range all {
+		if artifact.Kind != "payload" {
+			compatible = append(compatible, artifact)
+		}
+	}
+	return compatible
 }
 
 func channelRank(name string) string {

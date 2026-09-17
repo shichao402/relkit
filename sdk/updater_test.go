@@ -40,7 +40,7 @@ func TestCheckAndDownload(t *testing.T) {
 			Filename: "app.zip",
 			Size:     int64(len("hello-rup-v2")),
 			Sha256:   artHex,
-			Kind:     "archive",
+			Kind:     rupv2.ArtifactKind_ARTIFACT_KIND_ARCHIVE,
 			Urls:     []string{srv.URL + "/artifact/app.zip"},
 		}},
 	}
@@ -147,7 +147,7 @@ func TestDirectoryBootstrap(t *testing.T) {
 		Code:    200,
 		Artifacts: []*rupv2.Artifact{{
 			Id: "app", Filename: "app.bin", Size: int64(len(payload)),
-			Sha256: hex.EncodeToString(artSum[:]), Kind: "bin",
+			Sha256: hex.EncodeToString(artSum[:]), Kind: rupv2.ArtifactKind_ARTIFACT_KIND_BINARY,
 			Urls: []string{srv.URL + "/a.bin"},
 		}},
 	}

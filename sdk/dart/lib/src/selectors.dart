@@ -21,6 +21,12 @@ Artifact? selectArtifact(
   Artifact? best;
   for (final artifact in manifest.artifacts) {
     if (!_matches(artifact, clientSelectors)) continue;
+    if (best != null &&
+        _prefersApply(artifact, clientSelectors) !=
+            _prefersApply(best, clientSelectors)) {
+      if (_prefersApply(artifact, clientSelectors)) best = artifact;
+      continue;
+    }
     // Lowest id wins. Fixing the tie-break rather than taking the first match
     // is what makes every implementation agree on malformed input; publishing
     // side already refuses two artifacts with identical selectors.
@@ -39,8 +45,20 @@ List<Artifact> matchingArtifacts(
     for (final artifact in manifest.artifacts)
       if (_matches(artifact, clientSelectors)) artifact,
   ];
-  matches.sort((a, b) => a.id.compareTo(b.id));
+  matches.sort((a, b) {
+    final preferred = (_prefersApply(b, clientSelectors) ? 1 : 0) -
+        (_prefersApply(a, clientSelectors) ? 1 : 0);
+    return preferred != 0 ? preferred : a.id.compareTo(b.id);
+  });
   return matches;
+}
+
+bool _prefersApply(
+  Artifact artifact,
+  Map<String, String> clientSelectors,
+) {
+  final wanted = clientSelectors['apply'];
+  return wanted != null && selectorsToMap(artifact.selectors)['apply'] == wanted;
 }
 
 bool _matches(Artifact artifact, Map<String, String> clientSelectors) {

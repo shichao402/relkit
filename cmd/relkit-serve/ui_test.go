@@ -234,7 +234,7 @@ func writePlatformRelease(t *testing.T, dir, product, channel, version string, c
 			Filename: target.file,
 			Size:     3,
 			Sha256:   strings.Repeat("c", 64),
-			Kind:     "archive",
+			Kind:     rupv2.ArtifactKind_ARTIFACT_KIND_ARCHIVE,
 			Selectors: selectors(map[string]string{
 				"os": target.os, "arch": target.arch,
 			}),

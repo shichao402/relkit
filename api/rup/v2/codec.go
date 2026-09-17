@@ -10,8 +10,8 @@ import (
 
 const (
 	SchemaIndex      = "rup.index/2"
-	SchemaManifest   = "rup.manifest/2"
-	SchemaStaged     = "rup.staged/2"
+	SchemaManifest   = "rup.manifest/3"
+	SchemaStaged     = "rup.staged/3"
 	SchemaFallback   = "rup.fallback/2"
 	SchemaDirectory  = "rup.directory/2"
 	SchemaEnvelope   = "rup.envelope/2"

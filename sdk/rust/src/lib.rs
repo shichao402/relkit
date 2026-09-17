@@ -32,9 +32,9 @@ use proto::{
     StatusOp, StatusSnapshot, SwitchActiveOp, UpdaterEvent, UpdaterRequest,
 };
 
-pub const IPC_MIN: u32 = 1;
-pub const IPC_MAX: u32 = 2;
-pub const IPC_CURRENT: u32 = 2;
+pub const IPC_MIN: u32 = 3;
+pub const IPC_MAX: u32 = 3;
+pub const IPC_CURRENT: u32 = 3;
 const MAX_FRAME_SIZE: usize = 32 * 1024 * 1024;
 
 /// Prefixes one protobuf message with its 4-byte big-endian length.
@@ -743,7 +743,7 @@ mod tests {
         ) -> io::Result<()> {
             match self.calls.fetch_add(1, Ordering::SeqCst) {
                 0 => {
-                    on_event(&capabilities(1));
+                    on_event(&capabilities(3));
                     Ok(())
                 }
                 1 => {
@@ -775,7 +775,7 @@ mod tests {
             on_event: &mut dyn FnMut(&UpdaterEvent),
         ) -> io::Result<()> {
             if args == ["-capabilities"] {
-                on_event(&capabilities(1));
+                on_event(&capabilities(3));
                 return Ok(());
             }
             on_event(&UpdaterEvent {
@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn handshake_enforces_window_and_call_writes_hello() {
-        for (ipc, expected) in [(0, ErrorCode::UpdaterTooOld), (3, ErrorCode::UpdaterTooNew)] {
+        for (ipc, expected) in [(2, ErrorCode::UpdaterTooOld), (4, ErrorCode::UpdaterTooNew)] {
             let result = Updater::open_with_glue(
                 ClientProfile::default(),
                 Runtime::default(),
@@ -896,7 +896,7 @@ mod tests {
         }
 
         let glue = Arc::new(FakeGlue::new(vec![
-            vec![capabilities(1)],
+            vec![capabilities(3)],
             vec![UpdaterEvent {
                 kind: Some(updater_event::Kind::Result(ok_result())),
             }],
@@ -912,8 +912,8 @@ mod tests {
         let size = u32::from_be_bytes(payload[..4].try_into().unwrap()) as usize;
         let request = UpdaterRequest::decode(&payload[4..4 + size]).unwrap();
         let hello = request.hello.unwrap();
-        assert_eq!(hello.ipc_min, 1);
-        assert_eq!(hello.ipc_max, 2);
+        assert_eq!(hello.ipc_min, 3);
+        assert_eq!(hello.ipc_max, 3);
     }
 
     #[test]
@@ -922,7 +922,7 @@ mod tests {
             ClientProfile::default(),
             Runtime::default(),
             Arc::new(ExitGlue {
-                events: vec![capabilities(1)],
+                events: vec![capabilities(3)],
             }),
         );
         match result {

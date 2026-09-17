@@ -214,7 +214,7 @@ Artifact artifactDoc({
       filename: filename,
       size: Int64(body.length),
       sha256: sha256Hex(body),
-      kind: 'archive',
+      kind: ArtifactKind.ARTIFACT_KIND_ARCHIVE,
       selectors: selectorEntries(selectors),
       urls: urls,
       meta: metaEntries(meta),
@@ -889,7 +889,7 @@ void main() {
           filename: 'a.zip',
           size: Int64(1),
           sha256: 'ABC123',
-          kind: 'archive',
+          kind: ArtifactKind.ARTIFACT_KIND_ARCHIVE,
           urls: ['http://m/a.zip'],
         ),
       ]).writeToBuffer());
@@ -921,7 +921,7 @@ void main() {
         filename: 'a.zip',
         size: Int64(1),
         sha256: '1' * 64,
-        kind: 'archive',
+        kind: ArtifactKind.ARTIFACT_KIND_ARCHIVE,
         selectors: [
           Selector(key: 'os', value: 'windows'),
           Selector(key: 'arch', value: 'x64'),

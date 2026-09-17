@@ -23,9 +23,19 @@ func SelectArtifact(manifest *model.ManifestDocument, clientSelectors map[string
 		return nil
 	}
 	sort.Slice(matches, func(i, j int) bool {
+		leftPreferred := prefersApply(matches[i], clientSelectors)
+		rightPreferred := prefersApply(matches[j], clientSelectors)
+		if leftPreferred != rightPreferred {
+			return leftPreferred
+		}
 		return matches[i].Id < matches[j].Id
 	})
 	return matches[0]
+}
+
+func prefersApply(artifact *model.ManifestArtifact, clientSelectors map[string]string) bool {
+	want := clientSelectors["apply"]
+	return want != "" && model.SelectorsToMap(artifact.Selectors)["apply"] == want
 }
 
 func FindDuplicateSelectors(artifacts []*model.StagedArtifact) []DuplicateSelectors {

@@ -187,56 +187,102 @@ func (LastResult) EnumDescriptor() ([]byte, []int) {
 	return file_updater_v1_updater_proto_rawDescGZIP(), []int{1}
 }
 
-type Layout int32
+type Placement int32
 
 const (
-	Layout_LAYOUT_UNSPECIFIED   Layout = 0
-	Layout_LAYOUT_WHOLE_ROOT    Layout = 1
-	Layout_LAYOUT_VERSIONED_DIR Layout = 2
-	Layout_LAYOUT_FILE_SET      Layout = 3
+	Placement_PLACEMENT_UNSPECIFIED Placement = 0
+	Placement_PLACEMENT_IN_PLACE    Placement = 1
+	Placement_PLACEMENT_LIBRARY     Placement = 2
 )
 
-// Enum value maps for Layout.
+// Enum value maps for Placement.
 var (
-	Layout_name = map[int32]string{
-		0: "LAYOUT_UNSPECIFIED",
-		1: "LAYOUT_WHOLE_ROOT",
-		2: "LAYOUT_VERSIONED_DIR",
-		3: "LAYOUT_FILE_SET",
+	Placement_name = map[int32]string{
+		0: "PLACEMENT_UNSPECIFIED",
+		1: "PLACEMENT_IN_PLACE",
+		2: "PLACEMENT_LIBRARY",
 	}
-	Layout_value = map[string]int32{
-		"LAYOUT_UNSPECIFIED":   0,
-		"LAYOUT_WHOLE_ROOT":    1,
-		"LAYOUT_VERSIONED_DIR": 2,
-		"LAYOUT_FILE_SET":      3,
+	Placement_value = map[string]int32{
+		"PLACEMENT_UNSPECIFIED": 0,
+		"PLACEMENT_IN_PLACE":    1,
+		"PLACEMENT_LIBRARY":     2,
 	}
 )
 
-func (x Layout) Enum() *Layout {
-	p := new(Layout)
+func (x Placement) Enum() *Placement {
+	p := new(Placement)
 	*p = x
 	return p
 }
 
-func (x Layout) String() string {
+func (x Placement) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (Layout) Descriptor() protoreflect.EnumDescriptor {
+func (Placement) Descriptor() protoreflect.EnumDescriptor {
 	return file_updater_v1_updater_proto_enumTypes[2].Descriptor()
 }
 
-func (Layout) Type() protoreflect.EnumType {
+func (Placement) Type() protoreflect.EnumType {
 	return &file_updater_v1_updater_proto_enumTypes[2]
 }
 
-func (x Layout) Number() protoreflect.EnumNumber {
+func (x Placement) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use Layout.Descriptor instead.
-func (Layout) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use Placement.Descriptor instead.
+func (Placement) EnumDescriptor() ([]byte, []int) {
 	return file_updater_v1_updater_proto_rawDescGZIP(), []int{2}
+}
+
+type ApplyDisposition int32
+
+const (
+	ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED  ApplyDisposition = 0
+	ApplyDisposition_APPLY_DISPOSITION_INTERNAL     ApplyDisposition = 1
+	ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL ApplyDisposition = 2
+)
+
+// Enum value maps for ApplyDisposition.
+var (
+	ApplyDisposition_name = map[int32]string{
+		0: "APPLY_DISPOSITION_UNSPECIFIED",
+		1: "APPLY_DISPOSITION_INTERNAL",
+		2: "APPLY_DISPOSITION_FULL_INSTALL",
+	}
+	ApplyDisposition_value = map[string]int32{
+		"APPLY_DISPOSITION_UNSPECIFIED":  0,
+		"APPLY_DISPOSITION_INTERNAL":     1,
+		"APPLY_DISPOSITION_FULL_INSTALL": 2,
+	}
+)
+
+func (x ApplyDisposition) Enum() *ApplyDisposition {
+	p := new(ApplyDisposition)
+	*p = x
+	return p
+}
+
+func (x ApplyDisposition) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ApplyDisposition) Descriptor() protoreflect.EnumDescriptor {
+	return file_updater_v1_updater_proto_enumTypes[3].Descriptor()
+}
+
+func (ApplyDisposition) Type() protoreflect.EnumType {
+	return &file_updater_v1_updater_proto_enumTypes[3]
+}
+
+func (x ApplyDisposition) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ApplyDisposition.Descriptor instead.
+func (ApplyDisposition) EnumDescriptor() ([]byte, []int) {
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{3}
 }
 
 type Operation int32
@@ -299,11 +345,11 @@ func (x Operation) String() string {
 }
 
 func (Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_updater_v1_updater_proto_enumTypes[3].Descriptor()
+	return file_updater_v1_updater_proto_enumTypes[4].Descriptor()
 }
 
 func (Operation) Type() protoreflect.EnumType {
-	return &file_updater_v1_updater_proto_enumTypes[3]
+	return &file_updater_v1_updater_proto_enumTypes[4]
 }
 
 func (x Operation) Number() protoreflect.EnumNumber {
@@ -312,7 +358,7 @@ func (x Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Operation.Descriptor instead.
 func (Operation) EnumDescriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{3}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{4}
 }
 
 type SessionPhase int32
@@ -363,11 +409,11 @@ func (x SessionPhase) String() string {
 }
 
 func (SessionPhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_updater_v1_updater_proto_enumTypes[4].Descriptor()
+	return file_updater_v1_updater_proto_enumTypes[5].Descriptor()
 }
 
 func (SessionPhase) Type() protoreflect.EnumType {
-	return &file_updater_v1_updater_proto_enumTypes[4]
+	return &file_updater_v1_updater_proto_enumTypes[5]
 }
 
 func (x SessionPhase) Number() protoreflect.EnumNumber {
@@ -376,7 +422,7 @@ func (x SessionPhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SessionPhase.Descriptor instead.
 func (SessionPhase) EnumDescriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{4}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{5}
 }
 
 type TrustedKey struct {
@@ -627,28 +673,28 @@ func (x *ClientProfile) GetRecovery() *RecoveryHelp {
 	return nil
 }
 
-type FileSetEntry struct {
+type LibraryPolicy struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DestRelpath   string                 `protobuf:"bytes,1,opt,name=dest_relpath,json=destRelpath,proto3" json:"dest_relpath,omitempty"`
-	ArtifactName  string                 `protobuf:"bytes,2,opt,name=artifact_name,json=artifactName,proto3" json:"artifact_name,omitempty"`
+	Retain        int32                  `protobuf:"varint,1,opt,name=retain,proto3" json:"retain,omitempty"` // 0 means current + previous
+	ReservedCodes []int64                `protobuf:"varint,2,rep,packed,name=reserved_codes,json=reservedCodes,proto3" json:"reserved_codes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FileSetEntry) Reset() {
-	*x = FileSetEntry{}
+func (x *LibraryPolicy) Reset() {
+	*x = LibraryPolicy{}
 	mi := &file_updater_v1_updater_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FileSetEntry) String() string {
+func (x *LibraryPolicy) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FileSetEntry) ProtoMessage() {}
+func (*LibraryPolicy) ProtoMessage() {}
 
-func (x *FileSetEntry) ProtoReflect() protoreflect.Message {
+func (x *LibraryPolicy) ProtoReflect() protoreflect.Message {
 	mi := &file_updater_v1_updater_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -660,40 +706,36 @@ func (x *FileSetEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FileSetEntry.ProtoReflect.Descriptor instead.
-func (*FileSetEntry) Descriptor() ([]byte, []int) {
+// Deprecated: Use LibraryPolicy.ProtoReflect.Descriptor instead.
+func (*LibraryPolicy) Descriptor() ([]byte, []int) {
 	return file_updater_v1_updater_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *FileSetEntry) GetDestRelpath() string {
+func (x *LibraryPolicy) GetRetain() int32 {
 	if x != nil {
-		return x.DestRelpath
+		return x.Retain
 	}
-	return ""
+	return 0
 }
 
-func (x *FileSetEntry) GetArtifactName() string {
+func (x *LibraryPolicy) GetReservedCodes() []int64 {
 	if x != nil {
-		return x.ArtifactName
+		return x.ReservedCodes
 	}
-	return ""
+	return nil
 }
 
 type InstallSpec struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	Layout            Layout                 `protobuf:"varint,1,opt,name=layout,proto3,enum=relkit.updater.v1.Layout" json:"layout,omitempty"`
+	Placement         Placement              `protobuf:"varint,1,opt,name=placement,proto3,enum=relkit.updater.v1.Placement" json:"placement,omitempty"`
 	InstallRoot       string                 `protobuf:"bytes,2,opt,name=install_root,json=installRoot,proto3" json:"install_root,omitempty"`
 	ExecutableRelpath string                 `protobuf:"bytes,3,opt,name=executable_relpath,json=executableRelpath,proto3" json:"executable_relpath,omitempty"`
 	SidecarRelpath    string                 `protobuf:"bytes,4,opt,name=sidecar_relpath,json=sidecarRelpath,proto3" json:"sidecar_relpath,omitempty"`
 	Preserve          []string               `protobuf:"bytes,5,rep,name=preserve,proto3" json:"preserve,omitempty"`
-	Retain            int32                  `protobuf:"varint,6,opt,name=retain,proto3" json:"retain,omitempty"` // 0 means current + previous
 	Relaunch          bool                   `protobuf:"varint,7,opt,name=relaunch,proto3" json:"relaunch,omitempty"`
-	FileSet           []*FileSetEntry        `protobuf:"bytes,8,rep,name=file_set,json=fileSet,proto3" json:"file_set,omitempty"`
-	// Codes that prune must never delete (project pins). Engine does not
-	// interpret how the host chose them.
-	ReservedCodes []int64 `protobuf:"varint,9,rep,packed,name=reserved_codes,json=reservedCodes,proto3" json:"reserved_codes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Library           *LibraryPolicy         `protobuf:"bytes,10,opt,name=library,proto3" json:"library,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *InstallSpec) Reset() {
@@ -726,11 +768,11 @@ func (*InstallSpec) Descriptor() ([]byte, []int) {
 	return file_updater_v1_updater_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *InstallSpec) GetLayout() Layout {
+func (x *InstallSpec) GetPlacement() Placement {
 	if x != nil {
-		return x.Layout
+		return x.Placement
 	}
-	return Layout_LAYOUT_UNSPECIFIED
+	return Placement_PLACEMENT_UNSPECIFIED
 }
 
 func (x *InstallSpec) GetInstallRoot() string {
@@ -761,13 +803,6 @@ func (x *InstallSpec) GetPreserve() []string {
 	return nil
 }
 
-func (x *InstallSpec) GetRetain() int32 {
-	if x != nil {
-		return x.Retain
-	}
-	return 0
-}
-
 func (x *InstallSpec) GetRelaunch() bool {
 	if x != nil {
 		return x.Relaunch
@@ -775,16 +810,9 @@ func (x *InstallSpec) GetRelaunch() bool {
 	return false
 }
 
-func (x *InstallSpec) GetFileSet() []*FileSetEntry {
+func (x *InstallSpec) GetLibrary() *LibraryPolicy {
 	if x != nil {
-		return x.FileSet
-	}
-	return nil
-}
-
-func (x *InstallSpec) GetReservedCodes() []int64 {
-	if x != nil {
-		return x.ReservedCodes
+		return x.Library
 	}
 	return nil
 }
@@ -1041,7 +1069,7 @@ type Capabilities struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Ipc              uint32                 `protobuf:"varint,1,opt,name=ipc,proto3" json:"ipc,omitempty"`
 	Operations       []Operation            `protobuf:"varint,2,rep,packed,name=operations,proto3,enum=relkit.updater.v1.Operation" json:"operations,omitempty"`
-	Layouts          []Layout               `protobuf:"varint,3,rep,packed,name=layouts,proto3,enum=relkit.updater.v1.Layout" json:"layouts,omitempty"`
+	Placements       []Placement            `protobuf:"varint,3,rep,packed,name=placements,proto3,enum=relkit.updater.v1.Placement" json:"placements,omitempty"`
 	MinCheckInterval *durationpb.Duration   `protobuf:"bytes,4,opt,name=min_check_interval,json=minCheckInterval,proto3" json:"min_check_interval,omitempty"`
 	PlanTtl          *durationpb.Duration   `protobuf:"bytes,5,opt,name=plan_ttl,json=planTtl,proto3" json:"plan_ttl,omitempty"`
 	EngineVersion    string                 `protobuf:"bytes,6,opt,name=engine_version,json=engineVersion,proto3" json:"engine_version,omitempty"`
@@ -1093,9 +1121,9 @@ func (x *Capabilities) GetOperations() []Operation {
 	return nil
 }
 
-func (x *Capabilities) GetLayouts() []Layout {
+func (x *Capabilities) GetPlacements() []Placement {
 	if x != nil {
-		return x.Layouts
+		return x.Placements
 	}
 	return nil
 }
@@ -2178,6 +2206,7 @@ type UpdateAvailable struct {
 	ReleaseNotesUrl      string                 `protobuf:"bytes,9,opt,name=release_notes_url,json=releaseNotesUrl,proto3" json:"release_notes_url,omitempty"`
 	PriorReleaseNotes    []*PriorReleaseNotes   `protobuf:"bytes,10,rep,name=prior_release_notes,json=priorReleaseNotes,proto3" json:"prior_release_notes,omitempty"`
 	Artifacts            []*ArtifactView        `protobuf:"bytes,11,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	ApplyDisposition     ApplyDisposition       `protobuf:"varint,12,opt,name=apply_disposition,json=applyDisposition,proto3,enum=relkit.updater.v1.ApplyDisposition" json:"apply_disposition,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -2287,6 +2316,13 @@ func (x *UpdateAvailable) GetArtifacts() []*ArtifactView {
 		return x.Artifacts
 	}
 	return nil
+}
+
+func (x *UpdateAvailable) GetApplyDisposition() ApplyDisposition {
+	if x != nil {
+		return x.ApplyDisposition
+	}
+	return ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED
 }
 
 type FallbackRequired struct {
@@ -3664,6 +3700,7 @@ type PlannedFile struct {
 	DestRelpath   string                 `protobuf:"bytes,5,opt,name=dest_relpath,json=destRelpath,proto3" json:"dest_relpath,omitempty"`
 	LocalPath     string                 `protobuf:"bytes,6,opt,name=local_path,json=localPath,proto3" json:"local_path,omitempty"`
 	Downloaded    bool                   `protobuf:"varint,7,opt,name=downloaded,proto3" json:"downloaded,omitempty"`
+	Kind          string                 `protobuf:"bytes,8,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3745,6 +3782,13 @@ func (x *PlannedFile) GetDownloaded() bool {
 		return x.Downloaded
 	}
 	return false
+}
+
+func (x *PlannedFile) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
 }
 
 type UpdatePlan struct {
@@ -4000,15 +4044,14 @@ type ApplySessionRecord struct {
 	TargetVersion     string                 `protobuf:"bytes,9,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
 	Error             *Error                 `protobuf:"bytes,10,opt,name=error,proto3" json:"error,omitempty"`
 	Pid               int32                  `protobuf:"varint,11,opt,name=pid,proto3" json:"pid,omitempty"`
-	Layout            Layout                 `protobuf:"varint,12,opt,name=layout,proto3,enum=relkit.updater.v1.Layout" json:"layout,omitempty"`
+	Placement         Placement              `protobuf:"varint,12,opt,name=placement,proto3,enum=relkit.updater.v1.Placement" json:"placement,omitempty"`
 	Relaunch          bool                   `protobuf:"varint,13,opt,name=relaunch,proto3" json:"relaunch,omitempty"`
 	ExecutableRelpath string                 `protobuf:"bytes,14,opt,name=executable_relpath,json=executableRelpath,proto3" json:"executable_relpath,omitempty"`
 	Preserve          []string               `protobuf:"bytes,15,rep,name=preserve,proto3" json:"preserve,omitempty"`
-	Retain            int32                  `protobuf:"varint,16,opt,name=retain,proto3" json:"retain,omitempty"`
-	FileSet           []*FileSetEntry        `protobuf:"bytes,17,rep,name=file_set,json=fileSet,proto3" json:"file_set,omitempty"`
 	SidecarRelpath    string                 `protobuf:"bytes,18,opt,name=sidecar_relpath,json=sidecarRelpath,proto3" json:"sidecar_relpath,omitempty"`
 	InstallOnly       bool                   `protobuf:"varint,19,opt,name=install_only,json=installOnly,proto3" json:"install_only,omitempty"`
-	ReservedCodes     []int64                `protobuf:"varint,20,rep,packed,name=reserved_codes,json=reservedCodes,proto3" json:"reserved_codes,omitempty"`
+	RequiresHostExit  bool                   `protobuf:"varint,21,opt,name=requires_host_exit,json=requiresHostExit,proto3" json:"requires_host_exit,omitempty"`
+	Library           *LibraryPolicy         `protobuf:"bytes,22,opt,name=library,proto3" json:"library,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -4120,11 +4163,11 @@ func (x *ApplySessionRecord) GetPid() int32 {
 	return 0
 }
 
-func (x *ApplySessionRecord) GetLayout() Layout {
+func (x *ApplySessionRecord) GetPlacement() Placement {
 	if x != nil {
-		return x.Layout
+		return x.Placement
 	}
-	return Layout_LAYOUT_UNSPECIFIED
+	return Placement_PLACEMENT_UNSPECIFIED
 }
 
 func (x *ApplySessionRecord) GetRelaunch() bool {
@@ -4148,20 +4191,6 @@ func (x *ApplySessionRecord) GetPreserve() []string {
 	return nil
 }
 
-func (x *ApplySessionRecord) GetRetain() int32 {
-	if x != nil {
-		return x.Retain
-	}
-	return 0
-}
-
-func (x *ApplySessionRecord) GetFileSet() []*FileSetEntry {
-	if x != nil {
-		return x.FileSet
-	}
-	return nil
-}
-
 func (x *ApplySessionRecord) GetSidecarRelpath() string {
 	if x != nil {
 		return x.SidecarRelpath
@@ -4176,9 +4205,16 @@ func (x *ApplySessionRecord) GetInstallOnly() bool {
 	return false
 }
 
-func (x *ApplySessionRecord) GetReservedCodes() []int64 {
+func (x *ApplySessionRecord) GetRequiresHostExit() bool {
 	if x != nil {
-		return x.ReservedCodes
+		return x.RequiresHostExit
+	}
+	return false
+}
+
+func (x *ApplySessionRecord) GetLibrary() *LibraryPolicy {
+	if x != nil {
+		return x.Library
 	}
 	return nil
 }
@@ -4328,20 +4364,20 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"index_urls\x18\x04 \x03(\tR\tindexUrls\x12#\n" +
 	"\rfallback_urls\x18\x05 \x03(\tR\ffallbackUrls\x12@\n" +
 	"\ftrusted_keys\x18\x06 \x03(\v2\x1d.relkit.updater.v1.TrustedKeyR\vtrustedKeys\x12;\n" +
-	"\brecovery\x18\a \x01(\v2\x1f.relkit.updater.v1.RecoveryHelpR\brecovery\"V\n" +
-	"\fFileSetEntry\x12!\n" +
-	"\fdest_relpath\x18\x01 \x01(\tR\vdestRelpath\x12#\n" +
-	"\rartifact_name\x18\x02 \x01(\tR\fartifactName\"\xee\x02\n" +
-	"\vInstallSpec\x121\n" +
-	"\x06layout\x18\x01 \x01(\x0e2\x19.relkit.updater.v1.LayoutR\x06layout\x12!\n" +
+	"\brecovery\x18\a \x01(\v2\x1f.relkit.updater.v1.RecoveryHelpR\brecovery\"N\n" +
+	"\rLibraryPolicy\x12\x16\n" +
+	"\x06retain\x18\x01 \x01(\x05R\x06retain\x12%\n" +
+	"\x0ereserved_codes\x18\x02 \x03(\x03R\rreservedCodes\"\xca\x02\n" +
+	"\vInstallSpec\x12:\n" +
+	"\tplacement\x18\x01 \x01(\x0e2\x1c.relkit.updater.v1.PlacementR\tplacement\x12!\n" +
 	"\finstall_root\x18\x02 \x01(\tR\vinstallRoot\x12-\n" +
 	"\x12executable_relpath\x18\x03 \x01(\tR\x11executableRelpath\x12'\n" +
 	"\x0fsidecar_relpath\x18\x04 \x01(\tR\x0esidecarRelpath\x12\x1a\n" +
-	"\bpreserve\x18\x05 \x03(\tR\bpreserve\x12\x16\n" +
-	"\x06retain\x18\x06 \x01(\x05R\x06retain\x12\x1a\n" +
+	"\bpreserve\x18\x05 \x03(\tR\bpreserve\x12\x1a\n" +
 	"\brelaunch\x18\a \x01(\bR\brelaunch\x12:\n" +
-	"\bfile_set\x18\b \x03(\v2\x1f.relkit.updater.v1.FileSetEntryR\afileSet\x12%\n" +
-	"\x0ereserved_codes\x18\t \x03(\x03R\rreservedCodes\"\xde\x02\n" +
+	"\alibrary\x18\n" +
+	" \x01(\v2 .relkit.updater.v1.LibraryPolicyR\alibraryJ\x04\b\x06\x10\aJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"\"\xde\x02\n" +
 	"\aRuntime\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12!\n" +
 	"\fcurrent_code\x18\x02 \x01(\x03R\vcurrentCode\x12Z\n" +
@@ -4361,13 +4397,15 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x06policy\x18\x03 \x01(\v2\x1e.relkit.updater.v1.CheckPolicyR\x06policy\"?\n" +
 	"\vClientHello\x12\x17\n" +
 	"\aipc_min\x18\x01 \x01(\rR\x06ipcMin\x12\x17\n" +
-	"\aipc_max\x18\x02 \x01(\rR\x06ipcMax\"\xb9\x02\n" +
+	"\aipc_max\x18\x02 \x01(\rR\x06ipcMax\"\xc2\x02\n" +
 	"\fCapabilities\x12\x10\n" +
 	"\x03ipc\x18\x01 \x01(\rR\x03ipc\x12<\n" +
 	"\n" +
 	"operations\x18\x02 \x03(\x0e2\x1c.relkit.updater.v1.OperationR\n" +
-	"operations\x123\n" +
-	"\alayouts\x18\x03 \x03(\x0e2\x19.relkit.updater.v1.LayoutR\alayouts\x12G\n" +
+	"operations\x12<\n" +
+	"\n" +
+	"placements\x18\x03 \x03(\x0e2\x1c.relkit.updater.v1.PlacementR\n" +
+	"placements\x12G\n" +
 	"\x12min_check_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x10minCheckInterval\x124\n" +
 	"\bplan_ttl\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\aplanTtl\x12%\n" +
 	"\x0eengine_version\x18\x06 \x01(\tR\rengineVersion\"v\n" +
@@ -4439,7 +4477,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x06sha256\x18\x03 \x01(\fR\x06sha256\"R\n" +
 	"\bUpToDate\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x03R\bsequence\x12*\n" +
-	"\x11current_is_yanked\x18\x02 \x01(\bR\x0fcurrentIsYanked\"\xcf\x03\n" +
+	"\x11current_is_yanked\x18\x02 \x01(\bR\x0fcurrentIsYanked\"\xa1\x04\n" +
 	"\x0fUpdateAvailable\x12\x17\n" +
 	"\aplan_id\x18\x01 \x01(\tR\x06planId\x12\x1d\n" +
 	"\n" +
@@ -4453,7 +4491,8 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x11release_notes_url\x18\t \x01(\tR\x0freleaseNotesUrl\x12T\n" +
 	"\x13prior_release_notes\x18\n" +
 	" \x03(\v2$.relkit.updater.v1.PriorReleaseNotesR\x11priorReleaseNotes\x12=\n" +
-	"\tartifacts\x18\v \x03(\v2\x1f.relkit.updater.v1.ArtifactViewR\tartifacts\"\xda\x01\n" +
+	"\tartifacts\x18\v \x03(\v2\x1f.relkit.updater.v1.ArtifactViewR\tartifacts\x12P\n" +
+	"\x11apply_disposition\x18\f \x01(\x0e2#.relkit.updater.v1.ApplyDispositionR\x10applyDisposition\"\xda\x01\n" +
 	"\x10FallbackRequired\x12\x1d\n" +
 	"\n" +
 	"prompt_key\x18\x01 \x01(\tR\tpromptKey\x12\x1d\n" +
@@ -4551,7 +4590,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\tselectors\x18\x02 \x03(\v20.relkit.updater.v1.ArtifactTarget.SelectorsEntryR\tselectors\x1a<\n" +
 	"\x0eSelectorsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xca\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xde\x01\n" +
 	"\vPlannedFile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x1d\n" +
@@ -4563,7 +4602,8 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"local_path\x18\x06 \x01(\tR\tlocalPath\x12\x1e\n" +
 	"\n" +
 	"downloaded\x18\a \x01(\bR\n" +
-	"downloaded\"\xe9\x04\n" +
+	"downloaded\x12\x12\n" +
+	"\x04kind\x18\b \x01(\tR\x04kind\"\xe9\x04\n" +
 	"\n" +
 	"UpdatePlan\x12\x17\n" +
 	"\aplan_id\x18\x01 \x01(\tR\x06planId\x12\x18\n" +
@@ -4591,7 +4631,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x12last_seen_sequence\x18\x03 \x01(\x03R\x10lastSeenSequence\x12?\n" +
 	"\x1clast_seen_directory_sequence\x18\x04 \x01(\x03R\x19lastSeenDirectorySequence\x12=\n" +
 	"\x1blast_seen_fallback_sequence\x18\x05 \x01(\x03R\x18lastSeenFallbackSequence\x12#\n" +
-	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xac\x06\n" +
+	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xb6\x06\n" +
 	"\x12ApplySessionRecord\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
@@ -4608,16 +4648,15 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x0etarget_version\x18\t \x01(\tR\rtargetVersion\x12.\n" +
 	"\x05error\x18\n" +
 	" \x01(\v2\x18.relkit.updater.v1.ErrorR\x05error\x12\x10\n" +
-	"\x03pid\x18\v \x01(\x05R\x03pid\x121\n" +
-	"\x06layout\x18\f \x01(\x0e2\x19.relkit.updater.v1.LayoutR\x06layout\x12\x1a\n" +
+	"\x03pid\x18\v \x01(\x05R\x03pid\x12:\n" +
+	"\tplacement\x18\f \x01(\x0e2\x1c.relkit.updater.v1.PlacementR\tplacement\x12\x1a\n" +
 	"\brelaunch\x18\r \x01(\bR\brelaunch\x12-\n" +
 	"\x12executable_relpath\x18\x0e \x01(\tR\x11executableRelpath\x12\x1a\n" +
-	"\bpreserve\x18\x0f \x03(\tR\bpreserve\x12\x16\n" +
-	"\x06retain\x18\x10 \x01(\x05R\x06retain\x12:\n" +
-	"\bfile_set\x18\x11 \x03(\v2\x1f.relkit.updater.v1.FileSetEntryR\afileSet\x12'\n" +
+	"\bpreserve\x18\x0f \x03(\tR\bpreserve\x12'\n" +
 	"\x0fsidecar_relpath\x18\x12 \x01(\tR\x0esidecarRelpath\x12!\n" +
-	"\finstall_only\x18\x13 \x01(\bR\vinstallOnly\x12%\n" +
-	"\x0ereserved_codes\x18\x14 \x03(\x03R\rreservedCodes\"m\n" +
+	"\finstall_only\x18\x13 \x01(\bR\vinstallOnly\x12,\n" +
+	"\x12requires_host_exit\x18\x15 \x01(\bR\x10requiresHostExit\x12:\n" +
+	"\alibrary\x18\x16 \x01(\v2 .relkit.updater.v1.LibraryPolicyR\alibraryJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
 	"\fJournalEntry\x12\x1b\n" +
 	"\tdest_path\x18\x01 \x01(\tR\bdestPath\x12\x1f\n" +
 	"\vbackup_path\x18\x02 \x01(\tR\n" +
@@ -4660,12 +4699,15 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x1dLAST_RESULT_FALLBACK_REQUIRED\x10\x03\x12\x19\n" +
 	"\x15LAST_RESULT_THROTTLED\x10\x04\x12\x16\n" +
 	"\x12LAST_RESULT_FAILED\x10\x05\x12\x17\n" +
-	"\x13LAST_RESULT_APPLIED\x10\x06*f\n" +
-	"\x06Layout\x12\x16\n" +
-	"\x12LAYOUT_UNSPECIFIED\x10\x00\x12\x15\n" +
-	"\x11LAYOUT_WHOLE_ROOT\x10\x01\x12\x18\n" +
-	"\x14LAYOUT_VERSIONED_DIR\x10\x02\x12\x13\n" +
-	"\x0fLAYOUT_FILE_SET\x10\x03*\xab\x02\n" +
+	"\x13LAST_RESULT_APPLIED\x10\x06*U\n" +
+	"\tPlacement\x12\x19\n" +
+	"\x15PLACEMENT_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12PLACEMENT_IN_PLACE\x10\x01\x12\x15\n" +
+	"\x11PLACEMENT_LIBRARY\x10\x02*y\n" +
+	"\x10ApplyDisposition\x12!\n" +
+	"\x1dAPPLY_DISPOSITION_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aAPPLY_DISPOSITION_INTERNAL\x10\x01\x12\"\n" +
+	"\x1eAPPLY_DISPOSITION_FULL_INSTALL\x10\x02*\xab\x02\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fOPERATION_CHECK\x10\x01\x12\x12\n" +
@@ -4703,158 +4745,160 @@ func file_updater_v1_updater_proto_rawDescGZIP() []byte {
 	return file_updater_v1_updater_proto_rawDescData
 }
 
-var file_updater_v1_updater_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_updater_v1_updater_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_updater_v1_updater_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
 var file_updater_v1_updater_proto_goTypes = []any{
 	(ErrorCode)(0),                // 0: relkit.updater.v1.ErrorCode
 	(LastResult)(0),               // 1: relkit.updater.v1.LastResult
-	(Layout)(0),                   // 2: relkit.updater.v1.Layout
-	(Operation)(0),                // 3: relkit.updater.v1.Operation
-	(SessionPhase)(0),             // 4: relkit.updater.v1.SessionPhase
-	(*TrustedKey)(nil),            // 5: relkit.updater.v1.TrustedKey
-	(*RecoveryLink)(nil),          // 6: relkit.updater.v1.RecoveryLink
-	(*RecoveryHelp)(nil),          // 7: relkit.updater.v1.RecoveryHelp
-	(*ClientProfile)(nil),         // 8: relkit.updater.v1.ClientProfile
-	(*FileSetEntry)(nil),          // 9: relkit.updater.v1.FileSetEntry
-	(*InstallSpec)(nil),           // 10: relkit.updater.v1.InstallSpec
-	(*Runtime)(nil),               // 11: relkit.updater.v1.Runtime
-	(*CheckPolicy)(nil),           // 12: relkit.updater.v1.CheckPolicy
-	(*SchedulerConfig)(nil),       // 13: relkit.updater.v1.SchedulerConfig
-	(*ClientHello)(nil),           // 14: relkit.updater.v1.ClientHello
-	(*Capabilities)(nil),          // 15: relkit.updater.v1.Capabilities
-	(*CheckOp)(nil),               // 16: relkit.updater.v1.CheckOp
-	(*SkipOp)(nil),                // 17: relkit.updater.v1.SkipOp
-	(*DownloadOp)(nil),            // 18: relkit.updater.v1.DownloadOp
-	(*ApplyOp)(nil),               // 19: relkit.updater.v1.ApplyOp
-	(*StatusOp)(nil),              // 20: relkit.updater.v1.StatusOp
-	(*CleanupOp)(nil),             // 21: relkit.updater.v1.CleanupOp
-	(*CancelOp)(nil),              // 22: relkit.updater.v1.CancelOp
-	(*ListInstalledOp)(nil),       // 23: relkit.updater.v1.ListInstalledOp
-	(*SwitchActiveOp)(nil),        // 24: relkit.updater.v1.SwitchActiveOp
-	(*RollbackOp)(nil),            // 25: relkit.updater.v1.RollbackOp
-	(*InstalledVersion)(nil),      // 26: relkit.updater.v1.InstalledVersion
-	(*InstalledList)(nil),         // 27: relkit.updater.v1.InstalledList
-	(*UpdaterRequest)(nil),        // 28: relkit.updater.v1.UpdaterRequest
-	(*Error)(nil),                 // 29: relkit.updater.v1.Error
-	(*PriorReleaseNotes)(nil),     // 30: relkit.updater.v1.PriorReleaseNotes
-	(*ArtifactView)(nil),          // 31: relkit.updater.v1.ArtifactView
-	(*UpToDate)(nil),              // 32: relkit.updater.v1.UpToDate
-	(*UpdateAvailable)(nil),       // 33: relkit.updater.v1.UpdateAvailable
-	(*FallbackRequired)(nil),      // 34: relkit.updater.v1.FallbackRequired
-	(*Throttled)(nil),             // 35: relkit.updater.v1.Throttled
-	(*Failed)(nil),                // 36: relkit.updater.v1.Failed
-	(*CheckResult)(nil),           // 37: relkit.updater.v1.CheckResult
-	(*Downloaded)(nil),            // 38: relkit.updater.v1.Downloaded
-	(*DownloadResult)(nil),        // 39: relkit.updater.v1.DownloadResult
-	(*ApplyAccepted)(nil),         // 40: relkit.updater.v1.ApplyAccepted
-	(*ApplyResult)(nil),           // 41: relkit.updater.v1.ApplyResult
-	(*Ok)(nil),                    // 42: relkit.updater.v1.Ok
-	(*Result)(nil),                // 43: relkit.updater.v1.Result
-	(*SidecarInfo)(nil),           // 44: relkit.updater.v1.SidecarInfo
-	(*SessionView)(nil),           // 45: relkit.updater.v1.SessionView
-	(*StatusSnapshot)(nil),        // 46: relkit.updater.v1.StatusSnapshot
-	(*Progress)(nil),              // 47: relkit.updater.v1.Progress
-	(*ApplyProgress)(nil),         // 48: relkit.updater.v1.ApplyProgress
-	(*Log)(nil),                   // 49: relkit.updater.v1.Log
-	(*UpdaterEvent)(nil),          // 50: relkit.updater.v1.UpdaterEvent
-	(*ArtifactTarget)(nil),        // 51: relkit.updater.v1.ArtifactTarget
-	(*PlannedFile)(nil),           // 52: relkit.updater.v1.PlannedFile
-	(*UpdatePlan)(nil),            // 53: relkit.updater.v1.UpdatePlan
-	(*PersistedState)(nil),        // 54: relkit.updater.v1.PersistedState
-	(*ApplySessionRecord)(nil),    // 55: relkit.updater.v1.ApplySessionRecord
-	(*JournalEntry)(nil),          // 56: relkit.updater.v1.JournalEntry
-	(*ApplyJournal)(nil),          // 57: relkit.updater.v1.ApplyJournal
-	nil,                           // 58: relkit.updater.v1.Runtime.ClientSelectorsEntry
-	nil,                           // 59: relkit.updater.v1.ArtifactTarget.SelectorsEntry
-	(*durationpb.Duration)(nil),   // 60: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 61: google.protobuf.Timestamp
+	(Placement)(0),                // 2: relkit.updater.v1.Placement
+	(ApplyDisposition)(0),         // 3: relkit.updater.v1.ApplyDisposition
+	(Operation)(0),                // 4: relkit.updater.v1.Operation
+	(SessionPhase)(0),             // 5: relkit.updater.v1.SessionPhase
+	(*TrustedKey)(nil),            // 6: relkit.updater.v1.TrustedKey
+	(*RecoveryLink)(nil),          // 7: relkit.updater.v1.RecoveryLink
+	(*RecoveryHelp)(nil),          // 8: relkit.updater.v1.RecoveryHelp
+	(*ClientProfile)(nil),         // 9: relkit.updater.v1.ClientProfile
+	(*LibraryPolicy)(nil),         // 10: relkit.updater.v1.LibraryPolicy
+	(*InstallSpec)(nil),           // 11: relkit.updater.v1.InstallSpec
+	(*Runtime)(nil),               // 12: relkit.updater.v1.Runtime
+	(*CheckPolicy)(nil),           // 13: relkit.updater.v1.CheckPolicy
+	(*SchedulerConfig)(nil),       // 14: relkit.updater.v1.SchedulerConfig
+	(*ClientHello)(nil),           // 15: relkit.updater.v1.ClientHello
+	(*Capabilities)(nil),          // 16: relkit.updater.v1.Capabilities
+	(*CheckOp)(nil),               // 17: relkit.updater.v1.CheckOp
+	(*SkipOp)(nil),                // 18: relkit.updater.v1.SkipOp
+	(*DownloadOp)(nil),            // 19: relkit.updater.v1.DownloadOp
+	(*ApplyOp)(nil),               // 20: relkit.updater.v1.ApplyOp
+	(*StatusOp)(nil),              // 21: relkit.updater.v1.StatusOp
+	(*CleanupOp)(nil),             // 22: relkit.updater.v1.CleanupOp
+	(*CancelOp)(nil),              // 23: relkit.updater.v1.CancelOp
+	(*ListInstalledOp)(nil),       // 24: relkit.updater.v1.ListInstalledOp
+	(*SwitchActiveOp)(nil),        // 25: relkit.updater.v1.SwitchActiveOp
+	(*RollbackOp)(nil),            // 26: relkit.updater.v1.RollbackOp
+	(*InstalledVersion)(nil),      // 27: relkit.updater.v1.InstalledVersion
+	(*InstalledList)(nil),         // 28: relkit.updater.v1.InstalledList
+	(*UpdaterRequest)(nil),        // 29: relkit.updater.v1.UpdaterRequest
+	(*Error)(nil),                 // 30: relkit.updater.v1.Error
+	(*PriorReleaseNotes)(nil),     // 31: relkit.updater.v1.PriorReleaseNotes
+	(*ArtifactView)(nil),          // 32: relkit.updater.v1.ArtifactView
+	(*UpToDate)(nil),              // 33: relkit.updater.v1.UpToDate
+	(*UpdateAvailable)(nil),       // 34: relkit.updater.v1.UpdateAvailable
+	(*FallbackRequired)(nil),      // 35: relkit.updater.v1.FallbackRequired
+	(*Throttled)(nil),             // 36: relkit.updater.v1.Throttled
+	(*Failed)(nil),                // 37: relkit.updater.v1.Failed
+	(*CheckResult)(nil),           // 38: relkit.updater.v1.CheckResult
+	(*Downloaded)(nil),            // 39: relkit.updater.v1.Downloaded
+	(*DownloadResult)(nil),        // 40: relkit.updater.v1.DownloadResult
+	(*ApplyAccepted)(nil),         // 41: relkit.updater.v1.ApplyAccepted
+	(*ApplyResult)(nil),           // 42: relkit.updater.v1.ApplyResult
+	(*Ok)(nil),                    // 43: relkit.updater.v1.Ok
+	(*Result)(nil),                // 44: relkit.updater.v1.Result
+	(*SidecarInfo)(nil),           // 45: relkit.updater.v1.SidecarInfo
+	(*SessionView)(nil),           // 46: relkit.updater.v1.SessionView
+	(*StatusSnapshot)(nil),        // 47: relkit.updater.v1.StatusSnapshot
+	(*Progress)(nil),              // 48: relkit.updater.v1.Progress
+	(*ApplyProgress)(nil),         // 49: relkit.updater.v1.ApplyProgress
+	(*Log)(nil),                   // 50: relkit.updater.v1.Log
+	(*UpdaterEvent)(nil),          // 51: relkit.updater.v1.UpdaterEvent
+	(*ArtifactTarget)(nil),        // 52: relkit.updater.v1.ArtifactTarget
+	(*PlannedFile)(nil),           // 53: relkit.updater.v1.PlannedFile
+	(*UpdatePlan)(nil),            // 54: relkit.updater.v1.UpdatePlan
+	(*PersistedState)(nil),        // 55: relkit.updater.v1.PersistedState
+	(*ApplySessionRecord)(nil),    // 56: relkit.updater.v1.ApplySessionRecord
+	(*JournalEntry)(nil),          // 57: relkit.updater.v1.JournalEntry
+	(*ApplyJournal)(nil),          // 58: relkit.updater.v1.ApplyJournal
+	nil,                           // 59: relkit.updater.v1.Runtime.ClientSelectorsEntry
+	nil,                           // 60: relkit.updater.v1.ArtifactTarget.SelectorsEntry
+	(*durationpb.Duration)(nil),   // 61: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 62: google.protobuf.Timestamp
 }
 var file_updater_v1_updater_proto_depIdxs = []int32{
-	6,  // 0: relkit.updater.v1.RecoveryHelp.links:type_name -> relkit.updater.v1.RecoveryLink
-	5,  // 1: relkit.updater.v1.ClientProfile.trusted_keys:type_name -> relkit.updater.v1.TrustedKey
-	7,  // 2: relkit.updater.v1.ClientProfile.recovery:type_name -> relkit.updater.v1.RecoveryHelp
-	2,  // 3: relkit.updater.v1.InstallSpec.layout:type_name -> relkit.updater.v1.Layout
-	9,  // 4: relkit.updater.v1.InstallSpec.file_set:type_name -> relkit.updater.v1.FileSetEntry
-	58, // 5: relkit.updater.v1.Runtime.client_selectors:type_name -> relkit.updater.v1.Runtime.ClientSelectorsEntry
-	10, // 6: relkit.updater.v1.Runtime.install:type_name -> relkit.updater.v1.InstallSpec
-	60, // 7: relkit.updater.v1.CheckPolicy.after_success:type_name -> google.protobuf.Duration
-	60, // 8: relkit.updater.v1.CheckPolicy.after_failure:type_name -> google.protobuf.Duration
-	12, // 9: relkit.updater.v1.SchedulerConfig.policy:type_name -> relkit.updater.v1.CheckPolicy
-	3,  // 10: relkit.updater.v1.Capabilities.operations:type_name -> relkit.updater.v1.Operation
-	2,  // 11: relkit.updater.v1.Capabilities.layouts:type_name -> relkit.updater.v1.Layout
-	60, // 12: relkit.updater.v1.Capabilities.min_check_interval:type_name -> google.protobuf.Duration
-	60, // 13: relkit.updater.v1.Capabilities.plan_ttl:type_name -> google.protobuf.Duration
-	12, // 14: relkit.updater.v1.CheckOp.policy:type_name -> relkit.updater.v1.CheckPolicy
-	26, // 15: relkit.updater.v1.InstalledList.versions:type_name -> relkit.updater.v1.InstalledVersion
-	14, // 16: relkit.updater.v1.UpdaterRequest.hello:type_name -> relkit.updater.v1.ClientHello
-	8,  // 17: relkit.updater.v1.UpdaterRequest.profile:type_name -> relkit.updater.v1.ClientProfile
-	11, // 18: relkit.updater.v1.UpdaterRequest.runtime:type_name -> relkit.updater.v1.Runtime
-	16, // 19: relkit.updater.v1.UpdaterRequest.check:type_name -> relkit.updater.v1.CheckOp
-	17, // 20: relkit.updater.v1.UpdaterRequest.skip:type_name -> relkit.updater.v1.SkipOp
-	18, // 21: relkit.updater.v1.UpdaterRequest.download:type_name -> relkit.updater.v1.DownloadOp
-	19, // 22: relkit.updater.v1.UpdaterRequest.apply:type_name -> relkit.updater.v1.ApplyOp
-	20, // 23: relkit.updater.v1.UpdaterRequest.status:type_name -> relkit.updater.v1.StatusOp
-	21, // 24: relkit.updater.v1.UpdaterRequest.cleanup:type_name -> relkit.updater.v1.CleanupOp
-	22, // 25: relkit.updater.v1.UpdaterRequest.cancel:type_name -> relkit.updater.v1.CancelOp
-	23, // 26: relkit.updater.v1.UpdaterRequest.list_installed:type_name -> relkit.updater.v1.ListInstalledOp
-	24, // 27: relkit.updater.v1.UpdaterRequest.switch_active:type_name -> relkit.updater.v1.SwitchActiveOp
-	25, // 28: relkit.updater.v1.UpdaterRequest.rollback:type_name -> relkit.updater.v1.RollbackOp
+	7,  // 0: relkit.updater.v1.RecoveryHelp.links:type_name -> relkit.updater.v1.RecoveryLink
+	6,  // 1: relkit.updater.v1.ClientProfile.trusted_keys:type_name -> relkit.updater.v1.TrustedKey
+	8,  // 2: relkit.updater.v1.ClientProfile.recovery:type_name -> relkit.updater.v1.RecoveryHelp
+	2,  // 3: relkit.updater.v1.InstallSpec.placement:type_name -> relkit.updater.v1.Placement
+	10, // 4: relkit.updater.v1.InstallSpec.library:type_name -> relkit.updater.v1.LibraryPolicy
+	59, // 5: relkit.updater.v1.Runtime.client_selectors:type_name -> relkit.updater.v1.Runtime.ClientSelectorsEntry
+	11, // 6: relkit.updater.v1.Runtime.install:type_name -> relkit.updater.v1.InstallSpec
+	61, // 7: relkit.updater.v1.CheckPolicy.after_success:type_name -> google.protobuf.Duration
+	61, // 8: relkit.updater.v1.CheckPolicy.after_failure:type_name -> google.protobuf.Duration
+	13, // 9: relkit.updater.v1.SchedulerConfig.policy:type_name -> relkit.updater.v1.CheckPolicy
+	4,  // 10: relkit.updater.v1.Capabilities.operations:type_name -> relkit.updater.v1.Operation
+	2,  // 11: relkit.updater.v1.Capabilities.placements:type_name -> relkit.updater.v1.Placement
+	61, // 12: relkit.updater.v1.Capabilities.min_check_interval:type_name -> google.protobuf.Duration
+	61, // 13: relkit.updater.v1.Capabilities.plan_ttl:type_name -> google.protobuf.Duration
+	13, // 14: relkit.updater.v1.CheckOp.policy:type_name -> relkit.updater.v1.CheckPolicy
+	27, // 15: relkit.updater.v1.InstalledList.versions:type_name -> relkit.updater.v1.InstalledVersion
+	15, // 16: relkit.updater.v1.UpdaterRequest.hello:type_name -> relkit.updater.v1.ClientHello
+	9,  // 17: relkit.updater.v1.UpdaterRequest.profile:type_name -> relkit.updater.v1.ClientProfile
+	12, // 18: relkit.updater.v1.UpdaterRequest.runtime:type_name -> relkit.updater.v1.Runtime
+	17, // 19: relkit.updater.v1.UpdaterRequest.check:type_name -> relkit.updater.v1.CheckOp
+	18, // 20: relkit.updater.v1.UpdaterRequest.skip:type_name -> relkit.updater.v1.SkipOp
+	19, // 21: relkit.updater.v1.UpdaterRequest.download:type_name -> relkit.updater.v1.DownloadOp
+	20, // 22: relkit.updater.v1.UpdaterRequest.apply:type_name -> relkit.updater.v1.ApplyOp
+	21, // 23: relkit.updater.v1.UpdaterRequest.status:type_name -> relkit.updater.v1.StatusOp
+	22, // 24: relkit.updater.v1.UpdaterRequest.cleanup:type_name -> relkit.updater.v1.CleanupOp
+	23, // 25: relkit.updater.v1.UpdaterRequest.cancel:type_name -> relkit.updater.v1.CancelOp
+	24, // 26: relkit.updater.v1.UpdaterRequest.list_installed:type_name -> relkit.updater.v1.ListInstalledOp
+	25, // 27: relkit.updater.v1.UpdaterRequest.switch_active:type_name -> relkit.updater.v1.SwitchActiveOp
+	26, // 28: relkit.updater.v1.UpdaterRequest.rollback:type_name -> relkit.updater.v1.RollbackOp
 	0,  // 29: relkit.updater.v1.Error.code:type_name -> relkit.updater.v1.ErrorCode
-	7,  // 30: relkit.updater.v1.Error.recovery:type_name -> relkit.updater.v1.RecoveryHelp
-	30, // 31: relkit.updater.v1.UpdateAvailable.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
-	31, // 32: relkit.updater.v1.UpdateAvailable.artifacts:type_name -> relkit.updater.v1.ArtifactView
-	61, // 33: relkit.updater.v1.Throttled.next_allowed_at:type_name -> google.protobuf.Timestamp
-	29, // 34: relkit.updater.v1.Failed.error:type_name -> relkit.updater.v1.Error
-	32, // 35: relkit.updater.v1.CheckResult.up_to_date:type_name -> relkit.updater.v1.UpToDate
-	33, // 36: relkit.updater.v1.CheckResult.update_available:type_name -> relkit.updater.v1.UpdateAvailable
-	34, // 37: relkit.updater.v1.CheckResult.fallback_required:type_name -> relkit.updater.v1.FallbackRequired
-	35, // 38: relkit.updater.v1.CheckResult.throttled:type_name -> relkit.updater.v1.Throttled
-	36, // 39: relkit.updater.v1.CheckResult.failed:type_name -> relkit.updater.v1.Failed
-	38, // 40: relkit.updater.v1.DownloadResult.downloaded:type_name -> relkit.updater.v1.Downloaded
-	36, // 41: relkit.updater.v1.DownloadResult.failed:type_name -> relkit.updater.v1.Failed
-	40, // 42: relkit.updater.v1.ApplyResult.accepted:type_name -> relkit.updater.v1.ApplyAccepted
-	36, // 43: relkit.updater.v1.ApplyResult.failed:type_name -> relkit.updater.v1.Failed
-	42, // 44: relkit.updater.v1.Result.ok:type_name -> relkit.updater.v1.Ok
-	36, // 45: relkit.updater.v1.Result.failed:type_name -> relkit.updater.v1.Failed
-	4,  // 46: relkit.updater.v1.SessionView.phase:type_name -> relkit.updater.v1.SessionPhase
-	61, // 47: relkit.updater.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
-	29, // 48: relkit.updater.v1.SessionView.error:type_name -> relkit.updater.v1.Error
-	61, // 49: relkit.updater.v1.StatusSnapshot.last_check_at:type_name -> google.protobuf.Timestamp
-	1,  // 50: relkit.updater.v1.StatusSnapshot.last_result:type_name -> relkit.updater.v1.LastResult
-	61, // 51: relkit.updater.v1.StatusSnapshot.next_allowed_at:type_name -> google.protobuf.Timestamp
-	45, // 52: relkit.updater.v1.StatusSnapshot.active_session:type_name -> relkit.updater.v1.SessionView
-	44, // 53: relkit.updater.v1.StatusSnapshot.sidecar:type_name -> relkit.updater.v1.SidecarInfo
-	4,  // 54: relkit.updater.v1.ApplyProgress.phase:type_name -> relkit.updater.v1.SessionPhase
-	15, // 55: relkit.updater.v1.UpdaterEvent.capabilities:type_name -> relkit.updater.v1.Capabilities
-	47, // 56: relkit.updater.v1.UpdaterEvent.progress:type_name -> relkit.updater.v1.Progress
-	48, // 57: relkit.updater.v1.UpdaterEvent.apply_progress:type_name -> relkit.updater.v1.ApplyProgress
-	49, // 58: relkit.updater.v1.UpdaterEvent.log:type_name -> relkit.updater.v1.Log
-	37, // 59: relkit.updater.v1.UpdaterEvent.check:type_name -> relkit.updater.v1.CheckResult
-	39, // 60: relkit.updater.v1.UpdaterEvent.download:type_name -> relkit.updater.v1.DownloadResult
-	41, // 61: relkit.updater.v1.UpdaterEvent.apply:type_name -> relkit.updater.v1.ApplyResult
-	43, // 62: relkit.updater.v1.UpdaterEvent.result:type_name -> relkit.updater.v1.Result
-	46, // 63: relkit.updater.v1.UpdaterEvent.status:type_name -> relkit.updater.v1.StatusSnapshot
-	36, // 64: relkit.updater.v1.UpdaterEvent.failed:type_name -> relkit.updater.v1.Failed
-	27, // 65: relkit.updater.v1.UpdaterEvent.installed:type_name -> relkit.updater.v1.InstalledList
-	59, // 66: relkit.updater.v1.ArtifactTarget.selectors:type_name -> relkit.updater.v1.ArtifactTarget.SelectorsEntry
-	30, // 67: relkit.updater.v1.UpdatePlan.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
-	52, // 68: relkit.updater.v1.UpdatePlan.files:type_name -> relkit.updater.v1.PlannedFile
-	61, // 69: relkit.updater.v1.UpdatePlan.created_at:type_name -> google.protobuf.Timestamp
-	61, // 70: relkit.updater.v1.UpdatePlan.expires_at:type_name -> google.protobuf.Timestamp
-	61, // 71: relkit.updater.v1.PersistedState.last_check_at:type_name -> google.protobuf.Timestamp
-	1,  // 72: relkit.updater.v1.PersistedState.last_result:type_name -> relkit.updater.v1.LastResult
-	4,  // 73: relkit.updater.v1.ApplySessionRecord.phase:type_name -> relkit.updater.v1.SessionPhase
-	61, // 74: relkit.updater.v1.ApplySessionRecord.started_at:type_name -> google.protobuf.Timestamp
-	61, // 75: relkit.updater.v1.ApplySessionRecord.heartbeat_at:type_name -> google.protobuf.Timestamp
-	29, // 76: relkit.updater.v1.ApplySessionRecord.error:type_name -> relkit.updater.v1.Error
-	2,  // 77: relkit.updater.v1.ApplySessionRecord.layout:type_name -> relkit.updater.v1.Layout
-	9,  // 78: relkit.updater.v1.ApplySessionRecord.file_set:type_name -> relkit.updater.v1.FileSetEntry
-	56, // 79: relkit.updater.v1.ApplyJournal.entries:type_name -> relkit.updater.v1.JournalEntry
-	80, // [80:80] is the sub-list for method output_type
-	80, // [80:80] is the sub-list for method input_type
-	80, // [80:80] is the sub-list for extension type_name
-	80, // [80:80] is the sub-list for extension extendee
-	0,  // [0:80] is the sub-list for field type_name
+	8,  // 30: relkit.updater.v1.Error.recovery:type_name -> relkit.updater.v1.RecoveryHelp
+	31, // 31: relkit.updater.v1.UpdateAvailable.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
+	32, // 32: relkit.updater.v1.UpdateAvailable.artifacts:type_name -> relkit.updater.v1.ArtifactView
+	3,  // 33: relkit.updater.v1.UpdateAvailable.apply_disposition:type_name -> relkit.updater.v1.ApplyDisposition
+	62, // 34: relkit.updater.v1.Throttled.next_allowed_at:type_name -> google.protobuf.Timestamp
+	30, // 35: relkit.updater.v1.Failed.error:type_name -> relkit.updater.v1.Error
+	33, // 36: relkit.updater.v1.CheckResult.up_to_date:type_name -> relkit.updater.v1.UpToDate
+	34, // 37: relkit.updater.v1.CheckResult.update_available:type_name -> relkit.updater.v1.UpdateAvailable
+	35, // 38: relkit.updater.v1.CheckResult.fallback_required:type_name -> relkit.updater.v1.FallbackRequired
+	36, // 39: relkit.updater.v1.CheckResult.throttled:type_name -> relkit.updater.v1.Throttled
+	37, // 40: relkit.updater.v1.CheckResult.failed:type_name -> relkit.updater.v1.Failed
+	39, // 41: relkit.updater.v1.DownloadResult.downloaded:type_name -> relkit.updater.v1.Downloaded
+	37, // 42: relkit.updater.v1.DownloadResult.failed:type_name -> relkit.updater.v1.Failed
+	41, // 43: relkit.updater.v1.ApplyResult.accepted:type_name -> relkit.updater.v1.ApplyAccepted
+	37, // 44: relkit.updater.v1.ApplyResult.failed:type_name -> relkit.updater.v1.Failed
+	43, // 45: relkit.updater.v1.Result.ok:type_name -> relkit.updater.v1.Ok
+	37, // 46: relkit.updater.v1.Result.failed:type_name -> relkit.updater.v1.Failed
+	5,  // 47: relkit.updater.v1.SessionView.phase:type_name -> relkit.updater.v1.SessionPhase
+	62, // 48: relkit.updater.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
+	30, // 49: relkit.updater.v1.SessionView.error:type_name -> relkit.updater.v1.Error
+	62, // 50: relkit.updater.v1.StatusSnapshot.last_check_at:type_name -> google.protobuf.Timestamp
+	1,  // 51: relkit.updater.v1.StatusSnapshot.last_result:type_name -> relkit.updater.v1.LastResult
+	62, // 52: relkit.updater.v1.StatusSnapshot.next_allowed_at:type_name -> google.protobuf.Timestamp
+	46, // 53: relkit.updater.v1.StatusSnapshot.active_session:type_name -> relkit.updater.v1.SessionView
+	45, // 54: relkit.updater.v1.StatusSnapshot.sidecar:type_name -> relkit.updater.v1.SidecarInfo
+	5,  // 55: relkit.updater.v1.ApplyProgress.phase:type_name -> relkit.updater.v1.SessionPhase
+	16, // 56: relkit.updater.v1.UpdaterEvent.capabilities:type_name -> relkit.updater.v1.Capabilities
+	48, // 57: relkit.updater.v1.UpdaterEvent.progress:type_name -> relkit.updater.v1.Progress
+	49, // 58: relkit.updater.v1.UpdaterEvent.apply_progress:type_name -> relkit.updater.v1.ApplyProgress
+	50, // 59: relkit.updater.v1.UpdaterEvent.log:type_name -> relkit.updater.v1.Log
+	38, // 60: relkit.updater.v1.UpdaterEvent.check:type_name -> relkit.updater.v1.CheckResult
+	40, // 61: relkit.updater.v1.UpdaterEvent.download:type_name -> relkit.updater.v1.DownloadResult
+	42, // 62: relkit.updater.v1.UpdaterEvent.apply:type_name -> relkit.updater.v1.ApplyResult
+	44, // 63: relkit.updater.v1.UpdaterEvent.result:type_name -> relkit.updater.v1.Result
+	47, // 64: relkit.updater.v1.UpdaterEvent.status:type_name -> relkit.updater.v1.StatusSnapshot
+	37, // 65: relkit.updater.v1.UpdaterEvent.failed:type_name -> relkit.updater.v1.Failed
+	28, // 66: relkit.updater.v1.UpdaterEvent.installed:type_name -> relkit.updater.v1.InstalledList
+	60, // 67: relkit.updater.v1.ArtifactTarget.selectors:type_name -> relkit.updater.v1.ArtifactTarget.SelectorsEntry
+	31, // 68: relkit.updater.v1.UpdatePlan.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
+	53, // 69: relkit.updater.v1.UpdatePlan.files:type_name -> relkit.updater.v1.PlannedFile
+	62, // 70: relkit.updater.v1.UpdatePlan.created_at:type_name -> google.protobuf.Timestamp
+	62, // 71: relkit.updater.v1.UpdatePlan.expires_at:type_name -> google.protobuf.Timestamp
+	62, // 72: relkit.updater.v1.PersistedState.last_check_at:type_name -> google.protobuf.Timestamp
+	1,  // 73: relkit.updater.v1.PersistedState.last_result:type_name -> relkit.updater.v1.LastResult
+	5,  // 74: relkit.updater.v1.ApplySessionRecord.phase:type_name -> relkit.updater.v1.SessionPhase
+	62, // 75: relkit.updater.v1.ApplySessionRecord.started_at:type_name -> google.protobuf.Timestamp
+	62, // 76: relkit.updater.v1.ApplySessionRecord.heartbeat_at:type_name -> google.protobuf.Timestamp
+	30, // 77: relkit.updater.v1.ApplySessionRecord.error:type_name -> relkit.updater.v1.Error
+	2,  // 78: relkit.updater.v1.ApplySessionRecord.placement:type_name -> relkit.updater.v1.Placement
+	10, // 79: relkit.updater.v1.ApplySessionRecord.library:type_name -> relkit.updater.v1.LibraryPolicy
+	57, // 80: relkit.updater.v1.ApplyJournal.entries:type_name -> relkit.updater.v1.JournalEntry
+	81, // [81:81] is the sub-list for method output_type
+	81, // [81:81] is the sub-list for method input_type
+	81, // [81:81] is the sub-list for extension type_name
+	81, // [81:81] is the sub-list for extension extendee
+	0,  // [0:81] is the sub-list for field type_name
 }
 
 func init() { file_updater_v1_updater_proto_init() }
@@ -4911,7 +4955,7 @@ func file_updater_v1_updater_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_updater_v1_updater_proto_rawDesc), len(file_updater_v1_updater_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   55,
 			NumExtensions: 0,
 			NumServices:   0,

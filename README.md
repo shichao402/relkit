@@ -51,7 +51,7 @@ relkit backends
 relkit init --product demoapp
 relkit keygen --key-id k1 --out keys --update-config
 relkit version set 1.0.0+100
-relkit stage --add dist/demoapp-win-x64.zip os=windows,arch=x64
+relkit stage --install dist/demoapp-win-x64.zip kind=archive,os=windows,arch=x64
 relkit simulate --with-staged 1.0.0+100 --from all
 relkit publish --dry-run
 relkit publish
@@ -125,7 +125,7 @@ sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve
 | 一致性夹具 | [`conformance/`](conformance/) |
 | 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md) |
 | 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |
-| 安装布局（宿主接入必读） | [`docs/design/install-layouts.md`](docs/design/install-layouts.md) —— `wholeRoot` / `versionedDir` / `fileSet` 的落盘契约、launcher 归属、宿主退出时序、`retain` 取值 |
+| 安装落点（宿主接入必读） | [ADR 0013](docs/adr/0013-internal-update-payload.md)、[ADR 0014](docs/adr/0014-placement-and-version-library.md) —— `IN_PLACE` / `LIBRARY`、payload 内部更新、基线差分；历史背景见 [`docs/design/install-layouts.md`](docs/design/install-layouts.md) |
 | 装机 / 换二进制 | [`scripts/deploy/README.md`](scripts/deploy/README.md) · [`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md) |
 
 ## 客户端 SDK
