@@ -125,7 +125,7 @@ sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve
 | 一致性夹具 | [`conformance/`](conformance/) |
 | 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md) |
 | 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |
-| 宿主接入（两轨 + InstallSpec，语言无关） | [`docs/guide/host-update.md`](docs/guide/host-update.md) —— 完整安装 / payload、闸门、IPC `[3,3]`、最小接入步骤；权威细节 [ADR 0013](docs/adr/0013-internal-update-payload.md)、[ADR 0014](docs/adr/0014-placement-and-version-library.md)；历史背景 [`docs/design/install-layouts.md`](docs/design/install-layouts.md) |
+| 宿主接入（两轨 + InstallSpec） | skill SSOT [`DecAssets/skills/relkit-ops/host-update.md`](DecAssets/skills/relkit-ops/host-update.md)；本仓指针 [`docs/guide/host-update.md`](docs/guide/host-update.md)；协议 [ADR 0013](docs/adr/0013-internal-update-payload.md) / [ADR 0014](docs/adr/0014-placement-and-version-library.md) |
 | 装机 / 换二进制 | [`scripts/deploy/README.md`](scripts/deploy/README.md) · [`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md) |
 
 ## 客户端 SDK

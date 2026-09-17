@@ -822,6 +822,7 @@ index/manifest：
 由 Placement 常量决定。IPC 窗口为 `[3,3]`。
 
 完整落盘与迁移裁决见 ADR 0013、ADR 0014。产品仓接入合同（两轨 stage、
-InstallSpec、最小步骤）见 [`docs/guide/host-update.md`](docs/guide/host-update.md)。
+InstallSpec、最小步骤）见运维 skill
+[`DecAssets/skills/relkit-ops/host-update.md`](DecAssets/skills/relkit-ops/host-update.md)。
 历史背景见 [`docs/design/install-layouts.md`](docs/design/install-layouts.md)，其中旧
 Layout API 已被 ADR 0014 取代。
