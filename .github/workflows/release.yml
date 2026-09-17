@@ -42,21 +42,11 @@ jobs:
         working-directory: dist
         run: sha256sum * > SHA256SUMS
       - name: Publish Dec provides
-        env:
-          DEC_REGISTRY_TOKEN: ${{ secrets.DEC_REGISTRY_TOKEN }}
-          DEC_REGISTRY_SSH_KEY: ${{ secrets.DEC_REGISTRY_SSH_KEY }}
-        run: |
-          git clone --depth 1 https://github.com/shichao402/Dec.git /tmp/dec
-          go build -C /tmp/dec -o /tmp/dec-registry ./cmd/dec-registry
-          if [ -n "${DEC_REGISTRY_SSH_KEY:-}" ]; then
-            mkdir -p "$HOME/.ssh"
-            printf '%s\n' "$DEC_REGISTRY_SSH_KEY" > "$HOME/.ssh/dec_registry"
-            chmod 600 "$HOME/.ssh/dec_registry"
-            export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/dec_registry -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-            /tmp/dec-registry publish-provides --project-root "$GITHUB_WORKSPACE" --ref "$GITHUB_REF_NAME" --registry-url git@github.com:shichao402/Dec.git
-          else
-            /tmp/dec-registry publish-provides --project-root "$GITHUB_WORKSPACE" --ref "$GITHUB_REF_NAME"
-          fi
+        uses: shichao402/Dec/.github/actions/publish-provides@main
+        with:
+          project-root: ${{ github.workspace }}
+          ref: ${{ github.ref_name }}
+          registry-ssh-key: ${{ secrets.DEC_REGISTRY_SSH_KEY }}
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
