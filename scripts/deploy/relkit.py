@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -465,6 +466,7 @@ def cmd_build(args: argparse.Namespace) -> None:
             }
         )
     ident = git_identity()
+    ipc_min, ipc_max = updater_ipc_window()
     manifest = {
         "schema": "relkit.release/1",
         "version": stamp,
@@ -472,6 +474,8 @@ def cmd_build(args: argparse.Namespace) -> None:
         "dirty": ident["dirty"] == "true",
         "minProtocol": 2,
         "maxProtocol": 2,
+        "minUpdaterIpc": ipc_min,
+        "maxUpdaterIpc": ipc_max,
         "builtAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "artifacts": built,
     }
@@ -482,6 +486,16 @@ def cmd_build(args: argparse.Namespace) -> None:
         )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"output in {out_dir}")
+
+
+def updater_ipc_window() -> tuple[int, int]:
+    """Sidecar IPC window from internal/updater/const.go (same numbers as the facades)."""
+    text = (REPO_ROOT / "internal" / "updater" / "const.go").read_text(encoding="utf-8")
+    found_min = re.search(r"IPCMin\s+uint32\s*=\s*(\d+)", text)
+    found_max = re.search(r"IPCMax\s+uint32\s*=\s*(\d+)", text)
+    if found_min is None or found_max is None:
+        die("cannot read IPCMin/IPCMax from internal/updater/const.go")
+    return int(found_min.group(1)), int(found_max.group(1))
 
 
 def file_sha256(path: Path) -> str:

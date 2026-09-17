@@ -96,6 +96,8 @@ relkit stage 1.5.0 \
 
 `--install` is the full-install track (exe/dmg/deb/zip). `--payload` packs a directory into a `kind=payload` zip (`files.pb` + `files/` + optional `scripts/`) and injects `apply=relkit-payload`. `--add` remains a legacy alias of `--install`. Each flag takes `<path> [k=v,...]`. Reserved keys:
 
+产品仓两轨接入合同（闸门、人页不暴露 payload、InstallSpec）见 [`docs/guide/host-update.md`](docs/guide/host-update.md)。
+
 | 淇濈暀閿?| 浣滅敤 | 缂虹渷 |
 |---|---|---|
 | `id` | artifact 鐨?`id` | 鐢?selectors 鐨勫€兼嫾鎺ワ細鏍囧噯閿寜 SPEC.md 搂11.1 鐨勮〃鏍奸『搴忥紙`os` `arch` `target` `abi` `variant`锛夊湪鍓嶏紝鑷畾涔夐敭鎸夐敭鍚嶆帓搴忓湪鍚庯紝濡?`windows-x64`锛涙棤 selectors 鏃朵负 `default` |

@@ -760,19 +760,56 @@ class UpgradeManifestTests(unittest.TestCase):
             )
             self.assertEqual(lock["protocol"], {"min": 2, "max": 3})
 
+    def test_upgrade_takes_updater_ipc_from_the_manifest_not_the_old_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            lock_path = root / "scripts" / "relkit.lock.json"
+            lock_path.parent.mkdir(parents=True)
+            lock_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "relkit.consume/2",
+                        "updaterIpc": {"min": 1, "max": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            commit = "b814972e839dbb5eaac9814728e0fe08258c5e2b"
+            fake = self.fake_release(
+                commit,
+                min_updater_ipc=3,
+                max_updater_ipc=3,
+            )
+            with (
+                patch("relkit_host.http_get", side_effect=fake),
+                patch("relkit_host.cmd_install", return_value=0),
+            ):
+                self.assertEqual(host.cmd_upgrade(root, "v0.4.4"), 0)
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            self.assertEqual(lock["updaterIpc"], {"min": 3, "max": 3})
+
     @staticmethod
-    def fake_release(commit: str, min_protocol: int = 2, max_protocol: int = 2):
+    def fake_release(
+        commit: str,
+        min_protocol: int = 2,
+        max_protocol: int = 2,
+        min_updater_ipc: int | None = None,
+        max_updater_ipc: int | None = None,
+    ):
         def fake_get(url: str) -> str:
             if url.endswith("/manifest.json"):
-                return json.dumps(
-                    {
-                        "commit": commit,
-                        "minProtocol": min_protocol,
-                        "maxProtocol": max_protocol,
-                        "hostScriptsSha256": "a" * 64,
-                        "consumerSha256": "b" * 64,
-                    }
-                )
+                doc: dict = {
+                    "commit": commit,
+                    "minProtocol": min_protocol,
+                    "maxProtocol": max_protocol,
+                    "hostScriptsSha256": "a" * 64,
+                    "consumerSha256": "b" * 64,
+                }
+                if min_updater_ipc is not None:
+                    doc["minUpdaterIpc"] = min_updater_ipc
+                if max_updater_ipc is not None:
+                    doc["maxUpdaterIpc"] = max_updater_ipc
+                return json.dumps(doc)
             if url.endswith("/SHA256SUMS"):
                 return (
                     f"{'c' * 64}  relkit-host-scripts.zip\n"
@@ -1466,8 +1503,14 @@ class ReconcileTests(unittest.TestCase):
             ):
                 self.assertEqual(host.cmd_fake_verify(root, "1.2.3+4"), 0)
             argv_lists = [call.args[2] for call in run.call_args_list]
-            self.assertEqual(argv_lists[0][0], "stage")
-            self.assertEqual(argv_lists[0][1], "1.2.3+4")
+            stage_argv = argv_lists[0]
+            self.assertEqual(stage_argv[0], "stage")
+            self.assertEqual(stage_argv[1], "1.2.3+4")
+            self.assertIn("--install", stage_argv)
+            self.assertNotIn("--add", stage_argv)
+            self.assertTrue(
+                all("meta.layout" not in part for part in stage_argv)
+            )
             self.assertEqual(
                 argv_lists[-1],
                 ["simulate", "--with-staged", "1.2.3+4", "--from", "all"],
