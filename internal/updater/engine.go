@@ -161,7 +161,11 @@ func (e *Engine) HandleRequest(ctx context.Context, req *updaterv1.UpdaterReques
 		}
 	}
 
-	st := store{dataDir: req.GetRuntime().GetDataDir()}
+	st := store{
+		dataDir: req.GetRuntime().GetDataDir(),
+		product: req.GetProfile().GetProduct(),
+		channel: req.GetRuntime().GetChannel(),
+	}
 	switch op := req.GetOp().(type) {
 	case *updaterv1.UpdaterRequest_Check:
 		return e.handleCheck(ctx, req, op.Check, st)

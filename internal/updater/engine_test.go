@@ -14,6 +14,7 @@ import (
 	"go.firoyang.com/relkit/internal/ipc"
 	"go.firoyang.com/relkit/internal/model"
 	"go.firoyang.com/relkit/internal/payload"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -67,6 +68,78 @@ func TestMigrateLegacyJSONPreservesWatermark(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, StateFileName)); err != nil {
 		t.Fatal("state.pb not written")
+	}
+}
+
+func TestStateIsIsolatedByProductAndChannel(t *testing.T) {
+	dir := t.TempDir()
+	dev := store{dataDir: dir, product: "svn-auto-merge", channel: "dev"}
+	stable := store{dataDir: dir, product: "svn-auto-merge", channel: "stable"}
+	other := store{dataDir: dir, product: "other/product", channel: "dev"}
+
+	if err := dev.saveState(&updaterv1.PersistedState{LastSeenSequence: 93}); err != nil {
+		t.Fatal(err)
+	}
+	if err := stable.saveState(&updaterv1.PersistedState{LastSeenSequence: 21}); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.saveState(&updaterv1.PersistedState{LastSeenSequence: 7}); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, tc := range map[string]struct {
+		store store
+		want  int64
+	}{
+		"dev":    {store: dev, want: 93},
+		"stable": {store: stable, want: 21},
+		"other":  {store: other, want: 7},
+	} {
+		got, err := tc.store.loadState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.LastSeenSequence != tc.want {
+			t.Errorf("%s sequence=%d want=%d", name, got.LastSeenSequence, tc.want)
+		}
+	}
+	if dev.statePath() == stable.statePath() {
+		t.Fatal("channels share one state path")
+	}
+	if filepath.Base(other.statePath()) != "state-other_product-dev.pb" {
+		t.Fatalf("unsafe product was not sanitized: %s", other.statePath())
+	}
+}
+
+func TestScopedStateDoesNotImportUnattributedLegacyWatermark(t *testing.T) {
+	dir := t.TempDir()
+	legacy := &updaterv1.PersistedState{
+		LastSeenSequence:          93,
+		LastSeenDirectorySequence: 12,
+		SkippedCodes:              []int64{150},
+	}
+	raw, err := proto.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, StateFileName), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	scoped := store{dataDir: dir, product: "svn-auto-merge", channel: "stable"}
+	got, err := scoped.loadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastSeenSequence != 0 || got.LastSeenDirectorySequence != 0 ||
+		len(got.SkippedCodes) != 0 {
+		t.Fatalf("unattributed legacy state leaked into stable: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, StateFileName)); err != nil {
+		t.Fatal("legacy state should remain available for rollback/forensics")
+	}
+	if _, err := os.Stat(scoped.statePath()); err != nil {
+		t.Fatal("scoped state was not created")
 	}
 }
 

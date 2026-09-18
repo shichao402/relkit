@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
@@ -16,11 +17,25 @@ import (
 
 type store struct {
 	dataDir string
+	product string
+	channel string
 }
 
-func (s store) statePath() string { return filepath.Join(s.dataDir, StateFileName) }
-func (s store) jsonPath() string  { return filepath.Join(s.dataDir, LegacyStateJSON) }
-func (s store) plansDir() string  { return filepath.Join(s.dataDir, PlansDirName) }
+var unsafeStateName = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+func sanitizeStateName(value string) string {
+	return unsafeStateName.ReplaceAllString(value, "_")
+}
+
+func (s store) statePath() string {
+	if s.product == "" || s.channel == "" {
+		return filepath.Join(s.dataDir, StateFileName)
+	}
+	name := "state-" + sanitizeStateName(s.product) + "-" + sanitizeStateName(s.channel) + ".pb"
+	return filepath.Join(s.dataDir, name)
+}
+func (s store) jsonPath() string { return filepath.Join(s.dataDir, LegacyStateJSON) }
+func (s store) plansDir() string { return filepath.Join(s.dataDir, PlansDirName) }
 func (s store) sessionsDir() string {
 	return filepath.Join(s.dataDir, SessionsDirName)
 }
@@ -58,9 +73,17 @@ func (s store) loadState() (*updaterv1.PersistedState, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	st, err := s.migrateLegacyJSON()
-	if err != nil {
-		return nil, err
+	st := &updaterv1.PersistedState{}
+	// Legacy state.pb / JSON had no product or channel identity. Importing its
+	// index watermark into the first channel opened would make a later channel
+	// with an independent sequence look like a rollback. Only unscoped stores
+	// (legacy tests/tools) retain the old JSON migration behavior.
+	if s.product == "" && s.channel == "" {
+		var err error
+		st, err = s.migrateLegacyJSON()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := s.saveState(st); err != nil {
 		return nil, err
