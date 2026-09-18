@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -2284,6 +2285,44 @@ class LockCurrencyTests(unittest.TestCase):
             with patch.object(host, "urlopen", fake_urlopen):
                 self.assertEqual(host.upstream_latest_release(root), "v0.4.9")
             self.assertEqual(len(seen), 1)
+
+    def test_stale_latest_cache_refetches_when_lock_is_newer(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self.lock(root, "v0.4.10")
+            cache = host.cache_dir(root)
+            cache.mkdir(parents=True)
+            (cache / "upstream-latest.json").write_text(
+                host.dump_json(
+                    {
+                        "checkedAt": datetime.now(timezone.utc).timestamp(),
+                        "release": "v0.4.9",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            seen: list[str] = []
+
+            class Response:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_: object) -> None:
+                    return None
+
+                def geturl(self) -> str:
+                    return "https://github.com/owner/repo/releases/tag/v0.4.10"
+
+            def fake_urlopen(request, timeout=0):
+                seen.append(request.full_url)
+                return Response()
+
+            with patch.object(host, "urlopen", fake_urlopen):
+                self.assertEqual(host.upstream_latest_release(root), "v0.4.10")
+            self.assertEqual(len(seen), 1)
+            currency = host.lock_currency(root, "v0.4.10")
+            self.assertEqual(currency["latestRelease"], "v0.4.10")
+            self.assertEqual(currency["releaseRelation"], "current-or-newer")
 
     def test_currency_is_a_registered_gate(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
