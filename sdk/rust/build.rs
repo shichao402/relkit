@@ -4,19 +4,23 @@ fn main() {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is unavailable"),
     );
-    let repo_proto = manifest_dir.join("../../proto");
+    // Prefer the IDL packaged next to this crate (release zip / product tree).
+    // Only fall back to the relkit repo root proto/ when building in-tree, where
+    // packaged proto/ is absent. A leftover product-tree third_party/relkit/proto
+    // must not win over sdk/rust/proto after consume upgrades the SDK.
     let packaged_proto = manifest_dir.join("proto");
-    let proto_root = if repo_proto.join("updater/v1/updater.proto").is_file() {
-        repo_proto.as_path()
-    } else {
+    let repo_proto = manifest_dir.join("../../proto");
+    let proto_root = if packaged_proto.join("updater/v1/updater.proto").is_file() {
         packaged_proto.as_path()
+    } else {
+        repo_proto.as_path()
     };
     let input = proto_root.join("updater/v1/updater.proto");
     if !input.is_file() {
         panic!(
             "canonical proto/updater/v1/updater.proto not found (checked {} and {})",
-            repo_proto.display(),
-            packaged_proto.display()
+            packaged_proto.display(),
+            repo_proto.display()
         );
     }
 

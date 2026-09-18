@@ -449,6 +449,25 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
             ),
             conversation_retrospect,
         )
+        bypass_choice = (
+            "效率绕过" in text
+            and "标准回修" in text
+            and "禁止 agent 自行默绕或默修" in text
+            and "lock.releaseRelation=behind" in text
+            and "绕过不等于 verified" in text
+            and "手改 lock / `DIGESTED`" in text
+        )
+        check(
+            f"skill-retrospect-bypass-choice:{display_path}",
+            display_path,
+            "skill asks the user to choose efficiency bypass vs standard upstream fix for undigested generic notes",
+            (
+                "undigested generic notes require an explicit bypass-or-standard choice; bypass is not verified"
+                if bypass_choice
+                else "skill still defaults to silent bypass or silent upstream fix without an explicit user choice"
+            ),
+            bypass_choice,
+        )
 
     encountered, digested, undigested = classify_ops_journal(root)
     return {

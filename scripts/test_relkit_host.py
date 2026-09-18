@@ -1493,6 +1493,35 @@ class RetrospectTests(unittest.TestCase):
         check = "skill-conversation-retrospect:skills/relkit-ops/SKILL.md"
         self.assertIn(check, todo)
         self.assertIn("command-only retrospect", todo[check]["actual"])
+        bypass = "skill-retrospect-bypass-choice:skills/relkit-ops/SKILL.md"
+        self.assertIn(bypass, todo)
+        self.assertIn("silent bypass", todo[bypass]["actual"])
+
+    def test_retrospect_requires_explicit_bypass_vs_standard_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            skill = root / "skills" / "relkit-ops" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text(
+                "命令退出码为 0 不能替代会话复盘\n"
+                "用户对目标、范围或前提的纠正\n"
+                "命令成功但交付结果不对\n"
+                "换成任意无关产品\n"
+                "现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动\n"
+                "不得拿当前产品的专用测试或配置当通用流程优化\n"
+                "前一次 verified 已过期\n"
+                "先展示 evidence.topology 与 evidence.remote。\n"
+                "`blocked` 中的决策本轮禁止询问；operatorTokenPresent=true 不代表产品 token。\n"
+                "运行 python scripts/host/relkit_host.py retrospect。\n",
+                encoding="utf-8",
+            )
+            report = host.retrospect_report(root)
+        todo = {item["check"]: item for item in report["groups"]["todo"]}
+        bypass = "skill-retrospect-bypass-choice:skills/relkit-ops/SKILL.md"
+        self.assertIn(bypass, todo)
+        self.assertIn("silent bypass", todo[bypass]["actual"])
+        conversation = "skill-conversation-retrospect:skills/relkit-ops/SKILL.md"
+        self.assertNotIn(conversation, todo)
 
     def test_retrospect_requires_cache_ignore_but_tracks_onboarding(self) -> None:
         self.assertIn(".relkit/cache/", host.GITIGNORE_RELKIT)
