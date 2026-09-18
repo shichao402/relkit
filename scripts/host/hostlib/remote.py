@@ -428,8 +428,10 @@ def _impl_remote_inventory(
             }
         )
         if use_agent and len(status) > 2 and status[2].strip().startswith("{"):
+            # /-/site answers with an indented JSON object, so the body spans
+            # every line after the two systemctl answers.
             try:
-                site_status = json.loads(status[2])
+                site_status = json.loads("\n".join(status[2:]))
                 result["siteStatus"] = {
                     "configured": bool(site_status.get("configured")),
                     "projectId": site_status.get("projectId"),
@@ -464,6 +466,13 @@ def _impl_decision_evidence(root: Path, state: dict[str, Any]) -> dict[str, Any]
     implications: list[str] = []
     blocked: dict[str, str] = {}
     applicable = {step: True for step in STEP_IDS}
+    lock_release = remote.get("lockRelease")
+    lock = {"release": lock_release, **lock_currency(root, lock_release)}
+    if lock["releaseRelation"] == "behind":
+        implications.append(
+            f"lock {lock['release']} is behind upstream {lock['latestRelease']}; "
+            "the intent to upgrade or to stay is a human decision"
+        )
     if topology.get("mode") == "direct":
         implications.append(
             "release publishes directly to configured backends; serve/agent product tokens are not on this route"
@@ -512,6 +521,7 @@ def _impl_decision_evidence(root: Path, state: dict[str, Any]) -> dict[str, Any]
     return {
         "topology": topology,
         "remote": remote,
+        "lock": lock,
         "applicable": applicable,
         "implications": implications,
         "blockedDecisions": blocked,

@@ -349,6 +349,19 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
                 passed,
             )
 
+    lock_facts = (env_inspect_report(root).get("facts") or {}).get("lock") or {}
+    check(
+        "lock-currency-visible",
+        host_path,
+        "inspect compares the pinned release against the newest published one",
+        (
+            f"lock facts carry {sorted(lock_facts)}"
+            if lock_facts
+            else "no lock in this repository, so inspect has nothing to compare"
+        ),
+        not lock_facts or "releaseRelation" in lock_facts,
+    )
+
     skill_paths = _retrospect_skill_paths(root)
     if not skill_paths:
         items.append(

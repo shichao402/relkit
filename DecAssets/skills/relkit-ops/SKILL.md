@@ -28,16 +28,18 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 ## 批量决策优先
 
 1. 先运行 `onboard start` / `onboard inspect` 完成现状检查，再单独向用户确认本次意图：`fresh`（新接入）、`reconfigure`（重新开箱）或 `upgrade`（沿用已确认决策升级）。现状与意图冲突时先解释冲突，不猜。
-2. 运行 `onboard questions --intent <intent> --json`。先向用户展示其中的 `evidence.topology`、`evidence.remote`、`implications` 与 `blocked`，再提交这一波 `questions`。禁止脱离这些现场证据自行概括发布路径或 token 现状。
-3. 将整批回答按输出的 `answerShape` 写入 `.relkit/cache/`，运行 `onboard apply --answers <file>`。它按 `revision` 检查现状是否变化，并原子校验全部答案；任何冲突都不会写入部分状态。
-4. 批次按依赖分波次，不强求一次问完。`blocked` 中的决策本轮禁止询问；先完成它指出的前置项（例如确认 SSH Host），重新生成批次，拿到 live inventory 后再问 token。若脚本返回冲突，只重问报错项；若 revision 过期，重新生成问题批次并只问变化项。
-5. 决策落盘后再执行 action steps。可以并行委派互不写同一文件、互不改同一远端状态的调查或实现；共享产品状态、同一配置文件、serve/agent 注册与 release 必须按依赖顺序经 `relkit_host.py` 执行和复核。
+2. 确认意图**之前**先报 lock 版本新鲜度：`inspect` 的 `lock.releaseRelation` 为 `behind` 时，必须把 `lock.release` 与 `lock.latestRelease` 一起告诉用户，并让他选升 lock 还是明确留在当前版本。本地哈希只跟自己对得上，全绿不代表版本不落后；`relation=unknown` 说明取不到上游最新，要照实说，不要当成 current。
+3. 运行 `onboard questions --intent <intent> --json`。先向用户展示其中的 `evidence.topology`、`evidence.remote`、`evidence.lock`、`implications` 与 `blocked`，再提交这一波 `questions`。禁止脱离这些现场证据自行概括发布路径或 token 现状。
+4. 将整批回答按输出的 `answerShape` 写入 `.relkit/cache/`，运行 `onboard apply --answers <file>`。它按 `revision` 检查现状是否变化，并原子校验全部答案；任何冲突都不会写入部分状态。
+5. 批次按依赖分波次，不强求一次问完。`blocked` 中的决策本轮禁止询问；先完成它指出的前置项（例如确认 SSH Host），重新生成批次，拿到 live inventory 后再问 token。若脚本返回冲突，只重问报错项；若 revision 过期，重新生成问题批次并只问变化项。
+6. 决策落盘后再执行 action steps。可以并行委派互不写同一文件、互不改同一远端状态的调查或实现；共享产品状态、同一配置文件、serve/agent 注册与 release 必须按依赖顺序经 `relkit_host.py` 执行和复核。
 
 逐项 `onboard set` 只作为修改单个已知答案的兼容入口，不是默认开箱体验。脚本保持非交互；由 agent 使用结构化提问收集用户批量答案。
 
 ## 闸门短指针
 
 - 开箱前先跑 `onboard start` / `onboard inspect`：脚本会列出 `relkit.json` backends、VERSION、lock、SSH Include/通配匹配主机。`http-put` / `local` / `static-http` 等陈旧类型是 error，挡住 `product.id`。不要用手写确认代替 inspect。
+- `consume.lock` 的 `verified` 只说明 lock 自洽（schema 正确、`hostScriptsSha256` 与 `scripts/host` 一致），**不代表版本是最新**。落后与否只认 `lock.releaseRelation`（`behind` 时 `inspect` 出 `lock-behind-upstream` warning，`onboard start` / `resume` 也不会再说没有未决项）。升到最新走 `upgrade <tag>`；升完 lock 后远端会变 `behind`，按下面「远端版本」处理。
 - `ssh.host`：问人之前脚本已展开 `~/.ssh/config` 的 Include 与通配，并列出 exact / patterns / matched。通配本身不是 SSH 别名。写入 `onboard set ssh.host <值>`。
 - 发布拓扑：只认 `questions --json` 的 `evidence.topology`。`mode=direct` 表示 `publishTo` 只含 S3 等直连后端，serve/agent token 与注册不在发布链路上；不要因状态里残留 `ssh.host` 就把远端说成必需。
 - `sidecar.layout`：只认 lock 装到 `tools/bin/relkit-updater`；可选 `relkit.json` `sidecar.packScript` 只校验接线，不硬编码 `.mjs`。真产物归 `pack.ci`。macOS 的 universal sidecar 只跑 `relkit_host.py sidecar universal --out <路径>`：`install` 每个目标都装成同一个文件名，只能放构建机自己的架构。**这条闸门说的是 sidecar 二进制打进发布树的位置，与客户端 `InstallSpec.placement` 无关**，同名不同事。

@@ -361,6 +361,10 @@ def _impl_run_interactive_wizard(
         state = load_state(root)
         step_id = next_unresolved_step(state)
         if step_id is None:
+            currency = lock_currency_warning(root)
+            if currency:
+                print(currency)
+                return 0
             print("开箱状态没有未决项。运行 verify 对账后再 release。")
             return 0
         if step_id in ACTION_STEPS:
@@ -391,6 +395,20 @@ def _impl_run_interactive_wizard(
         value, share_with = normalize_interactive_value(step_id, answer)
         cmd_onboard_set(root, step_id, value, share_with)
 
+def _impl_lock_currency_warning(
+    root: Path, report: Optional[dict[str, Any]] = None
+) -> str:
+    """The one pending decision no local hash can reveal: the lock is stale."""
+    facts = ((report if report is not None else env_inspect_report(root)).get("facts") or {})
+    lock = facts.get("lock") or {}
+    if lock.get("releaseRelation") != "behind":
+        return ""
+    return (
+        f"lock {lock.get('release')} 落后上游最新 {lock.get('latestRelease')}。"
+        f"先确认本次意图：升 lock（upgrade {lock.get('latestRelease')}）"
+        "还是明确留在当前版本；这一项本身就是未决项。"
+    )
+
 def _impl_cmd_onboard_start(root: Path, *, interactive: bool = False) -> int:
     ensure_gitignore(root)
     state = load_state(root)
@@ -403,6 +421,9 @@ def _impl_cmd_onboard_start(root: Path, *, interactive: bool = False) -> int:
     print(f"仓根: {root}")
     print(f"技术栈: {','.join(stack['languages']) or 'unknown'}")
     print_env_inspect(report)
+    currency = lock_currency_warning(root, report)
+    if currency:
+        print(currency)
     if interactive:
         return run_interactive_wizard(root)
     unresolved = next_unresolved_step(state)
@@ -425,6 +446,10 @@ def _impl_cmd_onboard_resume(root: Path, *, interactive: bool = False) -> int:
             print("非交互模式: 清理 error findings 后运行 onboard inspect")
         else:
             print(f"非交互模式写入: onboard set {step_id} <你的选择>")
+        return 0
+    currency = lock_currency_warning(root)
+    if currency:
+        print(currency)
         return 0
     print("开箱状态没有未决项。运行 verify 对账。")
     return 0
@@ -704,6 +729,7 @@ _IMPLEMENTATIONS = {
     "print_decision": _impl_print_decision,
     "normalize_interactive_value": _impl_normalize_interactive_value,
     "run_interactive_wizard": _impl_run_interactive_wizard,
+    "lock_currency_warning": _impl_lock_currency_warning,
     "cmd_onboard_start": _impl_cmd_onboard_start,
     "cmd_onboard_resume": _impl_cmd_onboard_resume,
     "cmd_onboard_explain": _impl_cmd_onboard_explain,

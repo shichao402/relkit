@@ -2112,6 +2112,157 @@ class InspectAndJournalTests(unittest.TestCase):
             self.assertEqual(host.load_ops_journal(root), [])
 
 
+class LockCurrencyTests(unittest.TestCase):
+    """Every local hash agrees with itself, so staleness needs an outside reference."""
+
+    def lock(self, root: Path, release: str) -> None:
+        (root / "scripts").mkdir(parents=True, exist_ok=True)
+        (root / "scripts" / "relkit.lock.json").write_text(
+            json.dumps({"schema": host.LOCK_SCHEMA, "release": release}),
+            encoding="utf-8",
+        )
+
+    def test_relation_needs_both_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with patch.object(host, "upstream_latest_release", return_value="v0.4.9"):
+                self.assertEqual(
+                    host.lock_currency(root, "v0.4.2")["releaseRelation"], "behind"
+                )
+                self.assertEqual(
+                    host.lock_currency(root, "v0.4.9")["releaseRelation"],
+                    "current-or-newer",
+                )
+            with patch.object(host, "upstream_latest_release", return_value=""):
+                self.assertEqual(
+                    host.lock_currency(root, "v0.4.2")["releaseRelation"], "unknown"
+                )
+
+    def test_inspect_reports_a_stale_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self.lock(root, "v0.4.2")
+            with patch.object(host, "upstream_latest_release", return_value="v0.4.9"):
+                report = host.env_inspect_report(root)
+            facts = report["facts"]["lock"]
+            self.assertEqual(facts["latestRelease"], "v0.4.9")
+            self.assertEqual(facts["releaseRelation"], "behind")
+            codes = [item["code"] for item in report["findings"]]
+            self.assertIn("lock-behind-upstream", codes)
+
+    def test_a_stale_lock_is_never_reported_as_no_pending_work(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self.lock(root, "v0.4.2")
+            state = host.default_state(root)
+            for step in host.STEP_IDS:
+                host.set_step(state, step, "verified", "x")
+            host.save_state(root, state)
+            output = io.StringIO()
+            with patch.object(host, "upstream_latest_release", return_value="v0.4.9"):
+                with redirect_stdout(output):
+                    self.assertEqual(host.cmd_onboard_resume(root), 0)
+            self.assertNotIn("没有未决项", output.getvalue())
+            self.assertIn("v0.4.9", output.getvalue())
+
+    def test_a_current_lock_still_reports_no_pending_work(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self.lock(root, "v0.4.9")
+            state = host.default_state(root)
+            for step in host.STEP_IDS:
+                host.set_step(state, step, "verified", "x")
+            host.save_state(root, state)
+            output = io.StringIO()
+            with patch.object(host, "upstream_latest_release", return_value="v0.4.9"):
+                with redirect_stdout(output):
+                    self.assertEqual(host.cmd_onboard_resume(root), 0)
+            self.assertIn("没有未决项", output.getvalue())
+
+    def test_latest_release_comes_from_the_redirect_not_the_rest_api(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            seen: list[str] = []
+
+            class Response:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_: object) -> None:
+                    return None
+
+                def geturl(self) -> str:
+                    return "https://github.com/owner/repo/releases/tag/v0.4.9"
+
+            def fake_urlopen(request, timeout=0):
+                seen.append(request.full_url)
+                return Response()
+
+            with patch.object(host, "urlopen", fake_urlopen):
+                self.assertEqual(host.upstream_latest_release(root), "v0.4.9")
+            self.assertTrue(seen and seen[0].endswith("/releases/latest"))
+            self.assertNotIn("api.github.com", seen[0])
+            # The tag is cached, so a second call must not reach the network.
+            with patch.object(host, "urlopen", fake_urlopen):
+                self.assertEqual(host.upstream_latest_release(root), "v0.4.9")
+            self.assertEqual(len(seen), 1)
+
+    def test_currency_is_a_registered_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            checks = {
+                item["check"]: item
+                for item in host.retrospect_report(root)["groups"]["landed"]
+            }
+            self.assertIn("lock-currency-visible", checks)
+
+
+class AgentSiteReadinessTests(unittest.TestCase):
+    """/-/site answers with indented JSON, so the body spans several lines."""
+
+    def inventory(self, site_body: str) -> dict:
+        state = host.default_state(Path("."))
+        state["agent"] = {"sshHost": "box", "configPath": "/etc/relkit-agent/x.json"}
+
+        class Result:
+            def __init__(self, stdout: str) -> None:
+                self.stdout = stdout
+
+        def fake_ssh_run(target, argv, port=None):
+            if argv[-1] == "-version":
+                return Result("relkit-agent 0.4.9+abc\n")
+            if argv[0] == "bash":
+                return Result("active\nenabled\n" + site_body)
+            return Result("products\n  demo\n")
+
+        with tempfile.TemporaryDirectory() as raw:
+            with patch.object(host, "ssh_run", fake_ssh_run):
+                return host.remote_inventory(
+                    Path(raw),
+                    state,
+                    {"mode": "agent", "tokenRequired": True, "agentUrl": "https://x/v1/"},
+                )
+
+    def test_indented_body_is_parsed(self) -> None:
+        body = json.dumps(
+            {
+                "configured": True,
+                "projectId": "makers-1",
+                "tokenEnv": "EDGEONE_PAGES_API_TOKEN",
+                "tokenPresent": True,
+            },
+            indent=2,
+        )
+        site = self.inventory(body)["siteStatus"]
+        self.assertIsNotNone(site)
+        self.assertTrue(site["configured"])
+        self.assertTrue(site["tokenPresent"])
+        self.assertEqual(site["projectId"], "makers-1")
+
+    def test_missing_body_stays_unknown(self) -> None:
+        self.assertIsNone(self.inventory("")["siteStatus"])
+
+
 class UpdaterGateTests(unittest.TestCase):
     def state(self, root: Path, process: str) -> dict:
         state = host.default_state(root)

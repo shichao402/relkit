@@ -133,6 +133,11 @@ ANSWER_BATCH_SCHEMA = "relkit.onboarding-answers/1"
 
 ONBOARD_INTENTS = ("fresh", "reconfigure", "upgrade")
 
+# A product repo that silently stays on an old lock looks healthy: every local
+# hash agrees with itself. The newest published tag is the only outside
+# reference, so inspect resolves it once an hour and caches the answer.
+UPSTREAM_LATEST_TTL = 3600
+
 BATCH_DECISION_STEPS = tuple(
     step for step in DECISION_STEPS if step not in ("repo.root", "env.inspect")
 )

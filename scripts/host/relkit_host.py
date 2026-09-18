@@ -94,6 +94,8 @@ from hostlib.inspect import (
     inventory_path,
     ops_journal_path,
     onboarding_ignored,
+    upstream_latest_release,
+    lock_currency,
     env_inspect_report,
     print_env_inspect,
     apply_env_inspect,
