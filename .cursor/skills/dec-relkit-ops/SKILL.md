@@ -55,8 +55,53 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - 远端版本：`versionRelation=behind` 且 `onPublishRoute=true` 时先升级远端（relkit 仓 `relkit-deploy`）；若 `onPublishRoute=false`，明确告诉用户它落后但不阻塞当前产品发布。
 - 失败记账：带 `code=` 的 `Fail` 写入 `.relkit/cache/ops-journal.jsonl`（`unclassified` 不记）。`retrospect` 输出本次遇到 / 已修进脚本或 skill / 未消化；未消化非 0。
 
-## 完成后
+## 完成后：先复盘会话，再跑机械闸门
 
-运行 `python scripts/host/relkit_host.py retrospect`，再运行 `status` 检查
-`ops.retrospect` 已是 `verified`；只有前一命令退出码为 0，才能宣称开箱完成。
-`RETROSPECT.md` 只是入口指针，阅读它本身不构成完成闸门。
+`retrospect` 只能看文件与带错误码的命令失败；它看不到用户纠正、人工验收结果，
+也看不到「命令成功但交付结果不对」。因此 **命令退出码为 0 不能替代会话复盘**。
+
+先从本次运维意图开始重读对话与操作记录，逐项找出：
+
+- 用户对目标、范围或前提的纠正；
+- 人工验收与原先判断相反的结果；
+- 绕过正式入口的临时处理；
+- 当时显示成功、后来才证明不完整的步骤。
+
+每项必须先分类，再决定落点：
+
+1. **relkit 通用流程缺口**：换成任意无关产品、严格照本 Skill 操作仍会踩中。
+   必须指出最早可拦截的 relkit 阶段（inspect / questions / apply / upgrade /
+   install / fake verify / verify / release / retrospect），以及该阶段能读取的输入、
+   应做的机械判断和失败结果。修复应落在 relkit 的脚本、Skill、测试或发布产物；
+   不得拿当前产品的专用测试或配置当通用流程优化。
+2. **产品自身缺口**：只在该产品的宿主、权限、UI 或打包结构中成立。留在产品仓，
+   不冒充 relkit 运维优化。
+3. **Agent 理解偏差**：例如用户问流程，却回答具体项目。先用一句话复述当前范围，
+   再给建议；若这种误解可重复发生，就修本 Skill 的提示，不给产品加门阀。
+
+复盘输出必须写清「现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动」。
+只重复「应该有更新说明」「应该测试权限」这类已知目标，不算流程优化。
+发现新的通用缺口但本次不能落地时，必须明确列为未消化，不能宣称运维流程完成。
+
+复盘结论只写在回话里等于没记账：`retrospect` 读不到对话。每一项都要
+`retrospect note --code <类名> --class generic|product|agent --text "<四段结论>"`，
+落盘后 `ops.retrospect` 变 `stale`、`retrospect` 非 0，直到该类被修进脚本 / skill /
+测试并进入已消化集合。
+
+若复盘留下未消化的 **generic**（或必须改 host / skill 才能消化的 note），
+先问用户选 **效率绕过** 还是 **标准回修**；禁止 agent 自行默绕或默修。
+
+- **不可绕过**：`lock.releaseRelation=behind`；远端 `versionRelation=behind` 且
+  `onPublishRoute=true`；会导致发错包的 CI / 宿主行为。
+- **效率绕过**：产品缺口已落地即可继续日常；接受本机 `ops.retrospect=stale`；
+  **不得**手改 lock / `DIGESTED`（会 drift）；回话写明「用户选择绕过」与上游
+  issue/PR 链接。绕过不等于 verified，也不把 journal 标成已消化。
+- **标准回修**：回 relkit 修脚本 / skill / 测试 → 进 `DIGESTED` → 发版 → 产品
+  `upgrade` → `retrospect` 0 / `ops.retrospect=verified`。
+- 产品类已在产品仓修好的 code：只在 relkit 发版时纳入已消化集合；不要鼓励产品仓
+  改 `scripts/host` 消 note。
+
+会话复盘完成后，运行 `python scripts/host/relkit_host.py retrospect`，再运行
+`status` 检查 `ops.retrospect` 已是 `verified`。若之后用户验收又暴露新问题，
+前一次 verified 已过期，必须重新复盘并重跑。只有会话复盘没有未消化项、且命令
+退出码为 0，才能宣称完成。`RETROSPECT.md` 只是入口指针，阅读它本身不构成完成闸门。

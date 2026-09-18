@@ -312,6 +312,11 @@ class InstallTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             lock = lock_for("https://example.invalid/artifact", sdk_zip(), binary, sdk)
+            orphan = root / "third_party/relkit/proto/updater/v1"
+            orphan.mkdir(parents=True)
+            (orphan / "updater.proto").write_text(
+                'syntax = "proto3"; // stale leftover\n', encoding="utf-8"
+            )
 
             def fake_download(_root, component, _spec):
                 path = root / f"{component}.artifact"
@@ -339,6 +344,7 @@ class InstallTests(unittest.TestCase):
             installed = root / "third_party/relkit/sdk/rust"
             self.assertTrue((installed / "Cargo.toml").is_file())
             self.assertTrue((installed / "proto/updater/v1/updater.proto").is_file())
+            self.assertFalse((root / "third_party/relkit/proto").exists())
 
 
 class DownloadTests(unittest.TestCase):

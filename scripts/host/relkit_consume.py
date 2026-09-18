@@ -345,6 +345,29 @@ def sdk_destination(root: Path, component: str) -> Path:
     return root / row.destination
 
 
+def clear_orphan_relkit_proto(root: Path) -> None:
+    """Remove leftover third_party/relkit/proto that shadows the packaged Rust IDL.
+
+    Older consume layouts left a sibling proto tree. Rust build.rs prefers
+    manifest_dir/../../proto when present, so a stale product-tree path wins
+    over sdk/rust/proto even after sdk-rust is current. That path is not a
+    registry destination, so deleting it is safe.
+    """
+    orphan = root / "third_party" / "relkit" / "proto"
+    if not orphan.exists():
+        return
+    destinations = {
+        row.destination.rstrip("/")
+        for row in product_components()
+        if row.role == "product-tree" and row.name != "host-scripts"
+    }
+    relative = "third_party/relkit/proto"
+    if relative in destinations:
+        return
+    remove_tree(orphan)
+    print(f"relkit consume: removed orphan {relative} (shadows packaged sdk-rust IDL)")
+
+
 def preserved_sdk_subtrees(component: str) -> tuple[str, ...]:
     """Other registry trees nested below the tree being replaced."""
     owner = BY_NAME[component].destination.rstrip("/")
@@ -677,6 +700,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     )
                     verify_binary(destination, component)
             check_installed(root, lock, component, target)
+            if component == "sdk-rust":
+                clear_orphan_relkit_proto(root)
         resolved = {
             "schema": LOCK_SCHEMA,
             "release": lock["release"],
