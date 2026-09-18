@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,8 +163,14 @@ func TestWaitForHostExit(t *testing.T) {
 func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 	dataDir := t.TempDir()
 	installRoot := t.TempDir()
-	artifact := filepath.Join(t.TempDir(), "app.zip")
-	if err := os.WriteFile(artifact, []byte("payload"), 0o644); err != nil {
+	tree := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tree, "app.exe"), []byte("bin"), 0o644)
+	artifact := filepath.Join(t.TempDir(), "app-payload.zip")
+	if _, err := payload.Build(artifact, payload.BuildOptions{Tree: tree}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(artifact)
+	if err != nil {
 		t.Fatal(err)
 	}
 	st := store{dataDir: dataDir}
@@ -177,8 +184,9 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 		Code:      1,
 		ExpiresAt: timestamppb.New(time.Now().Add(time.Hour)),
 		Files: []*updaterv1.PlannedFile{{
-			Name:       "app.zip",
-			Size:       7,
+			Name:       "app-payload.zip",
+			Kind:       "payload",
+			Size:       info.Size(),
 			LocalPath:  artifact,
 			Downloaded: true,
 		}},
@@ -230,6 +238,42 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 	}
 }
 
+func mustPayloadPlan(t *testing.T, stage, version string, code int64, files map[string][]byte) *updaterv1.UpdatePlan {
+	t.Helper()
+	tree := filepath.Join(stage, "tree-"+version)
+	for rel, body := range files {
+		path := filepath.Join(tree, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(rel, "loom") || strings.HasSuffix(rel, ".exe") {
+			mode = 0o755
+		}
+		if err := os.WriteFile(path, body, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	zipPath := filepath.Join(stage, version+"-payload.zip")
+	if _, err := payload.Build(zipPath, payload.BuildOptions{Tree: tree}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &updaterv1.UpdatePlan{
+		Version: version,
+		Code:    code,
+		Files: []*updaterv1.PlannedFile{{
+			Name:      filepath.Base(zipPath),
+			Kind:      "payload",
+			Size:      info.Size(),
+			LocalPath: zipPath,
+		}},
+	}
+}
+
 func TestBaselineDeletionProtectsModifiedFiles(t *testing.T) {
 	root := t.TempDir()
 	dataDir := t.TempDir()
@@ -270,15 +314,9 @@ func TestBaselineDeletionProtectsModifiedFiles(t *testing.T) {
 func TestVersionedDirAtomicActive(t *testing.T) {
 	root := t.TempDir()
 	stage := t.TempDir()
-	payload := filepath.Join(stage, "unpacked")
-	_ = os.MkdirAll(filepath.Join(payload, "bin"), 0o755)
-	_ = os.WriteFile(filepath.Join(payload, "bin", "app.exe"), []byte("n"), 0o644)
-	// applyVersionedDir unpacks first file; give it a directory tree via non-zip local path dir
-	plan := &updaterv1.UpdatePlan{
-		Version: "1.0.0",
-		Code:    2,
-		Files:   []*updaterv1.PlannedFile{{Name: "app.exe", LocalPath: filepath.Join(payload, "bin", "app.exe")}},
-	}
+	plan := mustPayloadPlan(t, stage, "1.0.0", 2, map[string][]byte{
+		"bin/app.exe": []byte("n"),
+	})
 	sess := &updaterv1.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
@@ -332,14 +370,9 @@ func TestHandleRequestMissingHello(t *testing.T) {
 func TestInstallOnlyLeavesActive(t *testing.T) {
 	root := t.TempDir()
 	stage := t.TempDir()
-	payload := filepath.Join(stage, "unpacked")
-	_ = os.MkdirAll(filepath.Join(payload, "bin"), 0o755)
-	_ = os.WriteFile(filepath.Join(payload, "bin", "app.exe"), []byte("a"), 0o644)
-	first := &updaterv1.UpdatePlan{
-		Version: "1.0.0+1",
-		Code:    1,
-		Files:   []*updaterv1.PlannedFile{{Name: "app.exe", LocalPath: filepath.Join(payload, "bin", "app.exe")}},
-	}
+	first := mustPayloadPlan(t, stage, "1.0.0+1", 1, map[string][]byte{
+		"bin/app.exe": []byte("a"),
+	})
 	sess := &updaterv1.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
@@ -350,12 +383,9 @@ func TestInstallOnlyLeavesActive(t *testing.T) {
 	if err := applyPlan(t.TempDir(), sess, first); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.WriteFile(filepath.Join(payload, "bin", "app.exe"), []byte("b"), 0o644)
-	second := &updaterv1.UpdatePlan{
-		Version: "1.0.1+2",
-		Code:    2,
-		Files:   []*updaterv1.PlannedFile{{Name: "app.exe", LocalPath: filepath.Join(payload, "bin", "app.exe")}},
-	}
+	second := mustPayloadPlan(t, stage, "1.0.1+2", 2, map[string][]byte{
+		"bin/app.exe": []byte("b"),
+	})
 	sess.InstallOnly = true
 	if err := applyPlan(t.TempDir(), sess, second); err != nil {
 		t.Fatal(err)
@@ -404,21 +434,14 @@ func TestPruneKeepsReservedCodes(t *testing.T) {
 func TestVersionedDirKeepsAppBundle(t *testing.T) {
 	root := t.TempDir()
 	stage := t.TempDir()
-	app := filepath.Join(stage, "unpacked", "Loom Editor.app", "Contents", "MacOS")
-	_ = os.MkdirAll(app, 0o755)
-	_ = os.WriteFile(filepath.Join(app, "loom"), []byte("bin"), 0o755)
-	payloadFile := filepath.Join(stage, "unpacked", "marker.bin")
-	_ = os.WriteFile(payloadFile, []byte("x"), 0o644)
-	plan := &updaterv1.UpdatePlan{
-		Version: "0.2.2+21",
-		Code:    21,
-		Files:   []*updaterv1.PlannedFile{{Name: "marker.bin", LocalPath: payloadFile}},
-	}
+	plan := mustPayloadPlan(t, stage, "0.2.2+21", 21, map[string][]byte{
+		"Loom Editor.app/Contents/MacOS/loom": []byte("bin"),
+	})
 	sess := &updaterv1.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
 		Placement:         updaterv1.Placement_PLACEMENT_LIBRARY,
-		ExecutableRelpath: "Contents/MacOS/loom",
+		ExecutableRelpath: "Loom Editor.app/Contents/MacOS/loom",
 		Library:           &updaterv1.LibraryPolicy{Retain: 2},
 	}
 	if err := applyPlan(t.TempDir(), sess, plan); err != nil {

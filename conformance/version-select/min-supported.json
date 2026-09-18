@@ -2,7 +2,7 @@
   "name": "min-supported",
   "description": "验证 minSupported 与 minFrom 的正交性：前者回答『当前版本还能不能继续用』，后者回答『下一跳去哪』。客户端可能同时处于『必须更新』且『只能先升到中间版本』的状态。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 20,

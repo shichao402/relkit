@@ -8,7 +8,13 @@ RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管�
 | `relkit-agent` | `cmd/relkit-agent` | CI 交 staged 树；本机持钥写入数据面 |
 | `relkit-serve` | `cmd/relkit-serve` | Range 下载 + CAS 能力上传 + 孤儿 GC |
 
-当前版本以根目录 [`VERSION.json`](VERSION.json) 为 SSOT（`rup.version/1`）。GitHub Release tag 必须是 `v` + `number`（`x.y.z`）。本仓 `python scripts/deploy/relkit.py build|upgrade` 读该文件，不要另写版本号。RUP 线格式是 **protobuf v2**。
+当前版本以根目录 [`VERSION.json`](VERSION.json) 为 SSOT（`relkit.version/1`）。GitHub Release tag 必须是 `v` + `number`（`x.y.z`）。本仓 `python scripts/deploy/relkit.py build|upgrade` 读该文件，不要另写版本号。RUP 线格式是 **protobuf v2**。
+
+| 标识 | 层 |
+|---|---|
+| `relkit.version/1` | 项目版本文件（`VERSION.json`） |
+| `rup.v2` | 线格式（index / manifest / envelope 等） |
+| `relkit.updater.v1` | 本机 IPC（宿主 ↔ `relkit-updater`） |
 
 曾用过其它语言做过原型；发布工具正式实现就是本仓库的 Go CLI。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。  
 CLI 与 serve 合并决策见 [`docs/adr/0002-one-repo-cli-and-serve.md`](docs/adr/0002-one-repo-cli-and-serve.md)。  
@@ -121,7 +127,6 @@ sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve
 | 协议规范 | [`SPEC.md`](SPEC.md) |
 | 发布工具设计 | [`CLI.md`](CLI.md) |
 | Protobuf 结构 SSOT | [`proto/`](proto/)（Go / Dart：改完跑 `scripts/gen-proto.ps1`；Node：`cd sdk/node && npm run generate`；Rust：构建时用 vendored protoc 生成） |
-| JSON Schema（辅助） | [`schema/`](schema/) |
 | 一致性夹具 | [`conformance/`](conformance/) |
 | 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md) |
 | 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |

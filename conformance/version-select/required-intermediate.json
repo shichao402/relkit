@@ -2,7 +2,7 @@
   "name": "required-intermediate",
   "description": "核心场景：1.2.0 引入了不可跳过的变更（例如配置格式迁移），因此 1.5.0 声明 minFrom=120，强制更旧的客户端先升到 1.2.0。发布方只需填一个整数，多跳升级由客户端算法自动完成。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 7,

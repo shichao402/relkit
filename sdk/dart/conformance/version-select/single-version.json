@@ -2,7 +2,7 @@
   "name": "single-version",
   "description": "边界情况：index 中只有一个版本节点。首次发布时必然出现，实现不得在此崩溃或返回自身。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 1,

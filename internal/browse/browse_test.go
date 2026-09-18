@@ -64,27 +64,33 @@ func TestBuildRendersAllProductsAndChannelsDeterministically(t *testing.T) {
 	}
 }
 
-func TestHumanPagePrefersUserFacingArtifacts(t *testing.T) {
+func TestHumanPageListsAllNonPayloadArtifacts(t *testing.T) {
 	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
 		Product: "dec", Channel: "stable", Version: "1.0.0", Code: 1,
 		Artifacts: []webmeta.Artifact{
-			{ID: "runtime", Filename: "dec-server-linux-amd64", Selectors: map[string]string{"audience": "runtime"}},
-			{ID: "console", Filename: "dec-console-linux-amd64.AppImage", Selectors: map[string]string{"audience": "user"}},
+			{ID: "runtime", Filename: "dec-server-linux-amd64", Kind: "binary", Selectors: map[string]string{"audience": "runtime"}},
+			{ID: "console", Filename: "dec-console-linux-amd64.AppImage", Kind: "installer", Selectors: map[string]string{"audience": "user"}},
+			{ID: "ota", Filename: "dec-payload.zip", Kind: "payload"},
 		},
 	}}})
 	artifacts := catalog.Channels[0].Artifacts
-	if len(artifacts) != 1 || artifacts[0].Filename != "dec-console-linux-amd64.AppImage" {
+	if len(artifacts) != 2 {
 		t.Fatalf("human artifacts = %+v", artifacts)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Kind == "payload" || artifact.Filename == "dec-payload.zip" {
+			t.Fatalf("payload must stay off the human page: %+v", artifacts)
+		}
 	}
 }
 
-func TestHumanPageKeepsLegacyArtifacts(t *testing.T) {
+func TestHumanPageKeepsInstallArtifacts(t *testing.T) {
 	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
 		Product: "old", Channel: "stable", Version: "1.0.0", Code: 1,
-		Artifacts: []webmeta.Artifact{{ID: "legacy", Filename: "old.bin"}},
+		Artifacts: []webmeta.Artifact{{ID: "setup", Filename: "app-setup.exe", Kind: "installer"}},
 	}}})
 	if got := len(catalog.Channels[0].Artifacts); got != 1 {
-		t.Fatalf("legacy artifact count = %d, want 1", got)
+		t.Fatalf("install artifact count = %d, want 1", got)
 	}
 }
 

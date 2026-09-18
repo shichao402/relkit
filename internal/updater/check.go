@@ -210,11 +210,8 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 			})
 		}
 		disposition := updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL
-		if av.Artifact != nil {
-			kind := model.ArtifactKindString(av.Artifact.Kind)
-			if kind == "payload" || kind == "archive" {
-				disposition = updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL
-			}
+		if av.Artifact != nil && model.ArtifactKindString(av.Artifact.Kind) == "payload" {
+			disposition = updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL
 		}
 		return e.emit(&updaterv1.UpdaterEvent{
 			Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{

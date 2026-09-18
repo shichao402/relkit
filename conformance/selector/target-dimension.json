@@ -2,7 +2,7 @@
   "name": "target-dimension",
   "description": "一个版本同时包含多个可独立分发的子目标，取自 HelloKnightRemoteCam 的真实形态（桌面 client 与 Android server 共用一个版本号）。这里用 target 维度表达，替代该项目目前的 client.platforms.macos 固定嵌套结构——新增一个 Linux client 只是多一个数组元素，无需改动 Schema、生成脚本参数与客户端解析代码。同时演示 meta 作为宿主专属逃生舱的用法。",
   "manifest": {
-    "schema": "rup.manifest/1",
+    "schema": "rup.manifest/3",
     "product": "conformance",
     "version": "1.5.0",
     "code": 150,

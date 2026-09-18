@@ -41,7 +41,7 @@ class RequirementsTests(unittest.TestCase):
 
 class SsotTests(unittest.TestCase):
     def test_parses_number_and_tag(self):
-        out = ops.parse_ssot_document('{"schema":"rup.version/1","version":"0.3.20+0"}\n')
+        out = ops.parse_ssot_document('{"schema":"relkit.version/1","version":"0.3.20+0"}\n')
         self.assertEqual(out["number"], "0.3.20")
         self.assertEqual(out["version"], "0.3.20+0")
         self.assertEqual(out["build"], 0)

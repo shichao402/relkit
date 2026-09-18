@@ -2,7 +2,7 @@
   "name": "os-arch",
   "description": "最常见的两维选择：os + arch。同时验证客户端多余的选择器键必须被忽略，以及客户端缺少 artifact 所要求的键时必须不匹配。",
   "manifest": {
-    "schema": "rup.manifest/1",
+    "schema": "rup.manifest/3",
     "product": "conformance",
     "version": "1.5.0",
     "code": 150,

@@ -2,7 +2,7 @@
   "name": "zero-unreachable-warning",
   "description": "1.0.0 声明 minFrom=50，意味着发布方有意放弃 code<50 的极旧客户端（它们必须手动重装）。所有已发布节点之间的链条是完整的，因此这只是警告而非错误。发布方此时应配合 minSupported 明确告知用户。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 8,

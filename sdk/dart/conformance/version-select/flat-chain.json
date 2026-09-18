@@ -2,7 +2,7 @@
   "name": "flat-chain",
   "description": "最简单的情况：所有节点 minFrom 缺省（等价于 0），任何版本都能一跳直达最新。这是 Dec 与 RemoteCam 目前唯一支持的形态。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 3,

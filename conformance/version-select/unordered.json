@@ -2,7 +2,7 @@
   "name": "unordered",
   "description": "versions 数组故意按 code 降序排列。此用例专门捕捉『取候选集中最后一个元素』这一类实现错误——规范要求按 code 取最大值（SPEC.md §9.2 第 3 步）。规范虽建议发布方按升序输出，但客户端禁止依赖数组顺序。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 9,

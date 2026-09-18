@@ -13,8 +13,9 @@ import (
 const (
 	// FileName is the mandatory project version file next to relkit.json.
 	FileName = "VERSION.json"
-	// SchemaID is the required schema marker.
-	SchemaID = "rup.version/1"
+	// SchemaID is the required schema marker for the on-disk project version file.
+	// This is not the RUP wire format (rup.v2).
+	SchemaID = "relkit.version/1"
 )
 
 // Document is the on-disk project version SSOT.
@@ -243,7 +244,9 @@ func parseRaw(raw map[string]any) (*Document, error) {
 		return nil, fmt.Errorf("document must be a JSON object")
 	}
 
-	if schema, _ := raw["schema"].(string); schema == SchemaID {
+	schema, _ := raw["schema"].(string)
+	switch schema {
+	case SchemaID:
 		version, _ := raw["version"].(string)
 		if strings.TrimSpace(version) == "" {
 			return nil, fmt.Errorf("missing required field %q", "version")
@@ -257,38 +260,16 @@ func parseRaw(raw map[string]any) (*Document, error) {
 			Version: parts.String(),
 			Raw:     raw,
 		}, nil
-	}
-
-	// Legacy SvnMergeTool / nested shape: {"app":{"version":"x.y.z+n"}, ...}
-	if app, ok := raw["app"].(map[string]any); ok {
-		version, _ := app["version"].(string)
-		if strings.TrimSpace(version) == "" {
-			return nil, fmt.Errorf("legacy app.version is missing")
+	case "rup.version/1":
+		return nil, fmt.Errorf("%s schema %q is retired; rewrite as %q", FileName, schema, SchemaID)
+	case "":
+		if _, ok := raw["app"].(map[string]any); ok {
+			return nil, fmt.Errorf("%s legacy app.version shape is retired; rewrite as schema %q", FileName, SchemaID)
 		}
-		parts, err := Parse(version)
-		if err != nil {
-			return nil, err
-		}
-		return &Document{
-			Schema:  SchemaID,
-			Version: parts.String(),
-			Raw:     raw,
-		}, nil
+		return nil, fmt.Errorf("%s missing required field %q (want %q)", FileName, "schema", SchemaID)
+	default:
+		return nil, fmt.Errorf("%s schema %q is not supported; want %q", FileName, schema, SchemaID)
 	}
-
-	if version, ok := raw["version"].(string); ok && strings.TrimSpace(version) != "" {
-		parts, err := Parse(version)
-		if err != nil {
-			return nil, err
-		}
-		return &Document{
-			Schema:  SchemaID,
-			Version: parts.String(),
-			Raw:     raw,
-		}, nil
-	}
-
-	return nil, fmt.Errorf("unrecognized %s; expected schema %q with top-level version", FileName, SchemaID)
 }
 
 func digitsOnly(s string) bool {

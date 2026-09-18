@@ -7,7 +7,7 @@
 
 本文定义**发布侧**与**客户端运行时**之间的唯一契约。协议与实现语言无关：发布侧由 [`relkit`](https://github.com/shichao402/relkit) 实现（见 `CLI.md`），客户端运行时由各语言 **SDK**（生成类型 + 手写编排逻辑）实现。双方只通过本文与 `.proto` 定义的 **protobuf 文档**通信。
 
-**v1 JSON 线格式已废弃。** 旧的 `schema/*.json` 仅作历史对照。
+**JSON v1 已删除。** 现行线格式仅为 Protobuf v2（`rup.index/2`、`rup.manifest/3`、`rup.envelope/2` 等）；结构以 [`proto/`](proto/) 为准。
 
 关键词 **必须（MUST）**、**禁止（MUST NOT）**、**应该（SHOULD）**、**可以（MAY）** 按 RFC 2119 解释。凡标注「规范性」的小节，实现必须逐字遵守，否则会与其他实现产生行为分歧。
 
@@ -147,7 +147,7 @@ directory、index 与 fallback 在网络上传输时**必须**包裹在 protobuf
 
 ```json
 {
-  "schema": "rup.index/1",
+  "schema": "rup.index/2",
   "product": "myapp",
   "channel": "stable",
   "sequence": 42,
@@ -163,8 +163,8 @@ directory、index 与 fallback 在网络上传输时**必须**包裹在 protobuf
         "sha256": "a1b2...",
         "size": 1834,
         "urls": [
-          "https://cdn.example.com/manifest/myapp/1.0.0.json",
-          "https://mirror.example.cn/manifest/myapp/1.0.0.json"
+          "https://cdn.example.com/manifest/myapp/1.0.0.pb",
+          "https://mirror.example.cn/manifest/myapp/1.0.0.pb"
         ]
       }
     },

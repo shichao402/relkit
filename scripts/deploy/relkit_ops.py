@@ -405,12 +405,12 @@ def parse_requirements(text: str) -> list[str]:
     return reqs
 
 
-SSOT_SCHEMA = "rup.version/1"
+SSOT_SCHEMA = "relkit.version/1"
 SSOT_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)\+(\d+)$")
 
 
 def parse_ssot_document(text: str) -> dict[str, Any]:
-    """Parse a rup.version/1 VERSION.json body. Number is x.y.z; tag is v{number}."""
+    """Parse a relkit.version/1 VERSION.json body. Number is x.y.z; tag is v{number}."""
     try:
         raw = json.loads(text)
     except json.JSONDecodeError as exc:

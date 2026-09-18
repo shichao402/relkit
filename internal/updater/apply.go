@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,7 +41,7 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 			return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "downloaded file size mismatch")
 		}
 	}
-	if len(plan.Files) == 0 || plan.Files[0].Kind != "" && plan.Files[0].Kind != "payload" && plan.Files[0].Kind != "archive" {
+	if len(plan.Files) == 0 || plan.Files[0].Kind != "payload" {
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "artifact requires the full installation flow")
 	}
 	inst := req.GetRuntime().GetInstall()
@@ -396,80 +395,6 @@ func rollbackJournal(j *updaterv1.ApplyJournal) {
 			_ = os.Rename(ent.BackupPath, ent.DestPath)
 		}
 	}
-}
-
-func unpackLegacyArchive(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) (string, error) {
-	if len(plan.Files) == 0 {
-		return "", fmt.Errorf("plan has no files")
-	}
-	src := plan.Files[0].LocalPath
-	if strings.HasSuffix(strings.ToLower(src), ".zip") {
-		out := filepath.Join(sess.StagedRoot, "unpacked")
-		if err := unzip(src, out); err != nil {
-			return "", err
-		}
-		return out, nil
-	}
-	return filepath.Dir(src), nil
-}
-
-func findAppBundle(root string) string {
-	var found string
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil {
-			return nil
-		}
-		if strings.HasSuffix(info.Name(), ".app") && info.IsDir() {
-			found = path
-			return io.EOF
-		}
-		return nil
-	})
-	return found
-}
-
-func unzip(src, dest string) error {
-	r, err := zip.OpenReader(src)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
-	}
-	for _, f := range r.File {
-		if err := ValidateArtifactFilename(f.Name); err != nil {
-			if strings.HasSuffix(f.Name, "/") {
-				continue
-			}
-			return err
-		}
-		path := filepath.Join(dest, filepath.FromSlash(f.Name))
-		if !strings.HasPrefix(path, filepath.Clean(dest)+string(os.PathSeparator)) && path != filepath.Clean(dest) {
-			return fmt.Errorf("zip path escapes")
-		}
-		if f.FileInfo().IsDir() {
-			_ = os.MkdirAll(path, 0o755)
-			continue
-		}
-		_ = os.MkdirAll(filepath.Dir(path), 0o755)
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		_, err = io.Copy(out, rc)
-		out.Close()
-		rc.Close()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func copyFile(src, dst string) error {

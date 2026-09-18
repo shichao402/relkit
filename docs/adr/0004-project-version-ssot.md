@@ -11,12 +11,12 @@
 
 ```json
 {
-  "schema": "rup.version/1",
+  "schema": "relkit.version/1",
   "version": "1.2.3+45"
 }
 ```
 
-- `schema` 必须为 `rup.version/1`
+- `schema` 必须为 `relkit.version/1`
 - `version` 必须为 `x.y.z+build`（`build` 为非负整数）
 - 其它顶层字段可保留（宿主扩展），但 `version` / `schema` 语义由 relkit 独占
 
@@ -41,10 +41,6 @@ relkit version path
 | 线上 protobuf | Index / Manifest | `version` + `code` |
 
 `relkit stage` / `publish` 在省略版本参数时读取 `VERSION.json`。
-
-### 遗留格式
-
-只读兼容旧的 `{"app":{"version":"..."}}`。任何 `set` / `bump` / `init` 写入都规范化为 `rup.version/1`。
 
 ## 后果
 

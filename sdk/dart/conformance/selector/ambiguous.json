@@ -2,7 +2,7 @@
   "name": "ambiguous",
   "description": "同时验证空 selectors（匹配一切）与多匹配仲裁规则。Windows 客户端会同时匹配到通用产物和 Windows 专用产物，此时必须取 id 字典序最小的那个。仲裁规则被定死而不是『取数组第一个』，是为了让不同语言实现在异常输入下也给出一致结果——注意本用例中数组第一个恰好是错误答案。",
   "manifest": {
-    "schema": "rup.manifest/1",
+    "schema": "rup.manifest/3",
     "product": "conformance",
     "version": "1.5.0",
     "code": 150,

@@ -2,7 +2,7 @@
   "name": "broken-chain",
   "description": "1.5.0 声明 minFrom=120，但不存在任何 code 落在 [120, 150) 区间的中转节点。结果是所有 1.0.0 客户端被永久锁死：它们找不到合法的下一跳，只能手动重装。这正是发布工具必须在写入 index 之前拦截的错误，也是本协议要求可达性校验的根本原因。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 4,

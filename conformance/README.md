@@ -34,7 +34,7 @@
 
 ## 通用规则
 
-1. **禁止补全。** runner **必须**按原样使用用例文件中的 `index` / `manifest` 对象，**禁止**填充缺省字段或改写。用例因此显得冗长（例如每个版本节点都带一个占位 `manifest`），这是有意的：用例文件同时是合法的协议文档，可以直接喂给 `../schema/` 下的 JSON Schema 做二次校验。
+1. **禁止补全。** runner **必须**按原样使用用例文件中的 `index` / `manifest` 对象，**禁止**填充缺省字段或改写。用例因此显得冗长（例如每个版本节点都带一个占位 `manifest`），这是有意的：用例文件同时是合法的协议文档（`rup.index/2` / `rup.manifest/3`）。
 2. **占位值。** 选路与可达性用例不关心 manifest 的实际内容，其 `sha256` 使用可辨识的重复数字（如 64 个 `1`），`urls` 使用 `.invalid` 域名。这些值满足 Schema 但不可解析，从而保证实现不会意外去访问网络。
 3. **节点引用。** 期望结果用 `version` 字符串引用版本节点，而不是数组下标 —— 下标会让「乱序」用例失去意义。
 4. **null 的含义。** `expectTarget: null` 表示 `selectNextTarget` 必须返回空，即「当前没有可达的更新」。
@@ -46,7 +46,7 @@
 {
   "name": "required-intermediate",
   "description": "人类可读的场景说明",
-  "index": { "…完整的 rup.index/1 对象…" },
+  "index": { "…完整的 rup.index/2 对象…" },
   "cases": [
     {
       "currentCode": 100,
@@ -99,7 +99,7 @@
 ```json
 {
   "name": "os-arch",
-  "manifest": { "…完整的 rup.manifest/1 对象…" },
+  "manifest": { "…完整的 rup.manifest/3 对象…" },
   "cases": [
     { "clientSelectors": { "os": "windows", "arch": "x64" }, "expectArtifactId": "app-windows-x64" },
     { "clientSelectors": { "os": "solaris", "arch": "x64" }, "expectArtifactId": null }

@@ -38,7 +38,7 @@ func (e Error) Error() string {
 type AddSpec struct {
 	Path      string
 	PairsText string
-	Track     string // "install" or "payload"; empty is the legacy API
+	Track     string // "install" or "payload"
 }
 
 type Printer func(string)
@@ -261,7 +261,8 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 			}
 		}
 		source := add.Path
-		if add.Track == "payload" {
+		switch add.Track {
+		case "payload":
 			if kind := pairs["kind"]; kind != "" && kind != "payload" {
 				return nil, Error{Message: "--payload kind is always payload"}
 			}
@@ -287,10 +288,12 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 				return nil, Error{Message: err.Error()}
 			}
 			report = append(report, fmt.Sprintf("  payload contains %d file(s), %d script(s)", len(table.Files), len(table.Scripts)))
-		} else if add.Track == "install" {
+		case "install":
 			if pairs["kind"] == "payload" {
 				return nil, Error{Message: "--install cannot use kind=payload"}
 			}
+		default:
+			return nil, Error{Message: fmt.Sprintf("artifact track %q is not supported; use --install or --payload", add.Track)}
 		}
 		artifact, err := BuildArtifact(source, pairs, &report)
 		if err != nil {

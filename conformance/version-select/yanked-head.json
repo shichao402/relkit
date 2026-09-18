@@ -2,7 +2,7 @@
   "name": "yanked-head",
   "description": "最新版本被撤回，可达的最新退回到上一个版本。第三个用例是危险场景：客户端已经装上了被撤回的版本，而没有更新的版本可以救它——此时选路正确地返回 null，宿主应当提示用户当前版本已被撤回，发布方应尽快发布新版本。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 16,

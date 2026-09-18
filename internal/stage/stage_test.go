@@ -48,7 +48,7 @@ func TestRunWritesNormalizedReleasePolicy(t *testing.T) {
 		},
 	}
 
-	if _, err := Run(cfg, "1.0.0", 1, 0, []AddSpec{{Path: artifactPath}}, "", "", "", "", false, nil); err != nil {
+	if _, err := Run(cfg, "1.0.0", 1, 0, []AddSpec{{Path: artifactPath, Track: "install"}}, "", "", "", "", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	policyPath := ReleasePolicyPath(root, "1.0.0")

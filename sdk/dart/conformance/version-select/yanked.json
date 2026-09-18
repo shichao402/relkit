@@ -2,7 +2,7 @@
   "name": "yanked",
   "description": "1.3.0 发布后发现严重缺陷被撤回，但节点必须保留在数组中（1.5.0 的 minFrom 语义与客户端可能正运行在该版本上都依赖它的存在）。被撤回的节点禁止作为升级目标。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 15,

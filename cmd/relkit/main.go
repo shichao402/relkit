@@ -763,7 +763,7 @@ func parseStageArgs(args []string) (*stageArgs, error) {
 			opts.notesURL = mustValue(args, i, "--notes-url")
 		case arg == "--link":
 			opts.link = true
-		case arg == "--install" || arg == "--payload" || arg == "--add":
+		case arg == "--install" || arg == "--payload":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("%s requires a path", arg)
 			}
@@ -774,10 +774,8 @@ func parseStageArgs(args []string) (*stageArgs, error) {
 				pairs = args[i+1]
 				i++
 			}
-			track := ""
-			if arg == "--install" {
-				track = "install"
-			} else if arg == "--payload" {
+			track := "install"
+			if arg == "--payload" {
 				track = "payload"
 			}
 			opts.adds = append(opts.adds, stage.AddSpec{Path: pathValue, PairsText: pairs, Track: track})

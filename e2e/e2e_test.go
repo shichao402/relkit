@@ -61,8 +61,8 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "demoapp-1.0.0-mac-arm64.zip", "mac 1.0.0 ", 64)
 	stageOut := runRelkit(t, exe, project, nil, 0,
 		"stage", "1.0.0+100",
-		"--add", filepath.Join(dist, "demoapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
-		"--add", filepath.Join(dist, "demoapp-1.0.0-mac-arm64.zip"), "os=macos,arch=arm64",
+		"--install", filepath.Join(dist, "demoapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "demoapp-1.0.0-mac-arm64.zip"), "os=macos,arch=arm64",
 	)
 	assertContains(t, stageOut, "windows-x64")
 	assertContains(t, stageOut, "kind inferred as archive")
@@ -113,7 +113,7 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "demoapp-1.0.1-dev-win-x64.zip", "dev 1.0.1 ", 64)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.0.1+101", "--channel", "beta",
-		"--add", filepath.Join(dist, "demoapp-1.0.1-dev-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "demoapp-1.0.1-dev-win-x64.zip"), "os=windows,arch=x64",
 	)
 	runRelkit(t, exe, project, nil, 0, "publish", "1.0.1+101")
 	afterBeta, err := os.ReadFile(filepath.Join(project, "dist", "publish", "latest", "demoapp", "stable.json"))
@@ -141,7 +141,7 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "demoapp-1.1.0-win-x64.zip", "win 1.1.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.1.0+110",
-		"--add", filepath.Join(dist, "demoapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "demoapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	runRelkit(t, exe, project, nil, 0, "publish", "1.1.0+110")
 
@@ -149,8 +149,8 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "demoapp-1.5.0-mac-arm64.zip", "mac 1.5.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.5.0+150", "--min-from", "110", "--notes", "config format changed",
-		"--add", filepath.Join(dist, "demoapp-1.5.0-win-x64.zip"), "os=windows,arch=x64",
-		"--add", filepath.Join(dist, "demoapp-1.5.0-mac-arm64.zip"), "os=macos,arch=arm64",
+		"--install", filepath.Join(dist, "demoapp-1.5.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "demoapp-1.5.0-mac-arm64.zip"), "os=macos,arch=arm64",
 	)
 	simulated := runRelkit(t, exe, project, nil, 0, "simulate", "--with-staged", "1.5.0+150", "--from", "all")
 	assertContains(t, simulated, "1.5.0")
@@ -177,7 +177,7 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "demoapp-2.0.0-win-x64.zip", "win 2.0.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "2.0.0+200", "--min-from", "190",
-		"--add", filepath.Join(dist, "demoapp-2.0.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "demoapp-2.0.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	stranding := runRelkit(t, exe, project, nil, 2, "publish", "2.0.0+200", "--dry-run")
 	assertContains(t, stranding, "unreachable")
@@ -193,7 +193,7 @@ func TestCLIEndToEndRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "demoapp-0.9.0-win-x64.zip", "win 0.9.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "0.9.0+90",
-		"--add", filepath.Join(dist, "demoapp-0.9.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "demoapp-0.9.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	rollback := runRelkit(t, exe, project, nil, 2, "publish", "0.9.0+90", "--dry-run")
 	assertContains(t, rollback, "not greater than the highest existing code")
@@ -242,14 +242,14 @@ func TestPublishRetainVersionsTrimsIndex(t *testing.T) {
 	writeArtifact(t, dist, "a.zip", "a ", 32)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.0.0+100",
-		"--add", filepath.Join(dist, "a.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "a.zip"), "os=windows,arch=x64",
 	)
 	runRelkit(t, exe, project, nil, 0, "publish", "1.0.0+100")
 
 	writeArtifact(t, dist, "b.zip", "b ", 32)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "2.0.0+200",
-		"--add", filepath.Join(dist, "b.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "b.zip"), "os=windows,arch=x64",
 	)
 	out := runRelkit(t, exe, project, nil, 0, "publish", "2.0.0+200")
 	assertContains(t, out, "retainVersions=1")
@@ -290,7 +290,7 @@ func TestRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "servedapp-1.0.0-win-x64.zip", "served 1.0.0 ", 30000)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.0.0+100",
-		"--add", filepath.Join(dist, "servedapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "servedapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	runRelkit(t, exe, project, env, 0, "publish", "1.0.0+100")
 	out := runRelkit(t, exe, project, env, 0, "verify", "--deep")
@@ -299,7 +299,7 @@ func TestRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "servedapp-1.1.0-win-x64.zip", "served 1.1.0 ", 30000)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.1.0+110",
-		"--add", filepath.Join(dist, "servedapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "servedapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	runRelkit(t, exe, project, env, 0, "publish", "1.1.0+110")
 	out = runRelkit(t, exe, project, env, 0, "verify", "--deep")
@@ -308,7 +308,7 @@ func TestRelkitCompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "servedapp-1.2.0-win-x64.zip", "served 1.2.0 ", 64)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.2.0+120",
-		"--add", filepath.Join(dist, "servedapp-1.2.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "servedapp-1.2.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	missingToken := runRelkit(t, exe, project, nil, 2, "publish", "1.2.0+120")
 	assertContains(t, missingToken, "RELKIT_UPLOAD_TOKEN")
@@ -350,7 +350,7 @@ func TestS3CompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "cosapp-1.0.0-win-x64.zip", "cos 1.0.0 ", 4096)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.0.0+100",
-		"--add", filepath.Join(dist, "cosapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "cosapp-1.0.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	runRelkit(t, exe, project, env, 0, "publish", "1.0.0+100")
 	out := runRelkit(t, exe, project, env, 0, "verify", "--deep")
@@ -359,7 +359,7 @@ func TestS3CompatibleBackend(t *testing.T) {
 	writeArtifact(t, dist, "cosapp-1.1.0-win-x64.zip", "cos 1.1.0 ", 4096)
 	runRelkit(t, exe, project, nil, 0,
 		"stage", "1.1.0+110",
-		"--add", filepath.Join(dist, "cosapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
+		"--install", filepath.Join(dist, "cosapp-1.1.0-win-x64.zip"), "os=windows,arch=x64",
 	)
 	denied := runRelkit(t, exe, project, nil, 2, "publish", "1.1.0+110")
 	assertContains(t, denied, "COS_SECRET_ID")

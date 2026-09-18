@@ -2,7 +2,7 @@
   "name": "valid",
   "description": "合法的链条：每个已发布版本都能最终到达 head，从 code=0 出发也能起步。这是发布工具应当放行的形态。",
   "index": {
-    "schema": "rup.index/1",
+    "schema": "rup.index/2",
     "product": "conformance",
     "channel": "stable",
     "sequence": 7,

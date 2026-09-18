@@ -138,30 +138,17 @@ func productFromData(input ProductData) Product {
 	return page
 }
 
-// humanArtifacts keeps runtime-only artifacts in the signed protocol while
-// removing them from the unsigned page once a release declares user downloads.
+// humanArtifacts lists every non-payload artifact. Payload stays in the signed
+// protocol for in-app updates; hide a package from the page by not publishing it.
 func humanArtifacts(all []webmeta.Artifact) []webmeta.Artifact {
-	var userFacing []webmeta.Artifact
+	out := make([]webmeta.Artifact, 0, len(all))
 	for _, artifact := range all {
 		if artifact.Kind == "payload" {
 			continue
 		}
-		if artifact.Selectors["audience"] == "user" {
-			userFacing = append(userFacing, artifact)
-		}
+		out = append(out, artifact)
 	}
-	if len(userFacing) > 0 {
-		return userFacing
-	}
-	// Old releases have no audience selector. Preserve their existing page
-	// rather than rendering an empty product.
-	var compatible []webmeta.Artifact
-	for _, artifact := range all {
-		if artifact.Kind != "payload" {
-			compatible = append(compatible, artifact)
-		}
-	}
-	return compatible
+	return out
 }
 
 func channelRank(name string) string {

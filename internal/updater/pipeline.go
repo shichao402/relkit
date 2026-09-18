@@ -33,8 +33,7 @@ func planRequiresHostExit(inst *updaterv1.InstallSpec, plan *updaterv1.UpdatePla
 	}
 	first := plan.Files[0]
 	if first.Kind != "payload" {
-		// Legacy archives retain their historical stop-the-host behavior.
-		return true, nil
+		return false, fmt.Errorf("artifact requires the full installation flow")
 	}
 	table, err := payload.Validate(first.LocalPath)
 	if err != nil {
@@ -75,61 +74,14 @@ func prepareContent(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePl
 		return nil, fmt.Errorf("plan has no files")
 	}
 	first := plan.Files[0]
-	if first.Kind == "payload" {
-		pkg, err := payload.Extract(first.LocalPath, filepath.Join(sess.StagedRoot, "payload"))
-		if err != nil {
-			return nil, err
-		}
-		return &applyContent{table: pkg.Table, filesRoot: pkg.FilesRoot, scriptsRoot: pkg.ScriptsRoot}, nil
+	if first.Kind != "payload" {
+		return nil, fmt.Errorf("artifact requires the full installation flow")
 	}
-	root, err := unpackLegacyArchive(sess, plan)
+	pkg, err := payload.Extract(first.LocalPath, filepath.Join(sess.StagedRoot, "payload"))
 	if err != nil {
 		return nil, err
 	}
-	if app := findAppBundle(root); app != "" {
-		root = app
-	}
-	table, err := synthesizeTable(root)
-	if err != nil {
-		return nil, err
-	}
-	return &applyContent{table: table, filesRoot: root}, nil
-}
-
-func synthesizeTable(root string) (*updaterv1.FileTable, error) {
-	table := &updaterv1.FileTable{Schema: payload.Schema}
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == root || info.IsDir() {
-			return nil
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("opaque archive contains unsupported symlink %s", path)
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if err := payload.CheckRelpath(rel); err != nil {
-			return err
-		}
-		digest, size, err := model.Sha256File(path)
-		if err != nil {
-			return err
-		}
-		table.Files = append(table.Files, &updaterv1.FileEntry{
-			Relpath: rel,
-			Size:    size,
-			Sha256:  digest,
-			Mode:    uint32(info.Mode().Perm()),
-		})
-		return nil
-	})
-	sort.Slice(table.Files, func(i, j int) bool { return table.Files[i].Relpath < table.Files[j].Relpath })
-	return table, err
+	return &applyContent{table: pkg.Table, filesRoot: pkg.FilesRoot, scriptsRoot: pkg.ScriptsRoot}, nil
 }
 
 func applyLibraryContent(dataDir string, sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan, content *applyContent) error {
