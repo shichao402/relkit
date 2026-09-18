@@ -97,7 +97,7 @@ func TestAgentStagedAndPublishDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := 1
-	if _, err := stage.Run(relkitCfg, "1.0.0", code, 0, []stage.AddSpec{{Path: art, PairsText: "id=app,kind=binary"}}, "stable", "", "", "", false, func(string) {}); err != nil {
+	if _, err := stage.Run(relkitCfg, "1.0.0", code, 0, []stage.AddSpec{{Path: art, PairsText: "id=app,kind=binary", Track: "install"}}, "stable", "", "", "", false, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := config.ExtractPublishProfile(relkitCfg)
@@ -446,7 +446,7 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 	if err := os.WriteFile(art, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stage.Run(relkitCfg, opts.version, 1, 0, []stage.AddSpec{{Path: art, PairsText: "id=app,kind=binary"}}, "stable", "", "", "", false, func(string) {}); err != nil {
+	if _, err := stage.Run(relkitCfg, opts.version, 1, 0, []stage.AddSpec{{Path: art, PairsText: "id=app,kind=binary", Track: "install"}}, "stable", "", "", "", false, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 
