@@ -361,6 +361,18 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
         ),
         not lock_facts or "releaseRelation" in lock_facts,
     )
+    intake = callable(globals().get("cmd_retrospect_note"))
+    check(
+        "retrospect-session-intake",
+        host_path,
+        "retrospect accepts conversation findings that expire a previous verified",
+        (
+            "cmd_retrospect_note records session findings into the ops journal"
+            if intake
+            else "undigested can only ever be filled by failed commands"
+        ),
+        intake,
+    )
 
     skill_paths = _retrospect_skill_paths(root)
     if not skill_paths:
@@ -455,23 +467,34 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
 def _impl_classify_ops_journal(
     root: Path,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
-    seen: list[str] = []
+    seen: dict[str, dict[str, Any]] = {}
     for row in load_ops_journal(root):
         code = str(row.get("code") or "").strip()
         if not code or code == "unclassified" or code in seen:
             continue
-        seen.append(code)
+        seen[code] = row
     encountered: list[dict[str, str]] = []
     digested: list[dict[str, str]] = []
     undigested: list[dict[str, str]] = []
     journal = ".relkit/cache/ops-journal.jsonl"
-    for code in seen:
+    for code, row in seen.items():
+        # A session note describes something only a human or agent saw, so the
+        # message is the evidence; a command failure is identified by its code.
+        session = str(row.get("source") or "") == "session"
+        if session:
+            expected = (
+                "session finding must be digested into the relkit script, skill or tests"
+            )
+            actual = f"{row.get('class') or 'generic'}: {row.get('message') or code}"
+        else:
+            expected = "issue class already digested into host.py or skill"
+            actual = code
         item = _retrospect_item(
             "landed" if code in DIGESTED_ISSUE_CODES else "todo",
             f"ops-journal:{code}",
             journal,
-            "issue class already digested into host.py or skill",
-            code,
+            expected,
+            actual,
         )
         encountered.append(item)
         if code in DIGESTED_ISSUE_CODES:
@@ -479,6 +502,55 @@ def _impl_classify_ops_journal(
         else:
             undigested.append(item)
     return encountered, digested, undigested
+
+def _impl_cmd_retrospect_note(root: Path, code: str, kind: str, text: str) -> int:
+    """Record a conversation finding so the mechanical gate can refuse to pass.
+
+    retrospect only reads files and failed commands, so a step that exited 0 but
+    delivered the wrong thing leaves no trace. Without this intake the undigested
+    group can never be filled from conversation evidence, and a previous verified
+    would survive a user correction that invalidated it.
+    """
+    normalized = re.sub(r"[^a-z0-9-]+", "-", str(code or "").strip().lower()).strip("-")
+    if not normalized:
+        raise Fail(
+            "retrospect note needs --code as a short issue class, for example lock-behind-upstream",
+            code="retrospect-note-code-invalid",
+        )
+    if kind not in RETROSPECT_NOTE_CLASSES:
+        raise Fail(
+            "retrospect note --class must be one of " + "/".join(RETROSPECT_NOTE_CLASSES),
+            code="retrospect-note-class-invalid",
+        )
+    if not str(text or "").strip():
+        raise Fail(
+            "retrospect note needs --text stating 现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动",
+            code="retrospect-note-text-missing",
+        )
+    cache_dir(root).mkdir(parents=True, exist_ok=True)
+    entry = {
+        "schema": OPS_JOURNAL_SCHEMA,
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cmd": "retrospect note",
+        "code": normalized,
+        "source": "session",
+        "class": kind,
+        "message": redact_text(str(text).strip()),
+    }
+    with ops_journal_path(root).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    state = load_state(root)
+    set_step(
+        state,
+        "ops.retrospect",
+        "stale",
+        "relkit_host.py retrospect",
+        f"session finding {normalized} is undigested",
+    )
+    save_state(root, state)
+    print(f"recorded {normalized} ({kind}) as a session finding")
+    print("ops.retrospect is stale; retrospect fails until this class is digested")
+    return 0
 
 def _impl__retrospect_line(item: dict[str, str]) -> str:
     return (
@@ -534,6 +606,7 @@ _IMPLEMENTATIONS = {
     "_retrospect_item": _impl__retrospect_item,
     "retrospect_report": _impl_retrospect_report,
     "classify_ops_journal": _impl_classify_ops_journal,
+    "cmd_retrospect_note": _impl_cmd_retrospect_note,
     "_retrospect_line": _impl__retrospect_line,
     "retrospect_failures": _impl_retrospect_failures,
     "print_retrospect_report": _impl_print_retrospect_report,

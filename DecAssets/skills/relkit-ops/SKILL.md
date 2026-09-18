@@ -56,6 +56,7 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - publish profile 的字段归属：`baseUrl` 属产品（进签名 manifest 的客户端下载地址，以产品仓 `relkit.json` 为准）；`uploadUrl` 与 `tokenEnv` 属箱子（agent 自己的写入端点与 systemd 喂给它的凭据变量，本形态是 `RELKIT_SERVE_TOKEN`）。CI 的 `RELKIT_UPLOAD_TOKEN` 只到 agent HTTP API 为止，不在 agent 进程环境里，别把它填进 profile。`agent provision` 会从箱上已装 profile 继承箱上字段，不要手改远端 profile 绕过它。
 - 远端版本：`versionRelation=behind` 且 `onPublishRoute=true` 时先升级远端（relkit 仓 `relkit-deploy`）；若 `onPublishRoute=false`，明确告诉用户它落后但不阻塞当前产品发布。
 - 失败记账：带 `code=` 的 `Fail` 写入 `.relkit/cache/ops-journal.jsonl`（`unclassified` 不记）。`retrospect` 输出本次遇到 / 已修进脚本或 skill / 未消化；未消化非 0。
+- 会话结论记账：命令全部退出 0 时 journal 是空的，`本次遇到` 只会是「无」。所以复盘结论必须用 `retrospect note --code <类名> --class generic|product|agent --text "现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动"` 落盘。它把该项记成未消化并把 `ops.retrospect` 打回 `stale`，`retrospect` 随之非 0——这是唯一能让「命令成功但交付结果不对」挡住完成宣告的机制。
 
 ## 完成后：先复盘会话，再跑机械闸门
 
@@ -84,6 +85,11 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 复盘输出必须写清「现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动」。
 只重复「应该有更新说明」「应该测试权限」这类已知目标，不算流程优化。
 发现新的通用缺口但本次不能落地时，必须明确列为未消化，不能宣称运维流程完成。
+
+复盘结论只写在回话里等于没记账：`retrospect` 读不到对话。每一项都要
+`retrospect note --code <类名> --class generic|product|agent --text "<四段结论>"`，
+落盘后 `ops.retrospect` 变 `stale`、`retrospect` 非 0，直到该类被修进脚本 / skill /
+测试并进入已消化集合。
 
 会话复盘完成后，运行 `python scripts/host/relkit_host.py retrospect`，再运行
 `status` 检查 `ops.retrospect` 已是 `verified`。若之后用户验收又暴露新问题，

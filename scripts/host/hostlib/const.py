@@ -138,6 +138,11 @@ ONBOARD_INTENTS = ("fresh", "reconfigure", "upgrade")
 # reference, so inspect resolves it once an hour and caches the answer.
 UPSTREAM_LATEST_TTL = 3600
 
+# retrospect can only read files and command failures, so a finding that only a
+# human or agent observed needs its own intake. The class decides where the fix
+# belongs, mirroring the skill's conversation-retrospect split.
+RETROSPECT_NOTE_CLASSES = ("generic", "product", "agent")
+
 BATCH_DECISION_STEPS = tuple(
     step for step in DECISION_STEPS if step not in ("repo.root", "env.inspect")
 )
@@ -174,6 +179,9 @@ DIGESTED_ISSUE_CODES = frozenset(
         "sidecar-universal-not-darwin",
         "sidecar-universal-missing-attachment",
         "sidecar-universal-lipo-failed",
+        "retrospect-note-code-invalid",
+        "retrospect-note-class-invalid",
+        "retrospect-note-text-missing",
     }
 )
 

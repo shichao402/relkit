@@ -2112,6 +2112,55 @@ class InspectAndJournalTests(unittest.TestCase):
             self.assertEqual(host.load_ops_journal(root), [])
 
 
+class SessionFindingTests(unittest.TestCase):
+    """A step can exit 0 and still deliver the wrong thing."""
+
+    def test_note_is_undigested_and_expires_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state = host.default_state(root)
+            host.set_step(state, "ops.retrospect", "verified", "relkit_host.py retrospect")
+            host.save_state(root, state)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    host.cmd_retrospect_note(
+                        root, "Lock-Behind-Upstream", "generic", "现状全绿但 lock 落后"
+                    ),
+                    0,
+                )
+            self.assertEqual(
+                host.load_state(root)["steps"]["ops.retrospect"]["status"], "stale"
+            )
+            report = io.StringIO()
+            with redirect_stdout(report):
+                code = host.cmd_retrospect(root)
+            self.assertEqual(code, 1)
+            self.assertIn("ops-journal:lock-behind-upstream", report.getvalue())
+            self.assertIn("现状全绿但 lock 落后", report.getvalue())
+
+    def test_note_validates_its_own_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            for code, args in (
+                ("retrospect-note-code-invalid", ("///", "generic", "text")),
+                ("retrospect-note-class-invalid", ("gap", "cosmetic", "text")),
+                ("retrospect-note-text-missing", ("gap", "generic", "  ")),
+            ):
+                with self.assertRaises(host.Fail) as raised:
+                    host.cmd_retrospect_note(root, *args)
+                self.assertEqual(raised.exception.code, code)
+
+    def test_intake_is_a_registered_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            checks = {
+                item["check"]: item
+                for item in host.retrospect_report(root)["groups"]["landed"]
+            }
+            self.assertIn("retrospect-session-intake", checks)
+
+
 class LockCurrencyTests(unittest.TestCase):
     """Every local hash agrees with itself, so staleness needs an outside reference."""
 

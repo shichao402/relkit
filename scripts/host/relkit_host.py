@@ -222,6 +222,7 @@ from hostlib.retrospect import (
     _retrospect_skill_paths,
     _retrospect_item,
     retrospect_report,
+    cmd_retrospect_note,
     classify_ops_journal,
     _retrospect_line,
     retrospect_failures,
@@ -283,6 +284,15 @@ def build_parser() -> argparse.ArgumentParser:
         "retrospect", help="run the final non-interactive ops consistency gate"
     )
     retrospect.add_argument("--json", action="store_true")
+    retrospect_sub = retrospect.add_subparsers(dest="retrospect_cmd")
+    retrospect_note = retrospect_sub.add_parser(
+        "note", help="record a conversation finding the mechanical gate cannot see"
+    )
+    retrospect_note.add_argument("--code", required=True)
+    retrospect_note.add_argument(
+        "--class", dest="note_class", required=True, choices=list(RETROSPECT_NOTE_CLASSES)
+    )
+    retrospect_note.add_argument("--text", required=True)
     upgrade = sub.add_parser("upgrade", help="rewrite lock to a GitHub release and install")
     upgrade.add_argument("release")
 
@@ -405,6 +415,8 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
     if args.cmd == "sidecar":
         return cmd_sidecar_universal(root, Path(args.out))
     if args.cmd == "retrospect":
+        if getattr(args, "retrospect_cmd", None) == "note":
+            return cmd_retrospect_note(root, args.code, args.note_class, args.text)
         return cmd_retrospect(root, args.json)
     if args.cmd == "upgrade":
         return cmd_upgrade(root, args.release)
