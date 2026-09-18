@@ -185,6 +185,8 @@ DIGESTED_ISSUE_CODES = frozenset(
         "consume-stale-proto-shadow",
         "ci-zip-as-full-install",
         "host-ignore-full-install-disposition",
+        "lock-latest-cache-stale",
+        "dec-publish-not-in-ci",
     }
 )
 

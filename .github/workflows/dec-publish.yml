@@ -1,0 +1,54 @@
+name: Publish Dec provides
+
+# DecAssets can land on main without a GitHub Release tag. Tag-only publish
+# (release.yml) leaves consumers on the previous Dec registry version until the
+# next v* tag. Push to main when assets or VERSION change so registry tracks
+# VERSION.json without waiting for a full artifact release.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "DecAssets/**"
+      - "VERSION.json"
+      - ".dec/config.yaml"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve Dec provide ref from VERSION.json
+        id: ver
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          doc = json.loads(Path("VERSION.json").read_text(encoding="utf-8"))
+          version = str(doc.get("version") or "")
+          if "+" not in version:
+              raise SystemExit(f"VERSION.json version must be x.y.z+build, got {version!r}")
+          number, build = version.split("+", 1)
+          # Zero builds share the release tag shape; non-zero builds keep +build
+          # so DecAssets-only bumps stay distinct from the last GitHub Release.
+          ref = f"v{number}" if build == "0" else f"v{version}"
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as handle:
+              handle.write(f"ref={ref}\n")
+              handle.write(f"version={version}\n")
+          print(f"ref={ref} version={version}")
+          PY
+      - name: Publish Dec provides
+        uses: shichao402/Dec/.github/actions/publish-provides@32c2705f859266e7ddacf5ea435d3e26e691ccf0
+        with:
+          project-root: ${{ github.workspace }}
+          ref: ${{ steps.ver.outputs.ref }}
+          registry-ssh-key: ${{ secrets.DEC_REGISTRY_SSH_KEY }}
+      - name: Record published VERSION for logs
+        run: |
+          echo "Published Dec provides ref=${{ steps.ver.outputs.ref }} from VERSION.json=${{ steps.ver.outputs.version }}"
+          test -n "${{ steps.ver.outputs.ref }}"
+          test -n "${{ steps.ver.outputs.version }}"

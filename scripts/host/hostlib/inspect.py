@@ -80,13 +80,27 @@ def _impl_upstream_latest_release(root: Path) -> str:
     budget with release downloads, so the tag comes from the redirect that
     /releases/latest answers with. A network failure must leave inspect usable,
     so it degrades to an unknown relation instead of a finding.
+
+    The TTL cache is also invalidated when the pinned lock.release is newer than
+    the cached latest: a just-published tag can otherwise look stale for up to
+    an hour even though the lock already advanced.
     """
     cached_path = cache_dir(root) / "upstream-latest.json"
     now = datetime.now(timezone.utc).timestamp()
     try:
         cached = load_json(cached_path)
         if now - float(cached.get("checkedAt") or 0) < UPSTREAM_LATEST_TTL:
-            return str(cached.get("release") or "")
+            cached_release = str(cached.get("release") or "")
+            lock_path = root / "scripts" / "relkit.lock.json"
+            try:
+                locked = _release_tuple(load_json(lock_path).get("release"))
+                newest_cached = _release_tuple(cached_release)
+                if locked and newest_cached and locked > newest_cached:
+                    pass  # lock already past cache; refetch
+                else:
+                    return cached_release
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                return cached_release
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         pass
     url = f"https://github.com/{GITHUB_REPO}/releases/latest"
