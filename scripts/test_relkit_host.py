@@ -2752,6 +2752,33 @@ class UpdaterGateTests(unittest.TestCase):
             host.run_gates(root, self.state(root, "node"), drift)
             self.assertFalse(any("CI payload track" in item for item in drift))
 
+    def test_internal_apply_accepts_ci_release_pack_script(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src").mkdir()
+            (root / "src/update.ts").write_text(
+                'import "@relkit/updater-bindings";\nupdater.apply(planId);\n',
+                encoding="utf-8",
+            )
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "release": {"packScript": "scripts/pack.mjs"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            script = root / "scripts/ci_win_release.cmd"
+            script.parent.mkdir(parents=True)
+            script.write_text(
+                "python scripts\\host\\relkit_host.py ci release --channel dev --execute\n",
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertFalse(any("CI payload track" in item for item in drift))
+
     def test_check_only_host_does_not_require_payload_track(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

@@ -250,6 +250,8 @@ def internal_update_two_track(root: Path, state: dict[str, Any], drift: list[str
             "scripts/*.py",
             "scripts/*.sh",
             "scripts/*.ps1",
+            "scripts/*.cmd",
+            "scripts/*.bat",
         )
         for path in root.glob(pattern)
         if path.is_file()
@@ -258,11 +260,28 @@ def internal_update_two_track(root: Path, state: dict[str, Any], drift: list[str
         path.read_text(encoding="utf-8", errors="ignore")
         for path in ci_files
     )
-    if "--payload" not in ci_text:
-        drift.append(
-            "internal updater apply requires a CI payload track paired with "
-            "the full-install selectors (--payload is missing)"
+    # Legacy products hand-stage both tracks; new products declare
+    # release.packScript and call `ci release`, which always stages payload.
+    config_path = root / "relkit.json"
+    release_pack = False
+    if config_path.is_file():
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            config = {}
+        release = config.get("release") if isinstance(config, dict) else None
+        release_pack = (
+            isinstance(release, dict)
+            and bool(str(release.get("packScript") or "").strip())
         )
+    if "--payload" in ci_text:
+        return
+    if release_pack and "ci release" in ci_text:
+        return
+    drift.append(
+        "internal updater apply requires a CI payload track paired with "
+        "the full-install selectors (--payload is missing)"
+    )
 
 
 @gate("webview-projection")
