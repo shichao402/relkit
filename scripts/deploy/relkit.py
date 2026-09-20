@@ -396,6 +396,17 @@ def host_scripts_tree_sha256(entries: Sequence[tuple[Path, str]]) -> str:
     return digest.hexdigest()
 
 
+def host_release_contract() -> dict[str, Any]:
+    path = REPO_ROOT / "scripts" / "host" / "release-contract.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        die(f"cannot read {path}: {error}")
+    if not isinstance(value, dict) or value.get("schema") != "relkit.host-contract/1":
+        die(f"{path} must use relkit.host-contract/1")
+    return value
+
+
 def cmd_build(args: argparse.Namespace) -> None:
     require_cmd("go")
     out_dir = Path(args.out)
@@ -428,6 +439,16 @@ def cmd_build(args: argparse.Namespace) -> None:
         die("no build platforms left after --os/--arch filters")
     pkgs = {row.name: (row.go_package, row.binary_prefix) for row in binary_rows}
     step(f"build {stamp}")
+    contract = host_release_contract()
+    ipc_min, ipc_max = updater_ipc_window()
+    if contract.get("updaterIpc") != {"min": ipc_min, "max": ipc_max}:
+        die(
+            "scripts/host/release-contract.json updaterIpc does not match "
+            "internal/updater/const.go"
+        )
+    protocol = contract.get("protocol")
+    if not isinstance(protocol, dict):
+        die("scripts/host/release-contract.json protocol must be an object")
     built: list[dict[str, Any]] = []
     for kind in targets:
         pkg, prefix = pkgs[kind]
@@ -466,14 +487,13 @@ def cmd_build(args: argparse.Namespace) -> None:
             }
         )
     ident = git_identity()
-    ipc_min, ipc_max = updater_ipc_window()
     manifest = {
         "schema": "relkit.release/1",
         "version": stamp,
         "commit": ident["commit"],
         "dirty": ident["dirty"] == "true",
-        "minProtocol": 2,
-        "maxProtocol": 2,
+        "minProtocol": protocol.get("min"),
+        "maxProtocol": protocol.get("max"),
         "minUpdaterIpc": ipc_min,
         "maxUpdaterIpc": ipc_max,
         "builtAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

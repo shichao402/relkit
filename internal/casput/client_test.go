@@ -104,8 +104,7 @@ func TestPutUploadsCASAndThinStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Put(context.Background(), Options{
-		Root: root, Product: "demo", Version: version, URL: server.URL, Token: "token",
-		HTTPClient: server.Client(),
+		Root: root, Product: "demo", Version: version,
 	})
 	if err == nil || !strings.Contains(err.Error(), "no longer matches staged.pb") {
 		t.Fatalf("changed artifact err=%v", err)

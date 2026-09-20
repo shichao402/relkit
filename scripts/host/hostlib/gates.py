@@ -31,6 +31,20 @@ HOST_ENTRY_SIGNAL = re.compile(r"relkit_host\.py|relkit_consume\.py")
 CONSUMER_IMPORT = re.compile(r"^[ \t]*(?:import|from)[ \t]+relkit_consume\b", re.M)
 RETIRED_CONSUMER_PATH = re.compile(r"scripts[/\\]relkit_consume\.py")
 INTERNAL_APPLY_CALL = re.compile(r"\bapply\s*\(", re.I)
+REMOVED_STAGE_FLAGS = {"--add": "--install"}
+PACKAGING_PATTERNS = (
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    "ci/*.yml",
+    "ci/*.yaml",
+    "scripts/*.js",
+    "scripts/*.mjs",
+    "scripts/*.py",
+    "scripts/*.sh",
+    "scripts/*.ps1",
+    "scripts/*.cmd",
+    "scripts/*.bat",
+)
 
 
 def gate(name: str) -> Callable[[Gate], Gate]:
@@ -101,6 +115,61 @@ def _entry_files(root: Path) -> list[Path]:
         and not any(part.startswith(".") for part in path.relative_to(root).parts[:-1])
         and not path.relative_to(root).as_posix().startswith("scripts/host/")
     ]
+
+
+def _packaging_files(root: Path) -> list[Path]:
+    return [
+        path
+        for pattern in PACKAGING_PATTERNS
+        for path in root.glob(pattern)
+        if path.is_file()
+        and not path.relative_to(root).as_posix().startswith("scripts/host/")
+    ]
+
+
+@gate("stage-cli-flags")
+def stage_cli_flags(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    """Reject removed relkit stage flags in packaging entrypoints only."""
+    for path in _packaging_files(root):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "relkit" not in text or "stage" not in text:
+            continue
+        relative = path.relative_to(root).as_posix()
+        for removed, replacement in REMOVED_STAGE_FLAGS.items():
+            if re.search(
+                rf"(?<![A-Za-z0-9_-]){re.escape(removed)}(?![A-Za-z0-9_-])",
+                text,
+            ):
+                drift.append(
+                    f"removed relkit stage flag {removed} in {relative}; "
+                    f"use {replacement}"
+                )
+
+
+@gate("release-lock-contract")
+def release_lock_contract(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    """The installed target scripts must agree with the lock they just wrote."""
+    contract_path = root / "scripts" / "host" / "release-contract.json"
+    lock_path = root / "scripts" / "relkit.lock.json"
+    if not contract_path.is_file() or not lock_path.is_file():
+        return
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        drift.append(f"release lock contract is unreadable: {error}")
+        return
+    if contract.get("schema") != "relkit.host-contract/1":
+        drift.append("scripts/host/release-contract.json has an unsupported schema")
+        return
+    for field in ("protocol", "updaterIpc"):
+        expected = contract.get(field)
+        actual = lock.get(field)
+        if expected != actual:
+            drift.append(
+                f"lock {field}={actual} does not match installed release "
+                f"contract {expected}; rerun upgrade for {lock.get('release')}"
+            )
 
 
 def has_webview(root: Path) -> bool:
@@ -238,24 +307,7 @@ def internal_update_two_track(root: Path, state: dict[str, Any], drift: list[str
     if not INTERNAL_APPLY_CALL.search(source):
         return
 
-    ci_files = [
-        path
-        for pattern in (
-            ".github/workflows/*.yml",
-            ".github/workflows/*.yaml",
-            "ci/*.yml",
-            "ci/*.yaml",
-            "scripts/*.js",
-            "scripts/*.mjs",
-            "scripts/*.py",
-            "scripts/*.sh",
-            "scripts/*.ps1",
-            "scripts/*.cmd",
-            "scripts/*.bat",
-        )
-        for path in root.glob(pattern)
-        if path.is_file()
-    ]
+    ci_files = _packaging_files(root)
     ci_text = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
         for path in ci_files

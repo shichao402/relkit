@@ -272,7 +272,18 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 			}
 			pairs["apply"] = "relkit-payload"
 			if pairs["filename"] == "" {
-				pairs["filename"] = fmt.Sprintf("%s-%s-payload.zip", cfg.Product, version)
+				_, _, selectorsMap, splitErr := SplitControls(pairs)
+				if splitErr != nil {
+					return nil, splitErr
+				}
+				artifactID := pairs["id"]
+				if artifactID == "" {
+					artifactID, err = model.DefaultArtifactID(selectorsMap)
+					if err != nil {
+						return nil, err
+					}
+				}
+				pairs["filename"] = fmt.Sprintf("%s-%s-%s.zip", cfg.Product, version, artifactID)
 			}
 			tmp, err := os.CreateTemp("", "relkit-payload-*.zip")
 			if err != nil {
@@ -304,6 +315,9 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 
 	if duplicateIDs := findDuplicateIDs(artifacts); len(duplicateIDs) > 0 {
 		return nil, Error{Message: fmt.Sprintf("artifact ids must be unique within a release; duplicated: %s", strings.Join(duplicateIDs, ", "))}
+	}
+	if duplicateFilenames := findDuplicateFilenames(artifacts); len(duplicateFilenames) > 0 {
+		return nil, Error{Message: fmt.Sprintf("artifact filenames must be unique within a release; duplicated: %s", strings.Join(duplicateFilenames, ", "))}
 	}
 
 	if duplicates := selectors.FindDuplicateSelectors(artifacts); len(duplicates) > 0 {
@@ -511,6 +525,24 @@ func findDuplicateIDs(artifacts []*model.StagedArtifact) []string {
 	for id, count := range counts {
 		if count > 1 {
 			duplicates = append(duplicates, id)
+		}
+	}
+	sort.Strings(duplicates)
+	return duplicates
+}
+
+func findDuplicateFilenames(artifacts []*model.StagedArtifact) []string {
+	counts := make(map[string]int, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifact == nil {
+			continue
+		}
+		counts[artifact.Filename]++
+	}
+	var duplicates []string
+	for filename, count := range counts {
+		if count > 1 {
+			duplicates = append(duplicates, filename)
 		}
 	}
 	sort.Strings(duplicates)

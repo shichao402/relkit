@@ -72,15 +72,8 @@ type credentialResponse struct {
 const maxUploadAttempts = 4
 
 func Put(ctx context.Context, opts Options) (*Result, error) {
-	if opts.Root == "" || opts.Product == "" || opts.Version == "" || opts.URL == "" || opts.Token == "" {
-		return nil, fmt.Errorf("root, product, version, url, and token are required")
-	}
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Hour}
-	}
-	if err := publishproto.PreflightAgent(ctx, client, opts.URL, opts.Token, opts.Product); err != nil {
-		return nil, err
+	if opts.Root == "" || opts.Product == "" || opts.Version == "" {
+		return nil, fmt.Errorf("root, product, and version are required")
 	}
 	staged, err := stage.LoadStaged(opts.Root, opts.Version)
 	if err != nil {
@@ -91,6 +84,16 @@ func Put(ctx context.Context, opts Options) (*Result, error) {
 	}
 	if mismatches := stage.VerifyStagedHashes(&config.Config{Root: opts.Root}, staged); len(mismatches) > 0 {
 		return nil, fmt.Errorf("staging tree no longer matches staged.pb:\n  %s", strings.Join(mismatches, "\n  "))
+	}
+	if opts.URL == "" || opts.Token == "" {
+		return nil, fmt.Errorf("url and token are required")
+	}
+	client := opts.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Hour}
+	}
+	if err := publishproto.PreflightAgent(ctx, client, opts.URL, opts.Token, opts.Product); err != nil {
+		return nil, err
 	}
 	request := credentialRequest{Product: opts.Product}
 	paths := make(map[string]string, len(staged.Artifacts))
