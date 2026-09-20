@@ -386,6 +386,7 @@ class DownloadTests(unittest.TestCase):
                 return "schannel" if path == str(system) else "openssl"
 
             with (
+                patch.object(subject.os, "name", "nt"),
                 patch.object(subject, "system32_curl", return_value=system),
                 patch.object(subject.shutil, "which", return_value=str(cygwin)) as which,
                 patch.object(subject, "detect_curl_backend", side_effect=fake_backend),
