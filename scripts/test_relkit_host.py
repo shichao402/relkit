@@ -2497,6 +2497,62 @@ class UpdaterGateTests(unittest.TestCase):
             host.run_gates(root, self.state(root, "go"), drift)
             self.assertFalse(any("in-process updater API" in item for item in drift))
 
+    def test_internal_apply_requires_payload_track(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src").mkdir()
+            (root / "src/update.ts").write_text(
+                'import "@relkit/updater-bindings";\nupdater.apply(planId);\n',
+                encoding="utf-8",
+            )
+            workflow = root / ".github/workflows/release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                'run: relkit stage "$VERSION" --install dist/app.zip os=windows,arch=x64\n',
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertTrue(any("CI payload track" in item for item in drift))
+
+    def test_internal_apply_accepts_payload_track(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src").mkdir()
+            (root / "src/update.ts").write_text(
+                'import "@relkit/updater-bindings";\nupdater.apply(planId);\n',
+                encoding="utf-8",
+            )
+            workflow = root / ".github/workflows/release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                'run: relkit stage "$VERSION" '
+                '--install dist/app.zip os=windows,arch=x64 '
+                '--payload dist/payload os=windows,arch=x64\n',
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertFalse(any("CI payload track" in item for item in drift))
+
+    def test_check_only_host_does_not_require_payload_track(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "src").mkdir()
+            (root / "src/update.ts").write_text(
+                'import "@relkit/updater-bindings";\nupdater.check();\n',
+                encoding="utf-8",
+            )
+            workflow = root / ".github/workflows/release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                'run: relkit stage "$VERSION" --install dist/app.zip os=windows,arch=x64\n',
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertFalse(any("CI payload track" in item for item in drift))
+
 
 class ConsumerEntryGateTests(unittest.TestCase):
     def state(self, root: Path) -> dict:
