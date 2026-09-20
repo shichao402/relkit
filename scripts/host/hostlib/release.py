@@ -990,8 +990,16 @@ def _impl_cmd_ci_release(root: Path, args: argparse.Namespace) -> int:
     run_relkit(root, binary, ["simulate", "--with-staged", version, "--from", "all"])
     cmd_fake_verify(root, version)
 
+    if not execute:
+        print(
+            "ci release dry-run complete "
+            "(install → pack → stage → simulate → fake); "
+            "pass --execute with RELKIT_RELEASE_VIA_CI=1 to publish"
+        )
+        return 0
+
     # Existing release gate owns drift / incomplete / agent publish.
-    publish_args = argparse.Namespace(execute=execute)
+    publish_args = argparse.Namespace(execute=True)
     return cmd_release(root, publish_args)
 
 
