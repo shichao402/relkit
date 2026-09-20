@@ -28,6 +28,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 # Must refuse before the hostlib import, which itself needs 3.9. Keep in sync
@@ -54,6 +55,7 @@ DEFAULT_COMPONENTS = tuple(row.name for row in default_components())
 PORTABLE_COMPONENTS = tuple(row.name for row in portable_components())
 DOWNLOAD_ATTEMPTS = 3
 ALLOW_INSECURE_ENV = "RELKIT_CONSUME_ALLOW_INSECURE"
+CURL_OVERRIDE_ENV = "RELKIT_CURL"
 _CA_ENV_KEYS = (
     "RELKIT_CA_BUNDLE",
     "SSL_CERT_FILE",
@@ -62,7 +64,9 @@ _CA_ENV_KEYS = (
 )
 _ERROR_SUMMARY_LIMIT = 240
 _windows_ca_bundle: Optional[Path] = None
-_curl_backend: Optional[str] = None
+# Path -> backend name. A single global would poison later picks after PATH
+# found a Cygwin OpenSSL curl on the first call.
+_curl_backends: dict[str, str] = {}
 
 
 class CertificateVerificationError(RuntimeError):
@@ -273,9 +277,9 @@ def ssl_context(*, verify: bool, ca_bundle: Optional[Path] = None) -> ssl.SSLCon
 
 
 def detect_curl_backend(curl: str) -> str:
-    global _curl_backend
-    if _curl_backend is not None:
-        return _curl_backend
+    cached = _curl_backends.get(curl)
+    if cached is not None:
+        return cached
     try:
         result = subprocess.run(
             [curl, "--version"],
@@ -291,12 +295,76 @@ def detect_curl_backend(curl: str) -> str:
         text = ""
     lowered = text.lower()
     if "schannel" in lowered:
-        _curl_backend = "schannel"
+        backend = "schannel"
     elif "openssl" in lowered:
-        _curl_backend = "openssl"
+        backend = "openssl"
     else:
-        _curl_backend = "unknown"
-    return _curl_backend
+        backend = "unknown"
+    _curl_backends[curl] = backend
+    return backend
+
+
+def system32_curl() -> Optional[Path]:
+    """Windows Schannel curl shipped with the OS; never PATH-ordered."""
+    if os.name != "nt":
+        return None
+    root = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+    candidate = root / "System32" / "curl.exe"
+    return candidate if candidate.is_file() else None
+
+
+def resolve_curl(*, environ: Optional[dict[str, str]] = None) -> str:
+    """Pick a deterministic curl for HTTPS downloads.
+
+    On Windows the PATH often puts Cygwin/Git OpenSSL curl ahead of the OS
+    Schannel curl. That backend does not share the machine Root store and is
+    frequently decade-old. Prefer System32 Schannel; allow RELKIT_CURL to
+    override for tests and break-glass.
+    """
+    env = environ if environ is not None else os.environ
+    override = env.get(CURL_OVERRIDE_ENV, "").strip()
+    if override:
+        path = Path(override)
+        if not path.is_file():
+            raise RuntimeError(f"{CURL_OVERRIDE_ENV}={override} is not a file")
+        return str(path)
+
+    if os.name == "nt":
+        system = system32_curl()
+        if system is not None:
+            backend = detect_curl_backend(str(system))
+            if backend != "schannel":
+                raise RuntimeError(
+                    f"Windows System32 curl is not Schannel ({backend}): {system}"
+                )
+            return str(system)
+        raise RuntimeError(
+            "Windows System32 curl.exe is missing; refuse PATH curl "
+            "(Cygwin/Git OpenSSL curl is not a trusted TLS transport)"
+        )
+
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError("system curl is unavailable")
+    return curl
+
+
+def ca_source_label(ca_bundle: Optional[Path]) -> str:
+    if ca_bundle is None:
+        return "none"
+    if _windows_ca_bundle is not None and ca_bundle == _windows_ca_bundle:
+        return "windows-export"
+    for key in _CA_ENV_KEYS:
+        raw = os.environ.get(key, "").strip()
+        if raw and Path(raw) == ca_bundle:
+            return key
+    return "explicit"
+
+
+def log_transport(event: str, **fields: Any) -> None:
+    parts = [f"{key}={fields[key]}" for key in sorted(fields) if fields[key] is not None]
+    suffix = (" " + " ".join(parts)) if parts else ""
+    print(f"relkit consume: transport {event}{suffix}", file=sys.stderr)
 
 
 def download_with_python(
@@ -333,23 +401,19 @@ def download_with_curl(
     *,
     extra_args: Sequence[str] = (),
     ca_bundle: Optional[Path] = None,
+    curl: Optional[str] = None,
 ) -> None:
-    curl = shutil.which("curl.exe" if os.name == "nt" else "curl")
-    if not curl:
-        raise RuntimeError("system curl is unavailable")
+    curl_path = curl or resolve_curl()
     scheme = "=https" if url.startswith("https://") else "=http"
     args = list(extra_args)
     insecure = "--insecure" in args
+    backend = detect_curl_backend(curl_path)
     # Schannel already trusts the Windows store; OpenSSL curl needs an explicit
     # PEM. Prefer --cacert over env mutation so the choice is visible in argv.
-    if (
-        not insecure
-        and ca_bundle is not None
-        and detect_curl_backend(curl) != "schannel"
-    ):
+    if not insecure and ca_bundle is not None and backend != "schannel":
         args = ["--cacert", str(ca_bundle), *args]
     command = [
-        curl,
+        curl_path,
         "--fail",
         "--location",
         "--silent",
@@ -393,6 +457,37 @@ def fetch_url(
     if allow_insecure is None:
         allow_insecure = env_allows_insecure()
     ca_bundle = resolve_ca_bundle()
+    curl_path: Optional[str] = None
+    curl_backend = "unavailable"
+    try:
+        curl_path = resolve_curl()
+        curl_backend = detect_curl_backend(curl_path)
+    except RuntimeError as error:
+        curl_backend = f"unavailable:{summarize_error(error)}"
+    host = ""
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        host = ""
+    log_transport(
+        "attempt",
+        host=host or "-",
+        ca=ca_source_label(ca_bundle),
+        curl=curl_path or "-",
+        backend=curl_backend,
+    )
+
+    def curl_download(*, extra_args: Sequence[str] = ()) -> None:
+        if curl_path is None:
+            raise RuntimeError(f"system curl is unavailable ({curl_backend})")
+        download_with_curl(
+            url,
+            destination,
+            extra_args=extra_args,
+            ca_bundle=ca_bundle,
+            curl=curl_path,
+        )
+
     strict_methods: list[tuple[str, Any]] = [
         (
             "Python HTTPS",
@@ -400,10 +495,7 @@ def fetch_url(
                 url, destination, verify=True, ca_bundle=ca_bundle
             ),
         ),
-        (
-            "system curl",
-            lambda: download_with_curl(url, destination, ca_bundle=ca_bundle),
-        ),
+        ("system curl", curl_download),
     ]
     strict_errors: list[str] = []
     certificate_failed = False
@@ -411,6 +503,14 @@ def fetch_url(
         destination.unlink(missing_ok=True)
         try:
             download()
+            log_transport(
+                "success",
+                method=label,
+                host=host or "-",
+                misses=len(strict_errors),
+                ca=ca_source_label(ca_bundle),
+                backend=curl_backend if label == "system curl" else "python-ssl",
+            )
             if strict_errors:
                 print(
                     f"relkit consume: download ok via {label} "
@@ -428,6 +528,7 @@ def fetch_url(
 
     summary = "; ".join(strict_errors) if strict_errors else "no transports tried"
     if not certificate_failed:
+        log_transport("failure", host=host or "-", summary=summary)
         raise RuntimeError(
             "strict transports failed without a certificate verification error; "
             "refusing insecure fallback: "
@@ -443,6 +544,7 @@ def fetch_url(
                 "; or export a PEM via SSL_CERT_FILE / CURL_CA_BUNDLE "
                 "(Windows Root+CA) before consume"
             )
+        log_transport("failure", host=host or "-", summary=summary)
         raise RuntimeError(
             "certificate verification failed on all strict transports; "
             f"{hint}: {summary}"
@@ -455,9 +557,7 @@ def fetch_url(
         ),
         (
             "system curl --insecure",
-            lambda: download_with_curl(
-                url, destination, extra_args=("--insecure",)
-            ),
+            lambda: curl_download(extra_args=("--insecure",)),
         ),
     ]
     fallback_errors: list[str] = []
@@ -465,6 +565,12 @@ def fetch_url(
         destination.unlink(missing_ok=True)
         try:
             download()
+            log_transport(
+                "insecure-success",
+                method=label,
+                host=host or "-",
+                ca=ca_source_label(ca_bundle),
+            )
             print(
                 "relkit consume: opted-in insecure fallback via "
                 f"{label}; downloaded bytes must still match lock sha256",
@@ -473,6 +579,11 @@ def fetch_url(
             return
         except (HTTPError, URLError, OSError, TimeoutError, RuntimeError) as error:
             fallback_errors.append(f"{label}: {summarize_error(error)}")
+    log_transport(
+        "failure",
+        host=host or "-",
+        summary="; ".join([*strict_errors, *fallback_errors]),
+    )
     raise RuntimeError("; ".join([*strict_errors, *fallback_errors]))
 
 

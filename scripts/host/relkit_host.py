@@ -217,6 +217,14 @@ from hostlib.release import (
     dummy_stage_zip,
     stage_dummy_release,
     routing_help,
+    release_pack_config,
+    resolve_project_path,
+    pack_script_command,
+    run_release_pack_script,
+    normalize_selectors,
+    load_release_artifacts_manifest,
+    resolve_ci_channel,
+    cmd_ci_release,
 )
 from hostlib.retrospect import (
     _retrospect_skill_paths,
@@ -303,6 +311,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     release = sub.add_parser("release", help="publish if onboard is verified and there is no drift")
     release.add_argument("--execute", action="store_true")
+
+    ci = sub.add_parser("ci", help="CI-facing product release entry")
+    ci_sub = ci.add_subparsers(dest="ci_cmd", required=True)
+    ci_release = ci_sub.add_parser(
+        "release",
+        help="install → packScript → stage → simulate → fake verify → publish",
+    )
+    ci_release.add_argument("--channel", required=True)
+    ci_release.add_argument("--execute", action="store_true")
 
     serve = sub.add_parser("serve")
     serve_sub = serve.add_subparsers(dest="serve_cmd", required=True)
@@ -424,6 +441,10 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
         return cmd_fake_verify(root, args.version)
     if args.cmd == "release":
         return cmd_release(root, args)
+    if args.cmd == "ci":
+        if args.ci_cmd == "release":
+            return cmd_ci_release(root, args)
+        raise Fail(f"unknown ci command {args.ci_cmd}")
     if args.cmd == "serve":
         if args.serve_cmd == "list":
             return cmd_serve_list(root)

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import inspect
+import os
 import re
 import subprocess
 import sys
@@ -1590,6 +1592,221 @@ class ReconcileTests(unittest.TestCase):
                 state["steps"]["pack.ci"]["value"],
                 ".github/workflows/release.yml",
             )
+
+    def test_bkci_ci_release_entry_confirms_pack_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "ci").mkdir()
+            (root / "ci/build_dev.yaml").write_text("name: dev\n", encoding="utf-8")
+            (root / "ci/build_stable.yaml").write_text("name: stable\n", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts/ci_win_release.cmd").write_text(
+                "python scripts\\host\\relkit_host.py ci release --channel %CHANNEL% --execute\n",
+                encoding="utf-8",
+            )
+            (root / "scripts/pack.mjs").write_text("console.log('pack')\n", encoding="utf-8")
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "release": {"packScript": "scripts/pack.mjs"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = host.default_state(root)
+            host.set_step(state, "pack.ci", "confirmed", "pending")
+            host.reconcile_pack_ci(root, state)
+            self.assertEqual(state["steps"]["pack.ci"]["status"], "confirmed")
+            self.assertIn("ci release", state["steps"]["pack.ci"]["note"])
+
+    def test_load_release_artifacts_manifest_requires_installer_and_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            setup = root / "dist" / "setup.exe"
+            payload = root / "dist" / "payload"
+            archive = root / "dist" / "product.zip"
+            setup.parent.mkdir(parents=True)
+            setup.write_bytes(b"nsis")
+            payload.mkdir(parents=True)
+            (payload / "app.bin").write_bytes(b"payload")
+            archive.write_bytes(b"zip")
+            manifest = root / "dist" / "release-artifacts.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema": "relkit.release-artifacts/1",
+                        "version": "1.2.3+4",
+                        "install": {
+                            "path": "dist/setup.exe",
+                            "kind": "installer",
+                            "selectors": "os=windows,arch=x64",
+                        },
+                        "payload": {
+                            "path": "dist/payload",
+                            "selectors": "os=windows,arch=x64",
+                        },
+                        "archives": [
+                            {"path": "dist/product.zip", "role": "ci-only"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loaded = host.load_release_artifacts_manifest(
+                root, manifest, expected_version="1.2.3+4"
+            )
+            self.assertEqual(loaded["install"]["kind"], "installer")
+            self.assertEqual(loaded["archives"][0]["role"], "ci-only")
+
+    def test_load_release_artifacts_manifest_rejects_version_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            setup = root / "dist" / "setup.exe"
+            payload = root / "dist" / "payload"
+            setup.parent.mkdir(parents=True)
+            setup.write_bytes(b"nsis")
+            payload.mkdir()
+            manifest = root / "dist" / "release-artifacts.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema": "relkit.release-artifacts/1",
+                        "version": "9.9.9+1",
+                        "install": {
+                            "path": "dist/setup.exe",
+                            "kind": "installer",
+                            "selectors": "os=windows,arch=x64",
+                        },
+                        "payload": {
+                            "path": "dist/payload",
+                            "selectors": "os=windows,arch=x64",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(host.Fail, "does not match"):
+                host.load_release_artifacts_manifest(
+                    root, manifest, expected_version="1.2.3+4"
+                )
+
+    def test_resolve_ci_channel_rejects_tag_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps({"product": "demo", "channels": ["dev", "stable"]}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"BK_CI_REPO_GIT_WEBHOOK_TAG_NAME": "stable/1.0.0+1"},
+                clear=False,
+            ):
+                with self.assertRaisesRegex(host.Fail, "does not match channel"):
+                    host.resolve_ci_channel(root, "dev")
+
+    def test_cmd_ci_release_stages_install_and_payload_then_publishes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "VERSION.json").write_text(
+                '{"schema":"relkit.version/1","version":"1.2.3+4"}',
+                encoding="utf-8",
+            )
+            (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+            pack = root / "scripts" / "pack.mjs"
+            pack.parent.mkdir(parents=True)
+            pack.write_text("// pack\n", encoding="utf-8")
+            setup = root / "dist" / "setup.exe"
+            payload = root / "dist" / "payload"
+            archive = root / "dist" / "product.zip"
+            setup.parent.mkdir(parents=True)
+            setup.write_bytes(b"nsis")
+            payload.mkdir()
+            (payload / "bin").write_bytes(b"x")
+            archive.write_bytes(b"zip")
+            manifest = root / "dist" / "release-artifacts.json"
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "channels": ["dev", "stable"],
+                        "release": {
+                            "packScript": "scripts/pack.mjs",
+                            "manifest": "dist/release-artifacts.json",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_pack(_root: Path, _script: Path) -> None:
+                manifest.write_text(
+                    json.dumps(
+                        {
+                            "schema": "relkit.release-artifacts/1",
+                            "version": "1.2.3+4",
+                            "install": {
+                                "path": "dist/setup.exe",
+                                "kind": "installer",
+                                "selectors": "os=windows,arch=x64",
+                            },
+                            "payload": {
+                                "path": "dist/payload",
+                                "selectors": "os=windows,arch=x64",
+                            },
+                            "archives": [
+                                {"path": "dist/product.zip", "role": "ci-only"}
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            calls: list[list[str]] = []
+
+            def fake_run(_root, _binary, argv):
+                calls.append(list(argv))
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            args = argparse.Namespace(channel="dev", execute=True)
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "RELKIT_RELEASE_VIA_CI": "1",
+                        "RELKIT_UPLOAD_TOKEN": "token-value",
+                    },
+                    clear=False,
+                ),
+                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.relkit_bin", return_value=Path("relkit")),
+                patch("relkit_host.run_release_pack_script", side_effect=fake_pack),
+                patch("relkit_host.run_relkit", side_effect=fake_run),
+                patch("relkit_host.cmd_fake_verify", return_value=0) as fake_verify,
+                patch("relkit_host.cmd_release", return_value=0) as publish,
+            ):
+                self.assertEqual(host.cmd_ci_release(root, args), 0)
+            fake_verify.assert_called_once()
+            publish.assert_called_once()
+            self.assertTrue(publish.call_args.args[1].execute)
+            stage = next(item for item in calls if item and item[0] == "stage")
+            self.assertIn("--install", stage)
+            self.assertIn("--payload", stage)
+            self.assertTrue(any(item.startswith("kind=installer,") for item in stage))
+            self.assertFalse(any("product.zip" in item for item in stage))
+
+    def test_cmd_ci_release_refuses_execute_without_ci_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps({"product": "demo", "channels": ["dev"]}),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(channel="dev", execute=True)
+            with patch.dict(os.environ, {"RELKIT_RELEASE_VIA_CI": ""}, clear=False):
+                with self.assertRaisesRegex(host.Fail, "RELKIT_RELEASE_VIA_CI=1"):
+                    host.cmd_ci_release(root, args)
 
     def test_install_only_github_workflow_does_not_confirm_pack_ci(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
