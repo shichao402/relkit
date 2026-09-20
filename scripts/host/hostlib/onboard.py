@@ -99,7 +99,7 @@ def _impl_recommendations(root: Path, state: dict[str, Any]) -> dict[str, str]:
         "consume.lock": "relkit_host.py install after scripts/relkit.lock.json is pinned",
         "sidecar.layout": "tools/bin updater sidecar next to the process that calls Updater.open",
         "fake.release": "relkit_host.py fake verify (stages dummy zip, then simulate)",
-        "pack.ci": "product packaging + CI calling this script's release --execute",
+        "pack.ci": "product packScript + CI calling relkit_host.py ci release --execute",
         "ops.retrospect": "run relkit_host.py retrospect and require exit code 0",
     }
 

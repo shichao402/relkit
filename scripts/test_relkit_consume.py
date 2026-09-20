@@ -350,7 +350,7 @@ class InstallTests(unittest.TestCase):
 class DownloadTests(unittest.TestCase):
     def setUp(self) -> None:
         subject._windows_ca_bundle = None
-        subject._curl_backend = None
+        subject._curl_backends.clear()
 
     def test_uses_system_curl_when_python_tls_fails(self) -> None:
         payload = b"release artifact"
@@ -367,14 +367,66 @@ class DownloadTests(unittest.TestCase):
             with (
                 patch.object(subject, "urlopen", side_effect=URLError("bad CA")),
                 patch.object(subject, "download_with_curl", side_effect=fake_curl),
+                patch.object(subject, "resolve_curl", return_value=r"C:\Windows\System32\curl.exe"),
+                patch.object(subject, "detect_curl_backend", return_value="schannel"),
             ):
                 installed = subject.download_artifact(root, "cli", spec)
             self.assertEqual(installed.read_bytes(), payload)
 
+    def test_resolve_curl_prefers_system32_over_path_cygwin(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            system = Path(raw) / "System32" / "curl.exe"
+            system.parent.mkdir(parents=True)
+            system.write_bytes(b"MZ")
+            cygwin = Path(raw) / "cygwin" / "curl.exe"
+            cygwin.parent.mkdir(parents=True)
+            cygwin.write_bytes(b"MZ")
+
+            def fake_backend(path: str) -> str:
+                return "schannel" if path == str(system) else "openssl"
+
+            with (
+                patch.object(subject, "system32_curl", return_value=system),
+                patch.object(subject.shutil, "which", return_value=str(cygwin)) as which,
+                patch.object(subject, "detect_curl_backend", side_effect=fake_backend),
+            ):
+                chosen = subject.resolve_curl(environ={})
+            self.assertEqual(chosen, str(system))
+            which.assert_not_called()
+
+    def test_resolve_curl_respects_relkit_curl_override(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            override = Path(raw) / "custom-curl.exe"
+            override.write_bytes(b"MZ")
+            with patch.object(subject, "system32_curl", return_value=None):
+                chosen = subject.resolve_curl(
+                    environ={subject.CURL_OVERRIDE_ENV: str(override)}
+                )
+            self.assertEqual(chosen, str(override))
+
+    def test_detect_curl_backend_is_per_binary(self) -> None:
+        subject._curl_backends.clear()
+        with patch.object(
+            subject.subprocess,
+            "run",
+            side_effect=[
+                subject.subprocess.CompletedProcess([], 0, "curl ... OpenSSL/1.0.2d", ""),
+                subject.subprocess.CompletedProcess([], 0, "curl ... Schannel", ""),
+            ],
+        ):
+            first = subject.detect_curl_backend(r"C:\cygwin\bin\curl.exe")
+            second = subject.detect_curl_backend(r"C:\Windows\System32\curl.exe")
+        self.assertEqual(first, "openssl")
+        self.assertEqual(second, "schannel")
+        self.assertEqual(
+            subject._curl_backends[r"C:\cygwin\bin\curl.exe"],
+            "openssl",
+        )
+
     def test_curl_keeps_tls_verification_enabled(self) -> None:
         with (
             tempfile.TemporaryDirectory() as raw,
-            patch.object(subject.shutil, "which", return_value="curl") as which,
+            patch.object(subject, "resolve_curl", return_value="curl") as resolve,
             patch.object(subject, "detect_curl_backend", return_value="openssl"),
             patch.object(
                 subject.subprocess,
@@ -385,7 +437,7 @@ class DownloadTests(unittest.TestCase):
             subject.download_with_curl(
                 "https://example.invalid/x", Path(raw) / "artifact"
             )
-        which.assert_called_once()
+        resolve.assert_called_once()
         command = run.call_args.args[0]
         self.assertIn("--tlsv1.2", command)
         self.assertNotIn("--insecure", command)
@@ -395,7 +447,7 @@ class DownloadTests(unittest.TestCase):
             bundle = Path(raw) / "windows-ca.pem"
             bundle.write_text("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
             with (
-                patch.object(subject.shutil, "which", return_value="curl"),
+                patch.object(subject, "resolve_curl", return_value="curl"),
                 patch.object(subject, "detect_curl_backend", return_value="openssl"),
                 patch.object(
                     subject.subprocess,
@@ -418,7 +470,7 @@ class DownloadTests(unittest.TestCase):
             bundle = Path(raw) / "windows-ca.pem"
             bundle.write_text("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
             with (
-                patch.object(subject.shutil, "which", return_value="curl"),
+                patch.object(subject, "resolve_curl", return_value="curl"),
                 patch.object(subject, "detect_curl_backend", return_value="schannel"),
                 patch.object(
                     subject.subprocess,
@@ -433,6 +485,37 @@ class DownloadTests(unittest.TestCase):
                 )
             command = run.call_args.args[0]
             self.assertNotIn("--cacert", command)
+
+    def test_transport_log_includes_backend_and_ca_source(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            destination = Path(raw) / "artifact"
+            lines: list[str] = []
+
+            def capture(message: str, **_kwargs) -> None:
+                lines.append(message)
+
+            with (
+                patch.object(subject, "resolve_ca_bundle", return_value=None),
+                patch.object(
+                    subject,
+                    "resolve_curl",
+                    return_value=r"C:\Windows\System32\curl.exe",
+                ),
+                patch.object(subject, "detect_curl_backend", return_value="schannel"),
+                patch.object(
+                    subject,
+                    "download_with_python",
+                    side_effect=lambda *a, **k: destination.write_bytes(b"ok"),
+                ),
+                patch.object(subject.sys, "stderr"),
+                patch("builtins.print", side_effect=capture),
+            ):
+                subject.fetch_url("https://github.example/asset.zip", destination)
+            joined = "\n".join(lines)
+            self.assertIn("relkit consume: transport attempt", joined)
+            self.assertIn("backend=schannel", joined)
+            self.assertIn("relkit consume: transport success", joined)
+            self.assertIn("method=Python HTTPS", joined)
 
     def test_python_loads_ca_bundle_into_ssl_context(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
