@@ -1796,6 +1796,72 @@ class ReconcileTests(unittest.TestCase):
             self.assertTrue(any(item.startswith("kind=installer,") for item in stage))
             self.assertFalse(any("product.zip" in item for item in stage))
 
+    def test_cmd_ci_release_dry_run_stops_before_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "VERSION.json").write_text(
+                '{"schema":"relkit.version/1","version":"1.2.3+4"}',
+                encoding="utf-8",
+            )
+            (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+            pack = root / "scripts" / "pack.mjs"
+            pack.parent.mkdir(parents=True)
+            pack.write_text("// pack\n", encoding="utf-8")
+            setup = root / "dist" / "setup.exe"
+            payload = root / "dist" / "payload"
+            setup.parent.mkdir(parents=True)
+            setup.write_bytes(b"nsis")
+            payload.mkdir()
+            (payload / "bin").write_bytes(b"x")
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "channels": ["dev", "stable"],
+                        "release": {
+                            "packScript": "scripts/pack.mjs",
+                            "manifest": "dist/release-artifacts.json",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_pack(_root: Path, _script: Path) -> None:
+                (root / "dist" / "release-artifacts.json").write_text(
+                    json.dumps(
+                        {
+                            "schema": "relkit.release-artifacts/1",
+                            "version": "1.2.3+4",
+                            "install": {
+                                "path": "dist/setup.exe",
+                                "kind": "installer",
+                                "selectors": "os=windows,arch=x64",
+                            },
+                            "payload": {
+                                "path": "dist/payload",
+                                "selectors": "os=windows,arch=x64",
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            args = argparse.Namespace(channel="dev", execute=False)
+            with (
+                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.relkit_bin", return_value=Path("relkit")),
+                patch("relkit_host.run_release_pack_script", side_effect=fake_pack),
+                patch(
+                    "relkit_host.run_relkit",
+                    return_value=subprocess.CompletedProcess([], 0, "", ""),
+                ),
+                patch("relkit_host.cmd_fake_verify", return_value=0),
+                patch("relkit_host.cmd_release", return_value=0) as publish,
+            ):
+                self.assertEqual(host.cmd_ci_release(root, args), 0)
+            publish.assert_not_called()
+
     def test_cmd_ci_release_refuses_execute_without_ci_flag(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
