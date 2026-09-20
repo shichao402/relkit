@@ -187,6 +187,7 @@ DIGESTED_ISSUE_CODES = frozenset(
         "host-ignore-full-install-disposition",
         "lock-latest-cache-stale",
         "dec-publish-not-in-ci",
+        "dec-skill-header-push-route",
     }
 )
 

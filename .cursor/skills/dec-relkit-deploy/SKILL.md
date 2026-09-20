@@ -1,5 +1,5 @@
-<!-- 本文件由 `dec pull` 从 .dec/cache/relkit/ 渲染生成，请勿直接编辑。
-     修改流程：编辑 .dec/cache/relkit/... → 在 Run 页 push → pull 验证 -->
+<!-- 本文件由 `dec pull` 从 DecAssets/ 作者目录渲染生成，请勿直接编辑本副本。
+     修改流程：编辑 DecAssets/skills|commands|rules|mcp/... → 提交源仓并由 CI publish-provides（产品 v*）；禁止 Run 页 push -->
 
 ---
 name: relkit-deploy
