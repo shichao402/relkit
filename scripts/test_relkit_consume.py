@@ -110,7 +110,7 @@ class InstallTests(unittest.TestCase):
             root = Path(raw)
             lock = lock_for("https://example.invalid/artifact", sdk, binary)
 
-            def fake_download(_root, component, _spec):
+            def fake_download(_root, component, _spec, **_kwargs):
                 path = root / f"{component}.artifact"
                 path.write_bytes(sdk if component == "sdk-dart" else binary)
                 return path
@@ -242,7 +242,7 @@ class InstallTests(unittest.TestCase):
                 "sha256": sha256(scripts),
             }
 
-            def fake_download(_root, component, _spec):
+            def fake_download(_root, component, _spec, **_kwargs):
                 path = root / f"{component}.artifact"
                 if component == "host-scripts":
                     path.write_bytes(scripts)
@@ -318,7 +318,7 @@ class InstallTests(unittest.TestCase):
                 'syntax = "proto3"; // stale leftover\n', encoding="utf-8"
             )
 
-            def fake_download(_root, component, _spec):
+            def fake_download(_root, component, _spec, **_kwargs):
                 path = root / f"{component}.artifact"
                 path.write_bytes(sdk if component == "sdk-rust" else binary)
                 return path
@@ -348,6 +348,10 @@ class InstallTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
+    def setUp(self) -> None:
+        subject._windows_ca_bundle = None
+        subject._curl_backend = None
+
     def test_uses_system_curl_when_python_tls_fails(self) -> None:
         payload = b"release artifact"
         with tempfile.TemporaryDirectory() as raw:
@@ -357,7 +361,7 @@ class DownloadTests(unittest.TestCase):
                 "sha256": sha256(payload),
             }
 
-            def fake_curl(_url, destination):
+            def fake_curl(_url, destination, **_kwargs):
                 destination.write_bytes(payload)
 
             with (
@@ -371,6 +375,7 @@ class DownloadTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as raw,
             patch.object(subject.shutil, "which", return_value="curl") as which,
+            patch.object(subject, "detect_curl_backend", return_value="openssl"),
             patch.object(
                 subject.subprocess,
                 "run",
@@ -385,11 +390,136 @@ class DownloadTests(unittest.TestCase):
         self.assertIn("--tlsv1.2", command)
         self.assertNotIn("--insecure", command)
 
-    def test_certificate_failure_allows_checksum_guarded_fallback(self) -> None:
+    def test_openssl_curl_passes_windows_ca_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = Path(raw) / "windows-ca.pem"
+            bundle.write_text("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+            with (
+                patch.object(subject.shutil, "which", return_value="curl"),
+                patch.object(subject, "detect_curl_backend", return_value="openssl"),
+                patch.object(
+                    subject.subprocess,
+                    "run",
+                    return_value=subject.subprocess.CompletedProcess([], 0, "", ""),
+                ) as run,
+            ):
+                subject.download_with_curl(
+                    "https://example.invalid/x",
+                    Path(raw) / "artifact",
+                    ca_bundle=bundle,
+                )
+            command = run.call_args.args[0]
+            self.assertIn("--cacert", command)
+            self.assertIn(str(bundle), command)
+            self.assertNotIn("--insecure", command)
+
+    def test_schannel_curl_skips_cacert(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = Path(raw) / "windows-ca.pem"
+            bundle.write_text("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+            with (
+                patch.object(subject.shutil, "which", return_value="curl"),
+                patch.object(subject, "detect_curl_backend", return_value="schannel"),
+                patch.object(
+                    subject.subprocess,
+                    "run",
+                    return_value=subject.subprocess.CompletedProcess([], 0, "", ""),
+                ) as run,
+            ):
+                subject.download_with_curl(
+                    "https://example.invalid/x",
+                    Path(raw) / "artifact",
+                    ca_bundle=bundle,
+                )
+            command = run.call_args.args[0]
+            self.assertNotIn("--cacert", command)
+
+    def test_python_loads_ca_bundle_into_ssl_context(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = Path(raw) / "corp-ca.pem"
+            # Minimal PEM is enough: we only assert load_verify_locations is called.
+            bundle.write_text(
+                "-----BEGIN CERTIFICATE-----\n"
+                "MIIBkTCB+wIJAKHBfJXrfIqEMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBmRv\n"
+                "bW15bjAeFw0yNDAxMDEwMDAwMDBaFw0zNDAxMDEwMDAwMDBaMBExDzANBgNVBAMM\n"
+                "BmRvbW15bjBcMA0GCSqGSIb3DQEBAQUAA0sAMEgCQQC5dummy\n"
+                "-----END CERTIFICATE-----\n"
+            )
+            destination = Path(raw) / "artifact"
+            loaded: list[str] = []
+
+            class FakeContext:
+                def load_verify_locations(self, *, cafile: str) -> None:
+                    loaded.append(cafile)
+
+            class Response(io.BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    self.close()
+
+            with (
+                patch.object(
+                    subject.ssl, "create_default_context", return_value=FakeContext()
+                ),
+                patch.object(
+                    subject, "urlopen", side_effect=lambda *_a, **_k: Response(b"ok")
+                ),
+            ):
+                # Invalid PEM will fail load_verify_locations on a real context;
+                # FakeContext records the path instead.
+                subject.download_with_python(
+                    "https://example.invalid/x",
+                    destination,
+                    verify=True,
+                    ca_bundle=bundle,
+                )
+            self.assertEqual(loaded, [str(bundle)])
+            self.assertEqual(destination.read_bytes(), b"ok")
+
+    def test_certificate_failure_is_fail_closed_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            destination = Path(raw) / "artifact"
+            verify_calls: list[bool] = []
+
+            def python_download(
+                _url: str, path: Path, *, verify: bool, ca_bundle=None
+            ) -> None:
+                verify_calls.append(verify)
+                if verify:
+                    raise subject.CertificateVerificationError("expired CA")
+                path.write_bytes(b"should-not-run")
+
+            with (
+                patch.object(subject, "download_with_python", side_effect=python_download),
+                patch.object(
+                    subject,
+                    "download_with_curl",
+                    side_effect=subject.CertificateVerificationError("curl CA fail"),
+                ),
+                patch.dict(subject.os.environ, {}, clear=False),
+            ):
+                subject.os.environ.pop(subject.ALLOW_INSECURE_ENV, None)
+                with self.assertRaisesRegex(
+                    RuntimeError, "certificate verification failed.*RELKIT_CONSUME_ALLOW_INSECURE"
+                ):
+                    subject.fetch_url(
+                        "https://example.invalid/artifact",
+                        destination,
+                        allow_insecure=False,
+                    )
+
+            self.assertEqual(verify_calls, [True])
+            self.assertFalse(destination.exists())
+
+    def test_opt_in_insecure_fallback_still_checksum_guarded(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             destination = Path(raw) / "artifact"
 
-            def python_download(_url: str, path: Path, *, verify: bool) -> None:
+            def python_download(
+                _url: str, path: Path, *, verify: bool, ca_bundle=None
+            ) -> None:
                 if verify:
                     raise subject.CertificateVerificationError("expired CA")
                 path.write_bytes(b"pinned")
@@ -402,7 +532,11 @@ class DownloadTests(unittest.TestCase):
                     side_effect=RuntimeError("curl unavailable"),
                 ),
             ):
-                subject.fetch_url("https://example.invalid/artifact", destination)
+                subject.fetch_url(
+                    "https://example.invalid/artifact",
+                    destination,
+                    allow_insecure=True,
+                )
 
             self.assertEqual(destination.read_bytes(), b"pinned")
 
@@ -411,7 +545,9 @@ class DownloadTests(unittest.TestCase):
             destination = Path(raw) / "artifact"
             calls: list[bool] = []
 
-            def python_download(_url: str, _path: Path, *, verify: bool) -> None:
+            def python_download(
+                _url: str, _path: Path, *, verify: bool, ca_bundle=None
+            ) -> None:
                 calls.append(verify)
                 raise TimeoutError("network timeout")
 
@@ -424,9 +560,117 @@ class DownloadTests(unittest.TestCase):
                 ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "refusing insecure fallback"):
-                    subject.fetch_url("https://example.invalid/artifact", destination)
+                    subject.fetch_url(
+                        "https://example.invalid/artifact",
+                        destination,
+                        allow_insecure=True,
+                    )
 
             self.assertEqual(calls, [True])
+
+    def test_resolve_ca_bundle_prefers_explicit_env(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = Path(raw) / "custom.pem"
+            bundle.write_text("pem", encoding="utf-8")
+            resolved = subject.resolve_ca_bundle(
+                {"SSL_CERT_FILE": str(bundle), "CURL_CA_BUNDLE": str(Path(raw) / "missing")}
+            )
+            self.assertEqual(resolved, bundle)
+
+    def test_windows_ca_export_uses_root_and_ca_stores(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            captured: dict[str, str] = {}
+
+            def fake_run(command, **kwargs):
+                captured["command"] = " ".join(command)
+                Path(kwargs["env"]["RELKIT_CA_OUT"]).write_text(
+                    "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n",
+                    encoding="utf-8",
+                )
+                return subject.subprocess.CompletedProcess(command, 0, "", "")
+
+            subject._windows_ca_bundle = None
+            with (
+                patch.object(subject.shutil, "which", return_value="powershell.exe"),
+                patch.object(subject.subprocess, "run", side_effect=fake_run),
+                patch.object(subject.tempfile, "gettempdir", return_value=raw),
+                patch.object(subject.os, "getpid", return_value=4242),
+            ):
+                path = subject.ensure_windows_ca_bundle()
+            self.assertIsNotNone(path)
+            assert path is not None
+            self.assertTrue(path.is_file())
+            self.assertIn("LocalMachine\\Root", captured["command"])
+            self.assertIn("LocalMachine\\CA", captured["command"])
+            self.assertIn("CurrentUser\\Root", captured["command"])
+            self.assertIn("CurrentUser\\CA", captured["command"])
+            self.assertIn("BEGIN CERTIFICATE", path.read_text(encoding="utf-8"))
+
+    def test_fetch_url_summary_omits_curl_help_noise(self) -> None:
+        help_noise = (
+            "curl: (60) SSL certificate problem\n"
+            "Usage: curl [options...] <url>\n"
+            "curl --help for more information\n"
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            destination = Path(raw) / "artifact"
+            with (
+                patch.object(
+                    subject,
+                    "download_with_python",
+                    side_effect=subject.CertificateVerificationError(help_noise),
+                ),
+                patch.object(
+                    subject,
+                    "download_with_curl",
+                    side_effect=subject.CertificateVerificationError(help_noise),
+                ),
+            ):
+                with self.assertRaises(RuntimeError) as raised:
+                    subject.fetch_url(
+                        "https://example.invalid/artifact",
+                        destination,
+                        allow_insecure=False,
+                    )
+            message = str(raised.exception)
+            self.assertIn("certificate verification failed", message)
+            self.assertNotIn("Usage:", message)
+            self.assertNotIn("curl --help", message)
+
+    def test_enterprise_ca_bundle_lets_python_succeed_before_insecure(self) -> None:
+        """HTTPS inspection / corp CA: explicit PEM makes strict Python succeed."""
+        payload = b"corp-proxied artifact"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            bundle = root / "corp-root.pem"
+            bundle.write_text("-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n")
+            spec = {"url": "https://corp.example/x", "sha256": sha256(payload)}
+            seen: dict[str, object] = {}
+
+            def fake_python(url, destination, *, verify, ca_bundle=None):
+                seen["verify"] = verify
+                seen["ca_bundle"] = ca_bundle
+                if not verify:
+                    raise AssertionError("insecure path must not run")
+                if ca_bundle != bundle:
+                    raise subject.CertificateVerificationError("missing corp CA")
+                destination.write_bytes(payload)
+
+            with (
+                patch.object(subject, "resolve_ca_bundle", return_value=bundle),
+                patch.object(subject, "download_with_python", side_effect=fake_python),
+                patch.object(
+                    subject,
+                    "download_with_curl",
+                    side_effect=AssertionError("curl should not run"),
+                ),
+            ):
+                installed = subject.download_artifact(
+                    root, "cli", spec, allow_insecure=False
+                )
+            self.assertEqual(installed.read_bytes(), payload)
+            self.assertEqual(seen["verify"], True)
+            self.assertEqual(seen["ca_bundle"], bundle)
 
     def test_hash_mismatch_never_enters_cache(self) -> None:
         class Response(io.BytesIO):
