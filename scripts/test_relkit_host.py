@@ -661,6 +661,13 @@ class SshGuardTests(unittest.TestCase):
 
 
 class UpgradeManifestTests(unittest.TestCase):
+    @staticmethod
+    def fake_install(root: Path, _argv: list[str]) -> int:
+        entry = root / "scripts" / "host" / "relkit_host.py"
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text("# installed target host\n", encoding="utf-8")
+        return 0
+
     def test_commit_comes_from_release_manifest_not_github_api(self) -> None:
         commit = "9a3af017b3a3f7ab2f47e3843b9b5297c2775ac1"
         with patch(
@@ -715,7 +722,7 @@ class UpgradeManifestTests(unittest.TestCase):
             with (
                 patch("relkit_host.host_scripts_dir", return_value=host_dir),
                 patch("relkit_host.http_get", side_effect=fake_get),
-                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.cmd_install", side_effect=self.fake_install),
             ):
                 self.assertEqual(host.cmd_upgrade(root, "v0.3.3"), 0)
             lock = json.loads(lock_path.read_text(encoding="utf-8"))
@@ -751,7 +758,7 @@ class UpgradeManifestTests(unittest.TestCase):
 
             with (
                 patch("relkit_host.http_get", side_effect=self.fake_release(commit)),
-                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.cmd_install", side_effect=self.fake_install),
             ):
                 self.assertEqual(host.cmd_upgrade(root, "v0.3.14"), 0)
 
@@ -771,7 +778,7 @@ class UpgradeManifestTests(unittest.TestCase):
             commit = "b814972e839dbb5eaac9814728e0fe08258c5e2b"
             with (
                 patch("relkit_host.http_get", side_effect=self.fake_release(commit)),
-                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.cmd_install", side_effect=self.fake_install),
             ):
                 self.assertEqual(host.cmd_upgrade(root, "v0.3.14"), 0)
             lock = json.loads(
@@ -790,7 +797,7 @@ class UpgradeManifestTests(unittest.TestCase):
             fake = self.fake_release(commit, min_protocol=2, max_protocol=3)
             with (
                 patch("relkit_host.http_get", side_effect=fake),
-                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.cmd_install", side_effect=self.fake_install),
             ):
                 self.assertEqual(host.cmd_upgrade(root, "v0.3.14"), 0)
             lock = json.loads(
@@ -820,11 +827,56 @@ class UpgradeManifestTests(unittest.TestCase):
             )
             with (
                 patch("relkit_host.http_get", side_effect=fake),
-                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.cmd_install", side_effect=self.fake_install),
             ):
                 self.assertEqual(host.cmd_upgrade(root, "v0.4.4"), 0)
             lock = json.loads(lock_path.read_text(encoding="utf-8"))
             self.assertEqual(lock["updaterIpc"], {"min": 3, "max": 3})
+
+    def test_upgrade_reenters_through_the_installed_host_to_finalize_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            installed_entry = root / "scripts" / "host" / "relkit_host.py"
+
+            def fake_install(_root: Path, _argv: list[str]) -> int:
+                installed_entry.parent.mkdir(parents=True, exist_ok=True)
+                installed_entry.write_text("# target release host\n", encoding="utf-8")
+                return 0
+
+            commit = "b814972e839dbb5eaac9814728e0fe08258c5e2b"
+            with (
+                patch("relkit_host.http_get", side_effect=self.fake_release(commit)),
+                patch("relkit_host.cmd_install", side_effect=fake_install),
+                patch("relkit_host.subprocess.run") as run,
+            ):
+                self.assertEqual(host.cmd_upgrade(root, "v0.4.18"), 0)
+
+            run.assert_called_once_with(
+                [
+                    sys.executable,
+                    str(installed_entry),
+                    "upgrade",
+                    "v0.4.18",
+                    "--finalize",
+                ],
+                cwd=root,
+                check=True,
+            )
+
+    def test_upgrade_finalize_does_not_reenter_again(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            installed_entry = root / "scripts" / "host" / "relkit_host.py"
+            installed_entry.parent.mkdir(parents=True)
+            installed_entry.write_text("# target release host\n", encoding="utf-8")
+            commit = "b814972e839dbb5eaac9814728e0fe08258c5e2b"
+            with (
+                patch("relkit_host.http_get", side_effect=self.fake_release(commit)),
+                patch("relkit_host.cmd_install", return_value=0),
+                patch("relkit_host.subprocess.run") as run,
+            ):
+                self.assertEqual(host.cmd_upgrade(root, "v0.4.18", finalize=True), 0)
+            run.assert_not_called()
 
     @staticmethod
     def fake_release(
@@ -1705,6 +1757,25 @@ class ReconcileTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(host.Fail, "does not match channel"):
                     host.resolve_ci_channel(root, "dev")
+
+    def test_resolve_ci_channel_notes_non_default_without_rejecting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "defaultChannel": "stable",
+                        "channels": ["beta", "stable"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(host.resolve_ci_channel(root, "beta"), "beta")
+            self.assertIn("publishing non-default channel beta", output.getvalue())
+            self.assertIn("defaultChannel is stable", output.getvalue())
 
     def test_cmd_ci_release_stages_install_and_payload_then_publishes(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -2797,6 +2868,81 @@ class UpdaterGateTests(unittest.TestCase):
             drift: list[str] = []
             host.run_gates(root, self.state(root, "node"), drift)
             self.assertTrue(any("CI payload track" in item for item in drift))
+
+    def test_removed_stage_flag_is_rejected_in_packaging_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            workflow = root / ".github/workflows/release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                'run: relkit stage "$VERSION" --add dist/app.zip os=windows\n',
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertTrue(
+                any(
+                    "--add" in item
+                    and "--install" in item
+                    and ".github/workflows/release.yml" in item
+                    for item in drift
+                )
+            )
+
+    def test_removed_stage_flag_scan_does_not_read_product_source(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "src/example.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'const docs = "relkit stage --add";\n',
+                encoding="utf-8",
+            )
+            workflow = root / ".github/workflows/release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                'run: relkit stage "$VERSION" --install dist/app.zip os=windows\n',
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertFalse(any("removed relkit stage flag" in item for item in drift))
+
+    def test_installed_release_contract_rejects_stale_lock_window(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            contract = root / "scripts/host/release-contract.json"
+            contract.parent.mkdir(parents=True)
+            contract.write_text(
+                json.dumps(
+                    {
+                        "schema": "relkit.host-contract/1",
+                        "protocol": {"min": 2, "max": 2},
+                        "updaterIpc": {"min": 3, "max": 3},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            lock = root / "scripts/relkit.lock.json"
+            lock.write_text(
+                json.dumps(
+                    {
+                        "release": "v0.4.18",
+                        "protocol": {"min": 2, "max": 2},
+                        "updaterIpc": {"min": 1, "max": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertTrue(
+                any(
+                    "lock updaterIpc" in item
+                    and "rerun upgrade for v0.4.18" in item
+                    for item in drift
+                )
+            )
 
     def test_internal_apply_accepts_payload_track(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

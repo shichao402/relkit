@@ -131,3 +131,62 @@ func TestRunBuildsPayloadAndRequiresInstallCounterpart(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunDerivesDistinctPayloadFilenamesAndRejectsCollisions(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{
+		Root: root, Product: "demo", DefaultChannel: "stable", Channels: []string{"stable"},
+		CodeStrategy: "explicit",
+	}
+	var adds []AddSpec
+	for _, target := range []struct {
+		os, arch string
+	}{
+		{os: "linux", arch: "amd64"},
+		{os: "windows", arch: "amd64"},
+	} {
+		tree := filepath.Join(root, target.os+"-tree")
+		if err := os.MkdirAll(tree, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tree, "app.bin"), []byte(target.os), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		installer := filepath.Join(root, target.os+"-setup.zip")
+		if err := os.WriteFile(installer, []byte("install-"+target.os), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		selectors := "os=" + target.os + ",arch=" + target.arch
+		adds = append(adds,
+			AddSpec{Path: installer, Track: "install", PairsText: selectors},
+			AddSpec{Path: tree, Track: "payload", PairsText: selectors},
+		)
+	}
+
+	staged, err := Run(cfg, "1.0.0", 1, 0, adds, "", "", "", "", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloadFilenames := map[string]bool{}
+	for _, artifact := range staged.Artifacts {
+		if artifact.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
+			payloadFilenames[artifact.Filename] = true
+		}
+	}
+	if len(payloadFilenames) != 2 {
+		t.Fatalf("payload filenames=%v", payloadFilenames)
+	}
+	for filename := range payloadFilenames {
+		if _, err := os.Stat(filepath.Join(ArtifactsDir(root, "1.0.0"), filename)); err != nil {
+			t.Fatalf("payload %q was not materialized: %v", filename, err)
+		}
+	}
+
+	colliding := append([]AddSpec(nil), adds...)
+	colliding[1].PairsText += ",filename=shared-payload.zip"
+	colliding[3].PairsText += ",filename=shared-payload.zip"
+	if _, err := Run(cfg, "1.0.1", 2, 0, colliding, "", "", "", "", false, nil); err == nil ||
+		!strings.Contains(err.Error(), "artifact filenames must be unique") {
+		t.Fatalf("duplicate filename err=%v", err)
+	}
+}
