@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from .const import MIN_PYTHON
 from .facets import BY_NAME, components
@@ -45,6 +45,18 @@ PACKAGING_PATTERNS = (
     "scripts/*.cmd",
     "scripts/*.bat",
 )
+CHANNEL_ID = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+CHANNEL_STRING = rf"[\"']({CHANNEL_ID})[\"']"
+CLIENT_CHANNEL_ASSIGN = re.compile(
+    rf"\b(?:UPDATE_CHANNEL|updateChannel|currentChannel|Runtime\.channel)\b"
+    rf"(?:\s*:\s*[A-Za-z0-9_.<>,|?\s]+)?\s*=\s*{CHANNEL_STRING}"
+)
+CLIENT_CHANNEL_FIELD = re.compile(rf"\bchannel\s*[:=]\s*{CHANNEL_STRING}")
+CLIENT_CHANNEL_UNION = re.compile(
+    rf"[\"']{CHANNEL_ID}[\"'](?:\s*\|\s*[\"']{CHANNEL_ID}[\"'])+"
+)
+CLIENT_CHANNEL_TOKEN = re.compile(CHANNEL_STRING)
+CI_CHANNEL_FLAG = re.compile(rf"--channel\s+({CHANNEL_ID})\b")
 
 
 def gate(name: str) -> Callable[[Gate], Gate]:
@@ -127,6 +139,51 @@ def _packaging_files(root: Path) -> list[Path]:
     ]
 
 
+def publish_channels(root: Path) -> set[str]:
+    """Channels relkit.json and packaging entrypoints can actually emit."""
+    found: set[str] = set()
+    cfg = _config(root)
+    channels = cfg.get("channels")
+    if isinstance(channels, list):
+        found.update(str(item).strip() for item in channels if str(item).strip())
+    for path in _packaging_files(root):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        found.update(CI_CHANNEL_FLAG.findall(text))
+    return {item for item in found if re.fullmatch(CHANNEL_ID, item)}
+
+
+def client_query_channels(
+    root: Path, *, allowed: Optional[set[str]] = None
+) -> set[str]:
+    """Compile-time channel names the host actually queries.
+
+    Returns an empty set when source has no closed channel constant, so
+    callers must treat empty as 'unknown' rather than 'queries nothing'.
+    """
+    allowed = allowed if allowed is not None else publish_channels(root)
+    if not allowed:
+        return set()
+    found: set[str] = set()
+    for path in _source_files(root):
+        if path.suffix.lower() not in EXECUTABLE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        found.update(CLIENT_CHANNEL_ASSIGN.findall(text))
+        found.update(CLIENT_CHANNEL_FIELD.findall(text))
+        for span in CLIENT_CHANNEL_UNION.findall(text):
+            found.update(CLIENT_CHANNEL_TOKEN.findall(span))
+    return {item for item in found if item in allowed}
+
+
+def unused_publish_channels(root: Path) -> tuple[set[str], set[str]]:
+    """Publish channels no client compile-time constant will query."""
+    published = publish_channels(root)
+    queried = client_query_channels(root, allowed=published)
+    if not queried:
+        return set(), queried
+    return published - queried, queried
+
+
 @gate("stage-cli-flags")
 def stage_cli_flags(root: Path, state: dict[str, Any], drift: list[str]) -> None:
     """Reject removed relkit stage flags in packaging entrypoints only."""
@@ -170,6 +227,29 @@ def release_lock_contract(root: Path, state: dict[str, Any], drift: list[str]) -
                 f"lock {field}={actual} does not match installed release "
                 f"contract {expected}; rerun upgrade for {lock.get('release')}"
             )
+
+
+@gate("publish-channel-no-client-consumer")
+def publish_channel_no_client_consumer(
+    root: Path, state: dict[str, Any], drift: list[str]
+) -> None:
+    """A publishable channel that no host compile-time constant queries is drift.
+
+    inspect / verify used to stay green while CI shipped beta to a client whose
+    Runtime.channel was compiled as stable. Skip when source has no closed
+    channel constant: that is unknown, not 'queries nothing'.
+    """
+    unused, queried = unused_publish_channels(root)
+    if not unused:
+        return
+    queried_text = ", ".join(sorted(queried)) or "(none)"
+    drift.append(
+        "publish channel "
+        + ", ".join(sorted(unused))
+        + " is not queried by any client "
+        + f"(host source queries: {queried_text}); "
+        "installed clients will not see those releases"
+    )
 
 
 def has_webview(root: Path) -> bool:

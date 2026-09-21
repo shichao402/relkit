@@ -1777,6 +1777,32 @@ class ReconcileTests(unittest.TestCase):
             self.assertIn("publishing non-default channel beta", output.getvalue())
             self.assertIn("defaultChannel is stable", output.getvalue())
 
+    def test_resolve_ci_channel_rejects_channel_with_no_client_consumer(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "demo",
+                        "defaultChannel": "stable",
+                        "channels": ["beta", "stable"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source = root / "src/core/update/config.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'export const UPDATE_CHANNEL = "stable";\n',
+                encoding="utf-8",
+            )
+            with self.assertRaises(host.Fail) as raised:
+                host.resolve_ci_channel(root, "beta")
+            self.assertEqual(
+                raised.exception.code, "publish-channel-no-client-consumer"
+            )
+            self.assertIn("not queried by any client", str(raised.exception))
+
     def test_cmd_ci_release_stages_install_and_payload_then_publishes(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -2583,6 +2609,31 @@ class LockCurrencyTests(unittest.TestCase):
             codes = [item["code"] for item in report["findings"]]
             self.assertIn("lock-behind-upstream", codes)
 
+    def test_inspect_warns_when_a_publish_channel_has_no_client(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "cronkit",
+                        "site": {"title": "cronkit"},
+                        "channels": ["beta", "stable"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source = root / "src/core/update/config.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'export const UPDATE_CHANNEL = "stable";\n',
+                encoding="utf-8",
+            )
+            report = host.env_inspect_report(root)
+            codes = [item["code"] for item in report["findings"]]
+            self.assertIn("publish-channel-no-client-consumer", codes)
+            self.assertEqual(report["facts"]["unusedPublishChannels"], ["beta"])
+            self.assertEqual(report["facts"]["clientChannels"], ["stable"])
+
     def test_a_stale_lock_is_never_reported_as_no_pending_work(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -2942,6 +2993,54 @@ class UpdaterGateTests(unittest.TestCase):
                     and "rerun upgrade for v0.4.18" in item
                     for item in drift
                 )
+            )
+
+    def test_publish_channel_without_client_consumer_is_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps(
+                    {
+                        "product": "cronkit",
+                        "defaultChannel": "stable",
+                        "channels": ["beta", "stable"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source = root / "src/core/update/config.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'export const UPDATE_CHANNEL = "stable";\n',
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertTrue(
+                any(
+                    "publish channel beta" in item
+                    and "host source queries: stable" in item
+                    for item in drift
+                )
+            )
+
+    def test_publish_channel_gate_skips_when_host_has_no_channel_constant(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "relkit.json").write_text(
+                json.dumps({"product": "demo", "channels": ["beta", "stable"]}),
+                encoding="utf-8",
+            )
+            source = root / "src/update.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'import "@relkit/updater-bindings";\n',
+                encoding="utf-8",
+            )
+            drift: list[str] = []
+            host.run_gates(root, self.state(root, "node"), drift)
+            self.assertFalse(
+                any("not queried by any client" in item for item in drift)
             )
 
     def test_internal_apply_accepts_payload_track(self) -> None:

@@ -31,7 +31,7 @@ from .facets import (
     updater_process_values,
 )
 from .digest import tree_sha256 as _tree_sha256
-from .gates import GATES, run_gates, has_webview
+from .gates import GATES, run_gates, client_query_channels, has_webview
 from . import runtime as _runtime
 
 
@@ -954,6 +954,14 @@ def _impl_resolve_ci_channel(root: Path, explicit: str) -> str:
         print(
             f"relkit: note: publishing non-default channel {channel}; "
             f"defaultChannel is {default_channel}"
+        )
+    queried = client_query_channels(root, allowed=set(allowed))
+    if queried and channel not in queried:
+        raise Fail(
+            f"channel {channel} is not queried by any client "
+            f"(host source queries: {', '.join(sorted(queried))}); "
+            "installed clients will not see this release",
+            code="publish-channel-no-client-consumer",
         )
     tag = (
         os.environ.get("BK_CI_REPO_GIT_WEBHOOK_TAG_NAME")

@@ -182,6 +182,7 @@ DIGESTED_ISSUE_CODES = frozenset(
         "multi-payload-filename-collision",
         "stage-flag-removal-not-caught-until-publish",
         "upgrade-lock-before-new-scripts",
+        "publish-channel-no-client-consumer",
         "retrospect-note-code-invalid",
         "retrospect-note-class-invalid",
         "retrospect-note-text-missing",
