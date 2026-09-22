@@ -501,6 +501,7 @@ class DownloadTests(unittest.TestCase):
                 lines.append(message)
 
             with (
+                patch.object(subject.os, "name", "nt"),
                 patch.object(subject, "resolve_ca_bundle", return_value=None),
                 patch.object(
                     subject,
@@ -899,6 +900,8 @@ class DownloadTests(unittest.TestCase):
             destination = Path(raw) / "artifact"
             with (
                 patch.object(subject.os, "name", "nt"),
+                # Avoid Path becoming WindowsPath via ensure_windows_ca_bundle.
+                patch.object(subject, "resolve_ca_bundle", return_value=None),
                 patch.object(
                     subject, "resolve_curl", side_effect=RuntimeError("System32 missing")
                 ),
