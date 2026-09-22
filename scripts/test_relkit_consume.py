@@ -367,6 +367,11 @@ class DownloadTests(unittest.TestCase):
             with (
                 patch.object(subject, "urlopen", side_effect=URLError("bad CA")),
                 patch.object(subject, "download_with_curl", side_effect=fake_curl),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=AssertionError("powershell should not run"),
+                ),
                 patch.object(subject, "resolve_curl", return_value=r"C:\Windows\System32\curl.exe"),
                 patch.object(subject, "detect_curl_backend", return_value="schannel"),
             ):
@@ -505,8 +510,18 @@ class DownloadTests(unittest.TestCase):
                 patch.object(subject, "detect_curl_backend", return_value="schannel"),
                 patch.object(
                     subject,
-                    "download_with_python",
+                    "download_with_curl",
                     side_effect=lambda *a, **k: destination.write_bytes(b"ok"),
+                ),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=AssertionError("powershell should not run"),
+                ),
+                patch.object(
+                    subject,
+                    "download_with_python",
+                    side_effect=AssertionError("python should not run"),
                 ),
                 patch.object(subject.sys, "stderr"),
                 patch("builtins.print", side_effect=capture),
@@ -516,7 +531,7 @@ class DownloadTests(unittest.TestCase):
             self.assertIn("relkit consume: transport attempt", joined)
             self.assertIn("backend=schannel", joined)
             self.assertIn("relkit consume: transport success", joined)
-            self.assertIn("method=Python HTTPS", joined)
+            self.assertIn("method=system curl", joined)
 
     def test_python_loads_ca_bundle_into_ssl_context(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -582,6 +597,11 @@ class DownloadTests(unittest.TestCase):
                     "download_with_curl",
                     side_effect=subject.CertificateVerificationError("curl CA fail"),
                 ),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=subject.CertificateVerificationError("ps CA fail"),
+                ),
                 patch.dict(subject.os.environ, {}, clear=False),
             ):
                 subject.os.environ.pop(subject.ALLOW_INSECURE_ENV, None)
@@ -615,6 +635,11 @@ class DownloadTests(unittest.TestCase):
                     "download_with_curl",
                     side_effect=RuntimeError("curl unavailable"),
                 ),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=subject.CertificateVerificationError("ps CA fail"),
+                ),
             ):
                 subject.fetch_url(
                     "https://example.invalid/artifact",
@@ -641,6 +666,11 @@ class DownloadTests(unittest.TestCase):
                     subject,
                     "download_with_curl",
                     side_effect=RuntimeError("network unreachable"),
+                ),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=RuntimeError("powershell network unreachable"),
                 ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "refusing insecure fallback"):
@@ -709,6 +739,11 @@ class DownloadTests(unittest.TestCase):
                     "download_with_curl",
                     side_effect=subject.CertificateVerificationError(help_noise),
                 ),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=subject.CertificateVerificationError(help_noise),
+                ),
             ):
                 with self.assertRaises(RuntimeError) as raised:
                     subject.fetch_url(
@@ -746,7 +781,12 @@ class DownloadTests(unittest.TestCase):
                 patch.object(
                     subject,
                     "download_with_curl",
-                    side_effect=AssertionError("curl should not run"),
+                    side_effect=RuntimeError("curl should not win"),
+                ),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=RuntimeError("powershell should not win"),
                 ),
             ):
                 installed = subject.download_artifact(
@@ -771,6 +811,12 @@ class DownloadTests(unittest.TestCase):
                 patch.object(
                     subject, "urlopen", side_effect=lambda *_args, **_kwargs: Response(b"wrong")
                 ),
+                patch.object(subject, "resolve_curl", side_effect=RuntimeError("no curl")),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=RuntimeError("no powershell"),
+                ),
                 patch.object(subject.time, "sleep"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "sha256 mismatch"):
@@ -778,6 +824,116 @@ class DownloadTests(unittest.TestCase):
             self.assertFalse(
                 (root / ".relkit/cache/artifacts" / ("0" * 64)).exists()
             )
+
+    def test_ensure_uses_system32_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            system = Path(raw) / "System32" / "curl.exe"
+            system.parent.mkdir(parents=True)
+            system.write_bytes(b"MZ")
+            with (
+                patch.object(subject.os, "name", "nt"),
+                patch.object(subject, "system32_curl", return_value=system),
+                patch.object(subject, "detect_curl_backend", return_value="schannel"),
+                patch.object(
+                    subject,
+                    "install_pinned_windows_schannel_curl",
+                    side_effect=AssertionError("must not install"),
+                ),
+            ):
+                chosen = subject.ensure_windows_schannel_curl(root, environ={})
+            self.assertEqual(chosen, str(system))
+
+    def test_ensure_installs_pinned_curl_when_system32_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            installed = (
+                root
+                / ".relkit"
+                / "cache"
+                / "tools"
+                / f"curl-schannel-{subject._WINDOWS_CURL_PIN['version']}"
+                / subject._WINDOWS_CURL_PIN["extract_dir"]
+                / "bin"
+                / "curl.exe"
+            )
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"MZ")
+            env: dict[str, str] = {}
+
+            def fake_install(project_root: Path) -> Path:
+                self.assertEqual(project_root, root)
+                return installed
+
+            with (
+                patch.object(subject.os, "name", "nt"),
+                patch.object(subject, "system32_curl", return_value=None),
+                patch.object(subject, "cached_schannel_curl", return_value=None),
+                patch.object(
+                    subject, "install_pinned_windows_schannel_curl", side_effect=fake_install
+                ),
+                patch.object(subject, "detect_curl_backend", return_value="schannel"),
+            ):
+                chosen = subject.ensure_windows_schannel_curl(root, environ=env)
+            self.assertEqual(chosen, str(installed))
+            self.assertEqual(env[subject.CURL_OVERRIDE_ENV], str(installed))
+
+    def test_ensure_falls_back_to_powershell_when_install_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with (
+                patch.object(subject.os, "name", "nt"),
+                patch.object(subject, "system32_curl", return_value=None),
+                patch.object(subject, "cached_schannel_curl", return_value=None),
+                patch.object(
+                    subject,
+                    "install_pinned_windows_schannel_curl",
+                    side_effect=RuntimeError("403 Forbidden"),
+                ),
+            ):
+                chosen = subject.ensure_windows_schannel_curl(root, environ={})
+            self.assertIsNone(chosen)
+
+    def test_fetch_url_uses_powershell_when_curl_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            destination = Path(raw) / "artifact"
+            with (
+                patch.object(subject.os, "name", "nt"),
+                patch.object(
+                    subject, "resolve_curl", side_effect=RuntimeError("System32 missing")
+                ),
+                patch.object(
+                    subject,
+                    "download_with_powershell",
+                    side_effect=lambda url, path: path.write_bytes(b"via-ps"),
+                ),
+                patch.object(
+                    subject,
+                    "download_with_python",
+                    side_effect=AssertionError("python should not run"),
+                ),
+            ):
+                subject.fetch_url(
+                    "https://github.example/asset.zip",
+                    destination,
+                    allow_insecure=False,
+                )
+            self.assertEqual(destination.read_bytes(), b"via-ps")
+
+    def test_install_pinned_curl_checks_sha256(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive_bytes = b"not-a-real-archive"
+
+            def fake_ps(url: str, destination: Path) -> None:
+                destination.write_bytes(archive_bytes)
+
+            with (
+                patch.object(subject.os, "name", "nt"),
+                patch.object(subject, "download_with_powershell", side_effect=fake_ps),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "sha256 mismatch"):
+                    subject.install_pinned_windows_schannel_curl(root)
 
     def test_watched_windows_tree_replaces_files_and_removes_stale(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
