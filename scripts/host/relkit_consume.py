@@ -364,6 +364,10 @@ def download_with_powershell(url: str, destination: Path) -> None:
     temporary.unlink(missing_ok=True)
     script = (
         "$ErrorActionPreference = 'Stop'\n"
+        # Server 2016 / older .NET defaults omit TLS 1.2 and abort with
+        # "Could not create SSL/TLS secure channel" against modern hosts.
+        "[Net.ServicePointManager]::SecurityProtocol = "
+        "[Net.SecurityProtocolType]::Tls12\n"
         f"$url = {json.dumps(url)}\n"
         f"$out = {json.dumps(str(temporary))}\n"
         "Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $out\n"
@@ -1256,6 +1260,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             spec = artifact_spec(lock, component, target)
             resolved_artifacts[component] = spec["sha256"]
             if args.command == "install":
+                if component == "host-scripts":
+                    expected = str(lock.get("hostScriptsSha256") or "").lower()
+                    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                        raise RuntimeError("lock has no valid hostScriptsSha256")
+                    host_dir = root / "scripts" / "host"
+                    if (
+                        host_dir.is_dir()
+                        and host_scripts_tree_sha256(host_dir) == expected
+                    ):
+                        print(
+                            "relkit consume: host-scripts already match lock; "
+                            "skipping download",
+                            file=sys.stderr,
+                        )
+                        check_installed(root, lock, component, target)
+                        continue
                 artifact = download_artifact(
                     root, component, spec, allow_insecure=allow_insecure
                 )
