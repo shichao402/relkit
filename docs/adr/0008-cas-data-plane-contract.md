@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-08
-- Amended: 2026-09-15（删除 `static-http`）
+- Amended: 2026-09-15（删除 `static-http`）；2026-09-23（协议 3 的 CAS 分片）
 - Supersedes: [SPEC.md §13.1](../../SPEC.md) 中「`local` 后端必须始终可用」及「`get` 不能用文档 URL 替代，因为 `local` 的 `baseUrl` 此刻通常不可解析」。路径型「上传前即可确定 URL」的分界仍然有效。ADR 0001–0007 的决策正文不变；[ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md) 继续用 `s3-compatible` 作备援桶。
 
 ## 背景
@@ -11,8 +11,8 @@
 
 ## 决策
 
-1. **客户端只执行请求描述，永不签名。** 凭据文档描述要发哪些 HTTP 请求。每个请求是绝对 `http(s)` URL + 头 + 到期时间，鉴权装在 URL 里（预签名 query 或能力票）。客户端不认识 SigV4 / TC3，也不按 `Type()` 分支。禁止 `sign` 字段；分片到来时按需再要一片的 URL，而不是让客户端自签。
-2. **凭据按请求描述列表建模。** 每个 blob 带 `requests[]`（`method` / `url` / `headers` / `expiresAt`）。单对象上传恰好一个元素。分片续传只增加元素，并另给「索取下一片」的端点；形状不变。
+1. **客户端只执行请求描述，永不签名。** 凭据文档描述要发哪些 HTTP 请求。每个请求是绝对 `http(s)` URL + 头 + 到期时间，鉴权装在 URL 里（预签名 query 或能力票）。客户端不认识 SigV4 / TC3，也不按 `Type()` 分支。禁止 `sign` 字段。协议 3 的分片由 agent 一次签发全部片 URL（带 `offset` / `length`）；客户端把每片响应的 `ETag` 交回 agent 完成合并，仍然不签名、不拼 S3 XML。
+2. **凭据按请求描述列表建模。** 每个 blob 带 `requests[]`（`method` / `url` / `headers` / `expiresAt`，分片另有 `offset` / `length`）。对象不大于片大小、协商协议低于 3、或后端不是 `s3-compatible` 时，恰好一个元素且没有 `uploadId`。`s3-compatible` 分片增加元素并带 `uploadId`。合并与中止是 agent 的 `POST /v1/cas/complete` 与 `POST /v1/cas/abort`，不是预签名到对象存储的请求。能力 URL 上的 PUT 不加协议头。
 3. **数据面独占自己的存储。** 控制面（`relkit-agent`）签发能力、Promote、写 index，不做第二个字节写者。禁止 agent 代理 `PUT` CAS 正文到本机目录。
 4. **后端类型按「连哪套 API」命名，只保留两个：**
    - `s3-compatible`：COS / S3 / MinIO，长期钥 query 预签名。

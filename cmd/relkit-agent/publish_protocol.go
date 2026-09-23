@@ -16,6 +16,14 @@ func (s *Server) requirePublishProtocol(w http.ResponseWriter, r *http.Request) 
 	return publishproto.Check(w, r, s.publishWindow(), version)
 }
 
+func (s *Server) negotiatedProtocol(r *http.Request) int {
+	decision := publishproto.Negotiate(s.publishWindow(), publishproto.ParseOffer(r.Header))
+	if !decision.OK {
+		return 0
+	}
+	return decision.Selected
+}
+
 func (s *Server) handlePublishPreflight(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

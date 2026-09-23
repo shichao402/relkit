@@ -110,13 +110,19 @@ func DefaultPartSizeFromEnv() int64 {
 }
 
 func DefaultConcurrencyFromEnv() int {
+	return ConcurrencyFromEnv(DefaultConcurrency)
+}
+
+// ConcurrencyFromEnv reads RELKIT_UPLOAD_CONCURRENCY. An unset or unusable
+// value returns fallback, so cas-put can keep its own default.
+func ConcurrencyFromEnv(fallback int) int {
 	raw := strings.TrimSpace(os.Getenv("RELKIT_UPLOAD_CONCURRENCY"))
 	if raw == "" {
-		return DefaultConcurrency
+		return fallback
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 {
-		return DefaultConcurrency
+		return fallback
 	}
 	return n
 }

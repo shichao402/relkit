@@ -29,6 +29,7 @@ type Options struct {
 	Version     string
 	URL         string
 	Token       string
+	PartSize    int64
 	Concurrency int
 	HTTPClient  *http.Client
 	Log         func(string)
@@ -47,8 +48,9 @@ type blob struct {
 }
 
 type credentialRequest struct {
-	Product string `json:"product"`
-	Blobs   []blob `json:"blobs"`
+	Product  string `json:"product"`
+	PartSize int64  `json:"partSize,omitempty"`
+	Blobs    []blob `json:"blobs"`
 }
 
 type uploadRequest struct {
@@ -56,12 +58,20 @@ type uploadRequest struct {
 	URL       string            `json:"url"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	ExpiresAt time.Time         `json:"expiresAt"`
+	Offset    int64             `json:"offset,omitempty"`
+	Length    int64             `json:"length,omitempty"`
 }
 
 type upload struct {
 	SHA256   string          `json:"sha256"`
 	Size     int64           `json:"size"`
+	UploadID string          `json:"uploadId,omitempty"`
 	Requests []uploadRequest `json:"requests"`
+}
+
+type partReport struct {
+	PartNumber int    `json:"partNumber"`
+	ETag       string `json:"etag"`
 }
 
 type credentialResponse struct {
@@ -95,7 +105,7 @@ func Put(ctx context.Context, opts Options) (*Result, error) {
 	if err := publishproto.PreflightAgent(ctx, client, opts.URL, opts.Token, opts.Product); err != nil {
 		return nil, err
 	}
-	request := credentialRequest{Product: opts.Product}
+	request := credentialRequest{Product: opts.Product, PartSize: opts.PartSize}
 	paths := make(map[string]string, len(staged.Artifacts))
 	sizes := make(map[string]int64, len(staged.Artifacts))
 	for _, artifact := range staged.Artifacts {
@@ -172,95 +182,202 @@ func fetchCredentials(ctx context.Context, client *http.Client, opts Options, in
 	return &out, nil
 }
 
+type blobProgress struct {
+	item      upload
+	source    string
+	etags     []string
+	got       int
+	completed bool
+	mu        sync.Mutex
+	abortOnce sync.Once
+}
+
+type transfer struct {
+	item   upload
+	source string
+	index  int
+	blob   *blobProgress
+}
+
 func uploadAll(ctx context.Context, client *http.Client, opts Options, uploads []upload, paths map[string]string) error {
 	concurrency := opts.Concurrency
 	if concurrency < 1 {
 		concurrency = 4
 	}
+	var multipart []*blobProgress
+	var retErr error
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		abortCtx := context.WithoutCancel(ctx)
+		for _, progress := range multipart {
+			progress.mu.Lock()
+			done := progress.completed
+			progress.mu.Unlock()
+			if done {
+				continue
+			}
+			progress.abortOnce.Do(func() {
+				_ = postAgent(abortCtx, client, opts, "/cas/abort", map[string]string{
+					"product":  opts.Product,
+					"sha256":   progress.item.SHA256,
+					"uploadId": progress.item.UploadID,
+				})
+			})
+		}
+	}()
+	jobs := make([]transfer, 0)
+	for _, item := range uploads {
+		normalized, err := normalizeUpload(item)
+		if err != nil {
+			if item.UploadID != "" {
+				multipart = append(multipart, &blobProgress{item: item})
+			}
+			retErr = err
+			return err
+		}
+		source := paths[strings.ToLower(normalized.SHA256)]
+		if source == "" {
+			err = fmt.Errorf("credentials returned unknown blob %s", normalized.SHA256)
+			if normalized.UploadID != "" {
+				multipart = append(multipart, &blobProgress{item: normalized})
+			}
+			retErr = err
+			return err
+		}
+		if normalized.UploadID == "" {
+			jobs = append(jobs, transfer{item: normalized, source: source})
+			continue
+		}
+		progress := &blobProgress{
+			item:   normalized,
+			source: source,
+			etags:  make([]string, len(normalized.Requests)),
+		}
+		multipart = append(multipart, progress)
+		for part := range normalized.Requests {
+			jobs = append(jobs, transfer{item: normalized, source: source, index: part, blob: progress})
+		}
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	putClient := *client
 	putClient.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	jobs := make(chan upload)
+	queue := make(chan transfer)
 	errs := make(chan error, 1)
 	var wg sync.WaitGroup
 	for range concurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for item := range jobs {
-				item, err := normalizeUpload(item)
-				if err != nil {
+			for job := range queue {
+				if err := runTransfer(ctx, &putClient, opts, job); err != nil {
 					select {
 					case errs <- err:
 					default:
 					}
 					cancel()
 					return
-				}
-				source := paths[strings.ToLower(item.SHA256)]
-				if source == "" {
-					select {
-					case errs <- fmt.Errorf("credentials returned unknown blob %s", item.SHA256):
-					default:
-					}
-					cancel()
-					return
-				}
-				if err := uploadOne(ctx, &putClient, source, item, opts.Log); err != nil {
-					select {
-					case errs <- err:
-					default:
-					}
-					cancel()
-					return
-				}
-				if opts.Log != nil {
-					opts.Log(fmt.Sprintf("uploaded cas/%s (%d bytes)", item.SHA256, item.Size))
 				}
 			}
 		}()
 	}
 send:
-	for _, item := range uploads {
+	for _, job := range jobs {
 		select {
-		case jobs <- item:
+		case queue <- job:
 		case <-ctx.Done():
 			break send
 		}
 	}
-	close(jobs)
+	close(queue)
 	wg.Wait()
 	select {
 	case err := <-errs:
+		retErr = err
 		return err
 	default:
+		retErr = ctx.Err()
 		return ctx.Err()
 	}
+}
+
+func runTransfer(ctx context.Context, client *http.Client, opts Options, job transfer) error {
+	if job.blob == nil {
+		if err := uploadOne(ctx, client, job.source, job.item, opts.Log); err != nil {
+			return err
+		}
+		if opts.Log != nil {
+			opts.Log(fmt.Sprintf("uploaded cas/%s (%d bytes)", job.item.SHA256, job.item.Size))
+		}
+		return nil
+	}
+	etag, err := uploadPart(ctx, client, job.source, job.item, job.index, opts.Log)
+	if err != nil {
+		return err
+	}
+	job.blob.mu.Lock()
+	job.blob.etags[job.index] = etag
+	job.blob.got++
+	finished := job.blob.got == len(job.blob.etags)
+	etags := append([]string(nil), job.blob.etags...)
+	job.blob.mu.Unlock()
+	if !finished {
+		return nil
+	}
+	if err := completeBlob(ctx, client, opts, job.item, etags); err != nil {
+		return err
+	}
+	job.blob.mu.Lock()
+	job.blob.completed = true
+	job.blob.mu.Unlock()
+	if opts.Log != nil {
+		opts.Log(fmt.Sprintf("uploaded cas/%s (%d bytes)", job.item.SHA256, job.item.Size))
+	}
+	return nil
 }
 
 func normalizeUpload(item upload) (upload, error) {
 	if len(item.Requests) == 0 {
 		return item, fmt.Errorf("CAS credentials for %s have no requests", item.SHA256)
 	}
-	if len(item.Requests) != 1 {
+	if item.UploadID == "" && len(item.Requests) != 1 {
 		return item, fmt.Errorf("CAS credentials for %s contain %d requests; this client supports one-request uploads", item.SHA256, len(item.Requests))
 	}
-	req := item.Requests[0]
-	if req.Method != "" && !strings.EqualFold(req.Method, http.MethodPut) {
-		return item, fmt.Errorf("unsupported CAS method %q", req.Method)
+	var covered int64
+	for i := range item.Requests {
+		req := item.Requests[i]
+		if req.Method != "" && !strings.EqualFold(req.Method, http.MethodPut) {
+			return item, fmt.Errorf("unsupported CAS method %q", req.Method)
+		}
+		target, err := url.Parse(strings.TrimSpace(req.URL))
+		if err != nil {
+			return item, err
+		}
+		if !target.IsAbs() || (target.Scheme != "http" && target.Scheme != "https") {
+			return item, fmt.Errorf("CAS upload URL must be an absolute http(s) URL")
+		}
+		item.Requests[i].URL = target.String()
+		item.Requests[i].Method = http.MethodPut
+		if item.UploadID == "" {
+			continue
+		}
+		if req.Length < 1 {
+			return item, fmt.Errorf("CAS part for %s is missing a length", item.SHA256)
+		}
+		if req.Offset != covered {
+			return item, fmt.Errorf("CAS parts for %s must cover the blob in order", item.SHA256)
+		}
+		covered += req.Length
 	}
-	target, err := url.Parse(strings.TrimSpace(req.URL))
-	if err != nil {
-		return item, err
+	if item.UploadID != "" && covered != item.Size {
+		return item, fmt.Errorf("CAS parts for %s cover %d bytes, want %d", item.SHA256, covered, item.Size)
 	}
-	if !target.IsAbs() || (target.Scheme != "http" && target.Scheme != "https") {
-		return item, fmt.Errorf("CAS upload URL must be an absolute http(s) URL")
-	}
-	item.Requests[0].URL = target.String()
-	item.Requests[0].Method = http.MethodPut
 	return item, nil
 }
 
@@ -342,6 +459,116 @@ func uploadOnce(ctx context.Context, client *http.Client, source string, item up
 			fmt.Errorf("PUT cas/%s HTTP %d: %s", item.SHA256, resp.StatusCode, message)
 	}
 	return false, nil
+}
+
+func uploadPart(ctx context.Context, client *http.Client, source string, item upload, index int, log func(string)) (string, error) {
+	part := item.Requests[index]
+	var lastErr error
+	attemptsUsed := 0
+	for attempt := 1; attempt <= maxUploadAttempts; attempt++ {
+		attemptsUsed = attempt
+		etag, retry, err := uploadPartOnce(ctx, client, source, item.SHA256, part)
+		if err == nil {
+			return etag, nil
+		}
+		lastErr = err
+		if !retry || attempt == maxUploadAttempts {
+			break
+		}
+		delay := time.Duration(1<<(attempt-1)) * time.Second
+		if log != nil {
+			log(fmt.Sprintf(
+				"retrying cas/%s part %d after attempt %d/%d: %v",
+				item.SHA256, index+1, attempt, maxUploadAttempts, err,
+			))
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if attemptsUsed == 1 {
+		return "", lastErr
+	}
+	return "", fmt.Errorf("%w (after %d attempts)", lastErr, attemptsUsed)
+}
+
+func uploadPartOnce(ctx context.Context, client *http.Client, source, digest string, part uploadRequest) (string, bool, error) {
+	file, err := os.Open(source)
+	if err != nil {
+		return "", false, err
+	}
+	defer file.Close()
+	if _, err := file.Seek(part.Offset, io.SeekStart); err != nil {
+		return "", false, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, part.URL, io.LimitReader(file, part.Length))
+	if err != nil {
+		return "", false, err
+	}
+	req.ContentLength = part.Length
+	for key, value := range part.Headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", false, ctx.Err()
+		}
+		return "", true, fmt.Errorf("PUT cas/%s: %v", digest, redactErr(err))
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message := strings.TrimSpace(string(data))
+		return "", retryableUploadResponse(resp.StatusCode, message),
+			fmt.Errorf("PUT cas/%s HTTP %d: %s", digest, resp.StatusCode, message)
+	}
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		return "", false, fmt.Errorf("PUT cas/%s part returned no ETag", digest)
+	}
+	return etag, false, nil
+}
+
+func completeBlob(ctx context.Context, client *http.Client, opts Options, item upload, etags []string) error {
+	parts := make([]partReport, len(etags))
+	for i, etag := range etags {
+		parts[i] = partReport{PartNumber: i + 1, ETag: etag}
+	}
+	return postAgent(ctx, client, opts, "/cas/complete", map[string]any{
+		"product":  opts.Product,
+		"sha256":   item.SHA256,
+		"uploadId": item.UploadID,
+		"parts":    parts,
+	})
+}
+
+func postAgent(ctx context.Context, client *http.Client, opts Options, path string, payload any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, normalizeBase(opts.URL)+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+opts.Token)
+	req.Header.Set("Content-Type", "application/json")
+	publishproto.Apply(req.Header)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("POST %s HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return nil
 }
 
 func retryableUploadResponse(status int, body string) bool {
