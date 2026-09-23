@@ -672,7 +672,7 @@ get(key: str) -> bytes | None
 
 `local`、`http-put` 与 `static-http` 不属于现行后端。离线或本机演练**必须**启动真实 `relkit-serve` 数据面；禁止用不可访问的 `baseUrl` 伪造发布成功。外部系统已经放好的文件若要给客户端下载，把可匿名读取的绝对 URL 写进签名文档的 `urls[]`，不要为此再发明一种只读后端。
 
-CAS 凭据文档对每个 blob 给出 `requests[]`。每个请求**必须**包含绝对 http(s) URL、method、可选 headers 与到期时间。客户端只执行这些 HTTP 请求，**禁止**自行拼 URL、识别后端类型、实现 SigV4 / STS，或接受 `sign` 指令。单对象上传的 `requests[]` 恰好一个元素；未来分片仍沿用请求描述列表。
+CAS 凭据文档对每个 blob 给出 `requests[]`。每个请求**必须**包含绝对 http(s) URL、method、可选 headers 与到期时间；分片再加 `offset` 与 `length`。客户端只执行这些 HTTP 请求，**禁止**自行拼 URL、识别后端类型、实现 SigV4 / STS，或接受 `sign` 指令。对象不大于片大小、协商协议低于 3、或后端不是 `s3-compatible` 时，`requests[]` 恰好一个元素且没有 `uploadId`。协议 3 的 `s3-compatible` 分片增加元素并带 `uploadId`；客户端把每片 `ETag` 交回 agent 的 `POST /v1/cas/complete`，失败则 `POST /v1/cas/abort`。合并由 agent 签名。
 
 `s3-compatible` 对 COS / S3 / MinIO 使用发布机长期钥生成 query 预签名 URL。配置中的 `casCredentials` 仅可作为迁移兼容字段被接受并忽略，**禁止**把 `casCredentials=sts`、临时 STS 凭据或客户端签名当作现行流程。
 

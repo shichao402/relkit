@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestRelkitCompatiblePreflightAndWritesAdvertisePublisher(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
 			t.Errorf("Authorization = %q", got)
 		}
-		if got := r.Header.Get(publishproto.ProtocolHeader); got != "2" {
+		if got := r.Header.Get(publishproto.ProtocolHeader); got != strconv.Itoa(publishproto.Current) {
 			t.Errorf("%s = %q", publishproto.ProtocolHeader, got)
 		}
 		if got := r.Header.Get(publishproto.VersionHeader); got != "0.2.0-test" {

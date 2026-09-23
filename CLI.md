@@ -414,8 +414,8 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - `PUT /v1/drop/{product}/{version}/{filename}` — 多平台 Job 交换 build-scoped zip（Bearer；GET/HEAD/DELETE 同样鉴权）
 - `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer；整包兼容路径）
 - `relkit staged-put FILE --product ID --version VER --url URL` — 分片并发上传（`--part-size` / `--concurrency`，或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）
-- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 `requests[]`；每项都是绝对 URL。COS/S3 用长期钥 query 预签名，relkit-serve 用对象能力 URL，客户端不签名
-- `relkit cas-put --version VER [--product ID] [--url URL]` — 上传缺失 CAS blob，然后自动上传只含 `staged.pb` + `release-policy.json` 的瘦 staged tar
+- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 `requests[]`；每项都是绝对 URL。COS/S3 用长期钥 query 预签名，relkit-serve 用对象能力 URL，客户端不签名。协议 3 且对象大于一片时，COS/S3 改为多条带 `offset`/`length` 的分片 URL，客户端把 `ETag` 交回 `POST /v1/cas/complete`
+- `relkit cas-put --version VER [--product ID] [--url URL] [--concurrency N]` — 上传缺失 CAS blob，然后自动上传只含 `staged.pb` + `release-policy.json` 的瘦 staged tar。片大小认 `RELKIT_UPLOAD_PART_SIZE`（缺省 8MiB），在途 PUT 上限认 `RELKIT_UPLOAD_CONCURRENCY`（缺省 4，片和 blob 共用；`--concurrency` 覆盖该变量）
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
 - `GET /-/health`
 
@@ -455,13 +455,15 @@ CI **不持**签名私钥，也 **不持**长期 COS 写密钥。Runner 可在 `
       "${RELKIT_AGENT_URL}/v1/publish"
 ```
 
-CAS 路径把上面的打包与 `staged-put` 换成：
+CAS 路径把上面的打包与 `staged-put` 换成。跨地域直传时把片调小、在途路数调低；不设这两个变量时是 8MiB 与 4：
 
 ```yaml
 - name: Upload CAS and thin staged metadata
   env:
     RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
     RELKIT_AGENT_URL: ${{ vars.RELKIT_AGENT_URL }}
+    RELKIT_UPLOAD_PART_SIZE: 1MiB
+    RELKIT_UPLOAD_CONCURRENCY: 2
   run: relkit cas-put --version "${VERSION}" --product "${PRODUCT}"
 ```
 

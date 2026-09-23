@@ -107,11 +107,13 @@ agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不
 
 #### 凭据文档（CI 唯一入口）
 
-`POST /v1/cas/credentials` 的响应按 blob 给出 `requests[]`。每个请求只包含 `method`、**绝对** `url`、可选 `headers` 与 `expiresAt`；单对象上传恰好一个元素。CI 与 `relkit cas-put` 逐项执行 HTTP 请求，不认识后端类型，不实现 SigV4 / TC3 / STS，也不接受 `sign`。
+`POST /v1/cas/credentials` 的响应按 blob 给出 `requests[]`。每个请求包含 `method`、**绝对** `url`、可选 `headers` 与 `expiresAt`；分片再加 `offset` / `length`。CI 与 `relkit cas-put` 逐项执行 HTTP 请求，不认识后端类型，不实现 SigV4 / TC3 / STS，也不接受 `sign`。
+
+协商协议低于 3，或对象不大于片大小时，响应仍是一条 PUT、没有 `uploadId`。协议 3 且对象更大时，`s3-compatible` 返回 `uploadId` 和若干片 URL。客户端只上传对应字节，把每片 `ETag` `POST` 到 `/v1/cas/complete`；失败则 `POST /v1/cas/abort`。合并 XML 由 agent 签名，客户端不拼。片大小由凭据请求里的 `partSize` 给出，agent 夹到 `minPartSize` / `maxPartSize`。`relkit-compatible` 没有分片签发，协议 3 也仍是一条 PUT。进程在 abort 之前退出时，未完成的分片留在桶里，由 COS 生命周期清理。
 
 agent 只向 **ingest 后端**索取请求描述：
 
-- `s3-compatible`：发布机使用长期 `accessKeyEnv` / `secretKeyEnv` 对 PUT 生成 query 预签名 URL；COS、S3、MinIO 同形。`casCredentials` 若仍出现在旧 profile 中只会被接受并忽略，应尽快删除。
+- `s3-compatible`：发布机使用长期 `accessKeyEnv` / `secretKeyEnv` 对 PUT（或各片）生成 query 预签名 URL；COS、S3、MinIO 同形。创建分片、完成与中止由 agent 持钥调用。`casCredentials` 若仍出现在旧 profile 中只会被接受并忽略，应尽快删除。
 - `relkit-compatible`：agent 用 `tokenEnv` 中的 `RELKIT_SERVE_TOKEN` 调 `POST /-/cas/uploads`；serve 返回对象级能力 URL。能力签名密钥只在 serve 数据面，CAS 正文不经 agent 代理。
 
 响应永远只有 ingest 一个上传目的地。禁止相对 URL、禁止把长期 Bearer 抄入 `requests[].headers`、禁止给 CI 两套脚本，也禁止让 CI 按后端数量循环上传。

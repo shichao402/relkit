@@ -317,6 +317,107 @@ func TestS3IgnoresCasCredentialsField(t *testing.T) {
 	}
 }
 
+func TestS3AuthorizeCASMultipartPresignsParts(t *testing.T) {
+	t.Setenv("TEST_S3_ACCESS", "AKID")
+	t.Setenv("TEST_S3_SECRET", "SECRET")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !r.URL.Query().Has("uploads") {
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.RequestURI(), http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, `<InitiateMultipartUploadResult><UploadId>up-123</UploadId></InitiateMultipartUploadResult>`)
+	}))
+	defer server.Close()
+	backendAny, err := newS3CompatibleBackend("cos", map[string]any{
+		"type": "s3-compatible", "baseUrl": "https://download.example/rup/",
+		"endpoint": server.URL, "bucket": "bucket",
+		"accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
+		"region": "us-east-1", "forcePathStyle": true,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := backendAny.(*s3CompatibleBackend)
+	digest := strings.Repeat("ab", 32)
+	upload, err := backend.AuthorizeCASMultipart(CASMultipartRequest{
+		Key: "cas/" + digest, Size: 10, PartSize: 4, TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upload.UploadID != "up-123" || len(upload.Requests) != 3 {
+		t.Fatalf("upload=%+v", upload)
+	}
+	want := [][2]int64{{0, 4}, {4, 4}, {8, 2}}
+	for i, req := range upload.Requests {
+		if req.Offset != want[i][0] || req.Length != want[i][1] {
+			t.Fatalf("part %d range=%d,%d", i, req.Offset, req.Length)
+		}
+		parsed, err := url.Parse(req.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if parsed.Query().Get("partNumber") != strconv.Itoa(i+1) || parsed.Query().Get("uploadId") != "up-123" {
+			t.Fatalf("query=%s", parsed.RawQuery)
+		}
+		got := parsed.Query().Get("X-Amz-Signature")
+		signature := cosQueryAuthSignature(http.MethodPut, parsed, req.Headers, "us-east-1", "SECRET")
+		if got != signature {
+			t.Fatalf("part %d signature mismatch", i+1)
+		}
+	}
+}
+
+func TestS3CompleteCASMultipartSendsETags(t *testing.T) {
+	t.Setenv("TEST_S3_ACCESS", "AKID")
+	t.Setenv("TEST_S3_SECRET", "SECRET")
+	var completed, aborted string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Query().Get("uploadId") == "up-123":
+			completed = string(body)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodDelete && r.URL.Query().Get("uploadId") == "up-123":
+			aborted = r.URL.Query().Get("uploadId")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.RequestURI(), http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	backendAny, err := newS3CompatibleBackend("cos", map[string]any{
+		"type": "s3-compatible", "baseUrl": "https://download.example/rup/",
+		"endpoint": server.URL, "bucket": "bucket",
+		"accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
+		"region": "us-east-1", "forcePathStyle": true,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := backendAny.(*s3CompatibleBackend)
+	digest := strings.Repeat("ab", 32)
+	key := "cas/" + digest
+	err = backend.CompleteCASMultipart(key, "up-123", []CASPart{
+		{PartNumber: 2, ETag: `"p2"`},
+		{PartNumber: 1, ETag: `"p1"`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(completed, "<PartNumber>1</PartNumber><ETag>\"p1\"</ETag>") ||
+		!strings.Contains(completed, "<PartNumber>2</PartNumber><ETag>\"p2\"</ETag>") ||
+		strings.Index(completed, "<PartNumber>1</PartNumber>") > strings.Index(completed, "<PartNumber>2</PartNumber>") {
+		t.Fatalf("complete body=%s", completed)
+	}
+	if err := backend.AbortCASMultipart(key, "up-123"); err != nil {
+		t.Fatal(err)
+	}
+	if aborted != "up-123" {
+		t.Fatalf("aborted=%q", aborted)
+	}
+}
+
 func headerValueCI(headers map[string]string, name string) string {
 	for key, value := range headers {
 		if strings.EqualFold(key, name) {

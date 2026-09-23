@@ -9,13 +9,15 @@ import (
 
 	"go.firoyang.com/relkit/internal/casput"
 	"go.firoyang.com/relkit/internal/config"
+	"go.firoyang.com/relkit/internal/stagedput"
 )
 
 func cmdCASPut(args []string, configPath string) error {
 	opts := casput.Options{
 		URL:         strings.TrimSpace(os.Getenv("RELKIT_AGENT_URL")),
 		Token:       strings.TrimSpace(os.Getenv("RELKIT_UPLOAD_TOKEN")),
-		Concurrency: 4,
+		PartSize:    stagedput.DefaultPartSizeFromEnv(),
+		Concurrency: stagedput.ConcurrencyFromEnv(4),
 		Log:         func(line string) { fmt.Fprintln(os.Stderr, line) },
 	}
 	for i := 0; i < len(args); i++ {

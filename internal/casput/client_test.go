@@ -13,10 +13,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	rupv2 "go.firoyang.com/relkit/api/rup/v2"
 	"go.firoyang.com/relkit/internal/model"
+	"go.firoyang.com/relkit/internal/publishproto"
 	"go.firoyang.com/relkit/internal/stage"
 )
 
@@ -180,6 +182,122 @@ func TestUploadOneRetriesCOSUserNetworkTooSlow(t *testing.T) {
 	}
 	if len(logs) != 1 || !strings.Contains(logs[0], "attempt 1/4") {
 		t.Fatalf("logs=%v", logs)
+	}
+}
+
+func TestMultipartRetriesOnlyTheFailedPart(t *testing.T) {
+	payload := bytes.Repeat([]byte("abcdefgh"), 4)
+	source := filepath.Join(t.TempDir(), "blob")
+	if err := os.WriteFile(source, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var part1, part2, completes, aborts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/part/1":
+			part1.Add(1)
+			got, _ := io.ReadAll(r.Body)
+			if !bytes.Equal(got, payload[:16]) {
+				t.Errorf("part1=%q", got)
+			}
+			w.Header().Set("ETag", `"p1"`)
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/part/2":
+			n := part2.Add(1)
+			if n == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, "<Error><Code>UserNetworkTooSlow</Code></Error>")
+				return
+			}
+			got, _ := io.ReadAll(r.Body)
+			if !bytes.Equal(got, payload[16:]) {
+				t.Errorf("part2=%q", got)
+			}
+			w.Header().Set("ETag", `"p2"`)
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v1/cas/complete":
+			completes.Add(1)
+			var body struct {
+				Parts []partReport `json:"parts"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if len(body.Parts) != 2 || body.Parts[0].ETag != `"p1"` || body.Parts[1].ETag != `"p2"` {
+				t.Errorf("parts=%+v", body.Parts)
+			}
+			if r.Header.Get(publishproto.ProtocolHeader) == "" {
+				t.Error("complete must carry the publish protocol")
+			}
+			writeTestJSON(w, map[string]any{"ok": true})
+		case r.URL.Path == "/v1/cas/abort":
+			aborts.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	digest := model.Sha256Bytes(payload)
+	err := uploadAll(context.Background(), server.Client(), Options{
+		URL: server.URL, Token: "token", Product: "demo", Concurrency: 2,
+	}, []upload{{
+		SHA256: digest, Size: int64(len(payload)), UploadID: "up-1",
+		Requests: []uploadRequest{
+			{Method: http.MethodPut, URL: server.URL + "/part/1", Offset: 0, Length: 16},
+			{Method: http.MethodPut, URL: server.URL + "/part/2", Offset: 16, Length: 16},
+		},
+	}}, map[string]string{digest: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if part1.Load() != 1 || part2.Load() != 2 || completes.Load() != 1 || aborts.Load() != 0 {
+		t.Fatalf("part1=%d part2=%d complete=%d abort=%d", part1.Load(), part2.Load(), completes.Load(), aborts.Load())
+	}
+}
+
+func TestMultipartAbortOnPermanentPartFailure(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 8)
+	source := filepath.Join(t.TempDir(), "blob")
+	if err := os.WriteFile(source, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var completes, aborts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/part/1":
+			w.Header().Set("ETag", `"p1"`)
+			w.WriteHeader(http.StatusOK)
+		case "/part/2":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, "<Error><Code>InvalidArgument</Code></Error>")
+		case "/v1/cas/complete":
+			completes++
+			w.WriteHeader(http.StatusOK)
+		case "/v1/cas/abort":
+			aborts++
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	digest := model.Sha256Bytes(payload)
+	err := uploadAll(context.Background(), server.Client(), Options{
+		URL: server.URL, Token: "token", Product: "demo", Concurrency: 1,
+	}, []upload{{
+		SHA256: digest, Size: int64(len(payload)), UploadID: "up-1",
+		Requests: []uploadRequest{
+			{Method: http.MethodPut, URL: server.URL + "/part/1", Offset: 0, Length: 4},
+			{Method: http.MethodPut, URL: server.URL + "/part/2", Offset: 4, Length: 4},
+		},
+	}}, map[string]string{digest: source})
+	if err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("err=%v", err)
+	}
+	if completes != 0 || aborts != 1 {
+		t.Fatalf("complete=%d abort=%d", completes, aborts)
 	}
 }
 

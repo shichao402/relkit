@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	Current = 2
+	Current = 3
 	Min     = 2
-	Max     = 2
+	Max     = 3
 
 	ProtocolHeader = "X-Relkit-Publish-Protocol"
 	MinHeader      = "X-Relkit-Publish-Protocol-Min"

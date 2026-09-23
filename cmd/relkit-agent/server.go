@@ -340,6 +340,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc(publishproto.AgentPreflightPath, s.handlePublishPreflight)
 	mux.HandleFunc("/v1/drop/", s.handleDrop)
 	mux.HandleFunc("/v1/cas/credentials", s.handleCASCredentials)
+	mux.HandleFunc("/v1/cas/complete", s.handleCASComplete)
+	mux.HandleFunc("/v1/cas/abort", s.handleCASAbort)
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
 	return mux

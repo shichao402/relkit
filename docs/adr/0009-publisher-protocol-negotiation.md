@@ -11,7 +11,7 @@ CAS 凭据文档从 `putUrl` 改成 `requests[]` 之后，旧 publisher 仍然�
 
 ## 决策
 
-1. **publisher 与 server 各声明 `[min, max]`。** 当前 build 的窗口是 `[2, 2]`。请求头：
+1. **publisher 与 server 各声明 `[min, max]`。** 当前 build 的窗口是 `[2, 3]`（`Current` 为 3）。请求头：
    - `X-Relkit-Publish-Protocol`：publisher 本 build 的 `Current`
    - `X-Relkit-Publish-Protocol-Min` / `-Max`：它能说的窗口
    - `X-Relkit-Version`：诊断用

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestCASCredentialsRejectsPublisherWithoutProtocolHandshake(t *testing.T) {
 	if doc.Error != "publisher_upgrade_required" {
 		t.Errorf("error=%q", doc.Error)
 	}
-	if doc.MinProtocol != publishproto.Current || doc.Protocol != 0 {
+	if doc.MinProtocol != publishproto.Min || doc.Protocol != 0 {
 		t.Errorf("minProtocol=%d protocol=%d", doc.MinProtocol, doc.Protocol)
 	}
 }
@@ -87,6 +88,8 @@ func TestPublisherHandshakeGuardsEveryWriteRoute(t *testing.T) {
 	}{
 		{http.MethodPut, "/v1/drop/demo/1.0.0/app.zip", "zip-bytes"},
 		{http.MethodPost, "/v1/cas/credentials", `{"product":"demo","blobs":[{"sha256":"` + digest + `","size":5}]}`},
+		{http.MethodPost, "/v1/cas/complete", `{"product":"demo","sha256":"` + digest + `","uploadId":"up"}`},
+		{http.MethodPost, "/v1/cas/abort", `{"product":"demo","sha256":"` + digest + `","uploadId":"up"}`},
 		{http.MethodPut, "/v1/staged/demo/1.0.0", "tarball-bytes"},
 		{http.MethodPost, "/v1/publish", `{"product":"demo","version":"1.0.0","dryRun":true}`},
 	}
@@ -304,6 +307,107 @@ func TestThinStagedMaterializesSecondBackend(t *testing.T) {
 	casKey, _ := model.CasKey(digest)
 	if len(mirror.get(casKey)) != 0 {
 		t.Fatal("mirror should not store cas/")
+	}
+}
+
+func TestCASCredentialsProtocol2StaysSinglePUT(t *testing.T) {
+	var initiates int
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Query().Has("uploads") {
+			initiates++
+			_, _ = io.WriteString(w, `<InitiateMultipartUploadResult><UploadId>up-1</UploadId></InitiateMultipartUploadResult>`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer fake.Close()
+	t.Setenv("TEST_S3_ACCESS", "AKID")
+	t.Setenv("TEST_S3_SECRET", "SECRET")
+	fx := newAgentFixture(t, agentFixtureOpts{
+		tinyParts: true,
+		patchProfile: func(profile *config.PublishProfile) {
+			profile.Backends["cos"] = map[string]any{
+				"type": "s3-compatible", "baseUrl": "https://download.example/rup/",
+				"endpoint": fake.URL, "bucket": "bucket",
+				"accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
+				"region": "us-east-1", "forcePathStyle": true,
+			}
+			profile.PublishTo = []string{"cos"}
+		},
+	})
+	digest := strings.Repeat("ab", 32)
+	body := `{"product":"demo","partSize":4,"blobs":[{"sha256":"` + digest + `","size":10}]}`
+	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/cas/credentials", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(publishproto.ProtocolHeader, "2")
+	req.Header.Set(publishproto.MinHeader, "2")
+	req.Header.Set(publishproto.MaxHeader, "2")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	var doc casCredentialResponse
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Uploads) != 1 || doc.Uploads[0].UploadID != "" || len(doc.Uploads[0].Requests) != 1 {
+		t.Fatalf("uploads=%+v", doc.Uploads)
+	}
+	if initiates != 0 {
+		t.Fatalf("protocol 2 initiated multipart %d times", initiates)
+	}
+}
+
+func TestCASCredentialsProtocol3UsesMultipartOnS3(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Query().Has("uploads") {
+			_, _ = io.WriteString(w, `<InitiateMultipartUploadResult><UploadId>up-1</UploadId></InitiateMultipartUploadResult>`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer fake.Close()
+	t.Setenv("TEST_S3_ACCESS", "AKID")
+	t.Setenv("TEST_S3_SECRET", "SECRET")
+	fx := newAgentFixture(t, agentFixtureOpts{
+		tinyParts: true,
+		patchProfile: func(profile *config.PublishProfile) {
+			profile.Backends["cos"] = map[string]any{
+				"type": "s3-compatible", "baseUrl": "https://download.example/rup/",
+				"endpoint": fake.URL, "bucket": "bucket",
+				"accessKeyEnv": "TEST_S3_ACCESS", "secretKeyEnv": "TEST_S3_SECRET",
+				"region": "us-east-1", "forcePathStyle": true,
+			}
+			profile.PublishTo = []string{"cos"}
+		},
+	})
+	digest := strings.Repeat("ab", 32)
+	doc := requestCASCredentials(t, fx, `{"product":"demo","partSize":4,"blobs":[{"sha256":"`+digest+`","size":10}]}`)
+	if len(doc.Uploads) != 1 {
+		t.Fatalf("uploads=%+v", doc.Uploads)
+	}
+	got := doc.Uploads[0]
+	if got.UploadID != "up-1" || len(got.Requests) != 3 {
+		t.Fatalf("upload=%+v", got)
+	}
+	if got.Requests[0].Offset != 0 || got.Requests[0].Length != 4 ||
+		got.Requests[1].Offset != 4 || got.Requests[2].Offset != 8 || got.Requests[2].Length != 2 {
+		t.Fatalf("ranges=%+v", got.Requests)
+	}
+}
+
+func TestCASCredentialsRelkitCompatibleStaysSinglePUT(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{tinyParts: true})
+	digest := strings.Repeat("ab", 32)
+	doc := requestCASCredentials(t, fx, `{"product":"demo","partSize":4,"blobs":[{"sha256":"`+digest+`","size":10}]}`)
+	if len(doc.Uploads) != 1 || doc.Uploads[0].UploadID != "" || len(doc.Uploads[0].Requests) != 1 {
+		t.Fatalf("uploads=%+v", doc.Uploads)
 	}
 }
 

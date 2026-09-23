@@ -11,16 +11,21 @@ import (
 
 // CASRequest is one HTTP request the client must execute as written.
 // Authorization is already in the URL or headers; the client never signs.
+// Offset and Length select a byte range for one part. A single PUT leaves both zero.
 type CASRequest struct {
 	Method    string            `json:"method"`
 	URL       string            `json:"url"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	ExpiresAt time.Time         `json:"expiresAt"`
+	Offset    int64             `json:"offset,omitempty"`
+	Length    int64             `json:"length,omitempty"`
 }
 
-// CASUpload describes how to upload one blob. Today this is a single PUT.
-// Multipart later adds more requests without changing the client contract.
+// CASUpload describes how to upload one blob. UploadID is set only for a
+// multipart upload; the client then PUTs each ranged request and reports ETags
+// back to the agent. A single PUT leaves UploadID empty and has one request.
 type CASUpload struct {
+	UploadID string       `json:"uploadId,omitempty"`
 	Requests []CASRequest `json:"requests"`
 }
 
@@ -62,6 +67,30 @@ type CASUploadRequest struct {
 // callers always execute the returned HTTP PUT without switching on Type().
 type CASUploadAuthorizer interface {
 	AuthorizeCASUpload(req CASUploadRequest) (*CASUpload, error)
+}
+
+// CASPart is one uploaded part, as reported by the client. ETag is the
+// response header value, passed through unchanged.
+type CASPart struct {
+	PartNumber int
+	ETag       string
+}
+
+// CASMultipartRequest asks an ingest backend to open a multipart upload and
+// presign every part. PartSize is already clamped by the agent.
+type CASMultipartRequest struct {
+	Key      string
+	Size     int64
+	PartSize int64
+	TTL      time.Duration
+}
+
+// CASMultipartAuthorizer is optional. s3-compatible implements it. Backends
+// that do not (relkit-compatible) stay on a single PUT even at protocol 3.
+type CASMultipartAuthorizer interface {
+	AuthorizeCASMultipart(req CASMultipartRequest) (*CASUpload, error)
+	CompleteCASMultipart(key, uploadID string, parts []CASPart) error
+	AbortCASMultipart(key, uploadID string) error
 }
 
 // Ingest is the optional content-addressed write path on a data-plane backend.

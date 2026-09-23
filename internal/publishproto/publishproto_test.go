@@ -9,8 +9,8 @@ import (
 
 func TestNegotiateCurrentWindow(t *testing.T) {
 	server := DefaultWindow()
-	got := Negotiate(server, Offer{Min: 2, Max: 2, Protocol: 2})
-	if !got.OK || got.Selected != 2 {
+	got := Negotiate(server, Offer{Min: Min, Max: Min, Protocol: Min})
+	if !got.OK || got.Selected != Min {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -30,9 +30,9 @@ func TestNegotiateFutureProtocolIsTooNew(t *testing.T) {
 }
 
 func TestNegotiateOverlappingWindowSelectsCurrent(t *testing.T) {
-	got := Negotiate(Window{Min: 2, Max: 3}, Offer{Min: 2, Max: 4, Protocol: 3})
-	if !got.OK || got.Selected != 2 {
-		t.Fatalf("selected=%d want current 2: %+v", got.Selected, got)
+	got := Negotiate(Window{Min: Min, Max: Current}, Offer{Min: Min, Max: Current + 1, Protocol: Current})
+	if !got.OK || got.Selected != Current {
+		t.Fatalf("selected=%d want current %d: %+v", got.Selected, Current, got)
 	}
 }
 

@@ -3,6 +3,7 @@ package backends
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,6 +145,196 @@ func (b *s3CompatibleBackend) authorizeCASUploadPresign(uploadReq CASUploadReque
 		"X-Amz-Content-Sha256": unsignedPayload,
 	}
 	return SinglePUT(req.URL.String(), headers, now.Add(uploadReq.TTL)), nil
+}
+
+func (b *s3CompatibleBackend) AuthorizeCASMultipart(req CASMultipartRequest) (*CASUpload, error) {
+	if req.PartSize < 1 || req.Size <= req.PartSize {
+		return nil, fmt.Errorf("multipart CAS upload requires partSize < size")
+	}
+	parts := (req.Size + req.PartSize - 1) / req.PartSize
+	if parts > 10_000 {
+		return nil, fmt.Errorf("CAS object needs %d parts, the maximum is 10000", parts)
+	}
+	if req.TTL < time.Second {
+		req.TTL = time.Hour
+	}
+	uploadID, err := b.createMultipartUpload(req.Key)
+	if err != nil {
+		return nil, err
+	}
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		_ = b.AbortCASMultipart(req.Key, uploadID)
+		return nil, err
+	}
+	upload := &CASUpload{UploadID: uploadID, Requests: make([]CASRequest, 0, int(parts))}
+	var offset int64
+	for partNumber := 1; offset < req.Size; partNumber++ {
+		length := req.PartSize
+		if offset+length > req.Size {
+			length = req.Size - offset
+		}
+		partReq, err := b.newObjectRequest(http.MethodPut, req.Key, nil, 0)
+		if err != nil {
+			_ = b.AbortCASMultipart(req.Key, uploadID)
+			return nil, err
+		}
+		query := partReq.URL.Query()
+		query.Set("partNumber", strconv.Itoa(partNumber))
+		query.Set("uploadId", uploadID)
+		partReq.URL.RawQuery = canonicalQuery(query)
+		partReq.Header.Set("Content-Type", contentTypeFor(req.Key))
+		partReq.Header.Set("X-Amz-Content-Sha256", unsignedPayload)
+		now := time.Now().UTC()
+		if err := PresignS3Request(partReq, b.region, accessKey, secretKey, now, req.TTL); err != nil {
+			_ = b.AbortCASMultipart(req.Key, uploadID)
+			return nil, err
+		}
+		upload.Requests = append(upload.Requests, CASRequest{
+			Method: http.MethodPut,
+			URL:    partReq.URL.String(),
+			Headers: map[string]string{
+				"Content-Type":         contentTypeFor(req.Key),
+				"X-Amz-Content-Sha256": unsignedPayload,
+			},
+			ExpiresAt: now.Add(req.TTL),
+			Offset:    offset,
+			Length:    length,
+		})
+		offset += length
+	}
+	return upload, nil
+}
+
+func (b *s3CompatibleBackend) createMultipartUpload(key string) (string, error) {
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return "", err
+	}
+	req, err := b.newObjectRequest(http.MethodPost, key, nil, 0)
+	if err != nil {
+		return "", err
+	}
+	query := req.URL.Query()
+	query.Set("uploads", "")
+	req.URL.RawQuery = canonicalQuery(query)
+	req.ContentLength = 0
+	req.Header.Set("Content-Type", contentTypeFor(key))
+	if err := signAWSV4(req, emptyPayloadHash, b.region, "s3", accessKey, secretKey, time.Now()); err != nil {
+		return "", err
+	}
+	data, _, err := b.doS3(req)
+	if err != nil {
+		return "", err
+	}
+	var parsed struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if err := xml.Unmarshal(data, &parsed); err != nil || parsed.UploadID == "" {
+		return "", Error{Message: "multipart initiate returned no upload id"}
+	}
+	return parsed.UploadID, nil
+}
+
+func (b *s3CompatibleBackend) CompleteCASMultipart(key, uploadID string, parts []CASPart) error {
+	if uploadID == "" {
+		return fmt.Errorf("multipart complete requires an upload id")
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("multipart complete requires parts")
+	}
+	ordered := append([]CASPart(nil), parts...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].PartNumber < ordered[j].PartNumber
+	})
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return err
+	}
+	body := completeMultipartXML(ordered)
+	req, err := b.newObjectRequest(http.MethodPost, key, bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return err
+	}
+	query := req.URL.Query()
+	query.Set("uploadId", uploadID)
+	req.URL.RawQuery = canonicalQuery(query)
+	req.Header.Set("Content-Type", "application/xml")
+	if err := signAWSV4(req, hashSHA256Hex(body), b.region, "s3", accessKey, secretKey, time.Now()); err != nil {
+		return err
+	}
+	_, _, err = b.doS3(req)
+	return err
+}
+
+func (b *s3CompatibleBackend) AbortCASMultipart(key, uploadID string) error {
+	if uploadID == "" {
+		return fmt.Errorf("multipart abort requires an upload id")
+	}
+	accessKey, secretKey, err := b.credentials()
+	if err != nil {
+		return err
+	}
+	req, err := b.newObjectRequest(http.MethodDelete, key, nil, 0)
+	if err != nil {
+		return err
+	}
+	query := req.URL.Query()
+	query.Set("uploadId", uploadID)
+	req.URL.RawQuery = canonicalQuery(query)
+	req.ContentLength = 0
+	if err := signAWSV4(req, emptyPayloadHash, b.region, "s3", accessKey, secretKey, time.Now()); err != nil {
+		return err
+	}
+	_, _, err = b.doS3(req)
+	return err
+}
+
+func completeMultipartXML(parts []CASPart) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("<CompleteMultipartUpload>")
+	for _, part := range parts {
+		fmt.Fprintf(&buf, "<Part><PartNumber>%d</PartNumber><ETag>%s</ETag></Part>", part.PartNumber, xmlText(part.ETag))
+	}
+	buf.WriteString("</CompleteMultipartUpload>")
+	return buf.Bytes()
+}
+
+func xmlText(value string) string {
+	value = strings.ReplaceAll(value, "&", "&amp;")
+	value = strings.ReplaceAll(value, "<", "&lt;")
+	value = strings.ReplaceAll(value, ">", "&gt;")
+	return value
+}
+
+func (b *s3CompatibleBackend) doS3(req *http.Request) ([]byte, int, error) {
+	client := &http.Client{
+		Timeout: b.timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, Error{Message: fmt.Sprintf("%s %s failed: %v", req.Method, req.URL.Path, err)}
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return data, resp.StatusCode, Error{Message: fmt.Sprintf("%s %s was redirected to %s; point the backend endpoint at the final address instead", req.Method, req.URL.Path, resp.Header.Get("Location"))}
+	}
+	if resp.StatusCode >= 400 {
+		detail := strings.TrimSpace(string(data))
+		if len(detail) > 200 {
+			detail = detail[:200]
+		}
+		msg := fmt.Sprintf("%s %s returned %d", req.Method, req.URL.Path, resp.StatusCode)
+		if detail != "" {
+			msg += ": " + detail
+		}
+		return data, resp.StatusCode, Error{Message: msg}
+	}
+	return data, resp.StatusCode, nil
 }
 
 func (b *s3CompatibleBackend) PutArtifact(localPath string, key string) ([]string, error) {
@@ -339,6 +532,7 @@ func (b *s3CompatibleBackend) Delete(key string) error {
 var _ Ingest = (*s3CompatibleBackend)(nil)
 var _ Deleter = (*s3CompatibleBackend)(nil)
 var _ CASUploadAuthorizer = (*s3CompatibleBackend)(nil)
+var _ CASMultipartAuthorizer = (*s3CompatibleBackend)(nil)
 
 func (b *s3CompatibleBackend) Probe(rawURL string) (bool, *int64, string) {
 	timeout := b.timeout
