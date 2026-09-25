@@ -69,7 +69,7 @@ rebuild 成功路径的末尾（`dump.sha256` 写入之后、members 写入之�
 1. site 包：sink 接口扩展 + `status.json` 写入（已完成）。
 2. console 拆包 `cmd/relkit-console`（已完成，a51e05e）：搬运 admin.go/ui.go/stats.go + templates，adapter 层首版（rootAdapter），`-dir` 只读挂载。
 3. store 拆包 `cmd/relkit-store`（已完成）：serve 目录改名一次到位并删除，协议不变；部署侧（unit 模板、deploy CLI、hostlib、CI、文档）同步切换。`RELKIT_SERVE_TOKEN` 环境变量名与 `.relkit-serve-admin.json` / `.relkit-serve-stats.json` / `.relkit-serve-cas.key` 数据文件名保留旧值，迁移盒子不重配 token、不丢账户与计数。
-4. 部署切换与收尾文档（待实机执行）：两台机器 systemd/nginx 切换、`relkit-store.service` 上线、console 独立 unit。
+4. 部署切换与收尾文档（已完成，2026-09-25）：两台机器实机切换——`migrate-serve` 迁移内网（relkit:relkit token 语义）与外网（root:relkit 组可读 token 语义）的 store 并停用 `relkit-serve.service`，`install console` 以 `keeping existing operators` 保留账户上线独立 unit，nginx 三段面板分流（`/-/admin`、`/-/p/`、`/-/latest/` → `127.0.0.1:8081`）两台机均已验证（内网 200；外网经正确 SNI 200/302，公网域名直达同验）。`/tmp/relkit-deploy` 引导目录已清理，nginx 示例配置已同步线上实态。
 
 ## 后果
 

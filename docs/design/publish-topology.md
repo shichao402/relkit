@@ -30,7 +30,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 | nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
 | relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
 | relkit-store（[ADR 0016](../adr/0016-serve-split-store-console.md)，由 relkit-serve 拆出） | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只作存储壳，本机空目录不是 COS 数据面 |
-| relkit-console（[ADR 0016](../adr/0016-serve-split-store-console.md)） | `127.0.0.1:8081`（规划） | serve 的管理面拆出的独立二进制：`/-/admin` 面板、账户、统计、目录浏览、`/-/latest/`，只读经 adapter；面板切面已由 console 接管 |
+| relkit-console（[ADR 0016](../adr/0016-serve-split-store-console.md)） | `127.0.0.1:8081`（已落地） | serve 的管理面拆出的独立二进制：`/-/admin` 面板、账户、统计、目录浏览、`/-/latest/`，只读经 adapter；两台机的 nginx 面板分流均已上线 |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / 站点 sink 节点 |
 
 同机可以是一个 nginx、两个 `server_name`（CI 的 `/v1/*` → 8787，客户端 GET → 8080 或读盘）。内网 CI 打的是该箱**内网 IP:443** 上的名字，不是回环 hostname。
@@ -141,11 +141,11 @@ flowchart TB
 - 以后加 Cloudflare / GitHub Pages：给站点 rebuild 加 sink，不改产品 `relkit.json`。
 - console 现算页 **不是** BrowseSink。不要为了「内网也有好看首页」把门户留在 `/`。
 
-## 7. 现网落地（对照，实现前）
+## 7. 现网落地（2026-09-25 ADR 0016 切换后）
 
-外网 CVM 已运行 agent（默认入口 → `127.0.0.1:8787`）与 console 操作面壳（仅 `/-/admin`、`/-/p/` → `127.0.0.1:8080`）；store 的 `/srv/releases` 不是 COS 数据面。配置见 `scripts/deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
+外网 CVM 已运行 agent（`/v1/` → `127.0.0.1:8787`）、store 数据面（`location /` → `127.0.0.1:8080`，本机树是操作面壳、不是 COS 数据面）与 console 操作面板（`/-/admin`、`/-/p/`、`/-/latest/` → `127.0.0.1:8081`）；`location = /` 设计性 404，对外目录在 Makers。配置见 `scripts/deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
 
-- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余请求 → store 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 store 自己鉴权
+- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；`/-/admin`、`/-/p/`、`/-/latest/` → console `127.0.0.1:8081`；其余请求 → store 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 store 自己鉴权
 - 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变
 - 配置样例：`scripts/deploy/nginx-intranet.example.conf`
-- 内网 GET `/` 不现算门户；没有 rebuild dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`。公网 COS 根路径仍是协议数据面，HTML 由 agent 站点配置部署到 Makers。
+- 内网 GET `/` 不现算门户；没有 rebuild dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`（经 nginx 分流到 console `127.0.0.1:8081`）。公网 COS 根路径仍是协议数据面，HTML 由 agent 站点配置部署到 Makers。
