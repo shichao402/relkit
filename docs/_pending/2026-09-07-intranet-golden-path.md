@@ -23,6 +23,8 @@
 | TLS | 本机 / COS 自定义域名 | WOA 入口终止 TLS，箱上 `:80` |
 | 证书续期 | `relkit-cos-cert-renew.timer` | N/A |
 
+> 2026-09-25 更正：上表「证书续期」行的机器指位已失效。外网 CVM（`ap-hongkong`）到广州 COS 公网入口 443 全断（跨境链路，机器侧无 iptables/防火墙规则），该服务在外网机自 2026-09-04 装机起 21 天 0 次成功；probe 与 renew（腾讯云 SSL API）两半链路在内网机均验证可达。服务已于 2026-09-25 迁至内网机（与 agent 同机，符合原设计「与 agent 同机不同进程」），首跑 `certificate valid for 60 more days` 通过。外网机的 unit/binary/config 已清理。
+
 ## 已落地（发布机）
 
 - `relkit-agent` 已升级为 `0.1.2+3e31869`（CAS credentials、瘦 staged、Materialize）

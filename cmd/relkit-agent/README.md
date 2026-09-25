@@ -59,7 +59,7 @@ dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审
 
 装机 / 换二进制：`python scripts/deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：产品仓 `python scripts/host/relkit_host.py agent add --execute`；共用既有发布凭据时显式加 `--share-with <existing-id>`（重启另加 `--restart`）。`init` 是内部写配置接口，不是人用 CLI。
 
-证书续期与 agent 同机、不同进程：安装 `scripts/deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。
+证书续期与 agent 同机、不同进程：安装 `scripts/deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。注意部署位置的网络前提：该工具既要 TLS 拨号到目标 COS 自定义域名，又要调 `ssl.tencentcloudapi.com` 续期，装机的机器两条链路都得通——现网装在内网发布机（2026-09-25 自外网 CVM 迁入：香港机到广州 COS 公网入口 443 跨境不通，probe 永远超时）。
 
 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
