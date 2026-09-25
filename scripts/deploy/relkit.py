@@ -1053,7 +1053,9 @@ def migrate_serve_to_store(
     notes.append(f"config {old_config} -> {new_config}")
 
     # Token files sit next to the old config; carry them over so the new
-    # unit's config-relative lookups keep working.
+    # unit's config-relative lookups keep working. uploadTokens[].file is
+    # resolved relative to the config directory, so the tokens/ subdir moves
+    # with them - missing it leaves the store crash-looping on boot.
     for name in ("relkit-serve.token", "relkit-store.token"):
         token_src = old_config_file.parent / name
         if token_src.is_file():
@@ -1063,6 +1065,15 @@ def migrate_serve_to_store(
             shutil.copy2(token_src, token_dest)
             fix_token_perms(token_dest, user)
             notes.append(f"token {name} -> {config_dir}")
+    tokens_src = old_config_file.parent / "tokens"
+    if tokens_src.is_dir():
+        tokens_dest = config_dir / "tokens"
+        if not tokens_dest.exists():
+            shutil.copytree(tokens_src, tokens_dest)
+            for path in tokens_dest.rglob("*"):
+                os.chmod(path, 0o600 if path.is_file() else 0o750)
+                chown_path(path, user)
+            notes.append(f"tokens/ -> {tokens_dest}")
 
     write_serve_unit(user=user, prefix=prefix, config_path=str(new_config), serve_cfg=cfg)
 
