@@ -421,6 +421,12 @@ func writeDumpDir(dir string, dump map[string][]byte) error {
 	if err != nil {
 		return err
 	}
+	// MkdirTemp yields 0700; the dump tree is served by an unprivileged
+	// static host (nginx/Caddy), so open the tree to world-readable.
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		_ = os.RemoveAll(tmp)
+		return err
+	}
 	abort := func(err error) error {
 		_ = os.RemoveAll(tmp)
 		return err
