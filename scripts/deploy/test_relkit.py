@@ -650,5 +650,45 @@ class ExtractExportTests(unittest.TestCase):
         self.assertEqual(ops.extract_export("RELKIT_SERVE_TOKEN", blob), "sekrit")
 
 
+class ConsoleInstallTests(unittest.TestCase):
+    def test_render_console_unit_rewrites_exec_and_paths(self):
+        template = (DEPLOY / "relkit-console.service").read_text(encoding="utf-8")
+        unit = ops.render_console_unit(
+            template,
+            user="relkit",
+            prefix="/usr/local/bin",
+            config_path="/etc/relkit-console/relkit-console.json",
+            read_write_paths=["/data/relkit-serve"],
+            state_dir="/data/relkit-agent",
+        )
+        self.assertIn(
+            "ExecStart=/usr/local/bin/relkit-console -config /etc/relkit-console/relkit-console.json",
+            unit,
+        )
+        self.assertIn("ReadWritePaths=/data/relkit-serve", unit)
+        self.assertIn("User=relkit", unit)
+        self.assertNotIn("/srv/releases", unit.split("ReadWritePaths=")[1].splitlines()[0])
+
+    def test_console_template_exists_and_is_panel_only(self):
+        template = (DEPLOY / "relkit-console.service").read_text(encoding="utf-8")
+        self.assertIn("relkit-console", template)
+        # The panel never carries upload traffic, so no LimitNOFILE bump.
+        self.assertNotIn("LimitNOFILE", template)
+        self.assertIn("ProtectSystem=strict", template)
+
+    def test_migrate_and_console_parsers_exist(self):
+        args = deploy_cli.build_parser().parse_args(["migrate-serve", "--host", "box", "--store-binary", "dist/relkit-store-linux-amd64"])
+        self.assertEqual(args.host, "box")
+        self.assertEqual(args.user, "relkit")
+        args = deploy_cli.build_parser().parse_args(["install", "console", "--binary", "dist/relkit-console-linux-amd64"])
+        self.assertEqual(args.addr, "127.0.0.1:8081")
+        self.assertEqual(args.config_dir, "/etc/relkit-console")
+
+    def test_remote_bootstrap_sources_include_console_template(self):
+        names = [path.name for path, _ in deploy_cli.remote_bootstrap_sources()]
+        self.assertIn("relkit-console.service", names)
+        self.assertIn("relkit-store.service", names)
+
+
 if __name__ == "__main__":
     unittest.main()

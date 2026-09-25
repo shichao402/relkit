@@ -1,0 +1,40 @@
+[Unit]
+Description=relkit-console (RUP operator panel)
+Documentation=https://github.com/shichao402/relkit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/relkit-console -config /etc/relkit-console/relkit-console.json
+Restart=always
+RestartSec=2
+
+User=relkit
+Group=relkit
+
+# The panel renders storage facts read-only through its adapter; the only
+# thing it writes is the operator-account state file inside the release tree
+# (login sessions, bcrypt hashes), same layout the old serve box had.
+# Everything else stays flat files on the release tree, untouched.
+ProtectSystem=strict
+ReadWritePaths=/srv/releases
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# The panel is a low-traffic human surface; default descriptor limits are
+# plenty. No override needed.
+
+[Install]
+WantedBy=multi-user.target

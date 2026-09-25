@@ -135,6 +135,32 @@ def render_agent_unit(
     return text
 
 
+def render_console_unit(
+    template: str,
+    *,
+    user: str,
+    prefix: str,
+    config_path: str,
+    read_write_paths: list[str],
+    state_dir: str,
+) -> str:
+    """Render relkit-console.service.
+
+    The panel is read-only over the release tree and the agent state dir; the
+    only writable surface is the admin-account file inside the release tree,
+    same layout a serve box had (ADR 0016). state_dir may be empty (no site
+    status view); it is read, never written.
+    """
+    text = template
+    text = re.sub(r"^User=.*$", f"User={user}", text, flags=re.M)
+    text = re.sub(r"^Group=.*$", f"Group={user}", text, flags=re.M)
+    rwp = " ".join(read_write_paths) if read_write_paths else "/srv/releases"
+    text = re.sub(r"^ReadWritePaths=.*$", f"ReadWritePaths={rwp}", text, flags=re.M)
+    exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-console -config {config_path}"
+    text = re.sub(r"^ExecStart=.*$", exec_line, text, flags=re.M)
+    return text
+
+
 def ensure_cas_grace(serve_cfg: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     cfg = deepcopy(serve_cfg)
     notes: list[str] = []

@@ -9,9 +9,11 @@
 | 子命令 | 用途 |
 |---|---|
 | `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`）。stamp 读根目录 `VERSION.json` |
-| `version` | 打印 SSOT（`--field number|version|build|tag`）；发版 CI 用 `--check-tag` |
+| `version` | 打印 SSOT（`--field number\|version\|build\|tag`）；发版 CI 用 `--check-tag` |
 | `install serve` | 空机首装 systemd `relkit-store` |
 | `install agent` | 空机首装 systemd `relkit-agent` |
+| `install console` | 首装 systemd `relkit-console`（ADR 0016：管理面独立 unit；迁移盒子自动继承发布树里的操作员账户） |
+| `migrate-serve` | 现网仍在跑 `relkit-serve.service` 的盒子一步迁移到 `relkit-store.service`（ADR 0016 第 4 步：配置迁 `/etc/relkit-store/relkit-store.json`，树/token/数据文件不动，备份后可回滚） |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |
 
 禁止：用 example JSON 覆盖现网配置；把 token 或带 `sig=` 的 URL 打进聊天/工单；upgrade 默默 `--rotate-token`；跳过发布验证。产品 token 的签发/轮换/吊销不在本脚本，走产品仓 `relkit_host.py serve`。不要用腾讯云 TAT / MCP 代跑本脚本。

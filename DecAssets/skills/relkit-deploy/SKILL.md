@@ -21,6 +21,11 @@ description: >
 
 只跑 `python scripts/deploy/relkit.py`（仓库根；Linux 可用 `python3`）。细节以 [`scripts/deploy/README.md`](../../../scripts/deploy/README.md) 和该脚本 `--help` 为准。
 
+ADR 0016 拆分后的两个专用入口：
+
+- 现网仍在跑 `relkit-serve.service` 的盒子：先 `migrate-serve --host <Host> --store-binary dist/relkit-store-linux-amd64` 一步迁到 `relkit-store.service`，之后才可走 `upgrade`。
+- 面板独立 unit：`install console --binary dist/relkit-console-linux-amd64 --dir <发布树> --state-dir <agent state>`；迁移盒子自动继承树里的 `.relkit-serve-admin.json` 操作员账户，不重发 bootstrap。
+
 不要手拼 SSH 写配置，不要用腾讯云 TAT / MCP 代跑命令，不要编造命令输出。Go 的 `relkit` / `relkit-agent` / `relkit-store` 不是人用的第二套装机 CLI。
 
 ## 升级闸门
