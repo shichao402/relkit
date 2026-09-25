@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var version = "0.1.3"
+var version = "0.1.4"
 
 func main() {
 	os.Exit(run(os.Args[1:]))

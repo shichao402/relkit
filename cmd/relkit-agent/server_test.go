@@ -698,14 +698,25 @@ func TestAgentPublishRequiresProfileWhenPolicyPresent(t *testing.T) {
 	}
 }
 
+func TestAgentStagedRequiresPolicy(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{omitPolicy: true})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusBadRequest {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	if !bytes.Contains(body, []byte("release-policy.json required")) {
+		t.Fatalf("body=%s", body)
+	}
+	if _, err := os.Stat(stage.ReleasePolicyPath(fx.productRoot, "1.0.0")); !os.IsNotExist(err) {
+		t.Fatalf("staged tree should be rejected and cleaned: %v", err)
+	}
+}
+
 func TestAgentPublishRequiresPolicy(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{omitPolicy: true})
 	status, body := fx.putStaged(t, "demo", "1.0.0")
-	if status != http.StatusCreated {
+	if status != http.StatusBadRequest {
 		t.Fatalf("staged status=%d body=%s", status, body)
-	}
-	if _, err := os.Stat(stage.ReleasePolicyPath(fx.productRoot, "1.0.0")); !os.IsNotExist(err) {
-		t.Fatalf("policy should be absent: %v", err)
 	}
 	if _, err := os.Stat(fx.legacyPath); err != nil {
 		t.Fatalf("leftover product-root config should still exist: %v", err)

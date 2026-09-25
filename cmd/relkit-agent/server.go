@@ -613,19 +613,23 @@ func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (st
 		log.Printf("staged tree %s/%s: %v", product, version, err)
 		return "", &stagedHTTPError{http.StatusBadRequest, "invalid staged tree: " + err.Error()}
 	}
-	if _, statErr := os.Stat(stage.ReleasePolicyPath(pc.Root, version)); statErr == nil {
-		policy, err := stage.LoadReleasePolicy(pc.Root, version)
-		if err != nil {
-			_ = os.RemoveAll(dest)
-			return "", &stagedHTTPError{http.StatusBadRequest, "invalid release policy: " + err.Error()}
-		}
-		if policy.Product != product {
-			_ = os.RemoveAll(dest)
-			return "", &stagedHTTPError{http.StatusBadRequest, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product)}
-		}
-	} else if !os.IsNotExist(statErr) {
+	policyPath := stage.ReleasePolicyPath(pc.Root, version)
+	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
+		_ = os.RemoveAll(dest)
+		log.Printf("staged tree %s/%s: no release-policy.json at %s", product, version, policyPath)
+		return "", &stagedHTTPError{http.StatusBadRequest, "release-policy.json required at " + policyPath + "; run 'relkit stage' to produce a portable policy"}
+	} else if statErr != nil {
 		_ = os.RemoveAll(dest)
 		return "", &stagedHTTPError{http.StatusBadRequest, "inspect release policy: " + statErr.Error()}
+	}
+	policy, err := stage.LoadReleasePolicy(pc.Root, version)
+	if err != nil {
+		_ = os.RemoveAll(dest)
+		return "", &stagedHTTPError{http.StatusBadRequest, "invalid release policy: " + err.Error()}
+	}
+	if policy.Product != product {
+		_ = os.RemoveAll(dest)
+		return "", &stagedHTTPError{http.StatusBadRequest, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product)}
 	}
 	if err := s.writeStagedSHA(product, version, sum); err != nil {
 		_ = os.RemoveAll(dest)

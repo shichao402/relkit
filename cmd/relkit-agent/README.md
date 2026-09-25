@@ -35,9 +35,25 @@
 
 **只认这一条路径：** staged 树里的 `release-policy.json` + 本机 `/etc/relkit-agent/products/<id>.json`（`product` 与 `signing.keyId` 必须一致）。缺任一则失败。
 
+`PUT /v1/staged`（整包与分片 complete）会在解包后立即校验：staged 树缺 `release-policy.json` 直接 **400**，不再等到 `POST /v1/publish` 才失败。
+
 产品根上的 `relkit.json` **不是**发布配置，agent 不会读它。`relkit stage` 写出的 policy 不含私钥、backends、`publishTo`；profile 不含公钥集与通道策略。
 
 签名用的公钥取 staged 树 `release-policy.json` 的 `signing.publicKeys`。profile 没有公钥集。这台机上应至少留一个 staged 版本。
+
+## 人页 sink（`site.sinks[]`，ADR 0015）
+
+人页 browse dump（`index.html` / `<product>.html` / `catalog.json`）的部署目的地由 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]` 声明；产品 profile 不参与 sink 选择，产品 `relkit.json` 只提供 `site.title/description/homepage` 文案。
+
+| type | 配置 | 行为 |
+|---|---|---|
+| `makers` | `projectId` / `region`（`china` 或 `global`）/ `tokenEnv` | 整站部署到 EdgeOne Pages |
+| `backend` | `backend`（已配置 backend 名，须 `HostsBrowse`） | dump `PutPointer` 到该 backend 的 `browse/` |
+| `directory` | `path` | 原子写本机（或挂载）目录，外部静态服务伺服 |
+
+dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审计参照。sink 部署失败不影响协议发布：`POST /v1/publish` 照常成功，`site-rebuild` 单独报错，修好配置后重跑 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`，不发新版本。
+
+旧写法 `site.makers`（顶层）在加载时等价展开为一个 `{"type":"makers"}` sink，**deprecated**（ADR 0015），与 `site.sinks[]` 同时出现则拒绝启动。新部署一律直接写 `site.sinks[]`。
 
 ## 运维
 
