@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -299,5 +300,111 @@ func TestAdminStateRoundTrip(t *testing.T) {
 	if len(doc.Users) > 0 {
 		t.Fatal("no operator should exist yet")
 	}
-	_ = time.Second
+}
+
+// TestInitWritesConfigAndBootstrap: a fresh init lands a config skeleton and
+// a state file whose bootstrap is actually consumable, i.e. the panel would
+// come up in setup gate rather than locked.
+func TestInitWritesConfigAndBootstrap(t *testing.T) {
+	out := t.TempDir()
+	tree := t.TempDir()
+
+	var buf bytes.Buffer
+	if err := runInit(&buf, []string{"-dir", tree, "-out", out}); err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	configPath := filepath.Join(out, ConfigName)
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg FileConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dir != tree {
+		t.Fatalf("config dir = %q, want %q", cfg.Dir, tree)
+	}
+
+	admin, err := openAdminAuth(filepath.Join(tree, adminStateFileName), tree)
+	if err != nil {
+		t.Fatalf("openAdminAuth: %v", err)
+	}
+	if admin.gate() != gateSetup {
+		t.Fatalf("gate = %v, want gateSetup (bootstrap must be live)", admin.gate())
+	}
+}
+
+// TestInitRefusesExistingConfig keeps serve's guard: init on a box that
+// already has a config must not silently rotate the bootstrap.
+func TestInitRefusesExistingConfig(t *testing.T) {
+	out := t.TempDir()
+	if err := os.WriteFile(filepath.Join(out, ConfigName), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := runInit(&buf, []string{"-dir", t.TempDir(), "-out", out})
+	if err == nil {
+		t.Fatal("init over an existing config must fail")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("err = %v, want already-exists guard", err)
+	}
+}
+
+// TestInitResetAdmin: the break-glass path wipes operators and issues a new
+// live bootstrap at the location the running config points at, even when the
+// operator account file is the legacy serve-era name.
+func TestInitResetAdmin(t *testing.T) {
+	out := t.TempDir()
+	tree := t.TempDir()
+
+	// A box that migrated from serve: config with a populated tree, one
+	// operator, legacy state file name.
+	configPath := filepath.Join(out, ConfigName)
+	if err := os.WriteFile(configPath, []byte(`{"dir": "`+tree+`"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, admin := bootstrapAdmin(t, tree)
+	if err := admin.createFirstOperator(token, "op", testPanelPassword); err != nil {
+		t.Fatalf("createFirstOperator: %v", err)
+	}
+	if admin.gate() != gateLogin {
+		t.Fatalf("pre-condition: gate = %v, want gateLogin", admin.gate())
+	}
+
+	var buf bytes.Buffer
+	if err := runInit(&buf, []string{"-reset-admin", "-out", out}); err != nil {
+		t.Fatalf("runInit -reset-admin: %v", err)
+	}
+
+	after, err := openAdminAuth(filepath.Join(tree, adminStateFileName), tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.gate() != gateSetup {
+		t.Fatalf("gate = %v, want gateSetup after reset", after.gate())
+	}
+	if len(after.users) != 0 {
+		t.Fatalf("operators = %d, want 0 (wiped)", len(after.users))
+	}
+	if !strings.Contains(buf.String(), "relkit-console") {
+		t.Fatal("output should name the service to restart")
+	}
+}
+
+// TestInitResetAdminRejectsForce: the break-glass flag set is closed; -force
+// alongside -reset-admin is an operator error, not a silent combined action.
+func TestInitResetAdminRejectsForce(t *testing.T) {
+	var buf bytes.Buffer
+	err := runInit(&buf, []string{"-reset-admin", "-force"})
+	if err == nil {
+		t.Fatal("-reset-admin -force must be rejected")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("err = %v, want cannot-be-combined guard", err)
+	}
 }

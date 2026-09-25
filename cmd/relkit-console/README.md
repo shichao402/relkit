@@ -20,6 +20,15 @@ relkit-console -config /etc/relkit-console/relkit-console.json
 
 浏览器打开 `http://127.0.0.1:8081/-/admin`，用 init 打印的一次性令牌创建第一个操作员。
 
+面板锁死（无操作员、bootstrap 失效）时的破窗路径：
+
+```bash
+relkit-console init -reset-admin -out /etc/relkit-console   # 重置 bootstrap，清空全部操作员
+systemctl restart relkit-console
+```
+
+存储侧初始化（upload token、product token）不在此处，用 `relkit-store init`。
+
 ## 数据从哪来：adapter
 
 console 不直接假设数据在本机盘上。所有面板读取走一个 adapter 接口（`adapters.go`）：
