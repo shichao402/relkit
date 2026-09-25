@@ -37,7 +37,8 @@ import (
 //	  "stateDir": "/srv/relkit-agent-state", // agent state for site status
 //	  "site": {...}                   // portal title/product blurbs (unchanged)
 //	}
-const version = "dev"
+// Set by scripts/deploy/relkit.py build via -ldflags -X main.version=<stamp>.
+var version = "dev"
 
 // ConfigName is looked up next to the binary and in /etc when -config is
 // omitted. Which one was used is always logged at startup.
