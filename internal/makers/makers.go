@@ -85,7 +85,7 @@ type Config struct {
 // DeployDump uploads an in-memory, complete static site.
 func DeployDump(dump map[string][]byte, cfg *Config) error {
 	if cfg == nil || cfg.ProjectID == "" {
-		return fmt.Errorf("site.makers.projectId is required")
+		return fmt.Errorf("makers sink projectId is required")
 	}
 	tokenEnv := cfg.TokenEnv
 	if tokenEnv == "" {
@@ -93,7 +93,7 @@ func DeployDump(dump map[string][]byte, cfg *Config) error {
 	}
 	token := os.Getenv(tokenEnv)
 	if token == "" {
-		return fmt.Errorf("site.makers needs the Pages token in the environment variable %s, which is unset or empty", tokenEnv)
+		return fmt.Errorf("makers sink needs the Pages token in the environment variable %s, which is unset or empty", tokenEnv)
 	}
 	client := &Client{
 		Token:   token,

@@ -12,10 +12,10 @@
 
 `relkit publish` 只更新 `site/<product>.json` 与 `latest/<product>/<channel>.json`。agent 随后运行与 `relkit-agent site-rebuild` 相同的全量重建：读取全部注册产品，静态渲染 `index.html`、所有产品页和 `catalog.json`。渲染产物从不读回合并。
 
-| | `HostsBrowse` 数据面（`relkit-compatible`） | agent `site.makers`（现网外网） |
+| | `{"type":"backend"}` sink（`relkit-compatible` 数据面） | `{"type":"makers"}` sink（现网外网） |
 |---|---|---|
 | 站点根 | 数据面上的 `browse/` | EdgeOne Makers（现网项目 `relkit-updates-index`） |
-| 配置归属 | 产品 publish profile 的后端 | `/etc/relkit-agent/relkit-agent.json` 顶层 |
+| 配置归属 | agent `site.sinks[]` 声明 backend 名（能力校验 `HostsBrowse`） | `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]` |
 | 文件从哪来 | agent 全量 rebuild | 同一份完整 dump |
 
 agent 配置示例：

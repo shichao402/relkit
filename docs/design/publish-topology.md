@@ -134,8 +134,8 @@ flowchart TB
 `publish.Run` 只写 `site/<product>.json` 与 `latest/<product>/<channel>.json`，不渲染 HTML，也不打开站点 sink。发布成功后 agent 触发同一条 `site rebuild`；失败只使人页滞后，不回滚已提交的协议 index。
 
 - agent 的 `products` map 是站点产品集合。rebuild 从各产品数据面读全量 `site/`、`latest/`，调用纯函数 `browse.Build`，整站输出 `index.html`、全部 `<product>.html` 与 `catalog.json`。
-- `Backend.HostsBrowse()==true`（`relkit-compatible`）→ 把完整 dump `PutPointer` 到 `browse/`。
-- agent 顶层 `site.makers` → 把同一份完整 dump Folder 部署到 Makers。Makers 配置不属于产品 policy/profile。
+- agent 顶层 `site.sinks[]` 声明 dump 去向（ADR 0015）：`{"type":"backend","backend":"<name>"}` 把完整 dump `PutPointer` 到该 backend 的 `browse/`（backend 须 `HostsBrowse()==true`）；`{"type":"makers",...}` Folder 部署到 EdgeOne Makers；`{"type":"directory","path":...}` 原子写目录给外部静态宿主。sink 配置不属于产品 policy/profile，`HostsBrowse` 只做能力校验、不再自动注册 sink。
+- rebuild 先把 dump 写入 agent state 目录 `site/dump/`（本机审计/回滚参照），再分发到各 sink；某 sink 失败不阻断协议发布，重跑 rebuild 即全量重发。
 - `catalog.json` 只是派生输出，禁止读回后 merge。相同输入的 dump 哈希不变，跳过重复部署。
 - 以后加 Cloudflare / GitHub Pages：给站点 rebuild 加 sink，不改产品 `relkit.json`。
 - serve 现算页 **不是** BrowseSink。不要为了「内网也有好看首页」把门户留在 `/`。

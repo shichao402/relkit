@@ -434,6 +434,7 @@ def _impl_remote_inventory(
                 site_status = json.loads("\n".join(status[2:]))
                 result["siteStatus"] = {
                     "configured": bool(site_status.get("configured")),
+                    "sinks": site_status.get("sinks"),
                     "projectId": site_status.get("projectId"),
                     "tokenEnv": site_status.get("tokenEnv"),
                     "tokenPresent": bool(site_status.get("tokenPresent")),
@@ -508,7 +509,7 @@ def _impl_decision_evidence(root: Path, state: dict[str, Any]) -> dict[str, Any]
             if site_status is None:
                 implications.append("agent site readiness is unavailable; /-/site did not return status")
             elif not site_status.get("configured"):
-                implications.append("agent has no top-level site.makers; protocol publish works but static site rebuild cannot deploy")
+                implications.append("agent has no site.sinks; protocol publish works but static site rebuild cannot deploy")
             elif not site_status.get("tokenPresent"):
                 implications.append(
                     f"agent site token env {site_status.get('tokenEnv') or '(unset)'} is absent from the running process"

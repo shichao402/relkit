@@ -239,7 +239,7 @@ class MigrateTests(unittest.TestCase):
             public_base_url=None,
         )
         self.assertNotIn("site", migrated)
-        self.assertTrue(any("site.makers" in item for item in notes))
+        self.assertTrue(any("site.sinks" in item for item in notes))
 
     def test_unknown_backend_left_alone(self):
         backend = {"type": "s3-compatible", "bucket": "x"}
@@ -255,6 +255,52 @@ class MigrateTests(unittest.TestCase):
         )
         self.assertNotIn("uploadToken", cfg)
         self.assertTrue(notes)
+
+    def test_agent_site_makers_migrated_to_sinks(self):
+        cfg, notes = ops.migrate_agent_config(
+            {
+                "addr": "127.0.0.1:8787",
+                "site": {
+                    "makers": {
+                        "projectId": "relkit-updates-index",
+                        "region": "china",
+                        "tokenEnv": "EDGEONE_PAGES_API_TOKEN",
+                    }
+                },
+            }
+        )
+        self.assertEqual(
+            cfg["site"]["sinks"],
+            [
+                {
+                    "type": "makers",
+                    "projectId": "relkit-updates-index",
+                    "region": "china",
+                    "tokenEnv": "EDGEONE_PAGES_API_TOKEN",
+                }
+            ],
+        )
+        self.assertNotIn("makers", cfg["site"])
+        self.assertTrue(any("site.sinks" in item for item in notes))
+
+    def test_agent_site_sinks_left_alone(self):
+        sinks = [{"type": "directory", "path": "/srv/relkit-site"}]
+        cfg, notes = ops.migrate_agent_config(
+            {"addr": "127.0.0.1:8787", "site": {"sinks": sinks}}
+        )
+        self.assertEqual(cfg["site"]["sinks"], sinks)
+        self.assertEqual([n for n in notes if "site" in n], [])
+
+    def test_agent_site_makers_and_sinks_conflict_raises(self):
+        with self.assertRaises(ValueError):
+            ops.migrate_agent_config(
+                {
+                    "site": {
+                        "makers": {"projectId": "p1"},
+                        "sinks": [{"type": "directory", "path": "/srv/site"}],
+                    }
+                }
+            )
 
 
 class MissingTargetTests(unittest.TestCase):

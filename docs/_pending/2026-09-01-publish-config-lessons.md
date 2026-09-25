@@ -312,7 +312,7 @@ cronkit 的旧产品根 json 里 `site.homepage` 是空的、也没有 makers—
 
 - [ ] 去掉运行时 fallback（工作区已做，待提交）
 - [ ] `PUT /v1/staged` 无 `release-policy.json` → 400（今日待办，未做）
-- [ ] （待决）缺 Makers token / 缺 `site.makers` 时，publish 是 warning 继续还是非 2xx
+- [x] （已决，ADR 0015）缺 Makers token / 缺 `site.makers` 时，publish 是 warning 继续还是非 2xx：协议面照常成功；sink/rebuild 是非协议路径，失败单独报错退出，不发新版本
 
 ### 不要进正式设计（事故细节 / 一次性现场）
 

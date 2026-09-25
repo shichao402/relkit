@@ -352,6 +352,9 @@ func Load(path string) (*Config, error) {
 		if _, ok := obj["makers"]; ok {
 			return nil, Error{Message: "site.makers belongs in relkit-agent configuration, not product relkit.json"}
 		}
+		if _, ok := obj["sinks"]; ok {
+			return nil, Error{Message: "site.sinks belongs in relkit-agent configuration, not product relkit.json"}
+		}
 		if cfg.Site.Title == "" && cfg.Site.Description == "" && cfg.Site.Homepage == "" {
 			return nil, Error{Message: "site needs at least one of title / description / homepage"}
 		}

@@ -355,7 +355,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 
 **不要**为了赶时间先用默认桶域名发一版：`entryUrls` 一旦随二进制发出去就几乎不可变，那样等于把厂商、地域、桶名焊进所有老客户端，之后只能按 §8 双写迁移收场。
 
-给人看的索引页没有编译进客户端，换托管或换域名只影响书签，**不影响**已装客户端的更新链。COS 只放协议对象与 `site/`、`latest/` 数据：根路径 `GET /` 403 是 REST 源站拒 ListBucket，不要为此打开「静态网站源站」。公网索引站是 EdgeOne Makers（契约目录 `sites/updates-index/`，当前纯静态、无 `edge-functions/`）；agent 从所有产品的数据面指针静态重建整站，再由 agent 顶层 `site.makers` Folder 部署。内网把同一份完整 dump 写在 `HostsBrowse` 数据面的 `browse/`。
+给人看的索引页没有编译进客户端，换托管或换域名只影响书签，**不影响**已装客户端的更新链。COS 只放协议对象与 `site/`、`latest/` 数据：根路径 `GET /` 403 是 REST 源站拒 ListBucket，不要为此打开「静态网站源站」。公网索引站是 EdgeOne Makers（契约目录 `sites/updates-index/`，当前纯静态、无 `edge-functions/`）；agent 从所有产品的数据面指针静态重建整站，再按 agent 顶层 `site.sinks[]`（ADR 0015）分发——`makers` sink Folder 部署到 Makers，内网用 `backend` sink 把同一份完整 dump 写在 `HostsBrowse` 数据面的 `browse/`。
 
 ### 10.1 证书（已完成，含续期义务）
 

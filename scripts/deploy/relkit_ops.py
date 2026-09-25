@@ -266,7 +266,7 @@ def migrate_profile(
         notes.append(f"removed casCredentials x{n}")
     if "site" in cfg:
         cfg.pop("site", None)
-        notes.append("removed product-owned site config; configure site.makers in relkit-agent.json")
+        notes.append("removed product-owned site config; configure site.sinks in relkit-agent.json")
     backends = cfg.get("backends")
     if isinstance(backends, dict):
         new_backends = {}
@@ -296,6 +296,26 @@ def migrate_agent_config(agent_cfg: dict[str, Any]) -> tuple[dict[str, Any], lis
         cfg.pop("uploadToken", None)
         cfg.pop("uploadTokenFile", None)
         notes.append("removed instance-wide uploadToken fields")
+    site = cfg.get("site")
+    if isinstance(site, dict) and "makers" in site:
+        if site.get("sinks"):
+            raise ValueError(
+                "agent site has both site.makers and site.sinks; keep only site.sinks"
+            )
+        makers_cfg = site.get("makers") or {}
+        if not isinstance(makers_cfg, dict) or not str(makers_cfg.get("projectId") or "").strip():
+            raise ValueError(
+                "agent site.makers.projectId is empty; migrate it to site.sinks manually"
+            )
+        sink = {"type": "makers", "projectId": makers_cfg["projectId"]}
+        for key in ("region", "tokenEnv"):
+            value = makers_cfg.get(key)
+            if value:
+                sink[key] = value
+        cfg["site"] = {"sinks": [sink]}
+        notes.append(
+            "migrated site.makers to site.sinks [{\"type\":\"makers\"}]; site.makers is deprecated"
+        )
     return cfg, notes
 
 

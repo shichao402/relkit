@@ -41,7 +41,7 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../../docs/adr/0009-publisher-protocol-negotiation.md)）。升级 agent 后必须用同一 release 的 publisher。滚动放行时可临时下调 `minPublishProtocol`（设 0 关闭）。
 
-公网静态目录由 agent 顶层 `site.makers` 拥有；产品 profile 不再携带 Makers。upgrade 会移除旧 profile 的 `site` 块但不会猜 projectId，也不会覆盖现网 agent JSON。由运营者把 projectId/region/tokenEnv 写入 `/etc/relkit-agent/relkit-agent.json`，重启后用 `curl -fsS http://127.0.0.1:8787/-/site` 检查脱敏 readiness，再运行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。修人页不需要重发产品版本。
+公网静态目录由 agent 顶层 `site.sinks[]`（ADR 0015）拥有；产品 profile 不再携带 Makers。upgrade 会移除旧 profile 的 `site` 块、把旧 agent `site.makers` 迁移为 `site.sinks: [{"type":"makers",...}]`，但不会猜 projectId，也不会覆盖现网 agent JSON。由运营者把 sinks（Makers 的 projectId/region/tokenEnv 等）写入 `/etc/relkit-agent/relkit-agent.json`，重启后用 `curl -fsS http://127.0.0.1:8787/-/site` 检查脱敏 readiness，再运行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。修人页不需要重发产品版本。
 
 目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 

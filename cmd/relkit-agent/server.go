@@ -55,7 +55,12 @@ type FileConfig struct {
 }
 
 type SiteConfig struct {
+	// Makers is the pre-sinks spelling (ADR 0015 deprecated). It expands to a
+	// single {"type":"makers"} sink at load time and must not be combined
+	// with sinks.
 	Makers *makers.Config `json:"makers,omitempty"`
+	// Sinks is the declarative browse-dump destination list (ADR 0015).
+	Sinks []siterebuild.SinkSpec `json:"sinks,omitempty"`
 }
 
 // UploadTokenEntry is a publisher credential. One file maps to one or more
@@ -107,6 +112,9 @@ func LoadConfig(path string) (*Config, error) {
 	if raw.Products == nil {
 		raw.Products = map[string]ProductConfig{}
 	}
+	if raw.Site.Makers != nil && len(raw.Site.Sinks) > 0 {
+		return nil, fmt.Errorf("site.makers and site.sinks are mutually exclusive; migrate site.makers to site.sinks [{\"type\":\"makers\",...}]")
+	}
 	if raw.Site.Makers != nil {
 		if strings.TrimSpace(raw.Site.Makers.ProjectID) == "" {
 			return nil, fmt.Errorf("site.makers.projectId is required")
@@ -122,7 +130,16 @@ func LoadConfig(path string) (*Config, error) {
 		if raw.Site.Makers.Region == "" {
 			raw.Site.Makers.Region = "china"
 		}
+		raw.Site.Sinks = []siterebuild.SinkSpec{{
+			Type: siterebuild.SinkMakers, ProjectID: raw.Site.Makers.ProjectID,
+			Region: raw.Site.Makers.Region, TokenEnv: raw.Site.Makers.TokenEnv,
+		}}
 	}
+	sinks, err := siterebuild.NormalizeSinks(raw.Site.Sinks)
+	if err != nil {
+		return nil, err
+	}
+	raw.Site.Sinks = sinks
 	cfg := &Config{
 		Addr:               raw.Addr,
 		MaxUpload:          4 << 30,
@@ -329,6 +346,14 @@ type Server struct {
 }
 
 func NewServer(cfg *Config) *Server {
+	// Direct construction (tests, embedders) bypasses LoadConfig; repeat the
+	// site.makers → sinks expansion so the sink plane has one owner.
+	if len(cfg.Site.Sinks) == 0 && cfg.Site.Makers != nil {
+		cfg.Site.Sinks = []siterebuild.SinkSpec{{
+			Type: siterebuild.SinkMakers, ProjectID: cfg.Site.Makers.ProjectID,
+			Region: cfg.Site.Makers.Region, TokenEnv: cfg.Site.Makers.TokenEnv,
+		}}
+	}
 	return &Server{cfg: cfg}
 }
 
@@ -347,16 +372,26 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) handleSiteStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]any{"configured": false, "tokenPresent": false}
-	if cfg := s.cfg.Site.Makers; cfg != nil && cfg.ProjectID != "" {
-		tokenEnv := cfg.TokenEnv
+	sinks := s.cfg.Site.Sinks
+	status["sinks"] = len(sinks)
+	if len(sinks) > 0 {
+		status["configured"] = true
+	}
+	// Legacy fields stay populated from the first makers sink so older
+	// operators/scripts reading projectId/tokenEnv keep working.
+	for _, spec := range sinks {
+		if spec.Type != siterebuild.SinkMakers {
+			continue
+		}
+		tokenEnv := spec.TokenEnv
 		if tokenEnv == "" {
 			tokenEnv = makers.DefaultTokenEnv
 		}
-		status["configured"] = true
-		status["projectId"] = cfg.ProjectID
-		status["region"] = cfg.Region
+		status["projectId"] = spec.ProjectID
+		status["region"] = spec.Region
 		status["tokenEnv"] = tokenEnv
 		status["tokenPresent"] = strings.TrimSpace(os.Getenv(tokenEnv)) != ""
+		break
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -376,7 +411,7 @@ func (s *Server) rebuildSite(printer func(string)) (bool, error) {
 		})
 	}
 	return siterebuild.Rebuild(siterebuild.Config{
-		Makers: s.cfg.Site.Makers, StateDir: s.cfg.StateDir,
+		Sinks: s.cfg.Site.Sinks, StateDir: s.cfg.StateDir,
 	}, products, printer)
 }
 

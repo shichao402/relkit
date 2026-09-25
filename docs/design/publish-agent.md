@@ -281,7 +281,7 @@ Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某�
 | | 公网 | 内网 |
 |---|---|---|
 | 托管 | EdgeOne Makers（契约在本仓库 `sites/updates-index/`，**不要把 dump 拷进该目录当发版步骤**） | 数据面 `browse/` |
-| 怎么上去 | agent 顶层 `site.makers` 持有 projectId/region/tokenEnv；rebuild 后 Folder 整站 Upload | rebuild 把完整 dump 写入每个 `HostsBrowse` 数据面 |
+| 怎么上去 | agent 顶层 `site.sinks[]` 持有 `{"type":"makers"}`（projectId/region/tokenEnv）；rebuild 后 Folder 整站 Upload | rebuild 按 `site.sinks[]` 把完整 dump 写入声明的 backend（须 `HostsBrowse`）或 `directory` 目录 |
 | 动态 | 现在没有 `edge-functions/`，就是静态站。计数走 51.la（见 `docs/ROADMAP.md`），不要 KV。以后要函数只加在该子目录，且不当账本；内网不跟 |
 
 COS 不放 HTML。不要为此打开静态网站源站。页上不把 `.pb` 当导航，也不加载外链字体或图。
