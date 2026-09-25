@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"go.firoyang.com/relkit/internal/httpx"
 )
 
 // Adapter is the console's single read path into storage facts. Every panel
@@ -130,3 +135,116 @@ type sinkStatusRow struct {
 	OK           bool   `json:"ok"`
 	DeploymentID string `json:"deploymentId,omitempty"`
 }
+
+// storeEntryJSON mirrors relkit-store's /-/list/ row shape. Duplicating four
+// fields beats importing the store package: the console must not depend on
+// the storage plane's binary, only on its wire format (ADR 0016).
+type storeEntryJSON struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"isDir"`
+	Size  int64  `json:"size"`
+	Mtime string `json:"mtime"`
+}
+
+// storeAdapter reads a remote relkit-store over HTTP (ADR 0016 step 5): the
+// console box that is not co-located with the release tree. It is the read
+// half of the same wire the backends package's relkit-compatible client
+// speaks: plain GET on the tree, plus the store's /-/list/ JSON endpoint for
+// directory listings, which carries name/isDir/size/mtime per row.
+//
+// ReadKey translates httpx.Get's "404 is (nil, nil)" into rootAdapter's
+// "missing file is an error": scanProducts and friends treat an error as "no
+// data", and a nil body would decode as garbage.
+type storeAdapter struct {
+	name    string
+	baseURL string // absolute, no trailing slash
+}
+
+func newStoreAdapter(name, baseURL string) (*storeAdapter, error) {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return nil, fmt.Errorf("parse store URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("store URL must be http(s), got %q", baseURL)
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("store URL is missing a host: %q", baseURL)
+	}
+	return &storeAdapter{
+		name:    name,
+		baseURL: strings.TrimRight(parsed.String(), "/"),
+	}, nil
+}
+
+func (a *storeAdapter) Name() string { return a.name }
+
+// keyNoCache mirrors the store's no-cache prefixes (and the relkit-compatible
+// client's Get): pointers and indexes change under the console between
+// renders, while artifacts under a versioned prefix are immutable.
+func (a *storeAdapter) keyNoCache(key string) bool {
+	for _, prefix := range []string{"index/", "fallback/", "directory/", "latest/", "site/", "browse/"} {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *storeAdapter) ReadKey(key string) ([]byte, error) {
+	body, err := httpx.Get(a.baseURL+"/"+key, 60*time.Second, a.keyNoCache(key))
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		// 404: align with rootAdapter, where os.Root.ReadFile errors on a
+		// missing file rather than returning nil.
+		return nil, fmt.Errorf("GET %s: not found", key)
+	}
+	return body, nil
+}
+
+func (a *storeAdapter) ReadDir(dir string) ([]Entry, error) {
+	target := a.baseURL + "/-/list/" + strings.TrimPrefix(dir, "./")
+	body, err := httpx.Get(target, 60*time.Second, true)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return nil, fmt.Errorf("list %s: not found", dir)
+	}
+	var rows []storeEntryJSON
+	if err := json.Unmarshal(body, &rows); err != nil {
+		return nil, fmt.Errorf("list %s: decode: %w", dir, err)
+	}
+	entries := make([]Entry, 0, len(rows))
+	for _, row := range rows {
+		entry := Entry{Name: row.Name, IsDir: row.IsDir, Size: row.Size}
+		if row.Mtime != "" {
+			if parsed, err := time.Parse(time.RFC3339, row.Mtime); err == nil {
+				entry.Mtime = parsed
+			}
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func (a *storeAdapter) ModTime(key string) time.Time {
+	// The listing rows carry mtime; a one-row directory query is the cheapest
+	// authoritative source. Anything unparsable degrades to the zero time,
+	// which the panel renders as "no freshness shown".
+	dir, base := path.Split(key)
+	entries, err := a.ReadDir(strings.TrimSuffix(dir, "/"))
+	if err != nil {
+		return time.Time{}
+	}
+	for _, entry := range entries {
+		if entry.Name == base {
+			return entry.Mtime
+		}
+	}
+	return time.Time{}
+}
+
+var _ Adapter = (*storeAdapter)(nil)

@@ -23,6 +23,12 @@ import (
 // identifier, so the namespace is free.
 const healthPath = "/-/health"
 
+// listPathPrefix serves machine-readable directory listings for the console's
+// store adapter (ADR 0016 step 5). It is anonymous like the GET tree and
+// applies the same hidden-key filtering server-side, so a remote console never
+// sees the admin state, counters or CAS key even in listing form.
+const listPathPrefix = "/-/list/"
+
 func (c *config) handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -46,6 +52,7 @@ func (c *config) handler() http.Handler {
 	})
 	mux.HandleFunc(publishproto.PreflightPath, c.servePublishPreflight)
 	mux.HandleFunc(casUploadsPath, c.serveCASMint)
+	mux.HandleFunc(listPathPrefix, c.serveListJSON)
 
 	mux.HandleFunc("/", c.serve)
 
@@ -179,6 +186,74 @@ func (c *config) serveCatalogStub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte(catalogStubHTML))
+}
+
+// listEntryJSON is one row of the /-/list/ payload, mirroring the console's
+// Entry shape. mtime is RFC3339 so a zero time survives the round trip.
+type listEntryJSON struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"isDir"`
+	Size  int64  `json:"size"`
+	Mtime string `json:"mtime"`
+}
+
+// serveListJSON is the machine-readable counterpart of listDir: same key
+// cleaning, same server-side hidden-key filtering, JSON instead of HTML. The
+// console's storeAdapter consumes it for ReadDir and ModTime; humans keep the
+// HTML browsing pages.
+func (c *config) serveListJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// /-/list/ maps to the serve root, same convention cleanKey applies to /.
+	rest := strings.TrimPrefix(r.URL.Path, listPathPrefix)
+	name, ok := cleanKey(rest)
+	if !ok || c.hiddenKey(name) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	file, err := c.root.Open(name)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.IsDir() {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	entries, err := file.ReadDir(-1)
+	if err != nil {
+		http.Error(w, "cannot read directory", http.StatusInternalServerError)
+		return
+	}
+
+	rows := make([]listEntryJSON, 0, len(entries))
+	for _, entry := range entries {
+		// Filtering happens here, not at the panel: a remote console must not
+		// learn that reserved files exist, let alone their sizes.
+		if c.hiddenKey(entryKey(name, entry.Name())) {
+			continue
+		}
+		row := listEntryJSON{Name: entry.Name(), IsDir: entry.IsDir()}
+		if info, err := entry.Info(); err == nil {
+			row.Size = info.Size()
+			row.Mtime = info.ModTime().UTC().Format(time.RFC3339)
+		}
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(rows)
 }
 
 // listDir renders one directory: name, size, mtime, nothing else.

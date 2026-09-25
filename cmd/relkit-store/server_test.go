@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	rupv2 "go.firoyang.com/relkit/api/rup/v2"
 	"go.firoyang.com/relkit/internal/publishproto"
@@ -478,5 +480,102 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if health.Status != "ok" {
 		t.Fatalf("health status = %q", health.Status)
+	}
+}
+
+func TestListJSONEndpoint(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	srv := newLocalServer(t, cfg)
+	writeFile(t, dir, "index/app/stable.pb", []byte("x"))
+	writeFile(t, dir, "artifact/app/1.0.0/app.zip", []byte("pkg"))
+	// Reserved files exist on every real box; the listing must not mention
+	// them even though they sit in the same directory.
+	writeFile(t, dir, ".relkit-serve-admin.json", []byte(`{}`))
+	writeFile(t, dir, ".relkit-serve-stats.json", []byte(`{}`))
+	writeFile(t, dir, ".relkit-serve-cas.key", []byte("k"))
+
+	// Root listing maps /-/list/ to "." and hides the reserved files.
+	root := getBody(t, srv.URL+"/-/list/")
+	var rootRows []listEntryJSON
+	if err := json.Unmarshal([]byte(root), &rootRows); err != nil {
+		t.Fatalf("root payload not JSON: %v\n%s", err, root)
+	}
+	gotRoot := map[string]bool{}
+	for _, row := range rootRows {
+		gotRoot[row.Name] = true
+		if row.IsDir != (row.Name == "index" || row.Name == "artifact") {
+			t.Errorf("%s: isDir = %v", row.Name, row.IsDir)
+		}
+	}
+	for _, want := range []string{"index", "artifact"} {
+		if !gotRoot[want] {
+			t.Errorf("root listing missing %q: %+v", want, rootRows)
+		}
+	}
+	for _, hidden := range []string{
+		".relkit-serve-admin.json", ".relkit-serve-stats.json", ".relkit-serve-cas.key",
+	} {
+		if gotRoot[hidden] {
+			t.Errorf("root listing leaked %q", hidden)
+		}
+	}
+
+	// Subdirectory listing carries size and RFC3339 mtime.
+	sub := getBody(t, srv.URL+"/-/list/index/app")
+	var rows []listEntryJSON
+	if err := json.Unmarshal([]byte(sub), &rows); err != nil {
+		t.Fatalf("sub payload not JSON: %v\n%s", err, sub)
+	}
+	if len(rows) != 1 || rows[0].Name != "stable.pb" || rows[0].Size != 1 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if _, err := time.Parse(time.RFC3339, rows[0].Mtime); err != nil {
+		t.Errorf("mtime %q is not RFC3339: %v", rows[0].Mtime, err)
+	}
+}
+
+func TestListJSONRejectsBadPathsAndMethods(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	srv := newLocalServer(t, cfg)
+	writeFile(t, dir, "index/app/stable.pb", []byte("x"))
+
+	// Files are not listable, only directories.
+	resp, err := http.Get(srv.URL + "/-/list/index/app/stable.pb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("file listing = %d, want 404", resp.StatusCode)
+	}
+
+	// Traversal is rejected the same way the GET tree rejects it.
+	resp, err = http.Get(srv.URL + "/-/list/../outside")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("traversal = %d, want 404", resp.StatusCode)
+	}
+
+	// Missing directory is a plain 404.
+	resp, err = http.Get(srv.URL + "/-/list/nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("missing dir = %d, want 404", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/-/list/index", strings.NewReader("x"))
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("PUT = %d, want 405", resp.StatusCode)
 	}
 }

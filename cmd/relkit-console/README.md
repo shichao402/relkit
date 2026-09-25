@@ -42,14 +42,19 @@ type Adapter interface {
 }
 ```
 
-- `rootAdapter`：只读本机发布树（`os.Root` 沙箱）。与 store 同机部署时的默认形态，也是当前唯一实现。
-- `storeAdapter`（HTTP 经 relkit-compatible client 读 relkit-store）与 makers 只读查询是后续增强，见 ADR 0016 的排期。
+- `rootAdapter`：只读本机发布树（`os.Root` 沙箱）。与 store 同机部署时的默认形态。
+- `storeAdapter`（ADR 0016 第 5 步已落地）：经 HTTP 读远端 relkit-store——`ReadKey` 走 GET 树（no-cache 前缀与 store 一致），`ReadDir` 走 store 的 `/-/list/<dir>` JSON 端点（服务端已过滤保留键，console 看不到 admin state/计数/CAS key 的存在）。挂载方式：配置 `{"store": "http://<host>:8080"}` 或 `-store` 标志；store 模式下下载计数为空（面板不渲染统计行），admin state 落在 console 自己的本地路径。
+- makers 只读查询（`internal/makers.ListDeployments`，Pages OpenAPI `DescribePagesDeployments`）：配置 `"makers": {"projectId": ..., "tokenEnv": ..., "region": ...}` 后，portal 的 Site 卡片追加最近部署列表；token 未配置或查询失败时安静降级，只渲染快照。
 
 面板的扫描逻辑（`ui.go` 的 scanProducts/readProductCard 一族）只认 adapter，不因数据面是本机盘还是远端而分叉——与 `internal/backends` 的 Backend 接口同一设计语言。
 
-## 部署快照
+## 部署快照与 Site 卡片
 
-若 agent state 目录下存在 `site/status.json`（site-rebuild 成功后落盘的部署事件快照，见 ADR 0016），console 会展示各 sink 的部署结果与 makers deployment ID。快照缺失或损坏时面板安静降级，不报错。
+portal 首屏有一张 Site 卡片，回答「页面现在什么样」：
+
+- agent state 目录下存在 `site/status.json`（site-rebuild 成功后落盘的部署事件快照，见 ADR 0016）时，展示各 sink 的部署结果与 makers deployment ID，以及本机 dump 副本的刷新时间。
+- 配置了 makers 段时，追加最近 5 条 Pages 部署状态（60 秒缓存）。
+- 快照缺失、损坏、token 未配置均安静降级，不报错；两者都没有时整卡不渲染。
 
 ## 布局约定（与 store 同形，方便迁移）
 

@@ -110,6 +110,43 @@ type Result struct {
 	Uploaded       []string
 }
 
+// Deployment is one row of the Pages deployment history. This is the read-only
+// view the console's Site card renders (ADR 0016 step 5); fields the panel
+// does not show are left out so a Pages API addition never breaks decoding.
+type Deployment struct {
+	DeploymentID string `json:"DeploymentId"`
+	Status       string `json:"Status"`
+	CreateTime   string `json:"CreateTime"`
+}
+
+// deploymentsPage is the DescribePagesDeployments response shape after
+// unwrapPagesBody: TotalCount plus one page of rows.
+type deploymentsPage struct {
+	TotalCount  int          `json:"TotalCount"`
+	Deployments []Deployment `json:"Deployments"`
+}
+
+// ListDeployments reads the most recent deployments of one Pages project. It
+// is the console's makers read path: which deployment is live, when it was
+// created. Errors surface as-is; the panel degrades quietly.
+func (c *Client) ListDeployments(projectID string, limit int) ([]Deployment, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("site.makers.projectId is required")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	var page deploymentsPage
+	if err := c.call("DescribePagesDeployments", map[string]any{
+		"ProjectId": projectID,
+		"Limit":     limit,
+		"Offset":    0,
+	}, &page); err != nil {
+		return nil, err
+	}
+	return page.Deployments, nil
+}
+
 func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP

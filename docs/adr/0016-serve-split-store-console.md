@@ -70,6 +70,7 @@ rebuild 成功路径的末尾（`dump.sha256` 写入之后、members 写入之�
 2. console 拆包 `cmd/relkit-console`（已完成，a51e05e）：搬运 admin.go/ui.go/stats.go + templates，adapter 层首版（rootAdapter），`-dir` 只读挂载。
 3. store 拆包 `cmd/relkit-store`（已完成）：serve 目录改名一次到位并删除，协议不变；部署侧（unit 模板、deploy CLI、hostlib、CI、文档）同步切换。`RELKIT_SERVE_TOKEN` 环境变量名与 `.relkit-serve-admin.json` / `.relkit-serve-stats.json` / `.relkit-serve-cas.key` 数据文件名保留旧值，迁移盒子不重配 token、不丢账户与计数。
 4. 部署切换与收尾文档（已完成，2026-09-25）：两台机器实机切换——`migrate-serve` 迁移内网（relkit:relkit token 语义）与外网（root:relkit 组可读 token 语义）的 store 并停用 `relkit-serve.service`，`install console` 以 `keeping existing operators` 保留账户上线独立 unit，nginx 三段面板分流（`/-/admin`、`/-/p/`、`/-/latest/` → `127.0.0.1:8081`）两台机均已验证（内网 200；外网经正确 SNI 200/302，公网域名直达同验）。`/tmp/relkit-deploy` 引导目录已清理，nginx 示例配置已同步线上实态。
+5. console 读路径补全（已完成，2026-09-25）：store 新增 `/-/list/<dir>` 匿名 JSON 目录端点（服务端过滤保留键，console 远端模式下看不到 admin state/计数/CAS key）；console 落地 `storeAdapter`（`ReadKey` 走 GET 树、404 对齐 rootAdapter 的 error 语义、no-cache 前缀与 store 一致，`ReadDir` 解析 `/-/list/`），配置键 `store` / 标志 `-store` 挂载，store 模式下统计空计数降级；`internal/makers` 新增 `ListDeployments`（`DescribePagesDeployments` 只读查询）；portal 首屏接线 Site 卡片——`site/status.json` 快照（At/各 sink 成败/deploymentId）+ 本机 dump 副本刷新时间 + makers 最近部署列表（60s 缓存、token 缺失安静降级）。ADR 原文的 dumpAdapter（只读本机 agent state 的 `site/dump/`）经评估由快照 + dumpFreshness 覆盖同一事实面，未单独立实现。
 
 ## 后果
 

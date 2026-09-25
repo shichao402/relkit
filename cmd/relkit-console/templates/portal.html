@@ -21,5 +21,36 @@
 </table>
 </section>
 {{end}}
+{{if .Site}}
+<section class="card">
+<div class="cardhead"><h2>Site</h2><span class="push"></span>{{if .Site.At}}<span class="chip">rebuilt {{.Site.At}}</span>{{end}}</div>
+{{if .Site.DumpNote}}<p class="desc">{{.Site.DumpNote}}</p>{{end}}
+{{if .Site.Sinks}}
+<table>
+<thead><tr><th>Sink</th><th>Result</th><th class="num">Deployment</th></tr></thead>
+<tbody>
+{{range .Site.Sinks}}<tr>
+<td>{{.Name}}</td>
+<td>{{if .OK}}ok{{else}}<span class="warn">failed</span>{{end}}</td>
+<td class="num">{{if .DeploymentID}}<span class="mono">{{.DeploymentID}}</span>{{else}}-{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{end}}
+{{if .Site.MakersRows}}
+<p class="history-title">Pages deployments</p>
+<table>
+<thead><tr><th>Deployment</th><th>Status</th><th class="num">Created</th></tr></thead>
+<tbody>
+{{range .Site.MakersRows}}<tr>
+<td class="mono">{{.DeploymentID}}</td>
+<td>{{if .Status}}<span class="chip">{{.Status}}</span>{{else}}-{{end}}</td>
+<td class="num">{{.Created}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{end}}
+</section>
+{{end}}
 {{if .StatsSince}}<p class="note">Download counts persist across restarts; counting since {{.StatsSince}}.</p>{{end}}
 {{template "foot" .}}{{end}}

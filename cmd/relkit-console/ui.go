@@ -14,7 +14,9 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,6 +95,23 @@ type portalPage struct {
 	Sub        string
 	StatsSince string
 	Products   []productCard
+	Site       *siteCard
+}
+
+// siteCard is the Site section of the portal (ADR 0016 step 5): the last
+// rebuild's per-sink results from the agent's site/status.json snapshot,
+// plus the live Pages deployment list when a makers config is wired.
+type siteCard struct {
+	At         string
+	DumpNote   string
+	Sinks      []sinkStatusRow
+	MakersRows []makersRow
+}
+
+type makersRow struct {
+	DeploymentID string
+	Status       string
+	Created      string
 }
 
 type artifactRow struct {
@@ -489,6 +508,7 @@ func (c *console) servePortal(w http.ResponseWriter, r *http.Request, products [
 		Heading:  heading,
 		Sub:      r.Host,
 		Products: products,
+		Site:     c.siteCard(),
 	}
 	for _, product := range products {
 		if product.Downloads > 0 {
@@ -497,6 +517,50 @@ func (c *console) servePortal(w http.ResponseWriter, r *http.Request, products [
 		}
 	}
 	c.renderPage(w, r, "portal", page)
+}
+
+// siteCard gathers the Site section: the rebuild snapshot from agent state
+// and, when a makers project is configured, the latest Pages deployments.
+// Every input is optional; a console without agent state or a Pages token
+// renders the card with only what it has, and a box with neither skips it.
+func (c *console) siteCard() *siteCard {
+	status, hasStatus := siteStatusView{StateDir: c.stateDir}.readStatus()
+	var rows []makersRow
+	if c.makers != nil {
+		for _, dep := range c.makers.latest(5) {
+			rows = append(rows, makersRow{
+				DeploymentID: dep.DeploymentID,
+				Status:       dep.Status,
+				Created:      formatTimestamp(dep.CreateTime, stampLayout),
+			})
+		}
+	}
+	if !hasStatus && len(rows) == 0 {
+		return nil
+	}
+	card := &siteCard{MakersRows: rows}
+	if hasStatus {
+		card.At = formatTimestamp(status.At, stampLayout)
+		card.Sinks = status.Sinks
+		if dumpAt, ok := c.dumpFreshness(); ok {
+			card.DumpNote = "Local dump copy refreshed " + dumpAt + "."
+		}
+	}
+	return card
+}
+
+// dumpFreshness reports when the local dump copy last changed, the freshness
+// half of the snapshot. It is agent state again: co-located read-only input,
+// not the release tree.
+func (c *console) dumpFreshness() (string, bool) {
+	if c.stateDir == "" {
+		return "", false
+	}
+	info, err := os.Stat(filepath.Join(c.stateDir, "site", "dump"))
+	if err != nil {
+		return "", false
+	}
+	return info.ModTime().Format(stampLayout), true
 }
 
 func (c *console) serveAdmin(w http.ResponseWriter, r *http.Request) {

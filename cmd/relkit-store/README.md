@@ -30,6 +30,7 @@ Linux + systemd：`sudo python3 scripts/deploy/relkit.py install serve --binary 
 | `/-/version` | GET | 版本串 |
 | `/-/publish/preflight` | POST | 发布协议协商（`Protocol` header 窗口） |
 | `/-/cas/uploads` | POST | CAS 能力 mint（运营方 Bearer，返回带 sig 的 PUT URL） |
+| `/-/list/<dir>` | GET | 机器可读目录列表 JSON（`[{name,isDir,size,mtime}]`，服务端过滤保留键），console storeAdapter 的 ReadDir 数据源 |
 | `/`（树） | GET/HEAD | 匿名读 + Range；`Cache-Control` 按前缀（`index/` 等 no-cache，`manifest/`/`artifact/` immutable） |
 | `/`（树） | PUT/DELETE | 运营方或产品 Bearer；`X-Relkit-Copy-Source` 走 COPY promote |
 | `browse/<name>` | GET | 静态目录页（agent site-rebuild 的 dump 落点） |

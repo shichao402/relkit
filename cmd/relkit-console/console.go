@@ -18,6 +18,7 @@ type console struct {
 	stats    *downloadStats
 	site     *SiteConfig
 	stateDir string
+	makers   *makersPanel
 }
 
 func (c *console) handler() http.Handler {

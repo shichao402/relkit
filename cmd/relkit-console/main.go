@@ -7,9 +7,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
+
+	"go.firoyang.com/relkit/internal/makers"
 )
 
 // Command relkit-console is the operator panel binary split out of
@@ -37,6 +40,7 @@ import (
 //	  "stateDir": "/srv/relkit-agent-state", // agent state for site status
 //	  "site": {...}                   // portal title/product blurbs (unchanged)
 //	}
+//
 // Set by scripts/deploy/relkit.py build via -ldflags -X main.version=<stamp>.
 var version = "dev"
 
@@ -49,12 +53,14 @@ var searchPaths = []string{ConfigName, "/etc/" + ConfigName}
 // FileConfig mirrors the config file. Everything is optional; the defaults
 // match what relkit-serve used for the panel.
 type FileConfig struct {
-	Addr           string      `json:"addr"`
-	Dir            string      `json:"dir"`
-	StateDir       string      `json:"stateDir,omitempty"`
-	StatsFile      string      `json:"statsFile,omitempty"`
-	AdminStateFile string      `json:"adminStateFile,omitempty"`
-	Site           *SiteConfig `json:"site,omitempty"`
+	Addr           string         `json:"addr"`
+	Dir            string         `json:"dir"`
+	Store          string         `json:"store,omitempty"`
+	StateDir       string         `json:"stateDir,omitempty"`
+	StatsFile      string         `json:"statsFile,omitempty"`
+	AdminStateFile string         `json:"adminStateFile,omitempty"`
+	Site           *SiteConfig    `json:"site,omitempty"`
+	Makers         *makers.Config `json:"makers,omitempty"`
 }
 
 func LoadFileConfig(explicit string) (*FileConfig, string, error) {
@@ -96,6 +102,7 @@ func main() {
 		configPath  = flag.String("config", "", "path to "+ConfigName)
 		addr        = flag.String("addr", "127.0.0.1:8081", "address to listen on")
 		dir         = flag.String("dir", ".", "release tree to read (read-only)")
+		store       = flag.String("store", "", "relkit-store base URL to read over HTTP instead of a local tree")
 		stateDir    = flag.String("state-dir", "", "agent state directory (site status)")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
@@ -120,6 +127,9 @@ func main() {
 		if fileCfg.Dir != "" && !explicit["dir"] {
 			*dir = fileCfg.Dir
 		}
+		if fileCfg.Store != "" && !explicit["store"] {
+			*store = fileCfg.Store
+		}
 		if fileCfg.StateDir != "" && !explicit["state-dir"] {
 			*stateDir = fileCfg.StateDir
 		}
@@ -132,24 +142,49 @@ func main() {
 	}
 	if fileCfg != nil {
 		console.site = fileCfg.Site
+		// The makers read path is optional: without a project configured the
+		// Site card renders the snapshot alone. A missing token at query time
+		// degrades the same way rather than failing the panel.
+		if fileCfg.Makers != nil {
+			console.makers = newMakersPanel(*fileCfg.Makers)
+		}
 	}
 
-	adapter, err := newRootAdapter("local", *dir)
+	// The two adapters are the two deployment shapes of ADR 0016: co-located
+	// (os.Root over the tree store serves) and remote (HTTP against a store,
+	// with -dir repurposed as the local anchor for admin state and stats).
+	var adapter Adapter
+	if *store != "" {
+		adapter, err = newStoreAdapter("store:"+hostOf(*store), *store)
+	} else {
+		adapter, err = newRootAdapter("local", *dir)
+	}
 	if err != nil {
-		log.Fatalf("cannot read %s: %v", *dir, err)
+		log.Fatalf("cannot open data source: %v", err)
 	}
 	console.adapter = adapter
 
 	// Admin auth state follows the release tree unless configured otherwise;
 	// same default layout relkit-serve used, so a box migrating to console
-	// keeps its operator accounts.
+	// keeps its operator accounts. In store mode there may be no local tree
+	// at all: the admin state is the console's own file, resolved through the
+	// config directory instead.
 	adminPath := resolveAdminPath(*dir, usedPath, adminStateFileFrom(fileCfg))
 	admin, err := openAdminAuth(adminPath, *dir)
 	if err != nil {
 		log.Fatalf("admin: %v", err)
 	}
 	console.admin = admin
-	console.stats = newDownloadStats(statsPathOrDefault(*dir, fileCfg), *dir)
+
+	// Download counters are recorded by whoever serves the tree. In store
+	// mode the console has no shared counters file; an empty path yields the
+	// zero counter, which the panel renders as no stats at all (StatsSince
+	// stays blank) rather than as a broken page.
+	var statsPath string
+	if *store == "" {
+		statsPath = statsPathOrDefault(*dir, fileCfg)
+	}
+	console.stats = newDownloadStats(statsPath, *dir)
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -164,7 +199,11 @@ func main() {
 	} else {
 		log.Printf("config: none (flags and defaults only)")
 	}
-	log.Printf("panel on http://%s reading %s via %s adapter", *addr, *dir, adapter.Name())
+	if *store != "" {
+		log.Printf("panel on http://%s reading %s via %s adapter (no local tree)", *addr, *store, adapter.Name())
+	} else {
+		log.Printf("panel on http://%s reading %s via %s adapter", *addr, *dir, adapter.Name())
+	}
 	if *stateDir != "" {
 		log.Printf("site status: %s", *stateDir)
 	}
@@ -295,4 +334,14 @@ func statsPathOrDefault(dir string, cfg *FileConfig) string {
 		return resolveStatsPath(dir, cfg.StatsFile)
 	}
 	return defaultStatsPath(dir)
+}
+
+// hostOf extracts host:port from a URL for adapter naming; unparsable input
+// falls back to the raw string so the name still says something.
+func hostOf(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return raw
+	}
+	return parsed.Host
 }
