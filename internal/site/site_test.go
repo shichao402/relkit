@@ -121,6 +121,20 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	if err != nil || len(stateIndex) == 0 {
 		t.Fatalf("state dump index.html missing: %v", err)
 	}
+	statusBytes, err := os.ReadFile(filepath.Join(cfg.StateDir, "site", "status.json"))
+	if err != nil {
+		t.Fatalf("status.json missing after deploy: %v", err)
+	}
+	var status Status
+	if err := json.Unmarshal(statusBytes, &status); err != nil {
+		t.Fatalf("status.json: %v", err)
+	}
+	if len(status.Sinks) != 1 || status.Sinks[0].Name != "backend:prod" || !status.Sinks[0].OK {
+		t.Fatalf("status sinks=%+v", status.Sinks)
+	}
+	if status.At == "" {
+		t.Fatal("status.at missing")
+	}
 	firstPutCount := putCount
 	changed, err = Rebuild(cfg, products, nil)
 	if err != nil || changed {
@@ -128,6 +142,15 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	}
 	if putCount != firstPutCount {
 		t.Fatalf("unchanged rebuild wrote %d more pointers", putCount-firstPutCount)
+	}
+	// Unchanged rebuild deploys nothing: the snapshot must not be rewritten
+	// (its timestamp would otherwise lie about a deployment that happened).
+	statusBytes2, err := os.ReadFile(filepath.Join(cfg.StateDir, "site", "status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(statusBytes2) != string(statusBytes) {
+		t.Fatal("unchanged rewrite rewrote status.json")
 	}
 
 	delete(shared, webmeta.SiteKey("dec"))

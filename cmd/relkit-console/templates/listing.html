@@ -1,0 +1,13 @@
+{{define "listing"}}{{template "head" .}}
+<header class="site">
+<h1 class="mono">{{.Display}}</h1>
+<p class="sub">{{.Count}} entries</p>
+</header>
+<table>
+<thead><tr><th>Name</th><th class="num">Size</th><th class="num">Modified</th></tr></thead>
+<tbody>
+{{if .Parent}}<tr><td><a class="mono dir" href="{{.Parent}}">../</a></td><td class="num">-</td><td class="num">-</td></tr>{{end}}
+{{range .Entries}}<tr><td><a class="mono{{if .Dir}} dir{{end}}" href="{{.Href}}">{{.Name}}</a></td><td class="num">{{.Size}}</td><td class="num">{{.Mtime}}</td></tr>{{end}}
+</tbody>
+</table>
+{{template "foot" .}}{{end}}

@@ -1,0 +1,9 @@
+{{define "locked"}}{{template "head" .}}
+<div class="auth">
+<header class="site">
+<h1>Panel locked</h1>
+<p class="sub">No operator account, and the bootstrap is not live.</p>
+</header>
+<p class="hint">SSH in and run <span class="mono">relkit-serve init -reset-admin</span>, then open this page again. Upload tokens are not a panel password.</p>
+</div>
+{{template "foot" .}}{{end}}

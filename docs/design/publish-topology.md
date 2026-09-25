@@ -4,7 +4,7 @@
 title: 发布拓扑（控制面一条路，数据面 / 人页为 adapter）
 category: design
 created: 2026-08-30
-updated: 2026-09-07
+updated: 2026-09-25
 status: approved
 related: docs/design/publish-agent.md, docs/design/update-ingress-cos.md, CLI.md, sites/updates-index/README.md
 supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 仍保留，之后再合并。
@@ -30,6 +30,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 | nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
 | relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
 | relkit-serve | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只把 `/-/admin`、`/-/p/` 当操作面壳，本机空目录不是 COS 数据面 |
+| relkit-console（拆分中，[ADR 0016](../adr/0016-serve-split-store-console.md)） | `127.0.0.1:8081`（规划） | serve 的管理面拆出的独立二进制：`/-/admin` 面板、账户、统计、目录浏览、`/-/latest/`，只读经 adapter。过渡期与 serve 并行验证；下一轮 serve 瘦身为纯存储面 `relkit-store` 后接管面板切面 |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / 站点 sink 节点 |
 
 同机可以是一个 nginx、两个 `server_name`（CI 的 `/v1/*` → 8787，客户端 GET → 8080 或读盘）。内网 CI 打的是该箱**内网 IP:443** 上的名字，不是回环 hostname。

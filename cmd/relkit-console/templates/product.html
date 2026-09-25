@@ -1,0 +1,40 @@
+{{define "product"}}{{template "head" .}}
+<header class="site product-head">
+<div><h1>{{.Name}}</h1>{{if .Description}}<p class="desc">{{.Description}}</p>{{end}}</div>
+{{if .Homepage}}<a class="home-link" href="{{.Homepage}}">Project homepage ↗</a>{{end}}
+</header>
+<div class="channels">
+{{range .Channels}}
+<section class="release-card">
+<div class="release-head"><div class="release-title"><h2>{{.Name}}</h2>{{if .LatestLabel}}<span class="chip">{{.LatestLabel}}</span>{{end}}</div><div class="release-meta">{{if .LatestReleased}}Released {{.LatestReleased}}{{end}}{{if .LatestCode}} · build {{.LatestCode}}{{end}}{{if .LatestNotes}} · <a href="{{.LatestNotes}}">release notes</a>{{end}}</div></div>
+{{if .Err}}<p class="warn">{{.Err}}</p>{{else}}
+{{if .Artifacts}}
+<div class="download-list">{{range .Artifacts}}
+<div class="download"><div class="download-copy"><span class="platform">{{.Platform}}</span><span class="filename mono" title="{{.Filename}}">{{.Filename}}</span></div><div class="download-meta">{{.Size}}{{if .Downloads}} · {{.Downloads}} downloads{{end}}</div>{{if .PermanentHref}}<a class="download-btn" href="{{.PermanentHref}}" title="Permanent link for this channel">Download</a>{{else if .Href}}<a class="download-btn" href="{{.Href}}">Download</a>{{end}}</div>
+{{end}}</div>
+{{end}}
+<details class="technical"><summary>Technical details</summary>
+<div class="tech-meta">{{if .Sequence}}<span>Sequence {{.Sequence}}</span>{{end}}{{if .Generated}}<span>Generated {{.Generated}}</span>{{end}}<a href="{{.IndexHref}}">Index protobuf</a></div>
+{{if .Artifacts}}<table class="tech-table">
+<thead><tr><th>Artifact</th><th>SHA-256</th><th class="num">Direct file</th></tr></thead>
+<tbody>{{range .Artifacts}}<tr><td class="mono">{{.ID}}</td><td class="mono" title="{{.Sha256}}">{{.Sha256Short}}</td><td class="num">{{if .Href}}<a href="{{.Href}}">versioned URL</a>{{end}}</td></tr>{{end}}</tbody>
+</table>{{end}}
+{{if .Releases}}<p class="history-title">Release history</p>
+<table>
+<thead><tr><th>Version</th><th class="num">Code</th><th class="num">Released</th><th class="num">Notes</th><th class="num">Manifest</th></tr></thead>
+<tbody>{{range .Releases}}<tr>
+<td class="mono">{{.Version}}{{if .Yanked}} <span class="chip">yanked</span>{{end}}</td>
+<td class="num">{{if .Code}}{{.Code}}{{end}}</td>
+<td class="num">{{.Released}}</td>
+<td class="num">{{if .NotesURL}}<a href="{{.NotesURL}}">notes</a>{{end}}</td>
+<td class="num">{{if .ManifestHref}}<a href="{{.ManifestHref}}">.pb</a>{{end}}</td>
+</tr>{{end}}</tbody>
+</table>
+{{if .Truncated}}<p class="note">{{.Truncated}} older version(s) not shown; the index has them all.</p>{{end}}
+{{end}}</details>
+{{end}}
+</section>
+{{end}}
+</div>
+{{if .StatsSince}}<p class="note">Download counts persist across restarts; counting since {{.StatsSince}}.</p>{{end}}
+{{template "foot" .}}{{end}}

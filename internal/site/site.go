@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"go.firoyang.com/relkit/internal/backends"
 	"go.firoyang.com/relkit/internal/browse"
@@ -123,9 +124,16 @@ func sinkSpecName(spec SinkSpec) string {
 	return spec.Type
 }
 
+// DeployResult reports what one sink deployment produced. The zero value is
+// valid: sinks without a remote deployment identity (directory, backend)
+// report nothing beyond success.
+type DeployResult struct {
+	DeploymentID string // remote deployment id when the sink has one (makers)
+}
+
 type sink interface {
 	Name() string
-	Deploy(map[string][]byte) error
+	Deploy(map[string][]byte) (*DeployResult, error)
 }
 
 type backendSink struct {
@@ -134,7 +142,7 @@ type backendSink struct {
 }
 
 func (s backendSink) Name() string { return s.name }
-func (s backendSink) Deploy(dump map[string][]byte) error {
+func (s backendSink) Deploy(dump map[string][]byte) (*DeployResult, error) {
 	keys := make([]string, 0, len(dump))
 	for key := range dump {
 		keys = append(keys, key)
@@ -142,23 +150,32 @@ func (s backendSink) Deploy(dump map[string][]byte) error {
 	sort.Strings(keys)
 	for _, key := range keys {
 		if _, err := s.backend.PutPointer(dump[key], key); err != nil {
-			return fmt.Errorf("%s: %w", key, err)
+			return nil, fmt.Errorf("%s: %w", key, err)
 		}
 	}
-	return nil
+	return &DeployResult{}, nil
 }
 
 type makersSink struct{ cfg *makers.Config }
 
 func (s makersSink) Name() string { return "makers:" + s.cfg.ProjectID }
-func (s makersSink) Deploy(dump map[string][]byte) error {
-	return makers.DeployDump(dump, s.cfg)
+func (s makersSink) Deploy(dump map[string][]byte) (*DeployResult, error) {
+	result, err := makers.DeployDump(dump, s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return &DeployResult{}, nil
+	}
+	return &DeployResult{DeploymentID: result.DeploymentID}, nil
 }
 
 type directorySink struct{ dir string }
 
-func (s directorySink) Name() string                        { return "directory:" + s.dir }
-func (s directorySink) Deploy(dump map[string][]byte) error { return writeDumpDir(s.dir, dump) }
+func (s directorySink) Name() string { return "directory:" + s.dir }
+func (s directorySink) Deploy(dump map[string][]byte) (*DeployResult, error) {
+	return &DeployResult{}, writeDumpDir(s.dir, dump)
+}
 
 // Rebuild collects every configured product and deploys one complete dump.
 // Sink deployment failure is an error but never blocks protocol publishing:
@@ -186,6 +203,7 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	if err != nil {
 		return false, err
 	}
+	status := Status{At: time.Now().UTC().Format(time.RFC3339)}
 	memberPath := filepath.Join(siteCfg.StateDir, "site", "members.json")
 	members := inputMembers(inputs)
 	if err := guardCompleteSnapshot(memberPath, products, members); err != nil {
@@ -212,14 +230,23 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	}
 	for _, dest := range dests {
 		printer("site rebuild: deploying " + dest.Name())
-		if err := dest.Deploy(dump); err != nil {
+		result, err := dest.Deploy(dump)
+		if err != nil {
 			return false, fmt.Errorf("%s: %w", dest.Name(), err)
 		}
+		record := sinkStatus{Name: dest.Name(), OK: true}
+		if result != nil {
+			record.DeploymentID = result.DeploymentID
+		}
+		status.Sinks = append(status.Sinks, record)
 	}
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		return false, err
 	}
 	if err := os.WriteFile(statePath, []byte(sum+"\n"), 0o644); err != nil {
+		return false, err
+	}
+	if err := writeStatus(filepath.Join(siteCfg.StateDir, "site", "status.json"), status); err != nil {
 		return false, err
 	}
 	if err := writeMembers(memberPath, members); err != nil {
@@ -260,6 +287,46 @@ func resolveSinks(specs []SinkSpec, backendsByName map[string][]backends.Backend
 		}
 	}
 	return dests, nil
+}
+
+// Status is the deploy-event snapshot written after a successful rebuild. It
+// records what each sink did; dump.sha256 remains the content fingerprint.
+// An unchanged rebuild deploys nothing and rewrites nothing here.
+type Status struct {
+	At    string       `json:"at"`    // when this rebuild deployed
+	Sinks []sinkStatus `json:"sinks"` // one record per sink, in deploy order
+}
+
+type sinkStatus struct {
+	Name         string `json:"name"`
+	OK           bool   `json:"ok"`
+	DeploymentID string `json:"deploymentId,omitempty"` // makers deployments carry one
+}
+
+func writeStatus(path string, status Status) error {
+	data, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// ReadStatus loads the deploy-event snapshot for display (agent status
+// endpoint, console panels). A missing snapshot is not an error: it means no
+// rebuild has deployed since the feature landed.
+func ReadStatus(stateDir string) (Status, bool) {
+	data, err := os.ReadFile(filepath.Join(stateDir, "site", "status.json"))
+	if err != nil {
+		return Status{}, false
+	}
+	var status Status
+	if json.Unmarshal(data, &status) != nil {
+		return Status{}, false
+	}
+	return status, true
 }
 
 func inputMembers(inputs []browse.ProductData) []string {

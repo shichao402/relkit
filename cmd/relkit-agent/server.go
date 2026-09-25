@@ -377,6 +377,12 @@ func (s *Server) handleSiteStatus(w http.ResponseWriter, r *http.Request) {
 	if len(sinks) > 0 {
 		status["configured"] = true
 	}
+	// The deploy-event snapshot (site/status.json) is the panel-facing truth
+	// about what the last rebuild actually deployed. Missing means no rebuild
+	// has deployed since the feature landed; the panel shows that as "none".
+	if snap, ok := siterebuild.ReadStatus(s.cfg.StateDir); ok {
+		status["lastDeploy"] = snap
+	}
 	// Legacy fields stay populated from the first makers sink so older
 	// operators/scripts reading projectId/tokenEnv keep working.
 	for _, spec := range sinks {
