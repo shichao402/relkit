@@ -47,7 +47,7 @@ agent 只需要清单与策略，不需要产物副本：
 
 CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。目标路径：这些文件按凭据文档 PUT 到 **ingest 后端**的 `cas/{sha256}`，**每个 blob 一次**，与本轮有几个后端无关；交给 agent 的 tar **不含** `artifacts/`（只有 `staged.pb` + `release-policy.json`）。现网整包 tar 仍可带上 `artifacts/`，agent 解包后走 `PutArtifactCAS`。瘦 tar 路径下，缺文件是否可发布由 ingest 上是否已有对应 `cas/{sha256}` 决定（见失败语义），不要在解包时因为没有 `artifacts/` 就失败。
 
-缺少 `release-policy.json` 或本机没有可读 profile 时直接失败。
+staged 树缺 `release-policy.json` 时，`PUT /v1/staged`（整包与分片 complete）解包后直接 **400**，不再等到 `POST /v1/publish`（agent 0.1.4 起）；本机没有可读 profile 仍是 publish 时失败。
 
 ### 2.2 publish profile
 
