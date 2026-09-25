@@ -77,8 +77,8 @@ flowchart TB
 
   dump --> sink{"site sink<br/>配置归 agent"}
 
-  sink --> makers["Makers<br/>现网外网人页 · 可卸"]
-  sink --> tree["HTTP GET 树 browse/<br/>现网内网人页"]
+  sink --> makers["Makers<br/>已退役 2026-09-25 · 待清理云端项目"]
+  sink --> tree["HTTP GET 树 browse/<br/>现网内外网人页同款"]
   sink --> other["其他 site 托管"]
 
   makers --> done["发布完成"]
@@ -88,26 +88,32 @@ flowchart TB
 
 dump 包含 `index.html`（总目录）、全部 `<product>.html`、`catalog.json`（派生数据）。协议客户端不读，rebuild 也不把它当输入。
 
+> 2026-09-25 更新：外网数据面已从 COS 迁至本机 relkit-store（`/srv/releases`，serve 已退役）。人页 Makers 退出服务路径：agent sinks 为 `backend:serve` + `directory:/srv/relkit/site` 双落点，`update.firoyang.com` 由本机 nginx 直接伺服静态目录，与内网拓扑完全一致。原因：hk CVM 到广州 COS 公网入口 443 跨境不通（见 golden-path 归档），COS 托管暂不可用。Makers 云端项目 `relkit-updates-index` 尚未删除（Pages API token 已失效，待续期后清理）。
+
 ## 4. 下载
 
 ```mermaid
 flowchart TB
   sdk["客户端 SDK 不连 8787"] --> get{"GET 数据面"}
-  get --> cosGet["COS raw.firoyang.com:443<br/>主"]
+  get --> cosGet["COS raw.firoyang.com:443<br/>已退役 2026-09-25 · 见注"]
   get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
   get --> woaGet["update.devcloud.woa.com<br/>→ store 127.0.0.1:8080 读盘"]
+  get --> pubGet["publish.firoyang.com<br/>→ 本机 store :8080 · 现网外网主入口"]
   get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
   cosGet --> verify["验签 · sequence · sha256"]
   cosBackup --> verify
   woaGet --> verify
+  pubGet --> verify
   relGet --> verify
 
   human["人用浏览器 · 对外目录"] --> site{"同一份 browse dump"}
-  site --> makersGet["Makers<br/>现网外网"]
-  site --> pages["GET / 或 /browse/<br/>现网内网 · 静态文件"]
+  site --> makersGet["Makers<br/>已退役 · 云端项目待删"]
+  site --> pages["GET / 或 /browse/<br/>内外网同款 · nginx 伺服"]
 
     ops["操作员 · 自托管箱"] --> panel["console 现算面板 /-/admin<br/>以后 relkit 后台 · 不对外当目录"]
 ```
+
+> 注：`raw.firoyang.com`（广州 COS）2026-09-25 起退出外网数据面。hk CVM 到广州 COS 公网入口 443 跨境不通，CI 发布与客户端下载均已切到 `publish.firoyang.com`（本机 store）。香港临时桶已验证 hk→HK COS 全链路可用（PUT/GET/LIST/HEAD/DELETE 5/5，桶已删），待跨境问题解决后可评估迁回。
 
 ## 5. 人页 vs 操作面板
 
