@@ -5,7 +5,7 @@ package main
 // A freshly inited box has a one-shot bootstrap token (hash only on disk).
 // That token can create the first operator account and is consumed in the
 // same write; afterwards the panel is ordinary username/password plus a
-// signed cookie. Recovery is SSH: `relkit-serve init -reset-admin`.
+// signed cookie. Recovery is SSH: `relkit-console init -reset-admin`.
 //
 // This is not a token-issuance API and does not protect the download tree.
 // Upload tokens stay PUT-only; adding products still requires SSH.
@@ -285,7 +285,7 @@ func (a *adminAuth) statusLog() string {
 		}
 		return fmt.Sprintf("authenticated (%d operators)", n)
 	default:
-		return "locked (run relkit-serve init -reset-admin)"
+		return "locked (run relkit-console init -reset-admin)"
 	}
 }
 

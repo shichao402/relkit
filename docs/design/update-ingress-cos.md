@@ -11,7 +11,7 @@ related: ADR 0005, ADR 0007, docs/design/bootstrap-directory.md, docs/design/pub
 
 ## 1. 决议
 
-**只记一套角色：CI 打包 → 控制面 agent 签发上传说明并编排发布 → CI 直传数据面 → 数据面完成 Promote 与受控写入 → 客户端匿名 GET。** 数据面不是只读：COS 与 relkit-serve 都提供完整、受鉴权保护的写入 API；只有客户端读取正式对象时匿名。
+**只记一套角色：CI 打包 → 控制面 agent 签发上传说明并编排发布 → CI 直传数据面 → 数据面完成 Promote 与受控写入 → 客户端匿名 GET。** 数据面不是只读：COS 与 relkit-store 都提供完整、受鉴权保护的写入 API；只有客户端读取正式对象时匿名。
 
 发布完成之后，树上每一项都已经是普通文件（或 COS 里的普通对象），URL 和路径一一对应。下载路径上不再查库、不现场拼给人看的索引、不验 Bearer（Bearer 只在控制面）。公网文件在 COS，内网文件在 WOA 磁盘上；看起来都是「按路径取文件」。
 
@@ -22,7 +22,7 @@ related: ADR 0005, ADR 0007, docs/design/bootstrap-directory.md, docs/design/pub
 | 数据面 | COS 桶前缀（如 `rup/`） | WOA 上一棵同样布局的目录 |
 | 给人看的索引页 | 发布时写好的 HTML，托管在 **EdgeOne Makers**；**不**塞进 COS | 写入发布树 `browse/`，由 GET 原样返回（对齐前 serve 仍可现算一页） |
 
-CVM / 发布机 **不是**客户端默认主入口。`relkit-serve` 是内网 `relkit-compatible` 数据面（Range GET + CAS 能力写入），不是另一套发布协议。
+CVM / 发布机 **不是**客户端默认主入口。`relkit-store` 是内网 `relkit-compatible` 数据面（Range GET + CAS 能力写入），不是另一套发布协议。
 
 `s3-compatible` 后端（SigV4 Put/Get）已实现，是公网写桶的前提；凭据只经环境变量传入。
 
@@ -50,7 +50,7 @@ https://updates.example.com/directory/<product>.pb
 
 | 方案 | 做法 | 结论 |
 |---|---|---|
-| A. 域名 → CVM + HTTP（如 `relkit-serve`） | 部署简单 | 合法，但把全球延迟与可用性绑在单机/单地域；不作默认主入口 |
+| A. 域名 → CVM + HTTP（如 `relkit-store`） | 部署简单 | 合法，但把全球延迟与可用性绑在单机/单地域；不作默认主入口 |
 | B. 域名 → COS（可选 CDN） | 对象 key = URL 路径 | **推荐**：外表与「自建静态路径」同构，读路径可扩 CDN，写路径走对象 API |
 
 腾讯云 COS 支持：
@@ -135,7 +135,7 @@ flowchart TB
 - **字节只跨「CI → 数据面」一次。** 凭据文档只给一个目的地（该产品的 primary ingest）。CI **不按后端数量循环上传**；其余 `artifactTo` 后端的副本由 agent `Materialize`。
 - `cas/` inbox **只存在于 ingest 后端**，别的后端只有 `artifact/...`。`publish.Run` 只调用 Head / Promote / Materialize / PutArtifact，**禁止**按 `Type()` 写第二条发布路径。细节 [`publish-agent.md`](publish-agent.md) §2.3。
 - **第二 backend 必须是另一只桶。** 同桶的多个自定义域名只是 GET 别名，禁止写成两条 `s3-compatible`。成都桶（`raw2.firoyang.com`）是验证期第二 backend，已按单独指令拆除。全网崩坏保底是宿主内嵌 `recovery`，不走 Makers。
-- agent 对 S3/COS CAS **不重算 sha256**，只 HEAD 比 size；relkit-serve 能力 PUT 会校验长度。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
+- agent 对 S3/COS CAS **不重算 sha256**，只 HEAD 比 size；relkit-store 能力 PUT 会校验长度。损坏对象顶多让这一版装不上；客户端按签名 manifest 验收。
 - **写 index 指针才是真发布。** ingest `Head` 命中则只 Promote，不要求 agent 盘上有该文件；`Head` 不到且本地无整包副本时**整轮失败**，不写任何指针。
 - `publish.Run` **不幂等**；发布入口必须幂等键与串行化。
 - 发布机 **不必**出现在客户端 `entryUrls` 里。目的是健壮，不是跨境加速。
@@ -187,9 +187,9 @@ flowchart TB
 | 概念 | 能否「进 COS」 | 说明 |
 |---|---|---|
 | 匿名 GET 的 directory / index / fallback / manifest / artifact **文档与文件** | **能** | 它们是静态对象，不是常驻微服务 |
-| Bearer token 式「上传服务」（`relkit-serve` PUT） | **不能** | COS 不是该语义；上传由发布机经 `s3-compatible` 调对象 API |
+| Bearer token 式「上传服务」（`relkit-store` PUT） | **不能** | COS 不是该语义；上传由发布机经 `s3-compatible` 调对象 API |
 | 签名动作 / 私钥 | **不能放在 COS 或公网机当常驻密钥** | 私钥只在发布控制面短暂使用 |
-| `relkit-serve` 孤儿 GC、按前缀发 Cache-Control | **不是 COS 内置等价物** | 缓存靠 COS/CDN 控制台按前缀配置；GC 另议或靠 `retainVersions` + 运维 |
+| `relkit-store` 孤儿 GC、按前缀发 Cache-Control | **不是 COS 内置等价物** | 缓存靠 COS/CDN 控制台按前缀配置；GC 另议或靠 `retainVersions` + 运维 |
 
 常见误解：把 index / directory 说成「进不了 COS 的服务」。协议里它们是**签名过的可变指针文档**，恰恰适合对象存储 + 短缓存。
 
@@ -199,14 +199,14 @@ flowchart TB
 
 - **控制面永远是 `relkit-agent`**：持私钥、串行 publish、写入数据面。客户端永远不连它。公网写 COS（`s3-compatible`）；内网调用 `relkit-compatible`（serve 能力 URL / COPY / HEAD / DELETE）。
 - **数据面只是文件**：匿名 GET 返回已写入的字节。公网 = COS；内网 = WOA 磁盘。COS、nginx 裸目录、CDN 都能干这件事。
-- **`relkit-serve`** = 内网 `relkit-compatible` 数据面：Range GET、对象级 CAS 能力 URL、COPY / HEAD / DELETE 与孤儿 GC。它不持发布私钥，也不把正文转发给 agent。
+- **`relkit-store`** = 内网 `relkit-compatible` 数据面：Range GET、对象级 CAS 能力 URL、COPY / HEAD / DELETE 与孤儿 GC。它不持发布私钥，也不把正文转发给 agent。
 - **给人看的索引页也是文件**（发布时写好）。协议客户端不读它。公网 HTML 走 EdgeOne Makers，COS 只留协议对象；内网写在 `browse/`。打开更新域名应看到产品/版本/下载，而不是把 `.pb` 当导航。
 
 `baseUrl`（客户端下载）与控制面域名分开：`publish.*` 只给 CI，`updates.*` / `raw.*` / 内网更新域名只给 GET。
 
 ## 5. 缓存硬约束
 
-与 SPEC §3.1 / `relkit-serve` 前缀语义对齐，**在 COS / CDN 控制台按前缀配置**：
+与 SPEC §3.1 / `relkit-store` 前缀语义对齐，**在 COS / CDN 控制台按前缀配置**：
 
 | 前缀 | 可变性 | 缓存 |
 |---|---|---|
@@ -244,7 +244,7 @@ flowchart TB
 | 目标 | 后端 type | 状态 / 备注 |
 |---|---|---|
 | COS 自定义域名整树托管，CLI 直接写桶 | `s3-compatible` | **已实现**；字段见 CLI.md（`endpoint` / `bucket` / `prefix` / `baseUrl` / `accessKeyEnv` / `secretKeyEnv`，可选 `region` / `forcePathStyle` / `timeoutSeconds`）。公网产品的 **primary ingest** |
-| 自建 relkit-serve 数据面 | `relkit-compatible` | **已实现**；`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`；内网 primary ingest |
+| 自建 relkit-store 数据面 | `relkit-compatible` | **已实现**；`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`；内网 primary ingest |
 | CNB / GitHub raw 或已送达 HTTP | （不是后端） | 把可匿名读取的绝对 URL 写进签名文档 `urls[]`；不可作 ingest，也不再有 `static-http` 类型 |
 
 正式发布优先配置 `s3-compatible`。**禁止**手工打乱「产物 → manifest → 指针最后写」顺序冒充正式发布。

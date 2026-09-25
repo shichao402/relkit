@@ -10,7 +10,7 @@
 |---|---|
 | `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`）。stamp 读根目录 `VERSION.json` |
 | `version` | 打印 SSOT（`--field number|version|build|tag`）；发版 CI 用 `--check-tag` |
-| `install serve` | 空机首装 systemd `relkit-serve` |
+| `install serve` | 空机首装 systemd `relkit-store` |
 | `install agent` | 空机首装 systemd `relkit-agent` |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |
 
@@ -31,7 +31,7 @@ python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --apply
 
 upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、遇到 `static-http` 直接停（该类型已删除、不会改写成可写后端）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
 
-`uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-serve` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
+`uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-store` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
 
 现网数据面是 `update.devcloud.woa.com:8080`，与控制面共用主机名但不共用端口，也不经 nginx。后续可给数据面绑定独立 DNS，届时同时替换 `baseUrl` 与 `uploadUrl`。
 
@@ -48,7 +48,7 @@ agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../../docs/ad
 ## 首装
 
 ```bash
-sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
+sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-store-linux-amd64
 sudo python3 scripts/deploy/relkit.py install agent --binary ./dist/relkit-agent-linux-amd64
 ```
 

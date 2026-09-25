@@ -14,11 +14,11 @@ description: >
 
 判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
 
-Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
+Go 的 `relkit` / `relkit-store` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
 
 **两轨 / Placement / 内部更新**的产品接入合同在同目录 [`host-update.md`](host-update.md)。改发布脚本、填 `InstallSpec`、决定某平台开不开 payload 时先读它；不要去 relkit 仓 docs 里另找一份平行指南。协议实现细节才回 relkit ADR 0013 / 0014。
 
-**箱子上的二进制**（空机 systemd、换 `relkit-agent` / `relkit-serve`）不在本 skill。那是 relkit 仓的 [`relkit-deploy`](../relkit-deploy/SKILL.md) 与 `python scripts/deploy/relkit.py`。现网箱 **agent + serve 固定配套**，缺 serve 不算升完。产品仓里若 `versionRelation=behind` 且 `onPublishRoute=true`，告诉用户先到 relkit 仓升远端，不要在本仓假装能 `upgrade --host`。
+**箱子上的二进制**（空机 systemd、换 `relkit-agent` / `relkit-store`）不在本 skill。那是 relkit 仓的 [`relkit-deploy`](../relkit-deploy/SKILL.md) 与 `python scripts/deploy/relkit.py`。现网箱 **agent + serve 固定配套**，缺 serve 不算升完。产品仓里若 `versionRelation=behind` 且 `onPublishRoute=true`，告诉用户先到 relkit 仓升远端，不要在本仓假装能 `upgrade --host`。
 
 ## 状态与缓存
 

@@ -22,14 +22,14 @@ main:
             else
               echo "buf not installed; skip gen drift"
             fi
-        - name: serve lint and race
+        - name: store and console lint and race
           script: |
-            unformatted=$(gofmt -l ./cmd/relkit-serve)
+            unformatted=$(gofmt -l ./cmd/relkit-store ./cmd/relkit-console)
             if [ -n "$unformatted" ]; then
               echo "not gofmt'd:"; echo "$unformatted"; exit 1
             fi
-            go vet ./cmd/relkit-serve/...
-            go test -race ./cmd/relkit-serve/...
+            go vet ./cmd/relkit-store/... ./cmd/relkit-console/...
+            go test -race ./cmd/relkit-store/... ./cmd/relkit-console/...
         - name: deploy python tests
           script: |
             apt-get update && apt-get install -y python3
@@ -64,12 +64,12 @@ main:
         - name: build release artifacts
           script: |
             python3 scripts/deploy/relkit.py version --check-tag "${CNB_BRANCH}"
-            python3 scripts/deploy/relkit.py build --serve --agent --cli --updater --dart-sdk --out dist
+            python3 scripts/deploy/relkit.py build --store --agent --cli --updater --dart-sdk --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu
             apt-get update && apt-get install -y file
-            for f in dist/relkit-serve-linux-*; do
+            for f in dist/relkit-store-linux-*; do
               if file "$f" | grep -q "dynamically linked"; then
                 echo "$f is dynamically linked"; exit 1
               fi
@@ -85,18 +85,18 @@ main:
             - `relkit-updater-*` — host sidecar (check/download/apply)
             - `relkit-*` — publisher CLI (`stage` / `publish` / …)
             - `relkit-agent-*` — CI publish agent
-            - `relkit-serve-*` — self-hosted RUP download + authenticated PUT
+            - `relkit-store-*` — self-hosted RUP download + authenticated PUT
             - `relkit-sdk-dart.zip` — immutable Dart consumer SDK
             - `manifest.json` — commit, protocol window, SHA-256 of each binary
 
             Install the server on Linux with systemd:
 
             ```
-            python3 scripts/deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64
+            python3 scripts/deploy/relkit.py install serve --binary ./relkit-store-linux-amd64
             ```
 
             Product ops: copy `scripts/host/` and run `python scripts/host/relkit_host.py`.
-            Empty-machine install: `python3 scripts/deploy/relkit.py install serve --binary ./relkit-serve-linux-amd64`
+            Empty-machine install: `python3 scripts/deploy/relkit.py install serve --binary ./relkit-store-linux-amd64`
             EOF
         - name: create CNB Release
           type: git:release

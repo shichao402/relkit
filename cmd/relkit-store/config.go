@@ -18,7 +18,7 @@ import (
 // ConfigName is looked for next to the binary and in /etc when -config is
 // omitted. Which one was used is always logged at startup, so an unexpected
 // config never goes unnoticed.
-const ConfigName = "relkit-serve.json"
+const ConfigName = "relkit-store.json"
 
 var searchPaths = []string{ConfigName, "/etc/" + ConfigName}
 
@@ -411,7 +411,7 @@ func ParseDuration(text string) (time.Duration, error) {
 	return time.ParseDuration(strings.TrimSpace(text))
 }
 
-// Skeleton is what `relkit-serve init` writes.
+// Skeleton is what `relkit-store init` writes.
 //
 // Ships with the RUP cache prefixes already filled in rather than empty,
 // because those are the values that make a release visible immediately, and a
@@ -427,7 +427,7 @@ func skeletonBytes(dir, adminStateFile string) []byte {
 	cfg := FileConfig{
 		Addr:            ":8080",
 		Dir:             dir,
-		UploadTokenFile: "relkit-serve.token",
+		UploadTokenFile: "relkit-store.token",
 		AdminStateFile:  adminStateFile,
 		MaxUpload:       "4GiB",
 		Cache: &CacheConfig{

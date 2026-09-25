@@ -153,7 +153,7 @@ sequenceDiagram
 
 ### 0.4 第二台机（内网 WOA）
 
-同构，只换数据面：profile 里 `publishTo` 指 `local`，backend 写 `outputDir`（如 `/data/relkit-serve`），由 `relkit-serve` / nginx 对外匿名 GET。控制面仍是 agent + 同一套 policy/profile 拆分，没有 Makers 那一段。
+同构，只换数据面：profile 里 `publishTo` 指 `local`，backend 写 `outputDir`（如 `/data/relkit-store`），由 `relkit-store` / nginx 对外匿名 GET。控制面仍是 agent + 同一套 policy/profile 拆分，没有 Makers 那一段。
 
 > 待核：本文只据设计文档 §7 描述内网形态，未在本次验收中实测。
 

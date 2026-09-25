@@ -1,7 +1,7 @@
 ---
 name: relkit-deploy
 description: >
-  relkit 仓装机、交叉编译、升级已有 relkit-agent / relkit-serve 二进制。
+  relkit 仓装机、交叉编译、升级已有 relkit-agent / relkit-store 二进制。
   工作区有 scripts/deploy/relkit.py 时使用；产品开箱、token、lock 走 relkit-ops。
 ---
 
@@ -11,7 +11,7 @@ description: >
 
 当前仓库是 **relkit 本仓**（存在 `scripts/deploy/relkit.py`），且任务是：
 
-- 空机首装 systemd `relkit-agent` / `relkit-serve`
+- 空机首装 systemd `relkit-agent` / `relkit-store`
 - 已有箱子换二进制（`upgrade --plan` / `--apply`）
 - 为本仓 Release 交叉编译（`build`）
 
@@ -21,7 +21,7 @@ description: >
 
 只跑 `python scripts/deploy/relkit.py`（仓库根；Linux 可用 `python3`）。细节以 [`scripts/deploy/README.md`](../../../scripts/deploy/README.md) 和该脚本 `--help` 为准。
 
-不要手拼 SSH 写配置，不要用腾讯云 TAT / MCP 代跑命令，不要编造命令输出。Go 的 `relkit` / `relkit-agent` / `relkit-serve` 不是人用的第二套装机 CLI。
+不要手拼 SSH 写配置，不要用腾讯云 TAT / MCP 代跑命令，不要编造命令输出。Go 的 `relkit` / `relkit-agent` / `relkit-store` 不是人用的第二套装机 CLI。
 
 ## 升级闸门
 

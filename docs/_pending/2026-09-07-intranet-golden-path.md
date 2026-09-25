@@ -18,7 +18,7 @@
 
 | 层 | 外网 | 内网 |
 |---|---|---|
-| 存储 | COS `s3-compatible` | 磁盘 `local` + `relkit-serve` |
+| 存储 | COS `s3-compatible` | 磁盘 `local` + `relkit-store` |
 | 人页 | Makers | `browse/` |
 | TLS | 本机 / COS 自定义域名 | WOA 入口终止 TLS，箱上 `:80` |
 | 证书续期 | `relkit-cos-cert-renew.timer` | N/A |
@@ -26,13 +26,13 @@
 ## 已落地（发布机）
 
 - `relkit-agent` 已升级为 `0.1.2+3e31869`（CAS credentials、瘦 staged、Materialize）
-- `-migrate-profile`：`/etc/relkit-agent/products/svn-auto-merge.json`（`local` → `/data/relkit-serve`，`https://update.devcloud.woa.com/`）
+- `-migrate-profile`：`/etc/relkit-agent/products/svn-auto-merge.json`（`local` → `/data/relkit-store`，`https://update.devcloud.woa.com/`）
 - 产品根 `relkit.json` → `relkit.json.migrated`
 - 为 staged `0.2.0+112` 补上 `release-policy.json`
 - agent 健康：当时用清单检查；现改为产品仓 `relkit_host.py verify`
 - 因操作失误曾短暂暴露旧 upload token → 已轮换并重启；旧 token 失效
 - nginx：非 `/v1/` 的 PUT = 403
-- 2026-09-07：已吊销 `svn-auto-merge` 产品 token，并去掉运营方 `uploadTokenFile`；`relkit-serve` 只读，直连 PUT = **405**
+- 2026-09-07：已吊销 `svn-auto-merge` 产品 token，并去掉运营方 `uploadTokenFile`；`relkit-store` 只读，直连 PUT = **405**
 
 ## 已验证（只读）
 

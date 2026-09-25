@@ -1,12 +1,13 @@
 # relkit
 
-RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管分发服务，同一模块、两套单二进制。
+RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管分发服务，同一模块、多套单二进制。
 
 | 二进制 | 路径 | 作用 |
 |---|---|---|
 | `relkit` | `cmd/relkit` | stage / 签名 / 上传 / 提交 |
 | `relkit-agent` | `cmd/relkit-agent` | CI 交 staged 树；本机持钥写入数据面 |
-| `relkit-serve` | `cmd/relkit-serve` | Range 下载 + CAS 能力上传 + 孤儿 GC |
+| `relkit-store` | `cmd/relkit-store` | 存储面：Range 下载 + CAS 能力上传 + 孤儿 GC（ADR 0016） |
+| `relkit-console` | `cmd/relkit-console` | 管理面：操作面板、账户、下载统计（ADR 0006 / 0016） |
 
 当前版本以根目录 [`VERSION.json`](VERSION.json) 为 SSOT（`relkit.version/1`）。GitHub Release tag 必须是 `v` + `number`（`x.y.z`）。本仓 `python scripts/deploy/relkit.py build|upgrade` 读该文件，不要另写版本号。RUP 线格式是 **protobuf v2**。
 
@@ -99,26 +100,27 @@ relkit verify --deep
 
 发布完成后，relkit 还会写两类**不属于 RUP 信任链**的网页辅助指针：
 
-- 每个 channel 发布都覆盖 `site/<product>.json`，由 `relkit-serve` 产品门户读取。
+- 每个 channel 发布都覆盖 `site/<product>.json`，由 `relkit-store` 产品门户读取。
 - 每个 channel 发布只覆盖自己那份 `latest/<product>/<channel>.json`，在发布时固化本版各 artifact 的 ID、selectors 与 URL。dev 发布不影响 stable 的指针。
 - `relkit-agent site-rebuild` 从所有已注册产品的 `site/` 与 `latest/` 指针静态重建完整目录站，dump 先落 agent state 目录的 `site/dump/`，再按 agent 顶层 `site.sinks[]`（`makers` / `backend` / `directory`，ADR 0015）分发。渲染产物从不作为下一次重建的输入。
 
-因此 `relkit-serve` 可按 channel 提供 `/-/latest/<product>/<channel>/<artifact-id>` 这种长期有效地址，例如 `/-/latest/demoapp/stable/windows`。请求只读取已发布的 latest 指针并跳转，不实时扫描 index / manifest。
+因此 `relkit-store` 可按 channel 提供 `/-/latest/<product>/<channel>/<artifact-id>` 这种长期有效地址，例如 `/-/latest/demoapp/stable/windows`。请求只读取已发布的 latest 指针并跳转，不实时扫描 index / manifest。
 
-## relkit-serve（分发服务）
+## relkit-store（存储面）与 relkit-console（管理面）
 
 ```bash
-relkit-serve init -dir /srv/releases -out /etc/relkit-serve
-relkit-serve -config /etc/relkit-serve/relkit-serve.json
+relkit-store init -dir /srv/releases -out /etc/relkit-store
+relkit-store -config /etc/relkit-store/relkit-store.json
+relkit-console -config /etc/relkit-store/relkit-store.json -admin-state <dir>/.relkit-serve-admin.json
 ```
 
 Linux + systemd：
 
 ```bash
-sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
+sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-store-linux-amd64
 ```
 
-已有实例升级：`python scripts/deploy/relkit.py upgrade --host <Host> --plan` 然后 `--apply`。细节见 [`scripts/deploy/README.md`](scripts/deploy/README.md)。产品 token 用产品仓 `relkit_host.py serve`。设计说明见 [`cmd/relkit-serve/README.md`](cmd/relkit-serve/README.md)。
+已有实例升级：`python scripts/deploy/relkit.py upgrade --host <Host> --plan` 然后 `--apply`。细节见 [`scripts/deploy/README.md`](scripts/deploy/README.md)。产品 token 用产品仓 `relkit_host.py serve`。设计说明见 [`cmd/relkit-store/README.md`](cmd/relkit-store/README.md) 与 [`cmd/relkit-console/README.md`](cmd/relkit-console/README.md)。
 
 ## 设计与规范来源
 
@@ -171,6 +173,6 @@ cd sdk/node && npm test
 
 - `chain` / `selectors` / `envelope` 的 conformance 夹具回归
 - `s3-compatible` / `relkit-compatible` 端到端发布与校验（`.pb`）
-- `relkit-serve` 的 Range / PUT / GC / 配置加载 / 操作面板鉴权
+- `relkit-store` 的 Range / PUT / GC / 配置加载；`relkit-console` 的面板与操作鉴权
 - `sdk` 客户端 Check/Download（Go 与 Node）
 - `version` 项目 VERSION.json SSOT（get/set/bump/code）

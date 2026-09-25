@@ -52,7 +52,7 @@ func (c *console) handler() http.Handler {
 
 func trimSpace(s string) string { return strings.TrimSpace(s) }
 
-// jsonDecodeStrict rejects unknown fields, same policy as relkit-serve: a
+// jsonDecodeStrict rejects unknown fields, same policy as relkit-store: a
 // misspelled key silently keeping a default is the worst config bug.
 func jsonDecodeStrict(raw []byte, v any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))

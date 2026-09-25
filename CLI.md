@@ -322,20 +322,20 @@ type Backend interface {
 | type | 写入 / 读取方式 | CAS ingest | 状态 |
 |---|---|---|---|
 | `s3-compatible` | S3 API：PUT / HEAD / CopyObject / DELETE；客户端下载走 `baseUrl` | 是 | **已实现** |
-| `relkit-compatible` | relkit-serve：能力 URL / HEAD / COPY / DELETE；客户端下载走 `baseUrl` | 是 | **已实现** |
+| `relkit-compatible` | relkit-store：能力 URL / HEAD / COPY / DELETE；客户端下载走 `baseUrl` | 是 | **已实现** |
 
 `local`、`http-put` 与 `static-http` 已删除。需要本机演练时启动真实数据面：
 
 ```bash
-export RELKIT_SERVE_TOKEN='<relkit-serve init 输出的运营方 token>'
-relkit-serve -dir ./dist -addr 127.0.0.1:30341
+ export RELKIT_SERVE_TOKEN='<relkit-store init 输出的运营方 token>'
+ relkit-store -dir ./dist -addr 127.0.0.1:30341
 ```
 
 然后配置 `relkit-compatible` 指向 `http://127.0.0.1:30341/`。不要用本地目录后端伪造一条生产写入链路。外部已送达的文件把绝对 URL 写进签名文档，不要配置只读后端。
 
 ### 6.2 `relkit-compatible`
 
-用于自建 `relkit-serve` 数据面。普通文档写入使用 Bearer；CAS 正文先由发布控制面调用 `POST /-/cas/uploads`，再把服务端签发的绝对能力 URL放进 `requests[]`。后端同时使用 HEAD、带 `X-Relkit-Copy-Source` 的 COPY 语义和 DELETE。
+用于自建 `relkit-store` 数据面。普通文档写入使用 Bearer；CAS 正文先由发布控制面调用 `POST /-/cas/uploads`，再把服务端签发的绝对能力 URL放进 `requests[]`。后端同时使用 HEAD、带 `X-Relkit-Copy-Source` 的 COPY 语义和 DELETE。
 
 ```json
 {
@@ -350,7 +350,7 @@ relkit-serve -dir ./dist -addr 127.0.0.1:30341
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `baseUrl` | 是 | 客户端匿名下载基址 |
-| `uploadUrl` | 否 | 完整 relkit-serve 数据面 endpoint；必须同时可被 agent 与 CI 访问，默认等于 `baseUrl` |
+| `uploadUrl` | 否 | 完整 relkit-store 数据面 endpoint；必须同时可被 agent 与 CI 访问，默认等于 `baseUrl` |
 | `tokenEnv` | 是 | 运营方 token 的环境变量名；不得写 token 明文 |
 | `timeoutSeconds` | 否 | 写入超时，默认 600 |
 
@@ -363,7 +363,7 @@ relkit-serve -dir ./dist -addr 127.0.0.1:30341
 拓扑已冻结（详见设计文档）；`s3-compatible` **已实现**（SigV4）：
 
 - 客户端 `entryUrls` 的主 URL 应为**自有域名绑定腾讯云 COS**（可选 CDN）上的固定绝对路径，例如 `https://updates.firoyang.com/rup/directory/<product>.pb`。
-- 发布控制面在可信 CVM / CI（持钥签名）；写桶走 `s3-compatible`。COS **不是** `relkit-serve` 那种 Bearer 上传服务。
+- 发布控制面在可信 CVM / CI（持钥签名）；写桶走 `s3-compatible`。COS **不是** `relkit-store` 那种 Bearer 上传服务。
 - `directory` / `index` / `fallback` / `manifest` / `artifact` 都是静态对象，**可以**整棵进 COS；镜像切换靠双写再改 directory / `urls[]`（见设计文档 §8）。
 - 本仓库自用实装（桶 / DNS / CVM）见设计文档 §10。
 
@@ -414,7 +414,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - `PUT /v1/drop/{product}/{version}/{filename}` — 多平台 Job 交换 build-scoped zip（Bearer；GET/HEAD/DELETE 同样鉴权）
 - `PUT /v1/staged/{product}/{version}` — staged 目录的 tar.gz（Bearer；整包兼容路径）
 - `relkit staged-put FILE --product ID --version VER --url URL` — 分片并发上传（`--part-size` / `--concurrency`，或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）
-- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 `requests[]`；每项都是绝对 URL。COS/S3 用长期钥 query 预签名，relkit-serve 用对象能力 URL，客户端不签名
+- `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 `requests[]`；每项都是绝对 URL。COS/S3 用长期钥 query 预签名，relkit-store 用对象能力 URL，客户端不签名
 - `relkit cas-put --version VER [--product ID] [--url URL]` — 上传缺失 CAS blob，然后自动上传只含 `staged.pb` + `release-policy.json` 的瘦 staged tar
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
 - `GET /-/health`
@@ -427,7 +427,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 
 CI **不持**签名私钥，也 **不持**长期 COS 写密钥。Runner 可在 `relkit stage` 后用 `relkit cas-put` 直传缺失 blob；原有整包 staged-put 路径继续兼容。
 
-已落地切面：产物直传该产品第一个 ingest 的 `cas/`，凭据文档只给一个目的地；agent 返回绝对 URL 的 `requests[]`，S3/COS 用长期钥 query 预签名、relkit-serve 用能力 URL，再由后端 Promote、Materialize、签名。尚未落地的是 profile 从 `publishTo` 拆成 `artifactTo` / `pointerTo`。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3。
+已落地切面：产物直传该产品第一个 ingest 的 `cas/`，凭据文档只给一个目的地；agent 返回绝对 URL 的 `requests[]`，S3/COS 用长期钥 query 预签名、relkit-store 用能力 URL，再由后端 Promote、Materialize、签名。尚未落地的是 profile 从 `publishTo` 拆成 `artifactTo` / `pointerTo`。见 [`docs/design/publish-agent.md`](docs/design/publish-agent.md) §2.3。
 
 ```yaml
 - name: Stage
@@ -473,7 +473,7 @@ CAS 路径把上面的打包与 `staged-put` 换成：
 
 ## 8. 瀹炵幇浣嶇疆
 
-姝ｅ紡浠ｇ爜鍦?[go.firoyang.com/relkit](https://github.com/shichao402/relkit)锛堝惈 `cmd/relkit` 涓?`cmd/relkit-serve`锛夛細
+姝ｅ紡浠ｇ爜鍦?[go.firoyang.com/relkit](https://github.com/shichao402/relkit)锛堝惈 `cmd/relkit` 涓?`cmd/relkit-store`锛夛細
 
 ```
 cmd/relkit/                 CLI 鍏ュ彛

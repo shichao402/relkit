@@ -84,6 +84,6 @@ dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审
 ## 删除旧后端前的四步部署顺序
 
 1. 发布机先从全部 profile 清掉 `casCredentials`。
-2. 内网先部署带上传租约与 `gc.casGrace`（默认 24h）的 relkit-serve。
+2. 内网先部署带上传租约与 `gc.casGrace`（默认 24h）的 relkit-store。
 3. 开启 serve 写入面，把 profile 迁到 `relkit-compatible`，完成一次真实发版与 verify。
 4. 稳定后才部署已删除 `local` / `http-put` 类型的 agent/CLI。

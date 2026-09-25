@@ -74,8 +74,10 @@ class Component:
 
 
 COMPONENTS: tuple[Component, ...] = (
-    Component("serve", "host-binary", "serve", "", "", "", "files", (),
-              "./cmd/relkit-serve", "relkit-serve"),
+    Component("store", "host-binary", "store", "", "", "", "files", (),
+              "./cmd/relkit-store", "relkit-store"),
+    Component("console", "host-binary", "console", "", "", "", "files", (),
+              "./cmd/relkit-console", "relkit-console"),
     Component("agent", "host-binary", "agent", "", "", "", "files", (),
               "./cmd/relkit-agent", "relkit-agent"),
     Component(

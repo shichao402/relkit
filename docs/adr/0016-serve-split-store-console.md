@@ -66,18 +66,18 @@ rebuild 成功路径的末尾（`dump.sha256` 写入之后、members 写入之�
 
 ## 实现顺序
 
-1. site 包：sink 接口扩展 + `status.json` 写入（本轮）。
-2. console 拆包 `cmd/relkit-console`（本轮）：搬运 admin.go/ui.go/stats.go + templates，adapter 层首版（storeAdapter + dumpAdapter），`--store` URL 或 state 目录只读挂载。
-3. store 拆包 `cmd/relkit-store`（下一轮）：serve 瘦身为纯存储面，删除面板代码。
-4. 部署切换与收尾文档（下一轮）。
+1. site 包：sink 接口扩展 + `status.json` 写入（已完成）。
+2. console 拆包 `cmd/relkit-console`（已完成，a51e05e）：搬运 admin.go/ui.go/stats.go + templates，adapter 层首版（rootAdapter），`-dir` 只读挂载。
+3. store 拆包 `cmd/relkit-store`（已完成）：serve 目录改名一次到位并删除，协议不变；部署侧（unit 模板、deploy CLI、hostlib、CI、文档）同步切换。`RELKIT_SERVE_TOKEN` 环境变量名与 `.relkit-serve-admin.json` / `.relkit-serve-stats.json` / `.relkit-serve-cas.key` 数据文件名保留旧值，迁移盒子不重配 token、不丢账户与计数。
+4. 部署切换与收尾文档（待实机执行）：两台机器 systemd/nginx 切换、`relkit-store.service` 上线、console 独立 unit。
 
 ## 后果
 
-- serve 命名退役（过渡期保留 `cmd/relkit-serve` 作为 console 的过渡壳）? ——不需要：过渡期 serve 照旧跑，store/console 两个新二进制并行验证后再下线 serve。
+- serve 命名已退役：`cmd/relkit-serve` 删除，`cmd/relkit-store` / `cmd/relkit-console` 为唯二服务二进制。协议、配置形状、数据文件名对客户端与运维面保持不变。
 - 面板功能短期回退：console 首版只读，不做账户管理 CRUD（继续用 `init -reset-admin` SSH 路径），统计与目录浏览迁走。
 功能不回退：console 首版保留现有全部面板能力（登录/账户、统计、目录浏览、产品页），只是数据来源改走 adapter。
 - `ui.go` 的 scanProducts/readProductCard 一族读盘逻辑成为 storeAdapter 的主体，逻辑不变，只是换了调用方。
 - 测试搬迁：admin_test/ui_test/stats_test 随 console 走，handler/capability/gc/upload 测试随 store 走。
 - ADR 0006 的 bootstrap 流程不变，admin state 文件继续由 console 持有。
-- deploy 脚本与 systemd 单元调整（`relkit-console.service`、`relkit-store.service`）在部署切换轮处理。
+- deploy 脚本与 systemd 单元已切换（`relkit-store.service`；console 独立 unit 留在部署切换轮）。
 - ROADMAP「操作面板从本机盘长成发布管理」的迁移路径不变：console + adapter 是它的落地形态。

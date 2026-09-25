@@ -119,7 +119,7 @@ func AvailableTypes() []string {
 func SummaryFor(backendType string) (summary string, required []string, optional []string) {
 	switch backendType {
 	case "relkit-compatible":
-		return "uploads to relkit-serve with capability URLs; clients download via baseUrl", []string{"baseUrl", "tokenEnv"}, []string{"uploadUrl", "timeoutSeconds"}
+		return "uploads to relkit-store with capability URLs; clients download via baseUrl", []string{"baseUrl", "tokenEnv"}, []string{"uploadUrl", "timeoutSeconds"}
 	case "s3-compatible":
 		return "uploads with SigV4 to COS / S3 / MinIO; clients download via baseUrl (custom domain or CDN)", []string{"baseUrl", "endpoint", "bucket", "accessKeyEnv", "secretKeyEnv"}, []string{"prefix", "region", "forcePathStyle", "timeoutSeconds"}
 	default:

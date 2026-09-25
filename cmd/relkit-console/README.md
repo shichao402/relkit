@@ -6,7 +6,7 @@ relkit-serve 拆分出的**管理面**：`/-/admin` 操作面板、账户/会话
 
 **角色：** 只读的管理与观察面。它不伺服发布树（GET `/` 不是它的职责，那是 store/browse 的），不做任何写操作（发布、token 轮换、GC 仍是 agent/store 的职责）。面板是人类鉴权面（用户名密码 + 会话 cookie），与数据面令牌（Bearer PUT）是两种信任域，进程隔离让一个 0day 拿不到写者权限。
 
-过渡期说明：`cmd/relkit-serve` 仍完整存在并可部署；console 作为新二进制并行验证，下一轮做 store 拆包与部署切换。
+store 拆包已完成（ADR 0016 第 3 步）：`cmd/relkit-serve` 已删除，`cmd/relkit-store` 承载纯存储面。console 与 store 可同机部署（同 `-dir`），console 只读。
 
 ## 快速开始
 
@@ -42,7 +42,7 @@ type Adapter interface {
 
 若 agent state 目录下存在 `site/status.json`（site-rebuild 成功后落盘的部署事件快照，见 ADR 0016），console 会展示各 sink 的部署结果与 makers deployment ID。快照缺失或损坏时面板安静降级，不报错。
 
-## 布局约定（与 serve 同形，方便迁移）
+## 布局约定（与 store 同形，方便迁移）
 
 - 发布树：`-dir` 指向 store 伺服的同一目录（只读）。
 - admin state：`<dir>/.relkit-serve-admin.json`，文件名与格式不变，机器从 serve 迁到 console 时账户保留。
@@ -51,7 +51,7 @@ type Adapter interface {
 
 ## 与 serve 面板的差异
 
-| 能力 | serve | console |
+| 能力 | serve（旧） | console |
 |---|---|---|
 | `/-/admin` 面板、登录/账户 | 有 | 有（同模板同流程） |
 | `/-/p/` 产品页、`/-/latest/` 跳转 | 有 | 有 |

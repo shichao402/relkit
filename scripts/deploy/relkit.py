@@ -72,7 +72,7 @@ from relkit_ops import (  # noqa: E402
     redact_text,
     redact_value,
     render_agent_unit,
-    render_serve_unit,
+	render_store_unit,
     token_mode_ok,
 )
 
@@ -428,7 +428,7 @@ def cmd_build(args: argparse.Namespace) -> None:
             if getattr(args, row.build_flag.replace("-", "_"), False)
         ]
         if not targets and not selected_trees:
-            targets = ["serve", "agent"]
+            targets = ["store", "agent"]
     stamp = git_stamp(load_ssot()["number"])
     platforms = [tuple(target.split("-", 1)) for target in TARGETS]
     if args.os:
@@ -603,7 +603,7 @@ def self_check_serve(
     addr: str, token: str, public_upload_url: Optional[str] = None
 ) -> None:
     local_base = loopback_base(addr)
-    wait_health(local_base, "relkit-serve")
+    wait_health(local_base, "relkit-store")
     base = (public_upload_url or local_base).rstrip("/")
     if public_upload_url:
         print(f"relkit-compatible endpoint {base}")
@@ -614,7 +614,7 @@ def self_check_serve(
     if code != 401:
         raise Fail(f"unauthenticated PUT returned {code}, expected 401")
     print("2/7 upload auth         ok")
-    payload = b"relkit-serve probe"
+    payload = b"relkit-store probe"
     digest = hashlib.sha256(payload).hexdigest()
     mint_body = json.dumps({"key": f"cas/{digest}", "size": len(payload), "ttl": 300}).encode()
     code, raw = http_call(
@@ -697,8 +697,8 @@ def write_serve_unit(
     config_path: str,
     serve_cfg: dict[str, Any],
 ) -> None:
-    template = (DEPLOY_DIR / "relkit-serve.service").read_text(encoding="utf-8")
-    unit = render_serve_unit(
+    template = (DEPLOY_DIR / "relkit-store.service").read_text(encoding="utf-8")
+    unit = render_store_unit(
         template,
         user=user,
         prefix=prefix,
@@ -706,7 +706,7 @@ def write_serve_unit(
         read_write_paths=read_write_paths(serve_cfg),
         addr=str(serve_cfg.get("addr") or ""),
     )
-    dest = Path("/etc/systemd/system/relkit-serve.service")
+    dest = Path("/etc/systemd/system/relkit-store.service")
     dest.write_text(unit, encoding="utf-8")
     os.chmod(dest, 0o644)
     verify = run(["systemd-analyze", "verify", str(dest)], check=False, capture=True)
@@ -747,6 +747,11 @@ def fix_token_perms(path: Path, user: str) -> None:
         raise Fail(f"{path} mode {oct(mode)} is too open; want 0600")
 
 
+# The admin-account file keeps its historical name so a box migrated from
+# relkit-serve keeps its operator accounts (ADR 0016).
+ADMIN_STATE_FILE = ".relkit-serve-admin.json"
+
+
 def cmd_install_serve(args: argparse.Namespace) -> None:
     must_root()
     require_cmd("systemctl")
@@ -757,9 +762,9 @@ def cmd_install_serve(args: argparse.Namespace) -> None:
     prefix = args.prefix
     config_dir = Path(args.config_dir)
     directory = Path(args.dir)
-    config_path = config_dir / "relkit-serve.json"
-    token_path = config_dir / "relkit-serve.token"
-    dest_bin = Path(prefix) / "relkit-serve"
+    config_path = config_dir / "relkit-store.json"
+    token_path = config_dir / "relkit-store.token"
+    dest_bin = Path(prefix) / "relkit-store"
 
     if config_path.is_file() and not args.force_reconfigure:
         live = load_json_object(config_path.read_text(encoding="utf-8"))
@@ -817,7 +822,7 @@ def cmd_install_serve(args: argparse.Namespace) -> None:
         print("keeping existing config and token")
 
     fix_token_perms(token_path, user)
-    for extra in (directory / ".relkit-serve-admin.json", config_dir / "admin.json"):
+    for extra in (directory / ADMIN_STATE_FILE, config_dir / "admin.json"):
         if extra.is_file():
             os.chmod(extra, 0o600)
             chown_path(extra, user)
@@ -825,8 +830,8 @@ def cmd_install_serve(args: argparse.Namespace) -> None:
     cfg = load_json_object(config_path.read_text(encoding="utf-8"))
     write_serve_unit(user=user, prefix=prefix, config_path=str(config_path), serve_cfg=cfg)
     run(["systemctl", "daemon-reload"])
-    run(["systemctl", "enable", "relkit-serve"], check=False)
-    run(["systemctl", "restart", "relkit-serve"])
+    run(["systemctl", "enable", "relkit-store"], check=False)
+    run(["systemctl", "restart", "relkit-store"])
     token = new_token or token_path.read_text(encoding="utf-8").strip()
     if not token:
         die("cannot read operator token to finish self-check")
@@ -917,7 +922,7 @@ def backup_files(backup_root: Path, files: Sequence[Path]) -> None:
 
 def probe_local() -> dict[str, Any]:
     probe: dict[str, Any] = {"hostname": os.uname().nodename if hasattr(os, "uname") else ""}
-    for unit, kind in (("relkit-serve", "serve"), ("relkit-agent", "agent")):
+    for unit, kind in (("relkit-store", "serve"), ("relkit-agent", "agent")):
         show = systemd_show(unit, "FragmentPath", "User", "Group", "ExecStart", "ReadWritePaths", "ProtectSystem", "ActiveState")
         entry: dict[str, Any] = {"unit": show}
         exec_start = show.get("ExecStart") or ""
@@ -927,7 +932,7 @@ def probe_local() -> dict[str, Any]:
             cfg = load_json_object(Path(config_path).read_text(encoding="utf-8"))
             entry["config"] = redact_value(cfg)
             entry["configRawOk"] = True
-        bin_name = "relkit-serve" if kind == "serve" else "relkit-agent"
+        bin_name = "relkit-store" if kind == "serve" else "relkit-agent"
         bin_path = parse_exec_binary(exec_start) or shutil.which(bin_name) or f"/usr/local/bin/{bin_name}"
         entry["binary"] = bin_path
         present = Path(bin_path).is_file()
@@ -966,14 +971,14 @@ def apply_serve_upgrade(
     backup_root: Path,
 ) -> list[str]:
     notes: list[str] = []
-    show = systemd_show("relkit-serve", "ExecStart", "User", "FragmentPath")
+    show = systemd_show("relkit-store", "ExecStart", "User", "FragmentPath")
     config_path = parse_exec_config(show.get("ExecStart") or "")
     if not config_path:
-        raise Fail("cannot find relkit-serve -config from systemd")
+        raise Fail("cannot find relkit-store -config from systemd")
     config_file = Path(config_path)
-    token_file = config_file.parent / "relkit-serve.token"
-    dest_bin = Path(prefix) / "relkit-serve"
-    backup_files(backup_root / "serve", [dest_bin, config_file, Path("/etc/systemd/system/relkit-serve.service")])
+    token_file = config_file.parent / "relkit-store.token"
+    dest_bin = Path(prefix) / "relkit-store"
+    backup_files(backup_root / "serve", [dest_bin, config_file, Path("/etc/systemd/system/relkit-store.service")])
     cfg = load_json_object(config_file.read_text(encoding="utf-8"))
     live_addr = cfg.get("addr")
     live_dir = cfg.get("dir")
@@ -993,7 +998,7 @@ def apply_serve_upgrade(
     fix_token_perms(token_file, user)
     run(["systemctl", "daemon-reload"])
     if restart:
-        run(["systemctl", "restart", "relkit-serve"])
+        run(["systemctl", "restart", "relkit-store"])
         token = token_file.read_text(encoding="utf-8").strip()
         self_check_serve(
             str(cfg.get("addr") or ""),
@@ -1065,20 +1070,20 @@ def apply_agent_upgrade(
 
 
 def rollback(backup_root: Path, prefix: str) -> None:
-    serve_bin = backup_root / "serve" / "relkit-serve"
+    serve_bin = backup_root / "serve" / "relkit-store"
     if serve_bin.is_file():
-        install_file(serve_bin, Path(prefix) / "relkit-serve", 0o755)
-    serve_cfg = backup_root / "serve" / "relkit-serve.json"
+        install_file(serve_bin, Path(prefix) / "relkit-store", 0o755)
+    serve_cfg = backup_root / "serve" / "relkit-store.json"
     if serve_cfg.is_file():
-        dest = Path("/etc/relkit-serve/relkit-serve.json")
-        show = systemd_show("relkit-serve", "ExecStart")
+        dest = Path("/etc/relkit-store/relkit-store.json")
+        show = systemd_show("relkit-store", "ExecStart")
         config_path = parse_exec_config(show.get("ExecStart") or "")
         if config_path:
             dest = Path(config_path)
         shutil.copy2(serve_cfg, dest)
-    unit = backup_root / "serve" / "relkit-serve.service"
+    unit = backup_root / "serve" / "relkit-store.service"
     if unit.is_file():
-        shutil.copy2(unit, "/etc/systemd/system/relkit-serve.service")
+        shutil.copy2(unit, "/etc/systemd/system/relkit-store.service")
     agent_bin = backup_root / "agent" / "relkit-agent"
     if agent_bin.is_file():
         install_file(agent_bin, Path(prefix) / "relkit-agent", 0o755)
@@ -1101,7 +1106,7 @@ def rollback(backup_root: Path, prefix: str) -> None:
     if agent_unit.is_file():
         shutil.copy2(agent_unit, "/etc/systemd/system/relkit-agent.service")
     run(["systemctl", "daemon-reload"], check=False)
-    run(["systemctl", "restart", "relkit-serve"], check=False)
+    run(["systemctl", "restart", "relkit-store"], check=False)
     run(["systemctl", "restart", "relkit-agent"], check=False)
 
 
@@ -1136,7 +1141,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
                     )
                 )
             serve_addr = ""
-            show = systemd_show("relkit-serve", "ExecStart")
+            show = systemd_show("relkit-store", "ExecStart")
             cfg_path = parse_exec_config(show.get("ExecStart") or "")
             if cfg_path and Path(cfg_path).is_file():
                 serve_addr = str(load_json_object(Path(cfg_path).read_text(encoding="utf-8")).get("addr") or "")
@@ -1175,7 +1180,7 @@ def remote_bootstrap_sources() -> list[tuple[Path, str]]:
     return [
         (DEPLOY_DIR / "relkit.py", ""),
         (DEPLOY_DIR / "relkit_ops.py", ""),
-        (DEPLOY_DIR / "relkit-serve.service", ""),
+        (DEPLOY_DIR / "relkit-store.service", ""),
         (DEPLOY_DIR / "relkit-agent.service", ""),
         (HOST_DIR / "hostlib" / "__init__.py", "hostlib"),
         (HOST_DIR / "hostlib" / "facets.py", "hostlib"),
@@ -1376,7 +1381,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_i = install_sub.add_parser("serve")
     serve_i.add_argument("--binary", required=True)
     serve_i.add_argument("--dir", default="/srv/releases")
-    serve_i.add_argument("--config-dir", default="/etc/relkit-serve")
+    serve_i.add_argument("--config-dir", default="/etc/relkit-store")
     serve_i.add_argument("--addr", default="127.0.0.1:30341")
     serve_i.add_argument("--user", default="relkit")
     serve_i.add_argument("--prefix", default="/usr/local/bin")
@@ -1398,11 +1403,11 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--stage-only", action="store_true", help="write files but do not restart; not a completed upgrade")
     upgrade.add_argument("--allow-dirty", action="store_true")
     upgrade.add_argument("--unsafe-from-dist", action="store_true", help="ship existing dist/ binaries instead of building HEAD")
-    upgrade.add_argument("--serve-binary", default="dist/relkit-serve-linux-amd64")
+    upgrade.add_argument("--serve-binary", default="dist/relkit-store-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")
     upgrade.add_argument(
         "--serve-listen-addr",
-        help="explicit relkit-serve listen address (for example :8080)",
+        help="explicit relkit-store listen address (for example :8080)",
     )
     upgrade.add_argument("--public-base-url")
     upgrade.add_argument(

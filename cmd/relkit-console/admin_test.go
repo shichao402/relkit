@@ -272,8 +272,8 @@ func TestLockedPanelWithoutBootstrap(t *testing.T) {
 }
 
 // TestAdminStateRoundTrip keeps the doc migration checks from serve that
-// still apply: the state file format is shared with relkit-serve, and a box
-// migrating to console keeps its accounts.
+// still apply: the state file format is unchanged from relkit-serve, and a
+// box migrating from it keeps its accounts.
 func TestAdminStateRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, adminStateFileName)

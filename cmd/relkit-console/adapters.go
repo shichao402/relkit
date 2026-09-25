@@ -38,7 +38,7 @@ type Entry struct {
 }
 
 // rootAdapter reads a release tree on this box through os.Root, exactly like
-// relkit-serve does today. It is the "same box, read-only" case: the console
+// relkit-store does today. It is the "same box, read-only" case: the console
 // running next to relkit-store (or a store tree mounted read-only).
 type rootAdapter struct {
 	name string

@@ -668,9 +668,9 @@ get(key: str) -> bytes | None
 | 类型 | 数据面契约 | CAS ingest |
 |---|---|---|
 | `s3-compatible` | S3 API；服务端用长期写密钥签发 query 预签名请求，并执行 HEAD / CopyObject / DELETE | 可以 |
-| `relkit-compatible` | relkit-serve API；`POST /-/cas/uploads` 签发对象级能力 URL，并提供 HEAD / COPY / DELETE | 可以 |
+| `relkit-compatible` | relkit-store API；`POST /-/cas/uploads` 签发对象级能力 URL，并提供 HEAD / COPY / DELETE | 可以 |
 
-`local`、`http-put` 与 `static-http` 不属于现行后端。离线或本机演练**必须**启动真实 `relkit-serve` 数据面；禁止用不可访问的 `baseUrl` 伪造发布成功。外部系统已经放好的文件若要给客户端下载，把可匿名读取的绝对 URL 写进签名文档的 `urls[]`，不要为此再发明一种只读后端。
+`local`、`http-put` 与 `static-http` 不属于现行后端。离线或本机演练**必须**启动真实 `relkit-store` 数据面；禁止用不可访问的 `baseUrl` 伪造发布成功。外部系统已经放好的文件若要给客户端下载，把可匿名读取的绝对 URL 写进签名文档的 `urls[]`，不要为此再发明一种只读后端。
 
 CAS 凭据文档对每个 blob 给出 `requests[]`。每个请求**必须**包含绝对 http(s) URL、method、可选 headers 与到期时间。客户端只执行这些 HTTP 请求，**禁止**自行拼 URL、识别后端类型、实现 SigV4 / STS，或接受 `sign` 指令。单对象上传的 `requests[]` 恰好一个元素；未来分片仍沿用请求描述列表。
 

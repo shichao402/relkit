@@ -18,14 +18,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// healthPath is under /-/ so that it can never shadow a served file. RUP keys
+// begin with index/, manifest/ or artifact/, and a leading dash is not a legal
+// identifier, so the namespace is free.
 const healthPath = "/-/health"
 
 func (c *config) handler() http.Handler {
 	mux := http.NewServeMux()
 
-	// Under /-/ so that it can never shadow a served file. RUP keys begin with
-	// index/, manifest/ or artifact/, and a leading dash is not a legal
-	// identifier, so the namespace is free.
 	mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/protobuf")
@@ -46,28 +46,6 @@ func (c *config) handler() http.Handler {
 	})
 	mux.HandleFunc(publishproto.PreflightPath, c.servePublishPreflight)
 	mux.HandleFunc(casUploadsPath, c.serveCASMint)
-
-	mux.HandleFunc(adminLoginPath, c.serveAdminLogin)
-	mux.HandleFunc(adminSetupPath, c.serveAdminSetup)
-	mux.HandleFunc(adminLogoutPath, c.serveAdminLogout)
-	mux.HandleFunc(productPathPrefix, c.requirePanelAuth(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.serveProduct(w, r)
-	}))
-	mux.HandleFunc(latestPathPrefix, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.serveLatest(w, r)
-	})
-	mux.HandleFunc(adminPath, c.requirePanelAuth(c.serveAdmin))
-	mux.HandleFunc(adminFilesPath, c.requirePanelAuth(c.serveAdminFiles))
 
 	mux.HandleFunc("/", c.serve)
 
@@ -130,10 +108,6 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if name == "." {
-			if r.URL.Query().Has("files") {
-				http.Redirect(w, r, adminFilesPath, http.StatusMovedPermanently)
-				return
-			}
 			if c.serveExistingFile(w, r, "browse/index.html") {
 				return
 			}
@@ -194,7 +168,6 @@ const catalogStubHTML = `<!DOCTYPE html>
 </head><body><div class="wrap">
 <h1>Releases</h1>
 <p class="sub">No published catalog yet. Protocol clients do not read this page.</p>
-<p class="sub"><a href="/-/admin">Operator panel</a></p>
 </div></body></html>
 `
 

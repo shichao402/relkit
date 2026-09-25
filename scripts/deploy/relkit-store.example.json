@@ -1,7 +1,7 @@
 {
   "addr": ":8080",
   "dir": "/srv/releases",
-  "uploadTokenFile": "/etc/relkit-serve/relkit-serve.token",
+  "uploadTokenFile": "/etc/relkit-store/relkit-store.token",
   "uploadTokens": [
     {"file": "tokens/demoapp.token", "products": ["demoapp"]}
   ],

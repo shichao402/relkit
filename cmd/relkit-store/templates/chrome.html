@@ -93,7 +93,7 @@ p.foot a{color:var(--muted)}
 <div class="topline">{{if .Crumbs}}<nav class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sep">/</span>{{end}}{{if $c.Href}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{else}}<span>{{$c.Label}}</span>{{end}}{{end}}</nav>{{else}}<span></span>{{end}}<label class="theme"><span>Theme</span><select id="theme-select" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
 {{end}}
 
-{{define "foot"}}<p class="foot">relkit-serve {{.Version}}{{if .Note}} · {{.Note}}{{end}}{{if .LoggedIn}} · {{.Username}} · <a href="/-/admin/logout">sign out</a> · <a href="/-/admin/files">all files</a>{{end}}</p>
+{{define "foot"}}<p class="foot">relkit-store {{.Version}}{{if .Note}} · {{.Note}}{{end}}{{if .LoggedIn}} · {{.Username}} · <a href="/-/admin/logout">sign out</a> · <a href="/-/admin/files">all files</a>{{end}}</p>
 <script>(function(){var s=document.getElementById("theme-select");if(!s)return;var t=document.documentElement.dataset.theme||"system";s.value=t;s.addEventListener("change",function(){var v=s.value;document.documentElement.dataset.theme=v;try{if(v==="system")localStorage.removeItem("relkit-theme");else localStorage.setItem("relkit-theme",v)}catch(e){}})})()</script>
 </div></body></html>
 {{end}}

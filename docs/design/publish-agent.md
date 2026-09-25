@@ -14,7 +14,7 @@ related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI
 CI **不持** RUP 签名私钥，也 **不持** 长期后端写密钥。  
 CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯一一个**目的地上传一次；agent 持钥 `publish.Run`（Promote / Materialize + 签指针），其余后端的副本由 agent 在数据面之间分发。现网代码仍接受整包 `PUT /v1/staged`。
 
-数据面只是 API 不同：公网 `s3-compatible` → COS；内网 `relkit-compatible` → relkit-serve。客户端永远不连 agent。这条改动是为了让发布机只做管理角色，**不是**为了跨境加速。
+数据面只是 API 不同：公网 `s3-compatible` → COS；内网 `relkit-compatible` → relkit-store。客户端永远不连 agent。这条改动是为了让发布机只做管理角色，**不是**为了跨境加速。
 
 ## 2. 信任边界
 
@@ -240,7 +240,7 @@ python scripts/host/relkit_host.py agent remove --execute
 必须严格分四步，不能把配置迁移和删除类型二进制一起上线：
 
 1. **发布机清 `casCredentials`。** 从全部 publish profile 删除该字段；过渡版本虽接受并忽略，但不得继续把 `sts` 当有效配置。
-2. **内网 serve 先部署 GC。** 先上线支持 CAS 上传租约与 `gc.casGrace`（默认 `24h`）的 relkit-serve，并确认 GC 正常。
+2. **内网 serve 先部署 GC。** 先上线支持 CAS 上传租约与 `gc.casGrace`（默认 `24h`）的 relkit-store，并确认 GC 正常。
 3. **开写入面、迁 profile、发版验证。** 为 serve 配运营方 `RELKIT_SERVE_TOKEN`，把 profile 改成 `relkit-compatible`（`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`），完成一次 `cas-put` → publish → verify。
 4. **稳定后才部署删除类型版本。** 观察现网稳定后，最后升级到不再包含 `local` / `http-put` 的 agent/CLI；否则旧 profile 会直接报 unsupported backend type。
 
@@ -270,7 +270,7 @@ python scripts/host/relkit_host.py agent remove --execute
    描述的是 CI 直连后端的场景。`relkit_host.py agent provision` 生成 profile 时从
    箱上已装 profile 继承这两个字段，只有首次创建才用默认值；`baseUrl` 相反，始终
    以产品仓为准，因为它是要写进签名 manifest 的客户端下载地址。
-4. `relkit-serve` 对外提供完整数据面 API：正式对象继续匿名 Range GET；普通 PUT / COPY / HEAD / DELETE 由运营方 Bearer 保护，CAS PUT 由短期对象能力签名保护。和 COS 一样，公开可达不等于匿名可写。
+4. `relkit-store` 对外提供完整数据面 API：正式对象继续匿名 Range GET；普通 PUT / COPY / HEAD / DELETE 由运营方 Bearer 保护，CAS PUT 由短期对象能力签名保护。和 COS 一样，公开可达不等于匿名可写。
 
 Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某产品的 token 发给无关仓库。不要用实例级 Bearer 当「同机共享」。
 

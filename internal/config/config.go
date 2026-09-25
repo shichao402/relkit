@@ -40,7 +40,7 @@ type Config struct {
 	CodeStrategy   string
 	// RetainVersions caps how many version nodes remain in a published index.
 	// 0 (default) keeps the full history. N >= 1 keeps only the N highest-code
-	// nodes after merge, so relkit-serve orphan GC can drop older artifacts.
+	// nodes after merge, so relkit-store orphan GC can drop older artifacts.
 	RetainVersions int
 	Signing        map[string]any
 	Backends       map[string]map[string]any

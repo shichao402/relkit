@@ -41,12 +41,12 @@ var searchPaths = []string{ConfigName, "/etc/" + ConfigName}
 // FileConfig mirrors the config file. Everything is optional; the defaults
 // match what relkit-serve used for the panel.
 type FileConfig struct {
-	Addr          string      `json:"addr"`
-	Dir           string      `json:"dir"`
-	StateDir      string      `json:"stateDir,omitempty"`
-	StatsFile     string      `json:"statsFile,omitempty"`
-	AdminStateFile string     `json:"adminStateFile,omitempty"`
-	Site          *SiteConfig `json:"site,omitempty"`
+	Addr           string      `json:"addr"`
+	Dir            string      `json:"dir"`
+	StateDir       string      `json:"stateDir,omitempty"`
+	StatsFile      string      `json:"statsFile,omitempty"`
+	AdminStateFile string      `json:"adminStateFile,omitempty"`
+	Site           *SiteConfig `json:"site,omitempty"`
 }
 
 func LoadFileConfig(explicit string) (*FileConfig, string, error) {
@@ -75,11 +75,11 @@ func LoadFileConfig(explicit string) (*FileConfig, string, error) {
 
 func main() {
 	var (
-		configPath   = flag.String("config", "", "path to "+ConfigName)
-		addr         = flag.String("addr", "127.0.0.1:8081", "address to listen on")
-		dir          = flag.String("dir", ".", "release tree to read (read-only)")
-		stateDir     = flag.String("state-dir", "", "agent state directory (site status)")
-		showVersion  = flag.Bool("version", false, "print version and exit")
+		configPath  = flag.String("config", "", "path to "+ConfigName)
+		addr        = flag.String("addr", "127.0.0.1:8081", "address to listen on")
+		dir         = flag.String("dir", ".", "release tree to read (read-only)")
+		stateDir    = flag.String("state-dir", "", "agent state directory (site status)")
+		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
 
@@ -108,9 +108,9 @@ func main() {
 	}
 
 	console := &console{
-		adapter:    nil, // set below; failure to open is fatal
-		stateDir:   *stateDir,
-		site:       nil,
+		adapter:  nil, // set below; failure to open is fatal
+		stateDir: *stateDir,
+		site:     nil,
 	}
 	if fileCfg != nil {
 		console.site = fileCfg.Site

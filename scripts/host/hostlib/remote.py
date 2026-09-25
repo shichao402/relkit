@@ -365,7 +365,7 @@ def _impl_remote_inventory(
         result["error"] = "no confirmed SSH host"
         return result
     binary = AGENT_BIN if use_agent else SERVE_BIN
-    unit = "relkit-agent" if use_agent else "relkit-serve"
+    unit = "relkit-agent" if use_agent else "relkit-store"
     try:
         version = ssh_run(host, [binary, "-version"], port=port).stdout.strip()
         status = ssh_run(
@@ -735,10 +735,10 @@ def _impl_cmd_serve_add(root: Path, args: argparse.Namespace) -> int:
     set_step(state, "serve.register", "applied", product, "waiting for restart" if not args.restart else "")
     save_state(root, state)
     if args.restart:
-        ssh_run(host, ["sudo", "systemctl", "restart", "relkit-serve"])
+        ssh_run(host, ["sudo", "systemctl", "restart", "relkit-store"])
         set_step(state, "serve.register", "applied", product, "restarted")
         save_state(root, state)
-        print("relkit-serve restarted")
+        print("relkit-store restarted")
     else:
         print("not restarted; old tokens still work until --restart")
     return 0
@@ -758,12 +758,12 @@ def _impl_cmd_serve_restart(root: Path, args: argparse.Namespace) -> int:
     config_dir = (state.get("serve") or {}).get("configDir") or DEFAULT_SERVE_DIR
     if product:
         chown_serve_product_token(host, str(config_dir), str(product))
-    ssh_run(host, ["sudo", "systemctl", "reset-failed", "relkit-serve"])
-    ssh_run(host, ["sudo", "systemctl", "restart", "relkit-serve"])
+    ssh_run(host, ["sudo", "systemctl", "reset-failed", "relkit-store"])
+    ssh_run(host, ["sudo", "systemctl", "restart", "relkit-store"])
     if product:
         set_step(state, "serve.register", "applied", product, "restarted")
         save_state(root, state)
-    print("relkit-serve restarted")
+    print("relkit-store restarted")
     return 0
 
 def _impl_cmd_agent_restart(root: Path, args: argparse.Namespace) -> int:
@@ -820,8 +820,8 @@ def _impl_cmd_serve_rotate(root: Path, args: argparse.Namespace) -> int:
     print(f"new token written to {SECRET_NOTE.as_posix()} (plaintext not printed)")
     print("deliver this to publishers before --restart")
     if args.restart:
-        ssh_run(host, ["sudo", "systemctl", "restart", "relkit-serve"])
-        print("relkit-serve restarted; previous token is invalid")
+        ssh_run(host, ["sudo", "systemctl", "restart", "relkit-store"])
+        print("relkit-store restarted; previous token is invalid")
     else:
         print("not restarted; previous token still works")
     return 0
@@ -835,7 +835,7 @@ def _impl_cmd_serve_remove(root: Path, args: argparse.Namespace) -> int:
     if not host:
         raise Fail("pass --host or onboard set ssh.host first")
     if args.restart:
-        ssh_run(host, ["sudo", "systemctl", "restart", "relkit-serve"])
+        ssh_run(host, ["sudo", "systemctl", "restart", "relkit-store"])
     result = ssh_run(
         host,
         [

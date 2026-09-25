@@ -85,7 +85,7 @@ def read_write_paths(serve_cfg: dict[str, Any]) -> list[str]:
     return out
 
 
-def render_serve_unit(
+def render_store_unit(
     template: str,
     *,
     user: str,
@@ -99,7 +99,7 @@ def render_serve_unit(
     text = re.sub(r"^Group=.*$", f"Group={user}", text, flags=re.M)
     rwp = " ".join(read_write_paths) if read_write_paths else "/srv/releases"
     text = re.sub(r"^ReadWritePaths=.*$", f"ReadWritePaths={rwp}", text, flags=re.M)
-    exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-serve -config {config_path}"
+    exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-store -config {config_path}"
     text = re.sub(r"^ExecStart=.*$", exec_line, text, flags=re.M)
     port = parse_listen_port(addr)
     if port is not None and port < 1024 and "AmbientCapabilities=CAP_NET_BIND_SERVICE" not in text:
@@ -325,7 +325,7 @@ def missing_upgrade_targets(
     """Components an upgrade would touch that the host does not actually run.
 
     A host may legitimately run only one of the two (the public publisher has no
-    relkit-serve; its data plane is COS). Returned strings say what is missing
+    relkit-store; its data plane is COS). Returned strings say what is missing
     and how to proceed.
     """
     flags = {"serve": "--agent-only", "agent": "--serve-only"}

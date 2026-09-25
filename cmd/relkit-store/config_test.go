@@ -402,7 +402,7 @@ func TestInitWritesTokenWithTightPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tokenPath := filepath.Join(dir, "relkit-serve.token")
+	tokenPath := filepath.Join(dir, "relkit-store.token")
 	info, err := os.Stat(tokenPath)
 	if err != nil {
 		t.Fatal(err)
@@ -443,7 +443,7 @@ func TestInitRefusesToClobber(t *testing.T) {
 	if err := runInit(io.Discard, []string{"-out", dir}); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(filepath.Join(dir, "relkit-serve.token"))
+	before, err := os.ReadFile(filepath.Join(dir, "relkit-store.token"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +456,7 @@ func TestInitRefusesToClobber(t *testing.T) {
 		t.Errorf("error should mention -force, got: %v", err)
 	}
 
-	after, err := os.ReadFile(filepath.Join(dir, "relkit-serve.token"))
+	after, err := os.ReadFile(filepath.Join(dir, "relkit-store.token"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +467,7 @@ func TestInitRefusesToClobber(t *testing.T) {
 	if err := runInit(io.Discard, []string{"-out", dir, "-force"}); err != nil {
 		t.Fatal(err)
 	}
-	forced, err := os.ReadFile(filepath.Join(dir, "relkit-serve.token"))
+	forced, err := os.ReadFile(filepath.Join(dir, "relkit-store.token"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,13 +487,13 @@ func TestInitTokenOnlyLeavesConfigAlone(t *testing.T) {
 
 	configPath := filepath.Join(dir, ConfigName)
 	edited := `{"addr": ":9999", "dir": "/srv/releases", ` +
-		`"uploadTokenFile": "relkit-serve.token", ` +
+		`"uploadTokenFile": "relkit-store.token", ` +
 		`"cache": {"noCache": ["index/"], "immutable": ["artifact/"]}}`
 	if err := os.WriteFile(configPath, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	tokenPath := filepath.Join(dir, "relkit-serve.token")
+	tokenPath := filepath.Join(dir, "relkit-store.token")
 	before, err := os.ReadFile(tokenPath)
 	if err != nil {
 		t.Fatal(err)
@@ -541,7 +541,7 @@ func TestInitProductMergesWithoutRevertingCache(t *testing.T) {
 
 	configPath := filepath.Join(dir, ConfigName)
 	edited := `{"addr": ":9999", "dir": "/srv/releases", ` +
-		`"uploadTokenFile": "relkit-serve.token", ` +
+		`"uploadTokenFile": "relkit-store.token", ` +
 		`"cache": {"noCache": ["index/"], "immutable": ["artifact/"]}}`
 	if err := os.WriteFile(configPath, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
@@ -643,12 +643,12 @@ func TestInitListProductsHidesPlaintext(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"demoapp", "other", "tokens/demoapp.token", "relkit-serve.token"} {
+	for _, want := range []string{"demoapp", "other", "tokens/demoapp.token", "relkit-store.token"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("listing is missing %q:\n%s", want, out)
 		}
 	}
-	for _, name := range []string{"relkit-serve.token", "tokens/demoapp.token", "tokens/other.token"} {
+	for _, name := range []string{"relkit-store.token", "tokens/demoapp.token", "tokens/other.token"} {
 		raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
 		if err != nil {
 			t.Fatal(err)
@@ -677,7 +677,7 @@ func TestInitRemoveProductKeepsEverythingElse(t *testing.T) {
 	}
 	configPath := filepath.Join(dir, ConfigName)
 	edited := `{"addr": ":9999", "dir": "/srv/releases", ` +
-		`"uploadTokenFile": "relkit-serve.token", ` +
+		`"uploadTokenFile": "relkit-store.token", ` +
 		`"cache": {"noCache": ["index/"], "immutable": ["artifact/"]}}`
 	if err := os.WriteFile(configPath, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
@@ -688,7 +688,7 @@ func TestInitRemoveProductKeepsEverythingElse(t *testing.T) {
 		}
 	}
 
-	operatorBefore, err := os.ReadFile(filepath.Join(dir, "relkit-serve.token"))
+	operatorBefore, err := os.ReadFile(filepath.Join(dir, "relkit-store.token"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +713,7 @@ func TestInitRemoveProductKeepsEverythingElse(t *testing.T) {
 	if rel, ok := cfg.productTokenFile("other"); !ok || rel != "tokens/other.token" {
 		t.Errorf("other lost its entry: %q ok=%v", rel, ok)
 	}
-	if cfg.UploadTokenFile != "relkit-serve.token" {
+	if cfg.UploadTokenFile != "relkit-store.token" {
 		t.Errorf("operator token entry changed to %q", cfg.UploadTokenFile)
 	}
 	if cfg.Addr != ":9999" {
@@ -729,7 +729,7 @@ func TestInitRemoveProductKeepsEverythingElse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "tokens", "other.token")); err != nil {
 		t.Errorf("other token file was collateral damage: %v", err)
 	}
-	operatorAfter, err := os.ReadFile(filepath.Join(dir, "relkit-serve.token"))
+	operatorAfter, err := os.ReadFile(filepath.Join(dir, "relkit-store.token"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +774,7 @@ func TestInitRemoveProductKeepsSharedTokenFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(dir, ConfigName)
-	body := `{"dir": "/srv/releases", "uploadTokenFile": "relkit-serve.token", ` +
+	body := `{"dir": "/srv/releases", "uploadTokenFile": "relkit-store.token", ` +
 		`"uploadTokens": [{"file": "tokens/team.token", "products": ["demoapp", "other"]}]}`
 	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)

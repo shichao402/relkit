@@ -86,40 +86,40 @@ class ListenTests(unittest.TestCase):
 
     def test_exec_config_from_systemd_show(self):
         raw = (
-            "{ path=/usr/local/bin/relkit-serve ; "
-            "argv[]=/usr/local/bin/relkit-serve -config /etc/relkit-serve/relkit-serve.json ; "
+            "{ path=/usr/local/bin/relkit-store ; "
+            "argv[]=/usr/local/bin/relkit-store -config /etc/relkit-store/relkit-store.json ; "
             "ignore_errors=no }"
         )
         self.assertEqual(
             ops.parse_exec_config(raw),
-            "/etc/relkit-serve/relkit-serve.json",
+            "/etc/relkit-store/relkit-store.json",
         )
-        self.assertEqual(ops.parse_exec_binary(raw), "/usr/local/bin/relkit-serve")
+        self.assertEqual(ops.parse_exec_binary(raw), "/usr/local/bin/relkit-store")
 
 
 class UnitRenderTests(unittest.TestCase):
     def test_read_write_paths_include_tree_and_external_files(self):
         cfg = {
-            "dir": "/data/relkit-serve",
+            "dir": "/data/relkit-store",
             "statsFile": "/var/lib/stats.json",
-            "adminStateFile": "/data/relkit-serve/.relkit-serve-admin.json",
+            "adminStateFile": "/data/relkit-store/.relkit-serve-admin.json",
         }
         paths = ops.read_write_paths(cfg)
-        self.assertEqual(paths[0], "/data/relkit-serve")
+        self.assertEqual(paths[0], "/data/relkit-store")
         self.assertIn("/var/lib/stats.json", paths)
 
-    def test_render_serve_unit_uses_live_paths_and_low_port_caps(self):
-        template = (DEPLOY / "relkit-serve.service").read_text(encoding="utf-8")
-        unit = ops.render_serve_unit(
+    def test_render_store_unit_uses_live_paths_and_low_port_caps(self):
+        template = (DEPLOY / "relkit-store.service").read_text(encoding="utf-8")
+        unit = ops.render_store_unit(
             template,
             user="relkit",
             prefix="/usr/local/bin",
-            config_path="/etc/relkit-serve/relkit-serve.json",
-            read_write_paths=["/data/relkit-serve"],
+            config_path="/etc/relkit-store/relkit-store.json",
+            read_write_paths=["/data/relkit-store"],
             addr="127.0.0.1:80",
         )
-        self.assertIn("ReadWritePaths=/data/relkit-serve", unit)
-        self.assertIn("ExecStart=/usr/local/bin/relkit-serve -config /etc/relkit-serve/relkit-serve.json", unit)
+        self.assertIn("ReadWritePaths=/data/relkit-store", unit)
+        self.assertIn("ExecStart=/usr/local/bin/relkit-store -config /etc/relkit-store/relkit-store.json", unit)
         self.assertIn("AmbientCapabilities=CAP_NET_BIND_SERVICE", unit)
         self.assertNotIn("/srv/releases", unit.split("ReadWritePaths=")[1].splitlines()[0])
 
@@ -137,14 +137,14 @@ class UnitRenderTests(unittest.TestCase):
 
 class MigrateTests(unittest.TestCase):
     def test_cas_grace_idempotent(self):
-        cfg = {"addr": "127.0.0.1:8080", "dir": "/data/relkit-serve"}
+        cfg = {"addr": "127.0.0.1:8080", "dir": "/data/relkit-store"}
         once, notes = ops.ensure_cas_grace(cfg)
         self.assertEqual(once["gc"]["casGrace"], "24h")
         self.assertTrue(notes)
         twice, notes2 = ops.ensure_cas_grace(once)
         self.assertEqual(notes2, [])
         self.assertEqual(twice["addr"], "127.0.0.1:8080")
-        self.assertEqual(twice["dir"], "/data/relkit-serve")
+        self.assertEqual(twice["dir"], "/data/relkit-store")
 
     def test_strip_cas_credentials(self):
         profile = {"backends": {"x": {"type": "relkit-compatible", "casCredentials": "sts"}}}
@@ -183,7 +183,7 @@ class MigrateTests(unittest.TestCase):
             "backends": {
                 "intranet": {
                     "type": "local",
-                    "outputDir": "/data/relkit-serve",
+                    "outputDir": "/data/relkit-store",
                     "casCredentials": {"mode": "sts"},
                 }
             }
@@ -307,7 +307,7 @@ class MissingTargetTests(unittest.TestCase):
     AGENT_ONLY_HOST = {
         "serve": {
             "unit": {"FragmentPath": "", "ActiveState": "inactive"},
-            "binary": "/usr/local/bin/relkit-serve",
+            "binary": "/usr/local/bin/relkit-store",
             "present": False,
         },
         "agent": {
@@ -330,16 +330,16 @@ class MissingTargetTests(unittest.TestCase):
             self.AGENT_ONLY_HOST, want_serve=True, want_agent=True
         )
         self.assertEqual(len(missing), 1)
-        self.assertIn("relkit-serve", missing[0])
+        self.assertIn("relkit-store", missing[0])
         self.assertIn("no systemd unit", missing[0])
-        self.assertIn("/usr/local/bin/relkit-serve", missing[0])
+        self.assertIn("/usr/local/bin/relkit-store", missing[0])
         self.assertIn("--agent-only", missing[0])
 
     def test_host_running_both_has_nothing_missing(self):
         probe = {
             "serve": {
-                "unit": {"FragmentPath": "/etc/systemd/system/relkit-serve.service"},
-                "binary": "/usr/local/bin/relkit-serve",
+                "unit": {"FragmentPath": "/etc/systemd/system/relkit-store.service"},
+                "binary": "/usr/local/bin/relkit-store",
                 "present": True,
             },
             "agent": {
@@ -355,14 +355,14 @@ class MissingTargetTests(unittest.TestCase):
     def test_unit_without_binary_still_reports(self):
         probe = {
             "serve": {
-                "unit": {"FragmentPath": "/etc/systemd/system/relkit-serve.service"},
-                "binary": "/usr/local/bin/relkit-serve",
+                "unit": {"FragmentPath": "/etc/systemd/system/relkit-store.service"},
+                "binary": "/usr/local/bin/relkit-store",
                 "present": False,
             }
         }
         missing = ops.missing_upgrade_targets(probe, want_serve=True, want_agent=False)
         self.assertEqual(len(missing), 1)
-        self.assertIn("no binary at /usr/local/bin/relkit-serve", missing[0])
+        self.assertIn("no binary at /usr/local/bin/relkit-store", missing[0])
         self.assertNotIn("no systemd unit", missing[0])
 
     def test_remote_bootstrap_includes_hostlib_facets(self):
@@ -388,7 +388,7 @@ class BackupRollbackTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             src = root / "newbin"
-            dest = root / "relkit-serve"
+            dest = root / "relkit-store"
             src.write_bytes(b"new")
             dest.write_bytes(b"old")
             tmp_new = dest.with_name(dest.name + ".new")
@@ -397,7 +397,7 @@ class BackupRollbackTests(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), b"new")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            src = root / "relkit-serve.json"
+            src = root / "relkit-store.json"
             src.write_text('{"addr":"127.0.0.1:8080"}\n', encoding="utf-8")
             bak = root / "backup"
             bak.mkdir()

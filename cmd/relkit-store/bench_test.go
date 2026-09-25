@@ -51,6 +51,14 @@ func benchServer(b *testing.B, sizeMB int) (string, func()) {
 	}
 }
 
+func payload(size int) []byte {
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	return data
+}
+
 func BenchmarkWholeFile(b *testing.B) {
 	const sizeMB = 32
 	url, done := benchServer(b, sizeMB)

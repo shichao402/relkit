@@ -139,7 +139,7 @@ flowchart TB
 ## 7. 发布侧职责
 
 1. `relkit publish`（或等效）生成**一份**签名 index/manifest，artifact 的 `urls` 含各区域取货点。
-2. 将相同对象双写（或多写）到各 `relkit-serve` / 静态后端。
+2. 将相同对象双写（或多写）到各 `relkit-store` / 静态后端。
 3. 生成并签名 directory → 上传**自有域名 COS 主入口**与各备桶（字节完全一致，见 ADR 0007）。发布机（CVM）持钥；写 COS 走 `s3-compatible`，不要假设客户端去打 CVM。
 4. 私钥只在签名步骤出现；各处上传不需要也不应该各持一把钥。
 
