@@ -1069,10 +1069,24 @@ def migrate_serve_to_store(
     if tokens_src.is_dir():
         tokens_dest = config_dir / "tokens"
         if not tokens_dest.exists():
-            shutil.copytree(tokens_src, tokens_dest)
+            # copy2 keeps each file's original mode and owner-agnostic perms;
+            # some boxes hand out tokens root:<group> 0640 (group-readable),
+            # and flattening them to 0600 owner-relkit breaks the store's
+            # boot-time read. Preserve what the old config dir expressed.
+            shutil.copytree(tokens_src, tokens_dest, copy_function=shutil.copy2)
+            # The dir itself must be traversable by the service user.
+            os.chmod(tokens_dest, 0o750)
             for path in tokens_dest.rglob("*"):
-                os.chmod(path, 0o600 if path.is_file() else 0o750)
-                chown_path(path, user)
+                if path.is_dir():
+                    os.chmod(path, 0o750)
+                elif not (path.stat().st_mode & 0o040):
+                    # file not group/other readable: ensure the service user
+                    # can read it if it ended up owned by someone else.
+                    try:
+                        chown_path(path, user)
+                        os.chmod(path, 0o640)
+                    except (LookupError, OSError):
+                        pass
             notes.append(f"tokens/ -> {tokens_dest}")
 
     write_serve_unit(user=user, prefix=prefix, config_path=str(new_config), serve_cfg=cfg)
