@@ -100,7 +100,7 @@ flowchart TB
   get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
   get --> woaGet["update.devcloud.woa.com<br/>→ store 127.0.0.1:8080 读盘"]
   get --> pubGet["publish.firoyang.com<br/>→ 本机 store :8080 · CI 写面 + 旧代读兼容<br/>存量 entryUrls 靠自然升级迁出"]
-  get --> rawCompat["raw.firoyang.com<br/>A → 发布机 · /rup/ 前缀剥离<br/>旧代 ≤1.13.92 兼容入口"]
+  get --> rawCompat["raw.firoyang.com<br/>已下线 2026-09-26 · DNS 删<br/>旧代 ≤1.13.92 靠自然升级"]
   get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
   cosGet --> verify["验签 · sequence · sha256"]
   cosBackup --> verify
@@ -170,3 +170,5 @@ flowchart TB
 - 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变
 - 配置样例：`scripts/deploy/nginx-intranet.example.conf`
 - 内网 GET `/` 不现算门户；没有 rebuild dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`（经 nginx 分流到 console `127.0.0.1:8081`）。公网 COS 根路径仍是协议数据面，HTML 由 agent 站点配置部署到 Makers。
+
+> 2026-09-26 raw 兼容面下线：唯一还在打 /rup/ 的客户端（43.132.141.25，用户自有 CVM）日志核实已双轨访问新协议路径（/index、/manifest 直连，1.13.96 已装），/rup/ 轮询只是残留 cron；其余 /rup/ 流量全是验证 curl。三件套下线：DNSPod DeleteRecord 删 raw A 记录（RecordId 2380132895，回读 0 条，公共 DNS 返回 DNSPod 停放页与任意不存在子域一致）；nginx vhost 归档 raw-compat.conf.retired-20260926（非删除）；certbot delete 证书（Let's Encrypt 可随时重签）。Dec 仓 relkit.json 删除 backends.cos 死配置段（含嵌入副本，测试防回归断言保留），UPDATE_ARCHITECTURE.md 同步 relkit-store 现状（commit 7eb4dcd）。旧 relkit-cos-cert-renew.timer/service 空壳单元一并删除（daemon-reload 生效）。publish/update/update-internal 三面复验 200。以后需要旧代兼容面时重新加回（DNS A 记录 + certbot + vhost 三步）。
