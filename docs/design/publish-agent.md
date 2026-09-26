@@ -4,7 +4,7 @@
 title: Publish Agent
 category: design
 created: 2026-08-12
-updated: 2026-09-09
+updated: 2026-09-26
 status: approved
 related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md, docs/adr/0009-publisher-protocol-negotiation.md
 ---
@@ -52,6 +52,23 @@ staged 树缺 `release-policy.json` 时，`PUT /v1/staged`（整包与分片 com
 ### 2.2 publish profile
 
 缺省路径：与 `relkit-agent.json` 同目录的 `products/<product>.json`（安装后即 `/etc/relkit-agent/products/<id>.json`）。`products.<id>.profile` 可覆盖。profile 只含端点与环境变量**名**，不含密钥明文；init 写成 `0644`，以便 root 跑 init 后 `relkit` 用户仍能读。
+
+字段语义表（机器 profile 的合法字段集 = `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` 结构体字段集）：
+
+| 字段 | 归属 | 语义 |
+|---|---|---|
+| `product` | 机器 profile | 必须与 release-policy 的 `product` 一致，否则拒绝发布 |
+| `signing.keyId` | 机器 profile | 必须与 policy 的 `signing.keyId` 一致 |
+| `signing.privateKeyEnv` / `signing.privateKeyPath` | 机器 profile | 私钥引用（env 名或路径）；公钥永远不在这里 |
+| `backends` | 机器 profile | 各后端端点与凭据 env 名 |
+| `publishTo` | 机器 profile | 发布目标后端列表 |
+| `directory.publishTo` | 机器 profile | directory 指针发布目标 |
+| `signing.publicKeys` | 产品仓 `release-policy.json` | 公钥 SSOT 在产品策略，防发布机私钥与产品公钥配对错误 |
+| `directory.entryUrls` | 产品仓 `release-policy.json` | directory 文档内容由 staged 树的 release-policy 决定，机器只声明发布目标 |
+| `directory.services` | 产品仓 `release-policy.json` | 客户端概念随 staged 树走 |
+| `defaultChannel` / `channels` / `codeStrategy` / `retainVersions` | 产品仓 `release-policy.json` | 通道与版本策略 |
+
+strict 校验已生效（2026-09-26 双发布面部署 `0.4.24+94b2ef5`）：agent 对 publish profile 与 release-policy **双侧** strict 解析（`DisallowUnknownFields`），未知字段判整个文件非法、publish 阶段返回 400。机器 profile schema **不承诺向后兼容**，无迁移工具、无兼容垫片；旧 agent 的宽松解析让冗余字段静默存活，strict 是防止欠账再累积的基线。strict 拒绝时的排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
 
 ### 2.3 CAS：一次 ingest，之后由 agent 分发
 

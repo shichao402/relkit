@@ -41,6 +41,16 @@
 
 签名用的公钥取 staged 树 `release-policy.json` 的 `signing.publicKeys`。profile 没有公钥集。这台机上应至少留一个 staged 版本。
 
+profile 与 release-policy 均为 **strict 解析**（`DisallowUnknownFields`）：未知字段判整个文件非法，报错文案是 `is not a valid publish profile` / `is not a valid product policy`（publish 阶段 HTTP 400）。不静默忽略、不承诺向后兼容、无迁移工具。合法字段集即 relkit 源码 `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` / `ProductPolicy` 结构体字段集。
+
+strict 拒绝的排障链路（2026-09-26 stable 首发两跑两败的沉淀）：
+
+1. 症状：CI publish job 在 `cas/credentials` 步骤 exit 2，agent 日志出现 `is not a valid publish profile`。
+2. `gh run view <id> --log-failed` 定位失败步骤。
+3. `ssh <host> 'sudo cat /etc/relkit-agent/products/<product>.json'` 找出被拒字段。
+4. 对照 `internal/config/policy.go` 结构体删冗余字段。常见欠账：`signing.publicKeys`、`directory.entryUrls`、`directory.services`——设计归属都是产品仓 `release-policy.json`。
+5. `systemctl restart relkit-agent`，然后 `gh run rerun <id> --failed`。
+
 ## 人页 sink（`site.sinks[]`，ADR 0015）
 
 人页 browse dump（`index.html` / `<product>.html` / `catalog.json`）的部署目的地由 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]` 声明；产品 profile 不参与 sink 选择，产品 `relkit.json` 只提供 `site.title/description/homepage` 文案。
