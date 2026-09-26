@@ -27,7 +27,7 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 
 | 进程 | listen | 切面 |
 |---|---|---|
-| nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
+| nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`（CI 写面 + 兼容读）；外网读面 `update-internal.firoyang.com:443`（内嵌 SDK 协议 GET，2026-09-26 起）；人页 `update.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
 | relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
 | relkit-store（[ADR 0016](../adr/0016-serve-split-store-console.md)，由 relkit-serve 拆出） | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只作存储壳，本机空目录不是 COS 数据面 |
 | relkit-console（[ADR 0016](../adr/0016-serve-split-store-console.md)） | `127.0.0.1:8081`（已落地） | serve 的管理面拆出的独立二进制：`/-/admin` 面板、账户、统计、目录浏览、`/-/latest/`，只读经 adapter；两台机的 nginx 面板分流均已上线 |
@@ -95,10 +95,11 @@ dump 包含 `index.html`（总目录）、全部 `<product>.html`、`catalog.jso
 ```mermaid
 flowchart TB
   sdk["客户端 SDK 不连 8787"] --> get{"GET 数据面"}
+  get --> intGet["update-internal.firoyang.com<br/>→ store 127.0.0.1:8080<br/>新代内嵌 SDK 读面 · 2026-09-26 起"]
   get --> cosGet["COS raw.firoyang.com:443<br/>已退役 2026-09-25 · 见注"]
   get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
   get --> woaGet["update.devcloud.woa.com<br/>→ store 127.0.0.1:8080 读盘"]
-  get --> pubGet["publish.firoyang.com<br/>→ 本机 store :8080 · 现网外网主入口"]
+  get --> pubGet["publish.firoyang.com<br/>→ 本机 store :8080 · CI 写面 + 旧代读兼容<br/>存量 entryUrls 靠自然升级迁出"]
   get --> rawCompat["raw.firoyang.com<br/>A → 发布机 · /rup/ 前缀剥离<br/>旧代 ≤1.13.92 兼容入口"]
   get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
   cosGet --> verify["验签 · sequence · sha256"]
@@ -126,6 +127,8 @@ flowchart TB
 > 2026-09-26 raw 切换完成（迁移收口）：DNSPod API（`dec-exec` 注入 tencent-cloud 密钥，TC3-HMAC-SHA256 直调 `dnspod.tencentcloudapi.com`，`ModifyRecord` 原子改，RecordId 2380132895）把 `raw` 从 CNAME（广州 COS）改为 A `43.161.241.238`，TTL 600，权威 NS/公共/本地三路解析即时生效。certbot webroot 签发 `raw.firoyang.com` 正式证书（2026-12-25 到期，ECDSA），raw-compat.conf 从借用 publish 证书切换到自有证书（备份 `raw-compat.conf.bak.20260926rawcert`），续期 dry-run 通过、纳入 certbot-renew.timer。旧 `relkit-cos-cert-renew.timer` 已 disable --now 退役。E2E 复验（真实 DNS + 真实证书链）：directory cronkit 316B/dec 300B、index stable 1001B/dev 968B、工件 Range 206 全部与 store 一致。≤1.13.92 旧代客户端更新链路自 DNS 生效起全部恢复，外网数据面迁移收口。
 
 > 2026-09-26 广州 COS 桶退役完成：SigV4 header-auth（复用 dec tencent-cloud 主密钥，与 DNSPod 同链路）清点桶内 1211 对象/22.7GB → 批量删除（`Content-MD5` + 1000-key 批次）→ `DELETE /` 删桶，回读 HEAD 404。DNSPod 残留清理：`updates` CNAME（悬空）、`_dnsauth.updates/raw/raw2` TXT（COS 域名归属证明）、`edgeonereclaim.update` TXT（Pages reclaim 证明）共 5 条已删。发布机遗留 COS config 归档为 `relkit.json.retired-cos-20260926`（cronkit/dec 各一份，线上走 agent serve profile 与其无关）。SSL 控制台 4 张残留证书已删（raw `aKgyuExf`、raw2 `aXOYfCx6`、updates `ZwMfmDwc`、过期 nas `8sCr1xrt`，均部署计数 0；现网证书全部由发布机 certbot 管理）。Makers 云端项目 relkit-updates-index 确认已不存在（Pages token 已续期可用，DescribePagesProjects 空列表 + 按 ID 查询 ResourceNotFound），无需操作。桶删除后三面复验 raw/publish/update 全 200。COS 时代全部资产清零，更新数据面唯一实体为发布机 relkit-store。
+
+> 2026-09-26 外网读切面拆分（update-internal 落地）：`publish.firoyang.com` 混载 CI 写面与内嵌 SDK 读流量，与当年 raw 直指 COS 同病——域名角色不单一。新增 `update-internal.firoyang.com`（DNSPod CreateRecord，RecordId 2419405072，A → 发布机，TTL 600；certbot webroot 自有 ECDSA 证书 2026-12-25 到期，入 certbot-renew.timer），nginx `update-internal.conf` 新 vhost 全量代理 store（GET/HEAD 协议树，Range 透传，无 `/v1/`、无 console、无 browse）。三域名分工定型：publish = CI 写面 + 存量 entryUrls 兼容读（靠自然升级迁出）；update-internal = 内嵌 SDK 协议读面（SSOT）；update = 人页 browse dump。配置面同步：发布机 dec/cronkit 机器 profile `baseUrl` 切 update-internal（新 manifest `urls[]` 从此指向读面；`uploadUrl` 留 publish 写面），顺手清除 cronkit profile 三处 strict 欠账字段（`signing.publicKeys` / `directory.entryUrls` / `directory.services`，备份 `.bak.20260926internal`）；产品仓 dec/cronkit `relkit.json` 的 `entryUrls` / `services[].indexUrl` 同步切新域名（dec 含嵌入副本与 entry 测试改名）。E2E：directory dec 300B / cronkit 316B、index dev 968B / stable 1001B、artifact Range 206，真实 DNS + 真实证书链全通。
 
 ## 5. 人页 vs 操作面板
 
