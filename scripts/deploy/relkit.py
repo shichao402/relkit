@@ -1193,6 +1193,10 @@ def apply_serve_upgrade(
         raise Fail("cannot find relkit-store -config from systemd")
     config_file = Path(config_path)
     token_file = config_file.parent / "relkit-store.token"
+    legacy_token_file = config_file.parent / "relkit-serve.token"
+    if not token_file.is_file() and legacy_token_file.is_file():
+        token_file = legacy_token_file
+        notes.append("using legacy token file relkit-serve.token (migrate-serve box)")
     dest_bin = Path(prefix) / "relkit-store"
     backup_files(backup_root / "serve", [dest_bin, config_file, Path("/etc/systemd/system/relkit-store.service")])
     cfg = load_json_object(config_file.read_text(encoding="utf-8"))
