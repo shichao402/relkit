@@ -1580,7 +1580,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         step("building linux/amd64 agent+serve from HEAD")
         cmd_build(
             argparse.Namespace(
-                serve=spec["upgradeServe"],
+                store=spec["upgradeServe"],
                 agent=spec["upgradeAgent"],
                 cli=False,
                 out="dist",
