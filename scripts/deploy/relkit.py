@@ -1243,7 +1243,7 @@ def apply_agent_upgrade(
     backup_root: Path,
 ) -> list[str]:
     notes: list[str] = []
-    show = systemd_show("relkit-agent", "ExecStart", "User")
+    show = systemd_show("relkit-agent", "ExecStart", "User", "FragmentPath")
     config_path = parse_exec_config(show.get("ExecStart") or "") or "/etc/relkit-agent/relkit-agent.json"
     config_file = Path(config_path)
     dest_bin = Path(prefix) / "relkit-agent"
@@ -1271,11 +1271,18 @@ def apply_agent_upgrade(
     if binary:
         install_file(binary, dest_bin, 0o755)
         notes.append(f"installed {dest_bin}")
+    unit_text = Path(show.get("FragmentPath") or "/etc/systemd/system/relkit-agent.service").read_text(encoding="utf-8")
+    for line in unit_text.splitlines():
+        if line.startswith("WorkingDirectory="):
+            live_working_dir = line.split("=", 1)[1].strip()
+            break
+    if not live_working_dir:
+        raise Fail("cannot find WorkingDirectory in the live relkit-agent unit; refusing to guess")
     write_agent_unit(
         user=user,
         prefix=prefix,
         config_path=str(config_file),
-        working_directory=str(cfg.get("products") and "/srv/relkit" or "/srv/relkit"),
+        working_directory=live_working_dir,
     )
     run(["systemctl", "daemon-reload"])
     if restart:
