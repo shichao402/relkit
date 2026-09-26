@@ -99,11 +99,13 @@ flowchart TB
   get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
   get --> woaGet["update.devcloud.woa.com<br/>→ store 127.0.0.1:8080 读盘"]
   get --> pubGet["publish.firoyang.com<br/>→ 本机 store :8080 · 现网外网主入口"]
+  get --> rawCompat["raw.firoyang.com<br/>A → 发布机 · /rup/ 前缀剥离<br/>旧代 ≤1.13.92 兼容入口"]
   get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
   cosGet --> verify["验签 · sequence · sha256"]
   cosBackup --> verify
   woaGet --> verify
   pubGet --> verify
+  rawCompat --> verify
   relGet --> verify
 
   human["人用浏览器 · 对外目录"] --> site{"同一份 browse dump"}
@@ -114,6 +116,16 @@ flowchart TB
 ```
 
 > 注：`raw.firoyang.com`（广州 COS）2026-09-25 起退出外网数据面。hk CVM 到广州 COS 公网入口 443 跨境不通，CI 发布与客户端下载均已切到 `publish.firoyang.com`（本机 store）。香港临时桶已验证 hk→HK COS 全链路可用（PUT/GET/LIST/HEAD/DELETE 5/5，桶已删），待跨境问题解决后可评估迁回。
+
+> 2026-09-26 决定：`raw.firoyang.com` 以 A 记录直指发布机（43.161.241.238），由发布机 nginx 同板伺服 `location ^~ /rup/`（前缀剥离后转 store :8080），作为 ≤1.13.92 旧代客户端的兼容入口；不做 CNAME 到 `publish`（域名不指域名：两者是不同语义的东西，机器可能分开）。hk lighthouse 单机承载外网数据面，容量上限后转 COS + 全球加速（预案，不执行）。HK COS 第二数据面方案否决（成本）。directory sequence 防回退（SPEC §12.4）：COS 旧 directory seq（dec 30 / cronkit 11）高于 store 新树（8 / 2），旧代会拒收回退目录，republish 时以 COS 旧值抬基线。
+
+> 2026-09-26 施工完成：cronkit stable 补发（COS 旧 stable envelope seq 4 先 PUT 入 store 抬基线 → re-stage stable，payload zip 以 `kind=blob` + `apply=relkit-payload` selector 忠实复刻原字节 → publish 得 seq 5，CAS 命中零重复上传，versions 合并 9/10/11/13/14 五版）；dec 全代际走 dev，无需 stable 补发（store dev index seq 8 已就位）。directory 侧 dec 31 / cronkit 12。E2E 验收（发布机本机模拟最旧代客户端：cronkit stable code 9、dec dev code 1013089，均带旧 lastSeen 基线）directory→index→manifest→artifact 全链路通过，artifact Range probe 206。剩余待办：DNSPod 手动把 `raw` 从 CNAME 改 A 记录（无 API 凭据，需人工），切后 certbot webroot 签发 raw 证书（当前 raw-compat.conf 临时借用 publish 证书）、替换证书路径并 reload nginx、启用续期 timer。
+
+> 2026-09-26 证书续期修复（不依赖 DNS 切换的部分已全部完成）：certbot 自动续期 timer 原本未启用（`certbot-renew.timer` disabled），已 `enable --now`（每 12h + 随机延迟）。publish 证书原 authenticator=nginx 但插件未装（续期必失败），已 `certbot reconfigure` 切 webroot（`/var/www/letsencrypt`），dry-run 通过；publish vhost 80 端口补 ACME challenge location（备份 `relkit-agent.conf.bak.20260926cert`），443 服务面验证不变（Range 206）。update 证书本就 webroot 且演练通过。raw 证书待 DNS 切后签发，届时直接进同一 timer。旧 `relkit-cos-cert-renew.timer`（腾讯 SSL 探针，COS 时代遗产）已无服务对象，待 raw 切换完成后连同 timer 一起退役。
+
+> 2026-09-26 raw 切换完成（迁移收口）：DNSPod API（`dec-exec` 注入 tencent-cloud 密钥，TC3-HMAC-SHA256 直调 `dnspod.tencentcloudapi.com`，`ModifyRecord` 原子改，RecordId 2380132895）把 `raw` 从 CNAME（广州 COS）改为 A `43.161.241.238`，TTL 600，权威 NS/公共/本地三路解析即时生效。certbot webroot 签发 `raw.firoyang.com` 正式证书（2026-12-25 到期，ECDSA），raw-compat.conf 从借用 publish 证书切换到自有证书（备份 `raw-compat.conf.bak.20260926rawcert`），续期 dry-run 通过、纳入 certbot-renew.timer。旧 `relkit-cos-cert-renew.timer` 已 disable --now 退役。E2E 复验（真实 DNS + 真实证书链）：directory cronkit 316B/dec 300B、index stable 1001B/dev 968B、工件 Range 206 全部与 store 一致。≤1.13.92 旧代客户端更新链路自 DNS 生效起全部恢复，外网数据面迁移收口。
+
+> 2026-09-26 广州 COS 桶退役完成：SigV4 header-auth（复用 dec tencent-cloud 主密钥，与 DNSPod 同链路）清点桶内 1211 对象/22.7GB → 批量删除（`Content-MD5` + 1000-key 批次）→ `DELETE /` 删桶，回读 HEAD 404。DNSPod 残留清理：`updates` CNAME（悬空）、`_dnsauth.updates/raw/raw2` TXT（COS 域名归属证明）、`edgeonereclaim.update` TXT（Pages reclaim 证明）共 5 条已删。发布机遗留 COS config 归档为 `relkit.json.retired-cos-20260926`（cronkit/dec 各一份，线上走 agent serve profile 与其无关）。SSL 控制台 4 张残留证书已删（raw `aKgyuExf`、raw2 `aXOYfCx6`、updates `ZwMfmDwc`、过期 nas `8sCr1xrt`，均部署计数 0；现网证书全部由发布机 certbot 管理）。Makers 云端项目 relkit-updates-index 确认已不存在（Pages token 已续期可用，DescribePagesProjects 空列表 + 按 ID 查询 ResourceNotFound），无需操作。桶删除后三面复验 raw/publish/update 全 200。COS 时代全部资产清零，更新数据面唯一实体为发布机 relkit-store。
 
 ## 5. 人页 vs 操作面板
 
