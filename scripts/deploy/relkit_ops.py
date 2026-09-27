@@ -85,7 +85,7 @@ def read_write_paths(serve_cfg: dict[str, Any]) -> list[str]:
     return out
 
 
-def render_serve_unit(
+def render_store_unit(
     template: str,
     *,
     user: str,
@@ -99,7 +99,7 @@ def render_serve_unit(
     text = re.sub(r"^Group=.*$", f"Group={user}", text, flags=re.M)
     rwp = " ".join(read_write_paths) if read_write_paths else "/srv/releases"
     text = re.sub(r"^ReadWritePaths=.*$", f"ReadWritePaths={rwp}", text, flags=re.M)
-    exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-serve -config {config_path}"
+    exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-store -config {config_path}"
     text = re.sub(r"^ExecStart=.*$", exec_line, text, flags=re.M)
     port = parse_listen_port(addr)
     if port is not None and port < 1024 and "AmbientCapabilities=CAP_NET_BIND_SERVICE" not in text:
@@ -131,6 +131,32 @@ def render_agent_unit(
         flags=re.M,
     )
     exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-agent -config {config_path}"
+    text = re.sub(r"^ExecStart=.*$", exec_line, text, flags=re.M)
+    return text
+
+
+def render_console_unit(
+    template: str,
+    *,
+    user: str,
+    prefix: str,
+    config_path: str,
+    read_write_paths: list[str],
+    state_dir: str,
+) -> str:
+    """Render relkit-console.service.
+
+    The panel is read-only over the release tree and the agent state dir; the
+    only writable surface is the admin-account file inside the release tree,
+    same layout a serve box had (ADR 0016). state_dir may be empty (no site
+    status view); it is read, never written.
+    """
+    text = template
+    text = re.sub(r"^User=.*$", f"User={user}", text, flags=re.M)
+    text = re.sub(r"^Group=.*$", f"Group={user}", text, flags=re.M)
+    rwp = " ".join(read_write_paths) if read_write_paths else "/srv/releases"
+    text = re.sub(r"^ReadWritePaths=.*$", f"ReadWritePaths={rwp}", text, flags=re.M)
+    exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-console -config {config_path}"
     text = re.sub(r"^ExecStart=.*$", exec_line, text, flags=re.M)
     return text
 
@@ -266,7 +292,7 @@ def migrate_profile(
         notes.append(f"removed casCredentials x{n}")
     if "site" in cfg:
         cfg.pop("site", None)
-        notes.append("removed product-owned site config; configure site.makers in relkit-agent.json")
+        notes.append("removed product-owned site config; configure site.sinks in relkit-agent.json")
     backends = cfg.get("backends")
     if isinstance(backends, dict):
         new_backends = {}
@@ -296,6 +322,26 @@ def migrate_agent_config(agent_cfg: dict[str, Any]) -> tuple[dict[str, Any], lis
         cfg.pop("uploadToken", None)
         cfg.pop("uploadTokenFile", None)
         notes.append("removed instance-wide uploadToken fields")
+    site = cfg.get("site")
+    if isinstance(site, dict) and "makers" in site:
+        if site.get("sinks"):
+            raise ValueError(
+                "agent site has both site.makers and site.sinks; keep only site.sinks"
+            )
+        makers_cfg = site.get("makers") or {}
+        if not isinstance(makers_cfg, dict) or not str(makers_cfg.get("projectId") or "").strip():
+            raise ValueError(
+                "agent site.makers.projectId is empty; migrate it to site.sinks manually"
+            )
+        sink = {"type": "makers", "projectId": makers_cfg["projectId"]}
+        for key in ("region", "tokenEnv"):
+            value = makers_cfg.get(key)
+            if value:
+                sink[key] = value
+        cfg["site"] = {"sinks": [sink]}
+        notes.append(
+            "migrated site.makers to site.sinks [{\"type\":\"makers\"}]; site.makers is deprecated"
+        )
     return cfg, notes
 
 
@@ -305,7 +351,7 @@ def missing_upgrade_targets(
     """Components an upgrade would touch that the host does not actually run.
 
     A host may legitimately run only one of the two (the public publisher has no
-    relkit-serve; its data plane is COS). Returned strings say what is missing
+    relkit-store; its data plane is COS). Returned strings say what is missing
     and how to proceed.
     """
     flags = {"serve": "--agent-only", "agent": "--serve-only"}

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"go.firoyang.com/relkit/internal/publishproto"
+	"github.com/shichao402/relkit/internal/publishproto"
 )
 
 type fakeRelkitServe struct {

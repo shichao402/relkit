@@ -1,0 +1,26 @@
+{
+  "addr": ":8080",
+  "dir": "/srv/releases",
+  "uploadTokenFile": "/etc/relkit-store/relkit-store.token",
+  "uploadTokens": [
+    {"file": "tokens/demoapp.token", "products": ["demoapp"]}
+  ],
+  "maxUpload": "4GiB",
+  "cache": {
+    "noCache": ["index/", "fallback/", "directory/", "site/", "latest/"],
+    "immutable": ["manifest/", "artifact/"],
+    "defaultMaxAge": 60
+  },
+  "gc": {
+    "enabled": true,
+    "interval": "1h"
+  },
+  "publish": {
+    "minProtocol": 2
+  },
+  "shutdownTimeout": "30s",
+  "logRequests": true,
+  "site": {
+    "title": "Releases"
+  }
+}

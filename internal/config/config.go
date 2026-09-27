@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/envelope"
-	"go.firoyang.com/relkit/internal/jsonio"
-	"go.firoyang.com/relkit/internal/keys"
-	"go.firoyang.com/relkit/internal/model"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/envelope"
+	"github.com/shichao402/relkit/internal/jsonio"
+	"github.com/shichao402/relkit/internal/keys"
+	"github.com/shichao402/relkit/internal/model"
 )
 
 const ConfigName = "relkit.json"
@@ -40,7 +40,7 @@ type Config struct {
 	CodeStrategy   string
 	// RetainVersions caps how many version nodes remain in a published index.
 	// 0 (default) keeps the full history. N >= 1 keeps only the N highest-code
-	// nodes after merge, so relkit-serve orphan GC can drop older artifacts.
+	// nodes after merge, so relkit-store orphan GC can drop older artifacts.
 	RetainVersions int
 	Signing        map[string]any
 	Backends       map[string]map[string]any
@@ -351,6 +351,9 @@ func Load(path string) (*Config, error) {
 		}
 		if _, ok := obj["makers"]; ok {
 			return nil, Error{Message: "site.makers belongs in relkit-agent configuration, not product relkit.json"}
+		}
+		if _, ok := obj["sinks"]; ok {
+			return nil, Error{Message: "site.sinks belongs in relkit-agent configuration, not product relkit.json"}
 		}
 		if cfg.Site.Title == "" && cfg.Site.Description == "" && cfg.Site.Homepage == "" {
 			return nil, Error{Message: "site needs at least one of title / description / homepage"}

@@ -1,6 +1,6 @@
 // Package publishproto is the HTTP capability contract between a relkit
 // publisher and the write endpoints it talks to (relkit-agent and
-// relkit-serve). It is separate from RUP: update clients never use it.
+// relkit-store). It is separate from RUP: update clients never use it.
 package publishproto
 
 import (

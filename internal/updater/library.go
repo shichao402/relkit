@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
 )
 
 func (e *Engine) handleListInstalled(req *updaterv1.UpdaterRequest) error {

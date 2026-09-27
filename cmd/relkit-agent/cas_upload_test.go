@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/publishproto"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/publishproto"
 )
 
 func TestCASCredentialsUploadAndSkip(t *testing.T) {

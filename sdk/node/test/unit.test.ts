@@ -27,7 +27,7 @@ import {
   shouldCheck,
 } from "../src/state.js";
 import { rankUrlStrings } from "../src/preference.js";
-import { RupUpdater } from "../src/updater.js";
+import { platformSelectors, RupUpdater } from "../src/updater.js";
 
 describe("filename safety (SPEC.md section 14.4)", () => {
   test("accepts an ordinary artifact filename", () => {
@@ -340,5 +340,51 @@ describe("recovery help", () => {
     if (result.kind === "check-failed") {
       assert.equal(result.recovery?.message, "install manually");
     }
+  });
+});
+
+describe("platform selectors", () => {
+  test("platformSelectors returns the reserved GOOS/GOARCH vocabulary", () => {
+    const selectors = platformSelectors();
+    assert.ok(
+      ["darwin", "linux", "windows"].includes(selectors.os),
+      `unexpected os ${selectors.os}`,
+    );
+    assert.ok(
+      ["amd64", "arm64", "386"].includes(selectors.arch),
+      `unexpected arch ${selectors.arch}`,
+    );
+  });
+
+  test("constructor fills in undeclared platform dimensions and keeps declared ones", () => {
+    const offline = {
+      async getBytes(_url: URL, _timeoutMs: number) {
+        throw new Error("offline");
+      },
+      async probe() {
+        return { acceptsRanges: false };
+      },
+      async download() {
+        throw new Error("offline");
+      },
+      async downloadRange() {
+        throw new Error("offline");
+      },
+      close() {},
+    } as Fetcher;
+    const updater = new RupUpdater({
+      product: "demo",
+      channel: "stable",
+      currentCode: 1,
+      trustedKeys: { k1: new Uint8Array(32) },
+      clientSelectors: { arch: "x64", component: "console" },
+      stateStore: new MemoryUpdateStateStore(),
+      entryUrls: ["https://127.0.0.1:1/directory.pb"],
+      fetcher: offline,
+    });
+    const platform = platformSelectors();
+    assert.equal(updater.clientSelectors.os, platform.os);
+    assert.equal(updater.clientSelectors.arch, "x64");
+    assert.equal(updater.clientSelectors.component, "console");
   });
 });

@@ -6,9 +6,9 @@ import (
 	"io"
 	"os"
 
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
-	"go.firoyang.com/relkit/internal/ipc"
-	"go.firoyang.com/relkit/sdk"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	"github.com/shichao402/relkit/internal/ipc"
+	"github.com/shichao402/relkit/sdk"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"strings"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/envelope"
-	"go.firoyang.com/relkit/internal/model"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/envelope"
+	"github.com/shichao402/relkit/internal/model"
 )
 
 type Error struct {

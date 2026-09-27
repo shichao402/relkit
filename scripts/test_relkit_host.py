@@ -137,7 +137,7 @@ class StateTests(unittest.TestCase):
                     "channel.ssot": "VERSION.json",
                     "backend.kind": "intranet-relkit-compatible",
                     "ssh.host": "update.devcloud.woa.com",
-                    "ssh.config_dir": "/etc/relkit-serve",
+                    "ssh.config_dir": "/etc/relkit-store",
                     "token.isolation": "exclusive",
                 },
             )
@@ -164,7 +164,7 @@ class StateTests(unittest.TestCase):
                     "channel.ssot": "VERSION.json",
                     "backend.kind": "not-a-backend",
                     "ssh.host": "missing-host",
-                    "ssh.config_dir": "/etc/relkit-serve",
+                    "ssh.config_dir": "/etc/relkit-store",
                     "token.isolation": "share-with:demo",
                 },
             )
@@ -262,14 +262,14 @@ class StateTests(unittest.TestCase):
             host.set_step(state, "env.inspect", "verified", "clean")
             state["serve"]["sshHost"] = "publisher"
             responses = [
-                subprocess.CompletedProcess([], 0, "relkit-serve 0.3.17\n", ""),
+                subprocess.CompletedProcess([], 0, "relkit-store 0.3.17\n", ""),
                 subprocess.CompletedProcess([], 0, "active\nenabled\n", ""),
                 subprocess.CompletedProcess(
                     [],
                     0,
                     (
-                        "config /etc/relkit-serve/relkit-serve.json\n"
-                        "operator relkit-serve.token (full tree)\n"
+                        "config /etc/relkit-store/relkit-store.json\n"
+                        "operator relkit-store.token (full tree)\n"
                         "products\n"
                         "  loom,atlas tokens/loom.token\n"
                     ),
@@ -310,12 +310,12 @@ class StateTests(unittest.TestCase):
             host.set_step(state, "env.inspect", "verified", "clean")
             state["serve"]["sshHost"] = "publisher"
             responses = [
-                subprocess.CompletedProcess([], 0, "relkit-serve 0.3.17\n", ""),
+                subprocess.CompletedProcess([], 0, "relkit-store 0.3.17\n", ""),
                 subprocess.CompletedProcess([], 0, "active\nenabled\n", ""),
                 subprocess.CompletedProcess(
                     [],
                     0,
-                    "operator relkit-serve.token (full tree)\nproducts none\n",
+                    "operator relkit-store.token (full tree)\nproducts none\n",
                     "",
                 ),
             ]
@@ -608,7 +608,7 @@ class SshGuardTests(unittest.TestCase):
 
     def test_list_products_parser(self) -> None:
         text = (
-            "config /etc/relkit-serve\n"
+            "config /etc/relkit-store\n"
             "uploadTokens\n"
             "  svn-auto-merge            tokens/svn-auto-merge.token\n"
             "  loom                      tokens/loom.token\n"
@@ -617,8 +617,8 @@ class SshGuardTests(unittest.TestCase):
 
     def test_list_products_parser_share_with_products_block(self) -> None:
         text = (
-            "config /etc/relkit-serve/relkit-serve.json\n"
-            "operator  relkit-serve.token (full tree)\n"
+            "config /etc/relkit-store/relkit-store.json\n"
+            "operator  relkit-store.token (full tree)\n"
             "products\n"
             "  loom,svn-auto-merge      tokens/loom.token\n"
         )
@@ -653,11 +653,11 @@ class SshGuardTests(unittest.TestCase):
             "  loom,svn-auto-merge      tokens/shared.token\n"
         )
         self.assertEqual(
-            host.listed_product_token_path("/etc/relkit-serve", text, "svn-auto-merge"),
-            "/etc/relkit-serve/tokens/shared.token",
+            host.listed_product_token_path("/etc/relkit-store", text, "svn-auto-merge"),
+            "/etc/relkit-store/tokens/shared.token",
         )
         with self.assertRaisesRegex(host.Fail, "not guessing"):
-            host.listed_product_token_path("/etc/relkit-serve", text, "missing")
+            host.listed_product_token_path("/etc/relkit-store", text, "missing")
 
 
 class UpgradeManifestTests(unittest.TestCase):
@@ -1591,7 +1591,7 @@ class RetrospectTests(unittest.TestCase):
         self.assertIsNone(
             re.search(r'"sudo",\s*"relkit-(?:serve|agent)"', source)
         )
-        self.assertEqual(host.SERVE_BIN, "/usr/local/bin/relkit-serve")
+        self.assertEqual(host.SERVE_BIN, "/usr/local/bin/relkit-store")
         self.assertEqual(host.AGENT_BIN, "/usr/local/bin/relkit-agent")
 
     def test_retrospect_contract_has_matching_step_keys(self) -> None:
@@ -2172,8 +2172,8 @@ class ReconcileTests(unittest.TestCase):
 
     def test_share_with_token_path_is_the_listed_file(self) -> None:
         self.assertEqual(
-            host.serve_token_path("/etc/relkit-serve", "tokens/shared.token"),
-            "/etc/relkit-serve/tokens/shared.token",
+            host.serve_token_path("/etc/relkit-store", "tokens/shared.token"),
+            "/etc/relkit-store/tokens/shared.token",
         )
         self.assertEqual(
             host.agent_token_path("tokens/svn-auto-merge.token"),
@@ -2195,14 +2195,14 @@ class ReconcileTests(unittest.TestCase):
                 stdout = ""
                 if "-list-products" in argv:
                     stdout = (
-                        "config /etc/relkit-serve/relkit-serve.json\n"
-                        "operator relkit-serve.token (full tree)\n"
+                        "config /etc/relkit-store/relkit-store.json\n"
+                        "operator relkit-store.token (full tree)\n"
                         "products\n"
                         "  loom,svn-auto-merge      tokens/svn-auto-merge.token\n"
                     )
                 elif "init" in argv:
                     stdout = (
-                        "config /etc/relkit-serve/relkit-serve.json\n"
+                        "config /etc/relkit-store/relkit-store.json\n"
                         "token  tokens/svn-auto-merge.token (shared; products now include svn-auto-merge)\n"
                     )
                 return subprocess.CompletedProcess(argv, 0, stdout, "")
@@ -2213,7 +2213,7 @@ class ReconcileTests(unittest.TestCase):
                 product="svn-auto-merge",
                 share_with="loom",
                 host="update.devcloud.woa.com",
-                config_dir="/etc/relkit-serve",
+                config_dir="/etc/relkit-store",
             )
             with patch("relkit_host.ssh_run", side_effect=fake_ssh), patch(
                 "relkit_host.ssh_host_port", return_value=36000
@@ -2232,14 +2232,14 @@ class ReconcileTests(unittest.TestCase):
                         "sudo",
                         "chown",
                         "relkit:relkit",
-                        "/etc/relkit-serve/tokens/svn-auto-merge.token",
+                        "/etc/relkit-store/tokens/svn-auto-merge.token",
                     ]
                 ],
             )
             self.assertFalse(
                 any("loom.token" in part for cmd in remotes for part in cmd)
             )
-            self.assertIn(["sudo", "systemctl", "restart", "relkit-serve"], remotes)
+            self.assertIn(["sudo", "systemctl", "restart", "relkit-store"], remotes)
             self.assertFalse((root / host.SECRET_NOTE).is_file())
             saved = host.load_state(root)
             self.assertEqual(saved["serve"]["shareWith"], "loom")
@@ -2253,7 +2253,7 @@ class ReconcileTests(unittest.TestCase):
             state = host.default_state(root)
             state["product"] = "svn-auto-merge"
             state["serve"]["sshHost"] = "box"
-            state["serve"]["configDir"] = "/etc/relkit-serve"
+            state["serve"]["configDir"] = "/etc/relkit-store"
             state["serve"]["shareWith"] = "loom"
             host.save_state(root, state)
             remotes: list[list[str]] = []
@@ -2279,7 +2279,7 @@ class ReconcileTests(unittest.TestCase):
                     "sudo",
                     "chown",
                     "relkit:relkit",
-                    "/etc/relkit-serve/tokens/svn-auto-merge.token",
+                    "/etc/relkit-store/tokens/svn-auto-merge.token",
                 ],
                 remotes,
             )

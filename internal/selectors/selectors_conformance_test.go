@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/selectors"
-	"go.firoyang.com/relkit/internal/testutil"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/selectors"
+	"github.com/shichao402/relkit/internal/testutil"
 )
 
 type selectorFixture struct {

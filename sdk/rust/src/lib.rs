@@ -218,6 +218,42 @@ impl Glue for DefaultGlue {
     }
 }
 
+/// This build's platform as relkit selectors, in the GOOS/GOARCH vocabulary the
+/// protocol reserves (SPEC.md §11.1): os=darwin/linux/windows, arch=amd64/arm64.
+///
+/// Rust reports its own vocabulary (`std::env::consts::OS` is "macos" where
+/// the protocol says "darwin"; `ARCH` is "x86_64" where it says "amd64") —
+/// exactly the mismatch that broke Dec Console's self-update. Hosts wiring
+/// `Runtime.client_selectors` by hand should build the platform part from
+/// this; the sidecar engine also injects the same keys at check time when a
+/// host leaves them unset, so both planes agree.
+pub fn platform_selectors() -> std::collections::HashMap<String, String> {
+    let mut selectors = std::collections::HashMap::with_capacity(2);
+    selectors.insert("os".to_string(), normalized_os().to_string());
+    selectors.insert("arch".to_string(), normalized_arch().to_string());
+    selectors
+}
+
+/// GOOS-style OS name: std::env::consts::OS says "macos", the protocol's
+/// reserved vocabulary says "darwin" (SPEC.md §11.1).
+fn normalized_os() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        value => value,
+    }
+}
+
+/// GOARCH-style architecture name: std::env::consts::ARCH says "x86_64", the
+/// protocol's reserved vocabulary says "amd64" (SPEC.md §11.1).
+fn normalized_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        "x86" => "386",
+        value => value,
+    }
+}
+
 pub enum OpenResult {
     Opened {
         updater: Box<Updater>,
@@ -808,6 +844,25 @@ mod tests {
                 ..Default::default()
             })),
         }
+    }
+
+    #[test]
+    fn platform_selectors_use_reserved_vocabulary() {
+        // SPEC.md §11.1 reserves GOOS/GOARCH-style names. std::env::consts on
+        // macOS reports "macos"/"arm64"; the SDK must map to "darwin"/"arm64".
+        let selectors = platform_selectors();
+        let expected_os = if cfg!(target_os = "macos") {
+            "darwin"
+        } else if cfg!(target_os = "windows") {
+            "windows"
+        } else {
+            "linux"
+        };
+        assert_eq!(selectors.get("os").map(String::as_str), Some(expected_os));
+        assert!(matches!(
+            selectors.get("arch").map(String::as_str),
+            Some("amd64") | Some("arm64") | Some("386")
+        ));
     }
 
     #[test]

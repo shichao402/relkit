@@ -112,6 +112,28 @@ func TestLoadSiteMakersAlwaysRejected(t *testing.T) {
 	}
 }
 
+func TestLoadSiteSinksAlwaysRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigName)
+	raw := `{
+  "product": "demo",
+  "backends": {
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
+  },
+  "site": {
+    "title": "Demo",
+    "sinks": [{"type": "makers", "projectId": "makers-x"}]
+  }
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "site.sinks") {
+		t.Fatalf("expected site.sinks rejection, got %v", err)
+	}
+}
+
 func TestLoadSignersIgnoresEnvironmentVariable(t *testing.T) {
 	t.Setenv("RELKIT_PRIVATE_KEY", "not-a-real-seed-but-must-be-ignored")
 	cfg := &Config{

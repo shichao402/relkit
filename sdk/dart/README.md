@@ -4,7 +4,7 @@ Official Dart client for [RUP](https://github.com/shichao402/relkit) protobuf v2
 signed index → version chain → hash-verified download (optional apply helpers).
 
 **This directory (`relkit/sdk/dart`) is the source of truth.**  
-Go peer SDK: `../` (`go.firoyang.com/relkit/sdk`).  
+Go peer SDK: `../` (`github.com/shichao402/relkit/sdk`).  
 Host wiring: product-repo `python scripts/host/relkit_host.py`.
 
 Pure Dart (no Flutter SDK dependency).

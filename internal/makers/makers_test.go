@@ -169,6 +169,51 @@ func TestDeployDirUsesWrappedTempToken(t *testing.T) {
 	}
 }
 
+func TestListDeployments(t *testing.T) {
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "auth", http.StatusUnauthorized)
+			return
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &gotPayload); err != nil {
+			t.Fatal(err)
+		}
+		if gotPayload["Action"] != "DescribePagesDeployments" {
+			http.Error(w, "unknown action", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Response":{"TotalCount":2,"Deployments":[{"DeploymentId":"dep-1","Status":"Building","CreateTime":"2026-09-25T10:00:00Z"},{"DeploymentId":"dep-2","Status":"Success","CreateTime":"2026-09-24T10:00:00Z"}]}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := &Client{Token: "test-token", BaseURL: server.URL}
+	deployments, err := client.ListDeployments("makers-test", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deployments) != 2 {
+		t.Fatalf("deployments=%+v", deployments)
+	}
+	if deployments[0].DeploymentID != "dep-1" || deployments[0].Status != "Building" {
+		t.Fatalf("row0=%+v", deployments[0])
+	}
+	if gotPayload["ProjectId"] != "makers-test" {
+		t.Fatalf("payload=%+v", gotPayload)
+	}
+	if gotPayload["Limit"] != float64(5) {
+		t.Fatalf("limit=%v", gotPayload["Limit"])
+	}
+	if _, err := client.ListDeployments("", 5); err == nil {
+		t.Fatal("empty project must fail")
+	}
+}
+
 func TestAPIBaseURL(t *testing.T) {
 	if APIBaseURL("china") != chinaAPI {
 		t.Fatal(APIBaseURL("china"))

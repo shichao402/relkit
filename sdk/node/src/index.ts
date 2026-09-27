@@ -67,5 +67,6 @@ export {
   type UpdatePolicy,
   type UpdateStateStore,
 } from "./state.js";
+export { platformSelectors } from "./updater.js";
 export { directoryServiceKey } from "./preference.js";
 export { Updater, ipcMin, ipcMax, ipcCurrent, defaultGlue } from "./updater_facade.js";

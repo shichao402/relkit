@@ -5,5 +5,5 @@
 // relkit-updater sidecar. The in-process engine lives in internal/inprocess
 // and is not part of this package.
 //
-//	replace go.firoyang.com/relkit => ./third_party/relkit
+//	replace github.com/shichao402/relkit => ./third_party/relkit
 package sdk

@@ -504,11 +504,13 @@ updater 优先 payload，而旧 updater 仍能选不带 `apply` 的完整安装�
 
 | 键 | 取值示例 |
 |---|---|
-| `os` | `windows` `macos` `linux` `android` `ios` |
-| `arch` | `x64` `arm64` `x86` `armv7` |
+| `os` | `windows` `darwin` `linux` `android` `ios` |
+| `arch` | `amd64` `arm64` `386` `armv7` |
 | `target` | 宿主自定义的子目标，如 RemoteCam 的 `client` / `server` |
 | `abi` | 如 `musl` / `glibc` |
 | `variant` | 同一平台的不同变体，如 `portable` / `setup` |
+
+`os` 与 `arch` 的取值采用 GOOS/GOARCH 词汇（`darwin` 而非 `macos`，`amd64` 而非 `x64`/`x86_64`）。客户端**不必**自行拼装：updater 引擎在 check 时对宿主未声明的 `os`/`arch` 自动注入本机规范值；宿主显式声明的值**原样保留**（包括发布方自定义的 `arch=x64` 等非规范值），以兼容既有发布维度。in-process SDK（Node/Dart）在构造时执行同样的补缺注入。
 
 发布方**可以**使用其他自定义键。协议**禁止**限制键的集合。
 
@@ -668,9 +670,9 @@ get(key: str) -> bytes | None
 | 类型 | 数据面契约 | CAS ingest |
 |---|---|---|
 | `s3-compatible` | S3 API；服务端用长期写密钥签发 query 预签名请求，并执行 HEAD / CopyObject / DELETE | 可以 |
-| `relkit-compatible` | relkit-serve API；`POST /-/cas/uploads` 签发对象级能力 URL，并提供 HEAD / COPY / DELETE | 可以 |
+| `relkit-compatible` | relkit-store API；`POST /-/cas/uploads` 签发对象级能力 URL，并提供 HEAD / COPY / DELETE | 可以 |
 
-`local`、`http-put` 与 `static-http` 不属于现行后端。离线或本机演练**必须**启动真实 `relkit-serve` 数据面；禁止用不可访问的 `baseUrl` 伪造发布成功。外部系统已经放好的文件若要给客户端下载，把可匿名读取的绝对 URL 写进签名文档的 `urls[]`，不要为此再发明一种只读后端。
+`local`、`http-put` 与 `static-http` 不属于现行后端。离线或本机演练**必须**启动真实 `relkit-store` 数据面；禁止用不可访问的 `baseUrl` 伪造发布成功。外部系统已经放好的文件若要给客户端下载，把可匿名读取的绝对 URL 写进签名文档的 `urls[]`，不要为此再发明一种只读后端。
 
 CAS 凭据文档对每个 blob 给出 `requests[]`。每个请求**必须**包含绝对 http(s) URL、method、可选 headers 与到期时间；分片再加 `offset` 与 `length`。客户端只执行这些 HTTP 请求，**禁止**自行拼 URL、识别后端类型、实现 SigV4 / STS，或接受 `sign` 指令。对象不大于片大小、协商协议低于 3、或后端不是 `s3-compatible` 时，`requests[]` 恰好一个元素且没有 `uploadId`。协议 3 的 `s3-compatible` 分片增加元素并带 `uploadId`；客户端把每片 `ETag` 交回 agent 的 `POST /v1/cas/complete`，失败则 `POST /v1/cas/abort`。合并由 agent 签名。
 

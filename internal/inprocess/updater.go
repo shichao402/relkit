@@ -8,12 +8,12 @@ import (
 	"sort"
 	"time"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/chain"
-	"go.firoyang.com/relkit/internal/envelope"
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/selectors"
-	"go.firoyang.com/relkit/sdk"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/chain"
+	"github.com/shichao402/relkit/internal/envelope"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/selectors"
+	"github.com/shichao402/relkit/sdk"
 )
 
 // Updater checks for and downloads RUP v2 updates.

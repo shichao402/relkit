@@ -16,15 +16,15 @@ import (
 	"sync"
 	"time"
 
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/directory"
-	"go.firoyang.com/relkit/internal/humansize"
-	"go.firoyang.com/relkit/internal/makers"
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/publish"
-	"go.firoyang.com/relkit/internal/publishproto"
-	siterebuild "go.firoyang.com/relkit/internal/site"
-	"go.firoyang.com/relkit/internal/stage"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/directory"
+	"github.com/shichao402/relkit/internal/humansize"
+	"github.com/shichao402/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/publish"
+	"github.com/shichao402/relkit/internal/publishproto"
+	siterebuild "github.com/shichao402/relkit/internal/site"
+	"github.com/shichao402/relkit/internal/stage"
 )
 
 const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue a product token with `relkit-agent init -product <id>` (share a family with -share-with; CI env is RELKIT_UPLOAD_TOKEN)"
@@ -55,7 +55,12 @@ type FileConfig struct {
 }
 
 type SiteConfig struct {
+	// Makers is the pre-sinks spelling (ADR 0015 deprecated). It expands to a
+	// single {"type":"makers"} sink at load time and must not be combined
+	// with sinks.
 	Makers *makers.Config `json:"makers,omitempty"`
+	// Sinks is the declarative browse-dump destination list (ADR 0015).
+	Sinks []siterebuild.SinkSpec `json:"sinks,omitempty"`
 }
 
 // UploadTokenEntry is a publisher credential. One file maps to one or more
@@ -107,6 +112,9 @@ func LoadConfig(path string) (*Config, error) {
 	if raw.Products == nil {
 		raw.Products = map[string]ProductConfig{}
 	}
+	if raw.Site.Makers != nil && len(raw.Site.Sinks) > 0 {
+		return nil, fmt.Errorf("site.makers and site.sinks are mutually exclusive; migrate site.makers to site.sinks [{\"type\":\"makers\",...}]")
+	}
 	if raw.Site.Makers != nil {
 		if strings.TrimSpace(raw.Site.Makers.ProjectID) == "" {
 			return nil, fmt.Errorf("site.makers.projectId is required")
@@ -122,7 +130,16 @@ func LoadConfig(path string) (*Config, error) {
 		if raw.Site.Makers.Region == "" {
 			raw.Site.Makers.Region = "china"
 		}
+		raw.Site.Sinks = []siterebuild.SinkSpec{{
+			Type: siterebuild.SinkMakers, ProjectID: raw.Site.Makers.ProjectID,
+			Region: raw.Site.Makers.Region, TokenEnv: raw.Site.Makers.TokenEnv,
+		}}
 	}
+	sinks, err := siterebuild.NormalizeSinks(raw.Site.Sinks)
+	if err != nil {
+		return nil, err
+	}
+	raw.Site.Sinks = sinks
 	cfg := &Config{
 		Addr:               raw.Addr,
 		MaxUpload:          4 << 30,
@@ -329,6 +346,14 @@ type Server struct {
 }
 
 func NewServer(cfg *Config) *Server {
+	// Direct construction (tests, embedders) bypasses LoadConfig; repeat the
+	// site.makers → sinks expansion so the sink plane has one owner.
+	if len(cfg.Site.Sinks) == 0 && cfg.Site.Makers != nil {
+		cfg.Site.Sinks = []siterebuild.SinkSpec{{
+			Type: siterebuild.SinkMakers, ProjectID: cfg.Site.Makers.ProjectID,
+			Region: cfg.Site.Makers.Region, TokenEnv: cfg.Site.Makers.TokenEnv,
+		}}
+	}
 	return &Server{cfg: cfg}
 }
 
@@ -349,16 +374,32 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) handleSiteStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]any{"configured": false, "tokenPresent": false}
-	if cfg := s.cfg.Site.Makers; cfg != nil && cfg.ProjectID != "" {
-		tokenEnv := cfg.TokenEnv
+	sinks := s.cfg.Site.Sinks
+	status["sinks"] = len(sinks)
+	if len(sinks) > 0 {
+		status["configured"] = true
+	}
+	// The deploy-event snapshot (site/status.json) is the panel-facing truth
+	// about what the last rebuild actually deployed. Missing means no rebuild
+	// has deployed since the feature landed; the panel shows that as "none".
+	if snap, ok := siterebuild.ReadStatus(s.cfg.StateDir); ok {
+		status["lastDeploy"] = snap
+	}
+	// Legacy fields stay populated from the first makers sink so older
+	// operators/scripts reading projectId/tokenEnv keep working.
+	for _, spec := range sinks {
+		if spec.Type != siterebuild.SinkMakers {
+			continue
+		}
+		tokenEnv := spec.TokenEnv
 		if tokenEnv == "" {
 			tokenEnv = makers.DefaultTokenEnv
 		}
-		status["configured"] = true
-		status["projectId"] = cfg.ProjectID
-		status["region"] = cfg.Region
+		status["projectId"] = spec.ProjectID
+		status["region"] = spec.Region
 		status["tokenEnv"] = tokenEnv
 		status["tokenPresent"] = strings.TrimSpace(os.Getenv(tokenEnv)) != ""
+		break
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -378,7 +419,7 @@ func (s *Server) rebuildSite(printer func(string)) (bool, error) {
 		})
 	}
 	return siterebuild.Rebuild(siterebuild.Config{
-		Makers: s.cfg.Site.Makers, StateDir: s.cfg.StateDir,
+		Sinks: s.cfg.Site.Sinks, StateDir: s.cfg.StateDir,
 	}, products, printer)
 }
 
@@ -580,19 +621,23 @@ func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (st
 		log.Printf("staged tree %s/%s: %v", product, version, err)
 		return "", &stagedHTTPError{http.StatusBadRequest, "invalid staged tree: " + err.Error()}
 	}
-	if _, statErr := os.Stat(stage.ReleasePolicyPath(pc.Root, version)); statErr == nil {
-		policy, err := stage.LoadReleasePolicy(pc.Root, version)
-		if err != nil {
-			_ = os.RemoveAll(dest)
-			return "", &stagedHTTPError{http.StatusBadRequest, "invalid release policy: " + err.Error()}
-		}
-		if policy.Product != product {
-			_ = os.RemoveAll(dest)
-			return "", &stagedHTTPError{http.StatusBadRequest, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product)}
-		}
-	} else if !os.IsNotExist(statErr) {
+	policyPath := stage.ReleasePolicyPath(pc.Root, version)
+	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
+		_ = os.RemoveAll(dest)
+		log.Printf("staged tree %s/%s: no release-policy.json at %s", product, version, policyPath)
+		return "", &stagedHTTPError{http.StatusBadRequest, "release-policy.json required at " + policyPath + "; run 'relkit stage' to produce a portable policy"}
+	} else if statErr != nil {
 		_ = os.RemoveAll(dest)
 		return "", &stagedHTTPError{http.StatusBadRequest, "inspect release policy: " + statErr.Error()}
+	}
+	policy, err := stage.LoadReleasePolicy(pc.Root, version)
+	if err != nil {
+		_ = os.RemoveAll(dest)
+		return "", &stagedHTTPError{http.StatusBadRequest, "invalid release policy: " + err.Error()}
+	}
+	if policy.Product != product {
+		_ = os.RemoveAll(dest)
+		return "", &stagedHTTPError{http.StatusBadRequest, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product)}
 	}
 	if err := s.writeStagedSHA(product, version, sum); err != nil {
 		_ = os.RemoveAll(dest)

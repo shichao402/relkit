@@ -1,6 +1,10 @@
 // Package site rebuilds the human-facing static site from authoritative
 // data-plane documents. Product publishing never reads or writes rendered
 // catalog files.
+//
+// Destinations are declarative (ADR 0015): relkit-agent.json site.sinks[]
+// lists the sinks a dump is distributed to, and the dump always lands in the
+// agent state directory first as the local audit/servable copy.
 package site
 
 import (
@@ -9,19 +13,42 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
-	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/browse"
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/makers"
-	"go.firoyang.com/relkit/internal/webmeta"
+	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/browse"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/webmeta"
 )
 
+// Sink types (ADR 0015).
+const (
+	SinkMakers    = "makers"    // EdgeOne Pages project (legacy site.makers spelling)
+	SinkBackend   = "backend"   // a backend named in a product publish profile
+	SinkDirectory = "directory" // local dir served by an external static host
+)
+
+// SinkSpec declares one browse-dump destination in relkit-agent.json
+// site.sinks[]. It never appears in a product relkit.json.
+type SinkSpec struct {
+	Type string `json:"type"`
+	// SinkMakers fields.
+	ProjectID string `json:"projectId,omitempty"`
+	Region    string `json:"region,omitempty"`
+	TokenEnv  string `json:"tokenEnv,omitempty"`
+	// SinkBackend field: backend name as defined by a product profile.
+	Backend string `json:"backend,omitempty"`
+	// SinkDirectory field: absolute path the static host serves.
+	Path string `json:"path,omitempty"`
+}
+
 type Config struct {
-	Makers   *makers.Config
+	Sinks    []SinkSpec
 	StateDir string
 }
 
@@ -35,15 +62,87 @@ type Printer func(string)
 
 var createBackend = backends.Create
 
-type sink interface {
-	Name() string
-	Deploy(map[string][]byte) error
+// NormalizeSinks validates sink specs and applies defaults. It runs at agent
+// config load; Rebuild runs it again defensively for direct callers.
+func NormalizeSinks(specs []SinkSpec) ([]SinkSpec, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]SinkSpec, 0, len(specs))
+	seen := map[string]bool{}
+	for i, spec := range specs {
+		switch spec.Type {
+		case SinkMakers:
+			if strings.TrimSpace(spec.ProjectID) == "" {
+				return nil, fmt.Errorf("site.sinks[%d].projectId is required", i)
+			}
+			switch spec.Region {
+			case "", "china", "global":
+			default:
+				return nil, fmt.Errorf(`site.sinks[%d].region must be "china" or "global"`, i)
+			}
+			if spec.TokenEnv == "" {
+				spec.TokenEnv = makers.DefaultTokenEnv
+			}
+			if spec.Region == "" {
+				spec.Region = "china"
+			}
+		case SinkBackend:
+			if strings.TrimSpace(spec.Backend) == "" {
+				return nil, fmt.Errorf("site.sinks[%d].backend is required", i)
+			}
+		case SinkDirectory:
+			if strings.TrimSpace(spec.Path) == "" {
+				return nil, fmt.Errorf("site.sinks[%d].path is required", i)
+			}
+			if !filepath.IsAbs(spec.Path) {
+				return nil, fmt.Errorf("site.sinks[%d].path must be absolute", i)
+			}
+			spec.Path = filepath.Clean(spec.Path)
+		default:
+			return nil, fmt.Errorf("site.sinks[%d].type must be one of makers, backend, directory", i)
+		}
+		name := sinkSpecName(spec)
+		if seen[name] {
+			return nil, fmt.Errorf("site.sinks[%d] duplicates sink %q", i, name)
+		}
+		seen[name] = true
+		out = append(out, spec)
+	}
+	return out, nil
 }
 
-type backendSink struct{ backend backends.Backend }
+func sinkSpecName(spec SinkSpec) string {
+	switch spec.Type {
+	case SinkMakers:
+		return "makers:" + spec.ProjectID
+	case SinkBackend:
+		return "backend:" + spec.Backend
+	case SinkDirectory:
+		return "directory:" + spec.Path
+	}
+	return spec.Type
+}
 
-func (s backendSink) Name() string { return s.backend.Describe() }
-func (s backendSink) Deploy(dump map[string][]byte) error {
+// DeployResult reports what one sink deployment produced. The zero value is
+// valid: sinks without a remote deployment identity (directory, backend)
+// report nothing beyond success.
+type DeployResult struct {
+	DeploymentID string // remote deployment id when the sink has one (makers)
+}
+
+type sink interface {
+	Name() string
+	Deploy(map[string][]byte) (*DeployResult, error)
+}
+
+type backendSink struct {
+	name    string
+	backend backends.Backend
+}
+
+func (s backendSink) Name() string { return s.name }
+func (s backendSink) Deploy(dump map[string][]byte) (*DeployResult, error) {
 	keys := make([]string, 0, len(dump))
 	for key := range dump {
 		keys = append(keys, key)
@@ -51,25 +150,46 @@ func (s backendSink) Deploy(dump map[string][]byte) error {
 	sort.Strings(keys)
 	for _, key := range keys {
 		if _, err := s.backend.PutPointer(dump[key], key); err != nil {
-			return fmt.Errorf("%s: %w", key, err)
+			return nil, fmt.Errorf("%s: %w", key, err)
 		}
 	}
-	return nil
+	return &DeployResult{}, nil
 }
 
 type makersSink struct{ cfg *makers.Config }
 
 func (s makersSink) Name() string { return "makers:" + s.cfg.ProjectID }
-func (s makersSink) Deploy(dump map[string][]byte) error {
-	return makers.DeployDump(dump, s.cfg)
+func (s makersSink) Deploy(dump map[string][]byte) (*DeployResult, error) {
+	result, err := makers.DeployDump(dump, s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return &DeployResult{}, nil
+	}
+	return &DeployResult{DeploymentID: result.DeploymentID}, nil
+}
+
+type directorySink struct{ dir string }
+
+func (s directorySink) Name() string { return "directory:" + s.dir }
+func (s directorySink) Deploy(dump map[string][]byte) (*DeployResult, error) {
+	return &DeployResult{}, writeDumpDir(s.dir, dump)
 }
 
 // Rebuild collects every configured product and deploys one complete dump.
+// Sink deployment failure is an error but never blocks protocol publishing:
+// the caller (agent) runs this outside the publish path, and a failed pass
+// does not record dump.sha256, so the next run is a full redeploy.
 func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) {
 	if printer == nil {
 		printer = func(string) {}
 	}
-	inputs, sinks, err := collect(products, siteCfg.Makers, printer)
+	sinks, err := NormalizeSinks(siteCfg.Sinks)
+	if err != nil {
+		return false, err
+	}
+	inputs, backendsByName, err := collect(products, printer)
 	if err != nil {
 		return false, err
 	}
@@ -77,8 +197,13 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 		return false, fmt.Errorf("site rebuild found no published product data")
 	}
 	if len(sinks) == 0 {
-		return false, fmt.Errorf("site rebuild has no destination (configure agent site.makers or a HostsBrowse backend)")
+		return false, fmt.Errorf("site rebuild has no destination (configure site.sinks in relkit-agent.json)")
 	}
+	dests, err := resolveSinks(sinks, backendsByName)
+	if err != nil {
+		return false, err
+	}
+	status := Status{At: time.Now().UTC().Format(time.RFC3339)}
 	memberPath := filepath.Join(siteCfg.StateDir, "site", "members.json")
 	members := inputMembers(inputs)
 	if err := guardCompleteSnapshot(memberPath, products, members); err != nil {
@@ -88,7 +213,13 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	sum := hashDump(dump, sinks)
+	// The state copy is written first and unconditionally (ADR 0015): it is
+	// the audit/rollback reference and a servable document root, so a sink
+	// failure never destroys the only local dump.
+	if err := writeDumpDir(filepath.Join(siteCfg.StateDir, "site", "dump"), dump); err != nil {
+		return false, err
+	}
+	sum := hashDump(dump, dests)
 	statePath := filepath.Join(siteCfg.StateDir, "site", "dump.sha256")
 	if previous, err := os.ReadFile(statePath); err == nil && strings.TrimSpace(string(previous)) == sum {
 		if err := writeMembers(memberPath, members); err != nil {
@@ -97,11 +228,17 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 		printer("site rebuild: unchanged; deployment skipped")
 		return false, nil
 	}
-	for _, dest := range sinks {
+	for _, dest := range dests {
 		printer("site rebuild: deploying " + dest.Name())
-		if err := dest.Deploy(dump); err != nil {
+		result, err := dest.Deploy(dump)
+		if err != nil {
 			return false, fmt.Errorf("%s: %w", dest.Name(), err)
 		}
+		record := sinkStatus{Name: dest.Name(), OK: true}
+		if result != nil {
+			record.DeploymentID = result.DeploymentID
+		}
+		status.Sinks = append(status.Sinks, record)
 	}
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		return false, err
@@ -109,10 +246,87 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	if err := os.WriteFile(statePath, []byte(sum+"\n"), 0o644); err != nil {
 		return false, err
 	}
+	if err := writeStatus(filepath.Join(siteCfg.StateDir, "site", "status.json"), status); err != nil {
+		return false, err
+	}
 	if err := writeMembers(memberPath, members); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// resolveSinks turns validated specs into live sinks. A backend sink must
+// name a backend that product profiles actually define, and every product
+// defining that name must agree on the data plane it points at.
+func resolveSinks(specs []SinkSpec, backendsByName map[string][]backends.Backend) ([]sink, error) {
+	dests := make([]sink, 0, len(specs))
+	for _, spec := range specs {
+		switch spec.Type {
+		case SinkMakers:
+			dests = append(dests, makersSink{cfg: &makers.Config{
+				ProjectID: spec.ProjectID, TokenEnv: spec.TokenEnv, Region: spec.Region,
+			}})
+		case SinkBackend:
+			instances := backendsByName[spec.Backend]
+			if len(instances) == 0 {
+				return nil, fmt.Errorf("site sink backend %q is not defined by any product profile", spec.Backend)
+			}
+			for _, backend := range instances[1:] {
+				if backend.Type() != instances[0].Type() || backend.Describe() != instances[0].Describe() {
+					return nil, fmt.Errorf("site sink backend %q is ambiguous: products define it as different data planes", spec.Backend)
+				}
+			}
+			if !instances[0].HostsBrowse() {
+				return nil, fmt.Errorf("site sink backend %q (%s) cannot serve the browse dump; only HostsBrowse backends may receive HTML", spec.Backend, instances[0].Type())
+			}
+			dests = append(dests, backendSink{name: "backend:" + spec.Backend, backend: instances[0]})
+		case SinkDirectory:
+			dests = append(dests, directorySink{dir: spec.Path})
+		default:
+			return nil, fmt.Errorf("site sink type %q is not supported", spec.Type)
+		}
+	}
+	return dests, nil
+}
+
+// Status is the deploy-event snapshot written after a successful rebuild. It
+// records what each sink did; dump.sha256 remains the content fingerprint.
+// An unchanged rebuild deploys nothing and rewrites nothing here.
+type Status struct {
+	At    string       `json:"at"`    // when this rebuild deployed
+	Sinks []sinkStatus `json:"sinks"` // one record per sink, in deploy order
+}
+
+type sinkStatus struct {
+	Name         string `json:"name"`
+	OK           bool   `json:"ok"`
+	DeploymentID string `json:"deploymentId,omitempty"` // makers deployments carry one
+}
+
+func writeStatus(path string, status Status) error {
+	data, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// ReadStatus loads the deploy-event snapshot for display (agent status
+// endpoint, console panels). A missing snapshot is not an error: it means no
+// rebuild has deployed since the feature landed.
+func ReadStatus(stateDir string) (Status, bool) {
+	data, err := os.ReadFile(filepath.Join(stateDir, "site", "status.json"))
+	if err != nil {
+		return Status{}, false
+	}
+	var status Status
+	if json.Unmarshal(data, &status) != nil {
+		return Status{}, false
+	}
+	return status, true
 }
 
 func inputMembers(inputs []browse.ProductData) []string {
@@ -169,16 +383,14 @@ func writeMembers(path string, members []string) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-func collect(products []Product, makersCfg *makers.Config, printer Printer) ([]browse.ProductData, []sink, error) {
+// collect reads every product's site/latest documents from its publish
+// backends. Backends are also indexed by profile name so declarative backend
+// sinks can be resolved; sinks are no longer derived from HostsBrowse.
+func collect(products []Product, printer Printer) ([]browse.ProductData, map[string][]backends.Backend, error) {
 	sorted := append([]Product(nil), products...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	var inputs []browse.ProductData
-	var sinks []sink
-	seenSink := map[string]bool{}
-	if makersCfg != nil && makersCfg.ProjectID != "" {
-		sinks = append(sinks, makersSink{cfg: makersCfg})
-		seenSink["makers:"+makersCfg.ProjectID] = true
-	}
+	backendsByName := map[string][]backends.Backend{}
 	for _, product := range sorted {
 		profile, err := config.LoadPublishProfile(product.Profile)
 		if err != nil {
@@ -195,13 +407,7 @@ func collect(products []Product, makersCfg *makers.Config, printer Printer) ([]b
 				return nil, nil, fmt.Errorf("%s backend %s: %w", product.ID, name, err)
 			}
 			sources = append(sources, backend)
-			if backend.HostsBrowse() {
-				key := backend.Type() + ":" + backend.Describe()
-				if !seenSink[key] {
-					seenSink[key] = true
-					sinks = append(sinks, backendSink{backend: backend})
-				}
-			}
+			backendsByName[name] = append(backendsByName[name], backend)
 		}
 		siteRaw, err := firstGet(sources, webmeta.SiteKey(product.ID))
 		if err != nil {
@@ -248,7 +454,7 @@ func collect(products []Product, makersCfg *makers.Config, printer Printer) ([]b
 			inputs = append(inputs, input)
 		}
 	}
-	return inputs, sinks, nil
+	return inputs, backendsByName, nil
 }
 
 func firstGet(sources []backends.Backend, key string) ([]byte, error) {
@@ -266,6 +472,71 @@ func firstGet(sources []backends.Backend, key string) ([]byte, error) {
 		return nil, fmt.Errorf("%s", strings.Join(failures, "; "))
 	}
 	return nil, nil
+}
+
+// writeDumpDir atomically replaces dir with the dump rendered as a servable
+// document root: the browse/ prefix is stripped so index.html sits at the
+// root an external static host (nginx/Caddy) points at. The swap is
+// write-temp-then-rename; a failed write never touches the previous tree.
+func writeDumpDir(dir string, dump map[string][]byte) error {
+	dir = filepath.Clean(dir)
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(parent, "."+filepath.Base(dir)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	// MkdirTemp yields 0700; the dump tree is served by an unprivileged
+	// static host (nginx/Caddy), so open the tree to world-readable.
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		_ = os.RemoveAll(tmp)
+		return err
+	}
+	abort := func(err error) error {
+		_ = os.RemoveAll(tmp)
+		return err
+	}
+	names := make([]string, 0, len(dump))
+	for name := range dump {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		rel, err := dumpFileRel(name)
+		if err != nil {
+			return abort(err)
+		}
+		target := filepath.Join(tmp, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return abort(err)
+		}
+		if err := os.WriteFile(target, dump[name], 0o644); err != nil {
+			return abort(err)
+		}
+	}
+	previous := dir + ".previous"
+	_ = os.RemoveAll(previous)
+	if err := os.Rename(dir, previous); err != nil && !os.IsNotExist(err) {
+		return abort(err)
+	}
+	if err := os.Rename(tmp, dir); err != nil {
+		if _, statErr := os.Stat(previous); statErr == nil {
+			_ = os.Rename(previous, dir) // put the last good tree back
+		}
+		return abort(err)
+	}
+	_ = os.RemoveAll(previous)
+	return nil
+}
+
+func dumpFileRel(name string) (string, error) {
+	rel := strings.TrimPrefix(path.Clean(name), "browse/")
+	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("dump key %q is not a servable file name", name)
+	}
+	return rel, nil
 }
 
 func hashDump(dump map[string][]byte, sinks []sink) string {

@@ -4,7 +4,7 @@
 title: Publish Agent
 category: design
 created: 2026-08-12
-updated: 2026-09-09
+updated: 2026-09-26
 status: approved
 related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md, docs/adr/0009-publisher-protocol-negotiation.md
 ---
@@ -14,7 +14,7 @@ related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI
 CI **不持** RUP 签名私钥，也 **不持** 长期后端写密钥。  
 CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯一一个**目的地上传一次；agent 持钥 `publish.Run`（Promote / Materialize + 签指针），其余后端的副本由 agent 在数据面之间分发。现网代码仍接受整包 `PUT /v1/staged`。
 
-数据面只是 API 不同：公网 `s3-compatible` → COS；内网 `relkit-compatible` → relkit-serve。客户端永远不连 agent。这条改动是为了让发布机只做管理角色，**不是**为了跨境加速。
+数据面只是 API 不同：公网 `s3-compatible` → COS；内网 `relkit-compatible` → relkit-store。客户端永远不连 agent。这条改动是为了让发布机只做管理角色，**不是**为了跨境加速。
 
 ## 2. 信任边界
 
@@ -47,11 +47,28 @@ agent 只需要清单与策略，不需要产物副本：
 
 CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。目标路径：这些文件按凭据文档 PUT 到 **ingest 后端**的 `cas/{sha256}`，**每个 blob 一次**，与本轮有几个后端无关；交给 agent 的 tar **不含** `artifacts/`（只有 `staged.pb` + `release-policy.json`）。现网整包 tar 仍可带上 `artifacts/`，agent 解包后走 `PutArtifactCAS`。瘦 tar 路径下，缺文件是否可发布由 ingest 上是否已有对应 `cas/{sha256}` 决定（见失败语义），不要在解包时因为没有 `artifacts/` 就失败。
 
-缺少 `release-policy.json` 或本机没有可读 profile 时直接失败。
+staged 树缺 `release-policy.json` 时，`PUT /v1/staged`（整包与分片 complete）解包后直接 **400**，不再等到 `POST /v1/publish`（agent 0.1.4 起）；本机没有可读 profile 仍是 publish 时失败。
 
 ### 2.2 publish profile
 
 缺省路径：与 `relkit-agent.json` 同目录的 `products/<product>.json`（安装后即 `/etc/relkit-agent/products/<id>.json`）。`products.<id>.profile` 可覆盖。profile 只含端点与环境变量**名**，不含密钥明文；init 写成 `0644`，以便 root 跑 init 后 `relkit` 用户仍能读。
+
+字段语义表（机器 profile 的合法字段集 = `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` 结构体字段集）：
+
+| 字段 | 归属 | 语义 |
+|---|---|---|
+| `product` | 机器 profile | 必须与 release-policy 的 `product` 一致，否则拒绝发布 |
+| `signing.keyId` | 机器 profile | 必须与 policy 的 `signing.keyId` 一致 |
+| `signing.privateKeyEnv` / `signing.privateKeyPath` | 机器 profile | 私钥引用（env 名或路径）；公钥永远不在这里 |
+| `backends` | 机器 profile | 各后端端点与凭据 env 名 |
+| `publishTo` | 机器 profile | 发布目标后端列表 |
+| `directory.publishTo` | 机器 profile | directory 指针发布目标 |
+| `signing.publicKeys` | 产品仓 `release-policy.json` | 公钥 SSOT 在产品策略，防发布机私钥与产品公钥配对错误 |
+| `directory.entryUrls` | 产品仓 `release-policy.json` | directory 文档内容由 staged 树的 release-policy 决定，机器只声明发布目标 |
+| `directory.services` | 产品仓 `release-policy.json` | 客户端概念随 staged 树走 |
+| `defaultChannel` / `channels` / `codeStrategy` / `retainVersions` | 产品仓 `release-policy.json` | 通道与版本策略 |
+
+strict 校验已生效（2026-09-26 双发布面部署 `0.4.24+94b2ef5`）：agent 对 publish profile 与 release-policy **双侧** strict 解析（`DisallowUnknownFields`），未知字段判整个文件非法、publish 阶段返回 400。机器 profile schema **不承诺向后兼容**，无迁移工具、无兼容垫片；旧 agent 的宽松解析让冗余字段静默存活，strict 是防止欠账再累积的基线。strict 拒绝时的排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
 
 ### 2.3 CAS：一次 ingest，之后由 agent 分发
 
@@ -242,7 +259,7 @@ python scripts/host/relkit_host.py agent remove --execute
 必须严格分四步，不能把配置迁移和删除类型二进制一起上线：
 
 1. **发布机清 `casCredentials`。** 从全部 publish profile 删除该字段；过渡版本虽接受并忽略，但不得继续把 `sts` 当有效配置。
-2. **内网 serve 先部署 GC。** 先上线支持 CAS 上传租约与 `gc.casGrace`（默认 `24h`）的 relkit-serve，并确认 GC 正常。
+2. **内网 serve 先部署 GC。** 先上线支持 CAS 上传租约与 `gc.casGrace`（默认 `24h`）的 relkit-store，并确认 GC 正常。
 3. **开写入面、迁 profile、发版验证。** 为 serve 配运营方 `RELKIT_SERVE_TOKEN`，把 profile 改成 `relkit-compatible`（`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`），完成一次 `cas-put` → publish → verify。
 4. **稳定后才部署删除类型版本。** 观察现网稳定后，最后升级到不再包含 `local` / `http-put` 的 agent/CLI；否则旧 profile 会直接报 unsupported backend type。
 
@@ -272,7 +289,7 @@ python scripts/host/relkit_host.py agent remove --execute
    描述的是 CI 直连后端的场景。`relkit_host.py agent provision` 生成 profile 时从
    箱上已装 profile 继承这两个字段，只有首次创建才用默认值；`baseUrl` 相反，始终
    以产品仓为准，因为它是要写进签名 manifest 的客户端下载地址。
-4. `relkit-serve` 对外提供完整数据面 API：正式对象继续匿名 Range GET；普通 PUT / COPY / HEAD / DELETE 由运营方 Bearer 保护，CAS PUT 由短期对象能力签名保护。和 COS 一样，公开可达不等于匿名可写。
+4. `relkit-store` 对外提供完整数据面 API：正式对象继续匿名 Range GET；普通 PUT / COPY / HEAD / DELETE 由运营方 Bearer 保护，CAS PUT 由短期对象能力签名保护。和 COS 一样，公开可达不等于匿名可写。
 
 Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某产品的 token 发给无关仓库。不要用实例级 Bearer 当「同机共享」。
 
@@ -283,7 +300,7 @@ Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某�
 | | 公网 | 内网 |
 |---|---|---|
 | 托管 | EdgeOne Makers（契约在本仓库 `sites/updates-index/`，**不要把 dump 拷进该目录当发版步骤**） | 数据面 `browse/` |
-| 怎么上去 | agent 顶层 `site.makers` 持有 projectId/region/tokenEnv；rebuild 后 Folder 整站 Upload | rebuild 把完整 dump 写入每个 `HostsBrowse` 数据面 |
+| 怎么上去 | agent 顶层 `site.sinks[]` 持有 `{"type":"makers"}`（projectId/region/tokenEnv）；rebuild 后 Folder 整站 Upload | rebuild 按 `site.sinks[]` 把完整 dump 写入声明的 backend（须 `HostsBrowse`）或 `directory` 目录 |
 | 动态 | 现在没有 `edge-functions/`，就是静态站。计数走 51.la（见 `docs/ROADMAP.md`），不要 KV。以后要函数只加在该子目录，且不当账本；内网不跟 |
 
 COS 不放 HTML。不要为此打开静态网站源站。页上不把 `.pb` 当导航，也不加载外链字体或图。

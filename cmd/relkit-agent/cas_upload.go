@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/model"
 )
 
 const casCredentialTTL = time.Hour

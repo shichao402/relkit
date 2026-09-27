@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go.firoyang.com/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/config"
 )
 
 func TestLoadIndexSkipsMissingS3Credentials(t *testing.T) {

@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/httpx"
+	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/httpx"
 )
 
 const (
@@ -83,9 +83,9 @@ type Config struct {
 }
 
 // DeployDump uploads an in-memory, complete static site.
-func DeployDump(dump map[string][]byte, cfg *Config) error {
+func DeployDump(dump map[string][]byte, cfg *Config) (*Result, error) {
 	if cfg == nil || cfg.ProjectID == "" {
-		return fmt.Errorf("site.makers.projectId is required")
+		return nil, fmt.Errorf("makers sink projectId is required")
 	}
 	tokenEnv := cfg.TokenEnv
 	if tokenEnv == "" {
@@ -93,14 +93,13 @@ func DeployDump(dump map[string][]byte, cfg *Config) error {
 	}
 	token := os.Getenv(tokenEnv)
 	if token == "" {
-		return fmt.Errorf("site.makers needs the Pages token in the environment variable %s, which is unset or empty", tokenEnv)
+		return nil, fmt.Errorf("makers sink needs the Pages token in the environment variable %s, which is unset or empty", tokenEnv)
 	}
 	client := &Client{
 		Token:   token,
 		BaseURL: APIBaseURL(cfg.Region),
 	}
-	_, err := client.Deploy(dump, cfg.ProjectID)
-	return err
+	return client.Deploy(dump, cfg.ProjectID)
 }
 
 // Result is the Pages deployment created after the dump upload.
@@ -109,6 +108,43 @@ type Result struct {
 	DeploymentID   string
 	TempBucketPath string
 	Uploaded       []string
+}
+
+// Deployment is one row of the Pages deployment history. This is the read-only
+// view the console's Site card renders (ADR 0016 step 5); fields the panel
+// does not show are left out so a Pages API addition never breaks decoding.
+type Deployment struct {
+	DeploymentID string `json:"DeploymentId"`
+	Status       string `json:"Status"`
+	CreateTime   string `json:"CreateTime"`
+}
+
+// deploymentsPage is the DescribePagesDeployments response shape after
+// unwrapPagesBody: TotalCount plus one page of rows.
+type deploymentsPage struct {
+	TotalCount  int          `json:"TotalCount"`
+	Deployments []Deployment `json:"Deployments"`
+}
+
+// ListDeployments reads the most recent deployments of one Pages project. It
+// is the console's makers read path: which deployment is live, when it was
+// created. Errors surface as-is; the panel degrades quietly.
+func (c *Client) ListDeployments(projectID string, limit int) ([]Deployment, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("site.makers.projectId is required")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	var page deploymentsPage
+	if err := c.call("DescribePagesDeployments", map[string]any{
+		"ProjectId": projectID,
+		"Limit":     limit,
+		"Offset":    0,
+	}, &page); err != nil {
+		return nil, err
+	}
+	return page.Deployments, nil
 }
 
 func (c *Client) httpClient() *http.Client {

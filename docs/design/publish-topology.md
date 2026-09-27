@@ -4,14 +4,14 @@
 title: 发布拓扑（控制面一条路，数据面 / 人页为 adapter）
 category: design
 created: 2026-08-30
-updated: 2026-09-07
+updated: 2026-09-25
 status: approved
 related: docs/design/publish-agent.md, docs/design/update-ingress-cos.md, CLI.md, sites/updates-index/README.md
 supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 仍保留，之后再合并。
 ---
 
 开发者审阅用的当前拓扑。旧文继续当历史与细节 SSOT；本文只画**流程与进程切面**。  
-2026-08-30 晚：补「对外 browse / 对内 serve 面板」，实现已按 §5 落地。
+2026-08-30 晚：补「对外 browse / 对内 console 面板」，实现已按 §5 落地。
 
 ## 1. 决议
 
@@ -20,16 +20,17 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 - **`artifactTo` 与 `pointerTo` 分开（目标，profile 字段尚未落地）。** 几百 MiB 的 `artifact/` 只发给能当数据面的后端（`s3-compatible`、`relkit-compatible`），默认就 ingest 一家；几 KB 的签名 pb 才扇给 `entryUrls` 备桶。现网仍用一份 `publishTo`。用一个 `publishTo` 把产物也镜像进 git 仓，等于每次发版往历史灌一份删不掉的大文件。承载 `entryUrls` 的备援须过 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 三条准入（目标网络可达、`Cache-Control` 我方可配、失效域与主正交）；CNB / GitHub raw 不合格，当前形态是异地域第二个 COS 桶 + 独立自有二级域名。
 - 协议对象走 **Backend adapter**。CAS 的 `cas/{sha256}` inbox **只存在于 ingest 后端**；其余后端只有 `artifact/...`。**切面不因 type 分叉**：CI、`publish.Run`、客户端看到的接口对所有后端相同。query 预签名 / 能力 URL / COPY / 字节从哪儿来都是实现细节，禁止 `if backend.Type()=="s3-compatible"` 出现在 publish 或 CI 脚本里。
 - **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。它由 agent 对全部产品的数据面事实静态重建，外网落 Makers、内网落 `browse/`。产品 publish 不拥有站点。
-- **relkit-serve 现算的门户**（今 GET `/` 那套主题页、`/-/p/`、`?files=1`）是打到自托管箱上的操作面：容量就是这一台机，以后长成 relkit 后台面板。它不是对外目录，内外网对外都不要再把人指到这里。
+- **relkit-console 现算的门户**（今 GET `/` 那套主题页、`/-/p/`、`?files=1`）是打到自托管箱上的操作面：容量就是这一台机，以后长成 relkit 后台面板。它不是对外目录，内外网对外都不要再把人指到这里。
 - 环境差只在节点旁注明现网用法，不要为内外网发明第二种发布流程。人页皮肤也不分叉：dump 一份，托管地方按 sink 选。
 
 ## 2. 进程与端口
 
 | 进程 | listen | 切面 |
 |---|---|---|
-| nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
+| nginx / Caddy | `0.0.0.0:443`（内网现网先 `:80`，有证再上 443） | 外网 `publish.firoyang.com:443`（CI 写面 + 兼容读）；外网读面 `update-internal.firoyang.com:443`（内嵌 SDK 协议 GET，2026-09-26 起）；人页 `update.firoyang.com:443`；内网最终 `update.devcloud.woa.com:443` |
 | relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
-| relkit-serve | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只把 `/-/admin`、`/-/p/` 当操作面壳，本机空目录不是 COS 数据面 |
+| relkit-store（[ADR 0016](../adr/0016-serve-split-store-console.md)，由 relkit-serve 拆出） | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只作存储壳，本机空目录不是 COS 数据面 |
+| relkit-console（[ADR 0016](../adr/0016-serve-split-store-console.md)） | `127.0.0.1:8081`（已落地） | serve 的管理面拆出的独立二进制：`/-/admin` 面板、账户、统计、目录浏览、`/-/latest/`，只读经 adapter；两台机的 nginx 面板分流均已上线 |
 | COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / 站点 sink 节点 |
 
 同机可以是一个 nginx、两个 `server_name`（CI 的 `/v1/*` → 8787，客户端 GET → 8080 或读盘）。内网 CI 打的是该箱**内网 IP:443** 上的名字，不是回环 hostname。
@@ -49,7 +50,7 @@ flowchart TB
   tok --> casPut["CI PUT cas/SHA256<br/>每个 blob 恰好一次"]
   stage --> stagedMeta["PUT /v1/staged<br/>pb + policy 几 KB<br/>已有 URL 的产物在此申报"]
 
-  casPut ==> ingestCas[("ingest 的 cas/<br/>COS 或 relkit-serve")]
+  casPut ==> ingestCas[("ingest 的 cas/<br/>COS 或 relkit-store")]
   stagedMeta --> ngx["nginx 或 Caddy :443"]
   ngx --> postPub["agent POST /v1/publish"]
   postPub --> run["publish.Run"]
@@ -76,8 +77,8 @@ flowchart TB
 
   dump --> sink{"site sink<br/>配置归 agent"}
 
-  sink --> makers["Makers<br/>现网外网人页 · 可卸"]
-  sink --> tree["HTTP GET 树 browse/<br/>现网内网人页"]
+  sink --> makers["Makers<br/>已退役 2026-09-25 · 待清理云端项目"]
+  sink --> tree["HTTP GET 树 browse/<br/>现网内外网人页同款"]
   sink --> other["其他 site 托管"]
 
   makers --> done["发布完成"]
@@ -87,36 +88,57 @@ flowchart TB
 
 dump 包含 `index.html`（总目录）、全部 `<product>.html`、`catalog.json`（派生数据）。协议客户端不读，rebuild 也不把它当输入。
 
+> 2026-09-25 更新：外网数据面已从 COS 迁至本机 relkit-store（`/srv/releases`，serve 已退役）。人页 Makers 退出服务路径：agent sinks 为 `backend:serve` + `directory:/srv/relkit/site` 双落点，`update.firoyang.com` 由本机 nginx 直接伺服静态目录，与内网拓扑完全一致。原因：hk CVM 到广州 COS 公网入口 443 跨境不通（见 golden-path 归档），COS 托管暂不可用。Makers 云端项目 `relkit-updates-index` 尚未删除（Pages API token 已失效，待续期后清理）。
+
 ## 4. 下载
 
 ```mermaid
 flowchart TB
   sdk["客户端 SDK 不连 8787"] --> get{"GET 数据面"}
-  get --> cosGet["COS raw.firoyang.com:443<br/>主"]
+  get --> intGet["update-internal.firoyang.com<br/>→ store 127.0.0.1:8080<br/>新代内嵌 SDK 读面 · 2026-09-26 起"]
+  get --> cosGet["COS raw.firoyang.com:443<br/>已退役 2026-09-25 · 见注"]
   get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
-  get --> woaGet["update.devcloud.woa.com<br/>→ serve 127.0.0.1:8080 读盘"]
+  get --> woaGet["update.devcloud.woa.com<br/>→ store 127.0.0.1:8080 读盘"]
+  get --> pubGet["publish.firoyang.com<br/>→ 本机 store :8080 · CI 写面 + 旧代读兼容<br/>存量 entryUrls 靠自然升级迁出"]
+  get --> rawCompat["raw.firoyang.com<br/>已下线 2026-09-26 · DNS 删<br/>旧代 ≤1.13.92 靠自然升级"]
   get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
   cosGet --> verify["验签 · sequence · sha256"]
   cosBackup --> verify
   woaGet --> verify
+  pubGet --> verify
+  rawCompat --> verify
   relGet --> verify
 
   human["人用浏览器 · 对外目录"] --> site{"同一份 browse dump"}
-  site --> makersGet["Makers<br/>现网外网"]
-  site --> pages["GET / 或 /browse/<br/>现网内网 · 静态文件"]
+  site --> makersGet["Makers<br/>已退役 · 云端项目待删"]
+  site --> pages["GET / 或 /browse/<br/>内外网同款 · nginx 伺服"]
 
-  ops["操作员 · 自托管箱"] --> panel["serve 现算面板 /-/admin<br/>以后 relkit 后台 · 不对外当目录"]
+    ops["操作员 · 自托管箱"] --> panel["console 现算面板 /-/admin<br/>以后 relkit 后台 · 不对外当目录"]
 ```
+
+> 注：`raw.firoyang.com`（广州 COS）2026-09-25 起退出外网数据面。hk CVM 到广州 COS 公网入口 443 跨境不通，CI 发布与客户端下载均已切到 `publish.firoyang.com`（本机 store）。香港临时桶已验证 hk→HK COS 全链路可用（PUT/GET/LIST/HEAD/DELETE 5/5，桶已删），待跨境问题解决后可评估迁回。
+
+> 2026-09-26 决定：`raw.firoyang.com` 以 A 记录直指发布机（43.161.241.238），由发布机 nginx 同板伺服 `location ^~ /rup/`（前缀剥离后转 store :8080），作为 ≤1.13.92 旧代客户端的兼容入口；不做 CNAME 到 `publish`（域名不指域名：两者是不同语义的东西，机器可能分开）。hk lighthouse 单机承载外网数据面，容量上限后转 COS + 全球加速（预案，不执行）。HK COS 第二数据面方案否决（成本）。directory sequence 防回退（SPEC §12.4）：COS 旧 directory seq（dec 30 / cronkit 11）高于 store 新树（8 / 2），旧代会拒收回退目录，republish 时以 COS 旧值抬基线。
+
+> 2026-09-26 施工完成：cronkit stable 补发（COS 旧 stable envelope seq 4 先 PUT 入 store 抬基线 → re-stage stable，payload zip 以 `kind=blob` + `apply=relkit-payload` selector 忠实复刻原字节 → publish 得 seq 5，CAS 命中零重复上传，versions 合并 9/10/11/13/14 五版）；dec 全代际走 dev，无需 stable 补发（store dev index seq 8 已就位）。directory 侧 dec 31 / cronkit 12。E2E 验收（发布机本机模拟最旧代客户端：cronkit stable code 9、dec dev code 1013089，均带旧 lastSeen 基线）directory→index→manifest→artifact 全链路通过，artifact Range probe 206。剩余待办：DNSPod 手动把 `raw` 从 CNAME 改 A 记录（无 API 凭据，需人工），切后 certbot webroot 签发 raw 证书（当前 raw-compat.conf 临时借用 publish 证书）、替换证书路径并 reload nginx、启用续期 timer。
+
+> 2026-09-26 证书续期修复（不依赖 DNS 切换的部分已全部完成）：certbot 自动续期 timer 原本未启用（`certbot-renew.timer` disabled），已 `enable --now`（每 12h + 随机延迟）。publish 证书原 authenticator=nginx 但插件未装（续期必失败），已 `certbot reconfigure` 切 webroot（`/var/www/letsencrypt`），dry-run 通过；publish vhost 80 端口补 ACME challenge location（备份 `relkit-agent.conf.bak.20260926cert`），443 服务面验证不变（Range 206）。update 证书本就 webroot 且演练通过。raw 证书待 DNS 切后签发，届时直接进同一 timer。旧 `relkit-cos-cert-renew.timer`（腾讯 SSL 探针，COS 时代遗产）已无服务对象，待 raw 切换完成后连同 timer 一起退役。
+
+> 2026-09-26 raw 切换完成（迁移收口）：DNSPod API（`dec-exec` 注入 tencent-cloud 密钥，TC3-HMAC-SHA256 直调 `dnspod.tencentcloudapi.com`，`ModifyRecord` 原子改，RecordId 2380132895）把 `raw` 从 CNAME（广州 COS）改为 A `43.161.241.238`，TTL 600，权威 NS/公共/本地三路解析即时生效。certbot webroot 签发 `raw.firoyang.com` 正式证书（2026-12-25 到期，ECDSA），raw-compat.conf 从借用 publish 证书切换到自有证书（备份 `raw-compat.conf.bak.20260926rawcert`），续期 dry-run 通过、纳入 certbot-renew.timer。旧 `relkit-cos-cert-renew.timer` 已 disable --now 退役。E2E 复验（真实 DNS + 真实证书链）：directory cronkit 316B/dec 300B、index stable 1001B/dev 968B、工件 Range 206 全部与 store 一致。≤1.13.92 旧代客户端更新链路自 DNS 生效起全部恢复，外网数据面迁移收口。
+
+> 2026-09-26 广州 COS 桶退役完成：SigV4 header-auth（复用 dec tencent-cloud 主密钥，与 DNSPod 同链路）清点桶内 1211 对象/22.7GB → 批量删除（`Content-MD5` + 1000-key 批次）→ `DELETE /` 删桶，回读 HEAD 404。DNSPod 残留清理：`updates` CNAME（悬空）、`_dnsauth.updates/raw/raw2` TXT（COS 域名归属证明）、`edgeonereclaim.update` TXT（Pages reclaim 证明）共 5 条已删。发布机遗留 COS config 归档为 `relkit.json.retired-cos-20260926`（cronkit/dec 各一份，线上走 agent serve profile 与其无关）。SSL 控制台 4 张残留证书已删（raw `aKgyuExf`、raw2 `aXOYfCx6`、updates `ZwMfmDwc`、过期 nas `8sCr1xrt`，均部署计数 0；现网证书全部由发布机 certbot 管理）。Makers 云端项目 relkit-updates-index 确认已不存在（Pages token 已续期可用，DescribePagesProjects 空列表 + 按 ID 查询 ResourceNotFound），无需操作。桶删除后三面复验 raw/publish/update 全 200。COS 时代全部资产清零，更新数据面唯一实体为发布机 relkit-store。
+
+> 2026-09-26 外网读切面拆分（update-internal 落地）：`publish.firoyang.com` 混载 CI 写面与内嵌 SDK 读流量，与当年 raw 直指 COS 同病——域名角色不单一。新增 `update-internal.firoyang.com`（DNSPod CreateRecord，RecordId 2419405072，A → 发布机，TTL 600；certbot webroot 自有 ECDSA 证书 2026-12-25 到期，入 certbot-renew.timer），nginx `update-internal.conf` 新 vhost 全量代理 store（GET/HEAD 协议树，Range 透传，无 `/v1/`、无 console、无 browse）。三域名分工定型：publish = CI 写面 + 存量 entryUrls 兼容读（靠自然升级迁出）；update-internal = 内嵌 SDK 协议读面（SSOT）；update = 人页 browse dump。配置面同步：发布机 dec/cronkit 机器 profile `baseUrl` 切 update-internal（新 manifest `urls[]` 从此指向读面；`uploadUrl` 留 publish 写面），顺手清除 cronkit profile 三处 strict 欠账字段（`signing.publicKeys` / `directory.entryUrls` / `directory.services`，备份 `.bak.20260926internal`）；产品仓 dec/cronkit `relkit.json` 的 `entryUrls` / `services[].indexUrl` 同步切新域名（dec 含嵌入副本与 entry 测试改名）。E2E：directory dec 300B / cronkit 316B、index dev 968B / stable 1001B、artifact Range 206，真实 DNS + 真实证书链全通。
 
 ## 5. 人页 vs 操作面板
 
 两套页面，不要混成一张。
 
-| | 对外目录（browse） | 操作面板（serve 现算） |
+| | 对外目录（browse） | 操作面板（console 现算） |
 |---|---|---|
 | 谁看 | 装包的人、书签、内网同事打开更新域名 | 运营 / 开发，知道这台箱 |
 | 是什么 | 发布时写好的静态 HTML | 请求时扫盘画出来的门户 |
-| 代码 | `internal/browse` dump | `cmd/relkit-serve/ui.go` |
+| 代码 | `internal/browse` dump | `cmd/relkit-console/ui.go` |
 | 外网落地 | Makers（HTML 不进 COS） | `publish.firoyang.com/-/admin`；当前只扫本机空目录，尚不能管理 COS |
 | 内网落地 | 数据面 `browse/`，更新域名 GET `/`（无文件则短 stub，不现算门户） | `/-/admin`（今 `/-/p/`、`?files=1` 一并收进来） |
 | 容量 | 静态站 / CDN / Makers | 这一台自托管进程 |
@@ -126,7 +148,7 @@ flowchart TB
 
 - GET `/` 只服务 `browse/index.html`（可 302 到 `/browse/`）。没有 dump 就一页说明，**不要**再 `scanProducts` 当首页。
 - 现算门户、文件树从 `/` 和 `?files=1` 挪到 `/-/admin`。`/-/latest/` 仍是协议旁路的固定下载跳转，留给客户端/链接，不算目录页。
-- nginx 切面不变：`/v1/` → agent；其余 GET 仍进 serve。分流的是 serve 自己的路径，不是再加一台机。
+- nginx 切面不变：`/v1/` → agent；其余 GET 仍进 store。分流的是 store 自己的路径，不是再加一台机。
 - 不在这一步把面板当对外目录；面板鉴权见 [ADR 0006](../adr/0006-admin-panel-bootstrap.md)。
 
 ## 6. 站点重建与 sink 选型（实现约定）
@@ -134,17 +156,19 @@ flowchart TB
 `publish.Run` 只写 `site/<product>.json` 与 `latest/<product>/<channel>.json`，不渲染 HTML，也不打开站点 sink。发布成功后 agent 触发同一条 `site rebuild`；失败只使人页滞后，不回滚已提交的协议 index。
 
 - agent 的 `products` map 是站点产品集合。rebuild 从各产品数据面读全量 `site/`、`latest/`，调用纯函数 `browse.Build`，整站输出 `index.html`、全部 `<product>.html` 与 `catalog.json`。
-- `Backend.HostsBrowse()==true`（`relkit-compatible`）→ 把完整 dump `PutPointer` 到 `browse/`。
-- agent 顶层 `site.makers` → 把同一份完整 dump Folder 部署到 Makers。Makers 配置不属于产品 policy/profile。
+- agent 顶层 `site.sinks[]` 声明 dump 去向（ADR 0015）：`{"type":"backend","backend":"<name>"}` 把完整 dump `PutPointer` 到该 backend 的 `browse/`（backend 须 `HostsBrowse()==true`）；`{"type":"makers",...}` Folder 部署到 EdgeOne Makers；`{"type":"directory","path":...}` 原子写目录给外部静态宿主。sink 配置不属于产品 policy/profile，`HostsBrowse` 只做能力校验、不再自动注册 sink。
+- rebuild 先把 dump 写入 agent state 目录 `site/dump/`（本机审计/回滚参照），再分发到各 sink；某 sink 失败不阻断协议发布，重跑 rebuild 即全量重发。
 - `catalog.json` 只是派生输出，禁止读回后 merge。相同输入的 dump 哈希不变，跳过重复部署。
 - 以后加 Cloudflare / GitHub Pages：给站点 rebuild 加 sink，不改产品 `relkit.json`。
-- serve 现算页 **不是** BrowseSink。不要为了「内网也有好看首页」把门户留在 `/`。
+- console 现算页 **不是** BrowseSink。不要为了「内网也有好看首页」把门户留在 `/`。
 
-## 7. 现网落地（对照，实现前）
+## 7. 现网落地（2026-09-25 ADR 0016 切换后）
 
-外网 CVM 已运行 agent（默认入口 → `127.0.0.1:8787`）与 serve 操作面壳（仅 `/-/admin`、`/-/p/` → `127.0.0.1:8080`）；serve 的 `/srv/releases` 不是 COS 数据面。配置见 `scripts/deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
+外网 CVM 已运行 agent（`/v1/` → `127.0.0.1:8787`）、store 数据面（`location /` → `127.0.0.1:8080`，本机树是操作面壳、不是 COS 数据面）与 console 操作面板（`/-/admin`、`/-/p/`、`/-/latest/` → `127.0.0.1:8081`）；`location = /` 设计性 404，对外目录在 Makers。配置见 `scripts/deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
 
-- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；其余请求 → serve 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 serve 自己鉴权
+- nginx `0.0.0.0:80`：`/v1/` 与 `/-/health` → agent `127.0.0.1:8787`；`/-/admin`、`/-/p/`、`/-/latest/` → console `127.0.0.1:8081`；其余请求 → store 的完整 `relkit-compatible` 数据面 `127.0.0.1:8080`。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 store 自己鉴权
 - 客户端看到的 `https://update.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 `:80`。箱上暂无证书、不听 443；有证后再在本机加 `listen 443 ssl`，流程不变
 - 配置样例：`scripts/deploy/nginx-intranet.example.conf`
-- 内网 GET `/` 不现算门户；没有 rebuild dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`。公网 COS 根路径仍是协议数据面，HTML 由 agent 站点配置部署到 Makers。
+- 内网 GET `/` 不现算门户；没有 rebuild dump 时是短说明，面板在 `https://update.devcloud.woa.com/-/admin`（经 nginx 分流到 console `127.0.0.1:8081`）。公网 COS 根路径仍是协议数据面，HTML 由 agent 站点配置部署到 Makers。
+
+> 2026-09-26 raw 兼容面下线：唯一还在打 /rup/ 的客户端（43.132.141.25，用户自有 CVM）日志核实已双轨访问新协议路径（/index、/manifest 直连，1.13.96 已装），/rup/ 轮询只是残留 cron；其余 /rup/ 流量全是验证 curl。三件套下线：DNSPod DeleteRecord 删 raw A 记录（RecordId 2380132895，回读 0 条，公共 DNS 返回 DNSPod 停放页与任意不存在子域一致）；nginx vhost 归档 raw-compat.conf.retired-20260926（非删除）；certbot delete 证书（Let's Encrypt 可随时重签）。Dec 仓 relkit.json 删除 backends.cos 死配置段（含嵌入副本，测试防回归断言保留），UPDATE_ARCHITECTURE.md 同步 relkit-store 现状（commit 7eb4dcd）。旧 relkit-cos-cert-renew.timer/service 空壳单元一并删除（daemon-reload 生效）。publish/update/update-internal 三面复验 200。以后需要旧代兼容面时重新加回（DNS A 记录 + certbot + vhost 三步）。

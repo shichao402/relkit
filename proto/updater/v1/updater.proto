@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package relkit.updater.v1;
 
-option go_package = "go.firoyang.com/relkit/api/updater/v1;updaterv1";
+option go_package = "github.com/shichao402/relkit/api/updater/v1;updaterv1";
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -134,6 +134,9 @@ message InstallSpec {
 message Runtime {
   string channel = 1;
   int64 current_code = 2;
+  // Free-form client selectors (SPEC.md §11). The engine injects os/arch in
+  // the reserved GOOS/GOARCH vocabulary (darwin/linux/windows, amd64/arm64)
+  // when a host leaves them unset; host-declared values always win verbatim.
   map<string, string> client_selectors = 3;
   string data_dir = 4;
   InstallSpec install = 5;

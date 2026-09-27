@@ -153,7 +153,7 @@ sequenceDiagram
 
 ### 0.4 第二台机（内网 WOA）
 
-同构，只换数据面：profile 里 `publishTo` 指 `local`，backend 写 `outputDir`（如 `/data/relkit-serve`），由 `relkit-serve` / nginx 对外匿名 GET。控制面仍是 agent + 同一套 policy/profile 拆分，没有 Makers 那一段。
+同构，只换数据面：profile 里 `publishTo` 指 `local`，backend 写 `outputDir`（如 `/data/relkit-store`），由 `relkit-store` / nginx 对外匿名 GET。控制面仍是 agent + 同一套 policy/profile 拆分，没有 Makers 那一段。
 
 > 待核：本文只据设计文档 §7 描述内网形态，未在本次验收中实测。
 
@@ -310,9 +310,9 @@ cronkit 的旧产品根 json 里 `site.homepage` 是空的、也没有 makers—
 
 ### 应进代码（文档只声明行为）
 
-- [ ] 去掉运行时 fallback（工作区已做，待提交）
-- [ ] `PUT /v1/staged` 无 `release-policy.json` → 400（今日待办，未做）
-- [ ] （待决）缺 Makers token / 缺 `site.makers` 时，publish 是 warning 继续还是非 2xx
+- [x] 去掉运行时 fallback（工作区已做，待提交）
+- [x] `PUT /v1/staged` 无 `release-policy.json` → 400（agent 0.1.4：整包与分片 complete 均在解包后立即校验）
+- [x] （已决，ADR 0015）缺 Makers token / 缺 `site.makers` 时，publish 是 warning 继续还是非 2xx：协议面照常成功；sink/rebuild 是非协议路径，失败单独报错退出，不发新版本
 
 ### 不要进正式设计（事故细节 / 一次性现场）
 

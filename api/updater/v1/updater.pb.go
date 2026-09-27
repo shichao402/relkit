@@ -818,13 +818,16 @@ func (x *InstallSpec) GetLibrary() *LibraryPolicy {
 }
 
 type Runtime struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Channel         string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
-	CurrentCode     int64                  `protobuf:"varint,2,opt,name=current_code,json=currentCode,proto3" json:"current_code,omitempty"`
-	ClientSelectors map[string]string      `protobuf:"bytes,3,rep,name=client_selectors,json=clientSelectors,proto3" json:"client_selectors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	DataDir         string                 `protobuf:"bytes,4,opt,name=data_dir,json=dataDir,proto3" json:"data_dir,omitempty"`
-	Install         *InstallSpec           `protobuf:"bytes,5,opt,name=install,proto3" json:"install,omitempty"`
-	SidecarPath     string                 `protobuf:"bytes,6,opt,name=sidecar_path,json=sidecarPath,proto3" json:"sidecar_path,omitempty"` // empty = search order
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Channel     string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	CurrentCode int64                  `protobuf:"varint,2,opt,name=current_code,json=currentCode,proto3" json:"current_code,omitempty"`
+	// Free-form client selectors (SPEC.md §11). The engine injects os/arch in
+	// the reserved GOOS/GOARCH vocabulary (darwin/linux/windows, amd64/arm64)
+	// when a host leaves them unset; host-declared values always win verbatim.
+	ClientSelectors map[string]string `protobuf:"bytes,3,rep,name=client_selectors,json=clientSelectors,proto3" json:"client_selectors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	DataDir         string            `protobuf:"bytes,4,opt,name=data_dir,json=dataDir,proto3" json:"data_dir,omitempty"`
+	Install         *InstallSpec      `protobuf:"bytes,5,opt,name=install,proto3" json:"install,omitempty"`
+	SidecarPath     string            `protobuf:"bytes,6,opt,name=sidecar_path,json=sidecarPath,proto3" json:"sidecar_path,omitempty"` // empty = search order
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1300,8 +1303,8 @@ func (x *DownloadOp) GetPlanId() string {
 type ApplyOp struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	PlanId string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
-	// When true, versionedDir copies into versions/ but does not rewrite
-	// active.json. wholeRoot / fileSet ignore this flag.
+	// When true, LIBRARY installs into versions/ but does not rewrite
+	// active.json. IN_PLACE ignores this flag.
 	InstallOnly   bool `protobuf:"varint,2,opt,name=install_only,json=installOnly,proto3" json:"install_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4730,8 +4733,8 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x19SESSION_PHASE_RELAUNCHING\x10\x04\x12!\n" +
 	"\x1dSESSION_PHASE_NEEDS_ATTENTION\x10\x05\x12\x1b\n" +
 	"\x17SESSION_PHASE_COMPLETED\x10\x06\x12\x1d\n" +
-	"\x19SESSION_PHASE_ROLLED_BACK\x10\aB\xbc\x01\n" +
-	"\x15com.relkit.updater.v1B\fUpdaterProtoP\x01Z/go.firoyang.com/relkit/api/updater/v1;updaterv1\xa2\x02\x03RUX\xaa\x02\x11Relkit.Updater.V1\xca\x02\x11Relkit\\Updater\\V1\xe2\x02\x1dRelkit\\Updater\\V1\\GPBMetadata\xea\x02\x13Relkit::Updater::V1b\x06proto3"
+	"\x19SESSION_PHASE_ROLLED_BACK\x10\aB\xc2\x01\n" +
+	"\x15com.relkit.updater.v1B\fUpdaterProtoP\x01Z5github.com/shichao402/relkit/api/updater/v1;updaterv1\xa2\x02\x03RUX\xaa\x02\x11Relkit.Updater.V1\xca\x02\x11Relkit\\Updater\\V1\xe2\x02\x1dRelkit\\Updater\\V1\\GPBMetadata\xea\x02\x13Relkit::Updater::V1b\x06proto3"
 
 var (
 	file_updater_v1_updater_proto_rawDescOnce sync.Once

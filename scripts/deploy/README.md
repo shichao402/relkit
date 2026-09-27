@@ -9,9 +9,11 @@
 | 子命令 | 用途 |
 |---|---|
 | `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`）。stamp 读根目录 `VERSION.json` |
-| `version` | 打印 SSOT（`--field number|version|build|tag`）；发版 CI 用 `--check-tag` |
-| `install serve` | 空机首装 systemd `relkit-serve` |
+| `version` | 打印 SSOT（`--field number\|version\|build\|tag`）；发版 CI 用 `--check-tag` |
+| `install serve` | 空机首装 systemd `relkit-store` |
 | `install agent` | 空机首装 systemd `relkit-agent` |
+| `install console` | 首装 systemd `relkit-console`（ADR 0016：管理面独立 unit；迁移盒子自动继承发布树里的操作员账户） |
+| `migrate-serve` | 现网仍在跑 `relkit-serve.service` 的盒子一步迁移到 `relkit-store.service`（ADR 0016 第 4 步：配置迁 `/etc/relkit-store/relkit-store.json`，树/token/数据文件不动，备份后可回滚） |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |
 
 禁止：用 example JSON 覆盖现网配置；把 token 或带 `sig=` 的 URL 打进聊天/工单；upgrade 默默 `--rotate-token`；跳过发布验证。产品 token 的签发/轮换/吊销不在本脚本，走产品仓 `relkit_host.py serve`。不要用腾讯云 TAT / MCP 代跑本脚本。
@@ -31,7 +33,7 @@ python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --apply
 
 upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、遇到 `static-http` 直接停（该类型已删除、不会改写成可写后端）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
 
-`uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-serve` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
+`uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-store` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
 
 现网数据面是 `update.devcloud.woa.com:8080`，与控制面共用主机名但不共用端口，也不经 nginx。后续可给数据面绑定独立 DNS，届时同时替换 `baseUrl` 与 `uploadUrl`。
 
@@ -41,14 +43,16 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../../docs/adr/0009-publisher-protocol-negotiation.md)）。升级 agent 后必须用同一 release 的 publisher。滚动放行时可临时下调 `minPublishProtocol`（设 0 关闭）。
 
-公网静态目录由 agent 顶层 `site.makers` 拥有；产品 profile 不再携带 Makers。upgrade 会移除旧 profile 的 `site` 块但不会猜 projectId，也不会覆盖现网 agent JSON。由运营者把 projectId/region/tokenEnv 写入 `/etc/relkit-agent/relkit-agent.json`，重启后用 `curl -fsS http://127.0.0.1:8787/-/site` 检查脱敏 readiness，再运行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。修人页不需要重发产品版本。
+agent 对 publish profile 是 strict 解析：未知字段即拒（publish 阶段 400），不承诺向后兼容。升级前扫一遍目标机 `/etc/relkit-agent/products/*.json` 是否带结构体外字段（合法字段集 = relkit 源码 `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile`；常见冗余：`signing.publicKeys` / `directory.entryUrls` / `directory.services`，归属产品仓 release-policy），有则删字段再升级。这一步的定位是清欠账，不是兼容承诺；排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
+
+公网静态目录由 agent 顶层 `site.sinks[]`（ADR 0015）拥有；产品 profile 不再携带 Makers。upgrade 会移除旧 profile 的 `site` 块、把旧 agent `site.makers` 迁移为 `site.sinks: [{"type":"makers",...}]`，但不会猜 projectId，也不会覆盖现网 agent JSON。由运营者把 sinks（Makers 的 projectId/region/tokenEnv 等）写入 `/etc/relkit-agent/relkit-agent.json`，重启后用 `curl -fsS http://127.0.0.1:8787/-/site` 检查脱敏 readiness，再运行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。修人页不需要重发产品版本。
 
 目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 
 ## 首装
 
 ```bash
-sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve-linux-amd64
+sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-store-linux-amd64
 sudo python3 scripts/deploy/relkit.py install agent --binary ./dist/relkit-agent-linux-amd64
 ```
 

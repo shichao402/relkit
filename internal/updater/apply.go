@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -11,7 +11,7 @@ import (
 	"path"
 	"sort"
 
-	"go.firoyang.com/relkit/internal/webmeta"
+	"github.com/shichao402/relkit/internal/webmeta"
 )
 
 const SchemaCatalog = "relkit.browse-catalog/1"
@@ -138,12 +138,25 @@ func productFromData(input ProductData) Product {
 	return page
 }
 
-// humanArtifacts lists every non-payload artifact. Payload stays in the signed
-// protocol for in-app updates; hide a package from the page by not publishing it.
+// humanArtifacts lists the artifacts people install by hand. Payload stays in
+// the signed protocol for in-app updates; audience=runtime artifacts reach
+// machines only through RUP selectors, so both stay off the human page. Old
+// releases published before audience existed have no selector at all — keep
+// their full non-payload list so those pages do not go empty.
 func humanArtifacts(all []webmeta.Artifact) []webmeta.Artifact {
 	out := make([]webmeta.Artifact, 0, len(all))
+	hasUser := false
+	for _, artifact := range all {
+		if artifact.Selectors["audience"] == "user" {
+			hasUser = true
+			break
+		}
+	}
 	for _, artifact := range all {
 		if artifact.Kind == "payload" {
+			continue
+		}
+		if hasUser && artifact.Selectors["audience"] != "user" {
 			continue
 		}
 		out = append(out, artifact)

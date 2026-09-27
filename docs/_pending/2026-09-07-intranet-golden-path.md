@@ -18,21 +18,23 @@
 
 | 层 | 外网 | 内网 |
 |---|---|---|
-| 存储 | COS `s3-compatible` | 磁盘 `local` + `relkit-serve` |
+| 存储 | COS `s3-compatible` | 磁盘 `local` + `relkit-store` |
 | 人页 | Makers | `browse/` |
 | TLS | 本机 / COS 自定义域名 | WOA 入口终止 TLS，箱上 `:80` |
 | 证书续期 | `relkit-cos-cert-renew.timer` | N/A |
 
+> 2026-09-25 更正：上表「证书续期」行的机器指位已失效。外网 CVM（`ap-hongkong`）到广州 COS 公网入口 443 全断（跨境链路，机器侧无 iptables/防火墙规则），该服务在外网机自 2026-09-04 装机起 21 天 0 次成功；probe 与 renew（腾讯云 SSL API）两半链路在内网机均验证可达。服务已于 2026-09-25 迁至内网机（与 agent 同机，符合原设计「与 agent 同机不同进程」），首跑 `certificate valid for 60 more days` 通过。外网机的 unit/binary/config 已清理。
+
 ## 已落地（发布机）
 
 - `relkit-agent` 已升级为 `0.1.2+3e31869`（CAS credentials、瘦 staged、Materialize）
-- `-migrate-profile`：`/etc/relkit-agent/products/svn-auto-merge.json`（`local` → `/data/relkit-serve`，`https://update.devcloud.woa.com/`）
+- `-migrate-profile`：`/etc/relkit-agent/products/svn-auto-merge.json`（`local` → `/data/relkit-store`，`https://update.devcloud.woa.com/`）
 - 产品根 `relkit.json` → `relkit.json.migrated`
 - 为 staged `0.2.0+112` 补上 `release-policy.json`
 - agent 健康：当时用清单检查；现改为产品仓 `relkit_host.py verify`
 - 因操作失误曾短暂暴露旧 upload token → 已轮换并重启；旧 token 失效
 - nginx：非 `/v1/` 的 PUT = 403
-- 2026-09-07：已吊销 `svn-auto-merge` 产品 token，并去掉运营方 `uploadTokenFile`；`relkit-serve` 只读，直连 PUT = **405**
+- 2026-09-07：已吊销 `svn-auto-merge` 产品 token，并去掉运营方 `uploadTokenFile`；`relkit-store` 只读，直连 PUT = **405**
 
 ## 已验证（只读）
 

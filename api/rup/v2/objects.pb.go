@@ -1303,9 +1303,9 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\x17ARTIFACT_KIND_INSTALLER\x10\x02\x12\x18\n" +
 	"\x14ARTIFACT_KIND_BINARY\x10\x03\x12\x16\n" +
 	"\x12ARTIFACT_KIND_BLOB\x10\x04\x12\x19\n" +
-	"\x15ARTIFACT_KIND_PAYLOAD\x10\x05B|\n" +
+	"\x15ARTIFACT_KIND_PAYLOAD\x10\x05B\x82\x01\n" +
 	"\n" +
-	"com.rup.v2B\fObjectsProtoP\x01Z'go.firoyang.com/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
+	"com.rup.v2B\fObjectsProtoP\x01Z-github.com/shichao402/relkit/api/rup/v2;rupv2\xa2\x02\x03RXX\xaa\x02\x06Rup.V2\xca\x02\x06Rup\\V2\xe2\x02\x12Rup\\V2\\GPBMetadata\xea\x02\aRup::V2b\x06proto3"
 
 var (
 	file_rup_v2_objects_proto_rawDescOnce sync.Once

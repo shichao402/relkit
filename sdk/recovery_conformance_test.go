@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"testing"
 
-	"go.firoyang.com/relkit/internal/inprocess"
-	"go.firoyang.com/relkit/sdk"
+	"github.com/shichao402/relkit/internal/inprocess"
+	"github.com/shichao402/relkit/sdk"
 )
 
 func TestConformanceOfflineRecovery(t *testing.T) {

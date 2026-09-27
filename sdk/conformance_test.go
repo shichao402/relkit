@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/inprocess"
-	"go.firoyang.com/relkit/internal/testutil"
-	"go.firoyang.com/relkit/sdk"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/inprocess"
+	"github.com/shichao402/relkit/internal/testutil"
+	"github.com/shichao402/relkit/sdk"
 )
 
 func TestVersionSelectConformanceDelegated(t *testing.T) {

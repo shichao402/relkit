@@ -611,6 +611,9 @@ class Runtime extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearCurrentCode() => $_clearField(2);
 
+  /// Free-form client selectors (SPEC.md §11). The engine injects os/arch in
+  /// the reserved GOOS/GOARCH vocabulary (darwin/linux/windows, amd64/arm64)
+  /// when a host leaves them unset; host-declared values always win verbatim.
   @$pb.TagNumber(3)
   $pb.PbMap<$core.String, $core.String> get clientSelectors => $_getMap(2);
 
@@ -1246,8 +1249,8 @@ class ApplyOp extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearPlanId() => $_clearField(1);
 
-  /// When true, versionedDir copies into versions/ but does not rewrite
-  /// active.json. wholeRoot / fileSet ignore this flag.
+  /// When true, LIBRARY installs into versions/ but does not rewrite
+  /// active.json. IN_PLACE ignores this flag.
   @$pb.TagNumber(2)
   $core.bool get installOnly => $_getBF(1);
   @$pb.TagNumber(2)
