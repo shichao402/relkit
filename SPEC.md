@@ -504,11 +504,13 @@ updater 优先 payload，而旧 updater 仍能选不带 `apply` 的完整安装�
 
 | 键 | 取值示例 |
 |---|---|
-| `os` | `windows` `macos` `linux` `android` `ios` |
-| `arch` | `x64` `arm64` `x86` `armv7` |
+| `os` | `windows` `darwin` `linux` `android` `ios` |
+| `arch` | `amd64` `arm64` `386` `armv7` |
 | `target` | 宿主自定义的子目标，如 RemoteCam 的 `client` / `server` |
 | `abi` | 如 `musl` / `glibc` |
 | `variant` | 同一平台的不同变体，如 `portable` / `setup` |
+
+`os` 与 `arch` 的取值采用 GOOS/GOARCH 词汇（`darwin` 而非 `macos`，`amd64` 而非 `x64`/`x86_64`）。客户端**不必**自行拼装：updater 引擎在 check 时对宿主未声明的 `os`/`arch` 自动注入本机规范值；宿主显式声明的值**原样保留**（包括发布方自定义的 `arch=x64` 等非规范值），以兼容既有发布维度。in-process SDK（Node/Dart）在构造时执行同样的补缺注入。
 
 发布方**可以**使用其他自定义键。协议**禁止**限制键的集合。
 

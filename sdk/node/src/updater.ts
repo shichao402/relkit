@@ -168,6 +168,65 @@ export interface RupUpdaterOptions {
   recovery?: RecoveryHelp;
 }
 
+/**
+ * This build's platform as relkit selectors, in the GOOS/GOARCH vocabulary the
+ * protocol reserves (SPEC.md §11.1): os=darwin/linux/windows, arch=amd64/arm64.
+ *
+ * Node reports its own vocabulary (process.platform "darwin" is fine, but
+ * process.arch is "x64", and "win32" needs mapping), and every host wiring
+ * `clientSelectors` by hand gets to rediscover that. This is the same
+ * normalization the updater sidecar applies at check time; it lives here so
+ * the in-process SDK (which has no sidecar) matches its behavior.
+ */
+export function platformSelectors(): { os: string; arch: string } {
+  const os = normalizeOS(process.platform);
+  const arch = normalizeArch(process.arch);
+  return { os, arch };
+}
+
+function normalizeOS(value: NodeJS.Platform): string {
+  switch (value) {
+    case "win32":
+      return "windows";
+    case "darwin":
+      return "darwin";
+    default:
+      // linux, freebsd, openbsd, android … already match the reserved
+      // vocabulary; anything else passes through lowercased rather than
+      // throwing, because a publisher is free to invent selector values.
+      return String(value);
+  }
+}
+
+function normalizeArch(value: string): string {
+  switch (value) {
+    case "x64":
+      return "amd64";
+    case "arm64":
+      return "arm64";
+    case "ia32":
+      return "386";
+    default:
+      return String(value);
+  }
+}
+
+/**
+ * Fills in the platform dimensions the host did not declare. Keys the host
+ * set explicitly are kept verbatim (including non-canonical values like
+ * arch=x64 a publisher may have standardized on), mirroring the sidecar's
+ * engine-side injection so both SDK planes behave identically.
+ */
+function withPlatformSelectors(
+  host: Record<string, string>,
+): Record<string, string> {
+  const merged: Record<string, string> = { ...host };
+  const platform = platformSelectors();
+  if (merged.os === undefined) merged.os = platform.os;
+  if (merged.arch === undefined) merged.arch = platform.arch;
+  return merged;
+}
+
 type SourceOutcome<T> = { ok: true; value: T } | { ok: false; why: string };
 
 interface IndexCandidate {
@@ -200,7 +259,7 @@ export class RupUpdater {
     this.channel = options.channel;
     this.currentCode = options.currentCode;
     this.trustedKeys = toTrustedKeys(options.trustedKeys);
-    this.clientSelectors = options.clientSelectors;
+    this.clientSelectors = withPlatformSelectors(options.clientSelectors);
     this.stateStore = options.stateStore;
     this.entryUrls = [...(options.entryUrls ?? [])];
     this.indexUrls = [...(options.indexUrls ?? [])];

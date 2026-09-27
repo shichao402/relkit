@@ -138,6 +138,67 @@ class FallbackRequired extends UpdateCheckResult {
   final int maxCode;
 }
 
+/// This build's platform as relkit selectors, in the GOOS/GOARCH vocabulary
+/// the protocol reserves (SPEC.md §11.1): os=darwin/linux/windows,
+/// arch=amd64/arm64/386.
+///
+/// Dart's `Platform.operatingSystem` reports "macos" where the protocol
+/// vocabulary says "darwin" — exactly the mismatch that broke Dec Console's
+/// self-update. This is the same normalization the updater sidecar applies at
+/// check time; it lives here so the in-process SDK (no sidecar) matches it.
+Map<String, String> platformSelectors() {
+  return {
+    'os': _normalizedOS(Platform.operatingSystem),
+    'arch': _normalizedArch(Platform.version.contains('arm64')
+        ? 'arm64'
+        : _defaultArch),
+  };
+}
+
+String get _defaultArch {
+  // Dart does not expose the CPU architecture directly on every platform;
+  // amd64 is the safe default and arm64 is detected via the version string.
+  return 'amd64';
+}
+
+String _normalizedOS(String value) {
+  switch (value) {
+    case 'macos':
+      return 'darwin';
+    default:
+      // windows, linux, android, ios already match the reserved vocabulary.
+      return value;
+  }
+}
+
+String _normalizedArch(String value) {
+  switch (value) {
+    case 'x64':
+    case 'x86_64':
+      return 'amd64';
+    case 'ia32':
+    case 'x86':
+      return '386';
+    case 'arm64':
+    case 'aarch64':
+      return 'arm64';
+    default:
+      return value;
+  }
+}
+
+/// Fills in the platform dimensions the host did not declare. Keys the host
+/// set explicitly are kept verbatim (including non-canonical values like
+/// arch=x64 a publisher may have standardized on), mirroring the sidecar
+/// engine's injection so both SDK planes behave identically.
+Map<String, String> _withPlatformSelectors(Map<String, String> host) {
+  final merged = Map<String, String>.of(host);
+  final platform = platformSelectors();
+  merged.putIfAbsent('os', () => platform['os']!);
+  merged.putIfAbsent('arch', () => platform['arch']!);
+  return merged;
+}
+
 /// Checks for, and downloads, updates for one (product, channel).
 /// Frozen: new hosts must use [Updater] in `updater_facade.dart` + relkit-updater (ADR 0010).
 class RupUpdater {
@@ -146,7 +207,7 @@ class RupUpdater {
     required this.channel,
     required this.currentCode,
     required this.trustedKeys,
-    required this.clientSelectors,
+    Map<String, String>? clientSelectors,
     required this.stateStore,
     List<Uri>? indexUrls,
     List<Uri>? entryUrls,
@@ -155,7 +216,8 @@ class RupUpdater {
     this.policy = const UpdatePolicy(),
     this.log,
     this.recovery,
-  })  : indexUrls = List.unmodifiable(indexUrls ?? const <Uri>[]),
+  })  : clientSelectors = _withPlatformSelectors(clientSelectors ?? const {}),
+        indexUrls = List.unmodifiable(indexUrls ?? const <Uri>[]),
         entryUrls = List.unmodifiable(entryUrls ?? const <Uri>[]),
         fallbackUrls = List.unmodifiable(fallbackUrls ?? const <Uri>[]),
         fetcher = fetcher ?? HttpFetcher() {

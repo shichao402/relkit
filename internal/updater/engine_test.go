@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -537,5 +538,55 @@ func TestApplyLockRejectsSecondHolder(t *testing.T) {
 	releaseApplyLock(root)
 	if err := acquireApplyLock(root, "b"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWithEngineDefaults(t *testing.T) {
+	cases := []struct {
+		name string
+		host map[string]string
+		want map[string]string
+	}{
+		{
+			name: "empty host gets engine platform truth",
+			host: nil,
+			want: map[string]string{
+				"os": runtime.GOOS, "arch": runtime.GOARCH,
+				"apply": "relkit-payload",
+			},
+		},
+		{
+			name: "host platform values are kept verbatim",
+			host: map[string]string{"os": "macos", "arch": "x86_64"},
+			want: map[string]string{
+				"os": "macos", "arch": "x86_64",
+				"apply": "relkit-payload",
+			},
+		},
+		{
+			name: "publisher vocabulary survives alongside injections",
+			host: map[string]string{"arch": "x64", "component": "console"},
+			want: map[string]string{
+				"arch": "x64", "component": "console",
+				"os": runtime.GOOS, "apply": "relkit-payload",
+			},
+		},
+	}
+	for _, tc := range cases {
+		got := withEngineDefaults(tc.host)
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+		for key, want := range tc.want {
+			if got[key] != want {
+				t.Errorf("%s: %s=%q want %q", tc.name, key, got[key], want)
+			}
+		}
+		// The input map must never be mutated: hosts may reuse it.
+		if tc.host != nil {
+			if _, mutated := tc.host["apply"]; mutated {
+				t.Errorf("%s: input map mutated", tc.name)
+			}
+		}
 	}
 }

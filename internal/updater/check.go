@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"runtime"
 	"sort"
 	"time"
 
@@ -58,6 +59,35 @@ func osReadPlanIDs(st store) ([]string, error) {
 	return ents, err
 }
 
+// withEngineDefaults returns the effective client selectors for a check: a
+// copy of what the host declared, plus engine-injected keys the host should
+// never have to spell correctly by hand.
+//
+// os and arch are injected (GOOS/GOARCH vocabulary: darwin/linux/windows,
+// amd64/arm64/386) when — and only when — the host left them unset. Hosts that
+// declare their own values keep them verbatim, including non-canonical ones,
+// so a publisher's custom dimensions (arch=x64) keep working. This is the
+// protocol-plane fix for hosts like a Rust client reporting std::env::consts::OS
+// ("macos") against a manifest selector os=darwin: the engine is the single
+// place that knows the platform truth, and it uses the canonical vocabulary.
+//
+// apply is forced to "relkit-payload": artifact selection narrows to payload
+// artifacts when any exist (ADR 0013), and hosts have no reason to override it.
+func withEngineDefaults(host map[string]string) map[string]string {
+	out := make(map[string]string, len(host)+3)
+	for key, value := range host {
+		out[key] = value
+	}
+	if _, ok := out["os"]; !ok {
+		out["os"] = runtime.GOOS
+	}
+	if _, ok := out["arch"]; !ok {
+		out["arch"] = runtime.GOARCH
+	}
+	out["apply"] = "relkit-payload"
+	return out
+}
+
 func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest, op *updaterv1.CheckOp, st store) error {
 	profile, runtime := req.GetProfile(), req.GetRuntime()
 	state, err := st.loadState()
@@ -87,11 +117,7 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 	}
 
 	sdkState := engineStateToSDK(state)
-	clientSelectors := make(map[string]string, len(runtime.ClientSelectors)+1)
-	for key, value := range runtime.ClientSelectors {
-		clientSelectors[key] = value
-	}
-	clientSelectors["apply"] = "relkit-payload"
+	clientSelectors := withEngineDefaults(runtime.ClientSelectors)
 	u := &inprocess.Updater{
 		Product:         profile.Product,
 		Channel:         runtime.Channel,

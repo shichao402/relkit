@@ -1064,6 +1064,26 @@ void main() {
       );
     });
 
+    test('fills in undeclared platform selectors and keeps declared ones', () {
+      final updater = RupUpdater(
+        product: 'demo',
+        channel: 'stable',
+        currentCode: 1,
+        indexUrls: [Uri.parse('http://m/i.pb')],
+        trustedKeys: TrustedKeys({'k': List.filled(32, 0)}),
+        clientSelectors: const {'arch': 'x64', 'component': 'console'},
+        stateStore: MemoryUpdateStateStore(),
+        fetcher: FakeFetcher(const {}),
+      );
+      final platform = platformSelectors();
+      expect(updater.clientSelectors['os'], platform['os']);
+      expect(updater.clientSelectors['arch'], 'x64');
+      expect(updater.clientSelectors['component'], 'console');
+      // The reserved vocabulary (SPEC.md §11.1) on this test host.
+      expect(['darwin', 'linux', 'windows'], contains(platform['os']));
+      expect(['amd64', 'arm64', '386'], contains(platform['arch']));
+    });
+
     test('refuses a public key of the wrong length', () {
       expect(() => TrustedKeys({'k': List.filled(31, 0)}),
           throwsA(isA<ArgumentError>()));
