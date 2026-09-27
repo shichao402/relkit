@@ -74,13 +74,47 @@ func TestHumanPageListsAllNonPayloadArtifacts(t *testing.T) {
 		},
 	}}})
 	artifacts := catalog.Channels[0].Artifacts
+	if len(artifacts) != 1 {
+		t.Fatalf("human artifacts = %+v", artifacts)
+	}
+	if artifacts[0].Filename != "dec-console-linux-amd64.AppImage" {
+		t.Fatalf("only the user-facing installer may stay: %+v", artifacts)
+	}
+}
+
+func TestHumanPageHidesRuntimeAudienceArtifacts(t *testing.T) {
+	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
+		Product: "dec", Channel: "stable", Version: "1.0.0", Code: 1,
+		Artifacts: []webmeta.Artifact{
+			{ID: "dec-server-linux-amd64", Filename: "dec-server-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64", "audience": "runtime"}},
+			{ID: "dec-exec-linux-amd64", Filename: "dec-exec-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64", "audience": "runtime"}},
+			{ID: "dec-host-setup-linux-amd64", Filename: "dec-host-setup-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64", "audience": "runtime"}},
+			{ID: "dec-runtime-manifest", Filename: "dec-runtime-manifest.json", Kind: "blob", Selectors: map[string]string{"component": "manifest", "audience": "runtime"}},
+			{ID: "dec-console-windows-amd64", Filename: "dec-console-windows-amd64.exe", Kind: "installer", Selectors: map[string]string{"os": "windows", "arch": "amd64", "audience": "user"}},
+			{ID: "dec-console-darwin-arm64", Filename: "dec-console-darwin-arm64.dmg", Kind: "installer", Selectors: map[string]string{"os": "darwin", "arch": "arm64", "audience": "user"}},
+		},
+	}}})
+	artifacts := catalog.Channels[0].Artifacts
 	if len(artifacts) != 2 {
 		t.Fatalf("human artifacts = %+v", artifacts)
 	}
 	for _, artifact := range artifacts {
-		if artifact.Kind == "payload" || artifact.Filename == "dec-payload.zip" {
-			t.Fatalf("payload must stay off the human page: %+v", artifacts)
+		if artifact.Selectors["audience"] != "user" {
+			t.Fatalf("runtime artifact leaked to human page: %+v", artifacts)
 		}
+	}
+}
+
+func TestHumanPageKeepsLegacyArtifactsWithoutAudience(t *testing.T) {
+	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
+		Product: "dec", Channel: "stable", Version: "0.9.0", Code: 1,
+		Artifacts: []webmeta.Artifact{
+			{ID: "dec-server-linux-amd64", Filename: "dec-server-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64"}},
+			{ID: "dec-console-windows-amd64", Filename: "dec-console-windows-amd64.exe", Kind: "installer", Selectors: map[string]string{"os": "windows", "arch": "amd64"}},
+		},
+	}}})
+	if got := len(catalog.Channels[0].Artifacts); got != 2 {
+		t.Fatalf("legacy artifact count = %d, want 2 (no audience selector → keep list intact)", got)
 	}
 }
 
