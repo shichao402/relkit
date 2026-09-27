@@ -7,7 +7,7 @@
   "maxPartSize": "64MiB",
   "maxPartConcurrency": 16,
   "uploadTTL": "24h",
-  "stateDir": "/var/lib/relkit-agent",
+  "stateDir": "/data/relkit-agent",
   "uploadTokens": [],
   "products": {}
 }

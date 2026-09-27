@@ -276,7 +276,7 @@ python scripts/host/relkit_host.py agent remove --execute
 
 内网不必把产物发到公网 COS。控制面仍是 agent，数据面仍是 WOA 目录（现有 `https://update.devcloud.woa.com/` 的 GET 树）。
 
-1. 在箱上安装 `relkit-agent`（`python3 scripts/deploy/relkit.py install agent --binary …`），配置见 `scripts/deploy/relkit-agent.intranet.example.json`。已有实例用 `python scripts/deploy/relkit.py upgrade --host <Host>`。
+1. 在箱上安装 `relkit-agent` 与 `relkit-serve`。内网数据目录用 `/data`：serve `--addr :8080 --dir /data/relkit-serve`，agent `--state-dir /data/relkit-agent --product-root /data/relkit --config-example scripts/deploy/relkit-agent.intranet.example.json`。已有实例用 `python scripts/deploy/relkit.py upgrade --host <Host>`。
 2. 每个产品的 **publish profile** 把 `ingest`、`artifactTo`、`pointerTo` 都指到 `relkit-compatible`；`baseUrl` 为客户端匿名下载地址，`uploadUrl` 必须是 **CI 与 agent 都能访问的 serve 写入端点**，禁止填只因同机才可用的 loopback。serve 应像 COS endpoint 一样独立对外监听，上传正文不经过 agent 的 nginx；`baseUrl` 可以等于该 endpoint，也可以另用只读域名/CDN。`tokenEnv` 为 `RELKIT_SERVE_TOKEN`。样例：`scripts/deploy/relkit-intranet-product.example.json`。旧机若产品根还留着整份配置，可先 `-migrate-profile`。
 3. 私钥只在这台机上。CI 只持 **该产品** 的 `RELKIT_UPLOAD_TOKEN`。
 
