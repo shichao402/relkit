@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	relkitconfig "go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/uploadtoken"
+	relkitconfig "github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/uploadtoken"
 )
 
 const defaultProductRootPrefix = "/srv/relkit"

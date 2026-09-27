@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/webmeta"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/webmeta"
 )
 
 func mustEnvelope(t *testing.T, index *rupv2.Index) []byte {

@@ -16,11 +16,11 @@ import (
 	"os"
 	"time"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/envelope"
-	"go.firoyang.com/relkit/internal/inprocess"
-	"go.firoyang.com/relkit/internal/keys"
-	"go.firoyang.com/relkit/sdk"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/envelope"
+	"github.com/shichao402/relkit/internal/inprocess"
+	"github.com/shichao402/relkit/internal/keys"
+	"github.com/shichao402/relkit/sdk"
 )
 
 // dialPublish pins both the compat entry host and the store host to loopback

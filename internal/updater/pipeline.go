@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/payload"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/payload"
 	"google.golang.org/protobuf/proto"
 )
 

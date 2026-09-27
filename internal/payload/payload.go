@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
-	"go.firoyang.com/relkit/internal/model"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	"github.com/shichao402/relkit/internal/model"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )

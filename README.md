@@ -29,7 +29,7 @@ Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003
 
 ## 安装
 
-主仓是 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)。Go 模块名是逻辑路径 `go.firoyang.com/relkit`，**没有** vanity 解析，不要 `go get` / `go install` 该模块。
+主仓是 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)。Go 模块名是逻辑路径 `github.com/shichao402/relkit`，**没有** vanity 解析，不要 `go get` / `go install` 该模块。
 
 本仓库开发者从 [Releases](https://github.com/shichao402/relkit/releases) 取二进制，或在本仓用 `python scripts/deploy/relkit.py build`。
 
@@ -141,13 +141,13 @@ sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-store
 
 | | |
 |--|--|
-| Go | `relkit-sdk-go.zip` 附件装到 `third_party/relkit`（`go list -deps` 算出的可编译子集），配 `replace go.firoyang.com/relkit => ./third_party/relkit` · [`sdk/README.md`](sdk/README.md) |
+| Go | `relkit-sdk-go.zip` 附件装到 `third_party/relkit`（`go list -deps` 算出的可编译子集），配 `replace github.com/shichao402/relkit => ./third_party/relkit` · [`sdk/README.md`](sdk/README.md) |
 | Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/README.md`](sdk/dart/README.md) |
 | Node | `sdk/node`（package `rup-client`）· [`sdk/node/README.md`](sdk/node/README.md) |
 | Rust | `sdk/rust`（crate `relkit-updater`，供 Tauri 壳调用 sidecar）· [`sdk/rust/README.md`](sdk/rust/README.md) |
 
 ```go
-import "go.firoyang.com/relkit/sdk"
+import "github.com/shichao402/relkit/sdk"
 
 u := &sdk.Updater{
     Product: "myapp", Channel: "stable", CurrentCode: 100,

@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"go.firoyang.com/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/makers"
 )
 
 // Command relkit-console is the operator panel binary split out of

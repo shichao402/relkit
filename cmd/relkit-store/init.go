@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.firoyang.com/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/model"
 )
 
 // runInit writes a config skeleton plus a freshly generated token, so that a

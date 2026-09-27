@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"go.firoyang.com/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/makers"
 )
 
 // makersPanel is the console's read-only Pages view for the Site card (ADR

@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
-	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/browse"
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/makers"
-	"go.firoyang.com/relkit/internal/webmeta"
+	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/browse"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/webmeta"
 )
 
 // Sink types (ADR 0015).

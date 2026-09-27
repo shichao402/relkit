@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.firoyang.com/relkit/internal/jsonio"
-	"go.firoyang.com/relkit/internal/keys"
-	"go.firoyang.com/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/jsonio"
+	"github.com/shichao402/relkit/internal/keys"
+	"github.com/shichao402/relkit/internal/model"
 )
 
 // ProductPolicy is the repository-owned, portable part of relkit

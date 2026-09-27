@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/payload"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/payload"
 )
 
 func TestRunWritesNormalizedReleasePolicy(t *testing.T) {

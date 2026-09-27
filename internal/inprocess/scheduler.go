@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"go.firoyang.com/relkit/sdk"
+	"github.com/shichao402/relkit/sdk"
 )
 
 // UpdateScheduler runs periodic CheckForce calls in the background.

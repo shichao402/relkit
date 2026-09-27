@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"go.firoyang.com/relkit/internal/httpx"
+	"github.com/shichao402/relkit/internal/httpx"
 )
 
 // Adapter is the console's single read path into storage facts. Every panel

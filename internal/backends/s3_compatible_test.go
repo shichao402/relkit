@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"go.firoyang.com/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/model"
 )
 
 func TestS3CompatiblePutGetRoundTrip(t *testing.T) {

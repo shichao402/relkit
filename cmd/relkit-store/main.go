@@ -29,7 +29,7 @@ import (
 	"syscall"
 	"time"
 
-	"go.firoyang.com/relkit/internal/publishproto"
+	"github.com/shichao402/relkit/internal/publishproto"
 )
 
 // tokenEnv is the legacy name, kept so a systemd drop-in that rotated tokens

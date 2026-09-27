@@ -1,7 +1,7 @@
 package updater
 
 import (
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
 )
 
 func newError(code updaterv1.ErrorCode, retryable bool, message string, attempts []string) *updaterv1.Error {

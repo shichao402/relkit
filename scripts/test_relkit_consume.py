@@ -41,7 +41,7 @@ def rust_sdk_zip() -> bytes:
 def go_sdk_zip() -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
-        archive.writestr("go.mod", "module go.firoyang.com/relkit\n")
+        archive.writestr("go.mod", "module github.com/shichao402/relkit\n")
         archive.writestr("go.sum", "")
         archive.writestr("sdk/doc.go", "package sdk\n")
         archive.writestr("api/updater/v1/updater.pb.go", "package updaterv1\n")
@@ -194,7 +194,7 @@ class InstallTests(unittest.TestCase):
     def test_incomplete_go_sdk_is_rejected(self) -> None:
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w") as archive:
-            archive.writestr("go.mod", "module go.firoyang.com/relkit\n")
+            archive.writestr("go.mod", "module github.com/shichao402/relkit\n")
         payload = output.getvalue()
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

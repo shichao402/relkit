@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"go.firoyang.com/relkit/internal/webmeta"
+	"github.com/shichao402/relkit/internal/webmeta"
 )
 
 const (

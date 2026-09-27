@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 )
 
 // readIndexDoc and readManifestDoc are the storage-plane readers GC depends

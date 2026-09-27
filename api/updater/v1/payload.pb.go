@@ -514,8 +514,8 @@ const file_updater_v1_payload_proto_rawDesc = "" +
 	"\x1eSCRIPT_INTERPRETER_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19SCRIPT_INTERPRETER_DIRECT\x10\x01\x12\x19\n" +
 	"\x15SCRIPT_INTERPRETER_SH\x10\x02\x12!\n" +
-	"\x1dSCRIPT_INTERPRETER_POWERSHELL\x10\x03B\xbc\x01\n" +
-	"\x15com.relkit.updater.v1B\fPayloadProtoP\x01Z/go.firoyang.com/relkit/api/updater/v1;updaterv1\xa2\x02\x03RUX\xaa\x02\x11Relkit.Updater.V1\xca\x02\x11Relkit\\Updater\\V1\xe2\x02\x1dRelkit\\Updater\\V1\\GPBMetadata\xea\x02\x13Relkit::Updater::V1b\x06proto3"
+	"\x1dSCRIPT_INTERPRETER_POWERSHELL\x10\x03B\xc2\x01\n" +
+	"\x15com.relkit.updater.v1B\fPayloadProtoP\x01Z5github.com/shichao402/relkit/api/updater/v1;updaterv1\xa2\x02\x03RUX\xaa\x02\x11Relkit.Updater.V1\xca\x02\x11Relkit\\Updater\\V1\xe2\x02\x1dRelkit\\Updater\\V1\\GPBMetadata\xea\x02\x13Relkit::Updater::V1b\x06proto3"
 
 var (
 	file_updater_v1_payload_proto_rawDescOnce sync.Once

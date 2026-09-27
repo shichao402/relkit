@@ -16,10 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/publishproto"
-	"go.firoyang.com/relkit/internal/stage"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/publishproto"
+	"github.com/shichao402/relkit/internal/stage"
 )
 
 func TestPutUploadsCASAndThinStaged(t *testing.T) {

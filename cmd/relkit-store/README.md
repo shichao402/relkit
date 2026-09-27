@@ -1,6 +1,6 @@
 # relkit-store
 
-> 本目录是 [`go.firoyang.com/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-store`），与发布 CLI 同仓。设计决策见 [ADR 0016](../../docs/adr/0016-serve-split-store-console.md)。
+> 本目录是 [`github.com/shichao402/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-store`），与发布 CLI 同仓。设计决策见 [ADR 0016](../../docs/adr/0016-serve-split-store-console.md)。
 
 relkit-serve 拆分出的**存储面**（ADR 0016 第 3 步）：`/` 树的 GET/HEAD/PUT/DELETE、Range 下载、CAS 能力上传（mint → 带 sig 的 PUT → COPY promote）、孤儿 GC、上传令牌、发布协议协商与 preflight。单个静态链接的可执行文件，协议与配置形状与 serve 完全一致——客户端、CI、agent 不感知换了二进制。
 

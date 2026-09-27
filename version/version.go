@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"go.firoyang.com/relkit/internal/jsonio"
+	"github.com/shichao402/relkit/internal/jsonio"
 )
 
 const (

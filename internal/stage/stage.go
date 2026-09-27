@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/changelog"
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/jsonio"
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/payload"
-	"go.firoyang.com/relkit/internal/selectors"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/changelog"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/jsonio"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/payload"
+	"github.com/shichao402/relkit/internal/selectors"
 )
 
 const stagingRoot = ".relkit/cache/staged"

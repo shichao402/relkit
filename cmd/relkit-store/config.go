@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"go.firoyang.com/relkit/internal/model"
-	"go.firoyang.com/relkit/internal/uploadtoken"
+	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/uploadtoken"
 )
 
 // ConfigName is looked for next to the binary and in /etc when -config is

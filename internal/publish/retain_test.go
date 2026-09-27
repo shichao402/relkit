@@ -3,7 +3,7 @@ package publish
 import (
 	"testing"
 
-	"go.firoyang.com/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/model"
 )
 
 func TestApplyRetainVersionsUnlimited(t *testing.T) {

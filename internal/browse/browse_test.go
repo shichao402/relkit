@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"go.firoyang.com/relkit/internal/webmeta"
+	"github.com/shichao402/relkit/internal/webmeta"
 )
 
 func TestBuildRendersAllProductsAndChannelsDeterministically(t *testing.T) {

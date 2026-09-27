@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"go.firoyang.com/relkit/internal/backends"
-	"go.firoyang.com/relkit/internal/httpx"
+	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/httpx"
 )
 
 const (

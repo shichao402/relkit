@@ -15,12 +15,12 @@ import (
 	"strings"
 	"testing"
 
-	rupv2 "go.firoyang.com/relkit/api/rup/v2"
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/keys"
-	"go.firoyang.com/relkit/internal/makers"
-	"go.firoyang.com/relkit/internal/publishproto"
-	"go.firoyang.com/relkit/internal/stage"
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/keys"
+	"github.com/shichao402/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/publishproto"
+	"github.com/shichao402/relkit/internal/stage"
 )
 
 func TestSiteStatusIsRedacted(t *testing.T) {

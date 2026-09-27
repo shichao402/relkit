@@ -1,6 +1,6 @@
 # relkit-console
 
-> 本目录是 [`go.firoyang.com/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-console`），与发布 CLI 同仓。设计决策见 [ADR 0016](../../docs/adr/0016-serve-split-store-console.md)。
+> 本目录是 [`github.com/shichao402/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-console`），与发布 CLI 同仓。设计决策见 [ADR 0016](../../docs/adr/0016-serve-split-store-console.md)。
 
 relkit-serve 拆分出的**管理面**：`/-/admin` 操作面板、账户/会话（ADR 0006 的 bootstrap 流程不变）、下载统计展示、文件树浏览、`/-/latest/` 固定链接跳转。单个静态链接的可执行文件，无运行时依赖。
 

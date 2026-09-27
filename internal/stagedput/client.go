@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"go.firoyang.com/relkit/internal/humansize"
-	"go.firoyang.com/relkit/internal/publishproto"
+	"github.com/shichao402/relkit/internal/humansize"
+	"github.com/shichao402/relkit/internal/publishproto"
 )
 
 const (

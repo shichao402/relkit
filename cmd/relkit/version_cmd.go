@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.firoyang.com/relkit/internal/config"
-	"go.firoyang.com/relkit/internal/jsonio"
-	projver "go.firoyang.com/relkit/version"
+	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/jsonio"
+	projver "github.com/shichao402/relkit/version"
 )
 
 func cmdVersion(args []string, configPath string) error {

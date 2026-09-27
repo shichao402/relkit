@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"go.firoyang.com/relkit/version"
+	"github.com/shichao402/relkit/version"
 )
 
 func TestParseAndBump(t *testing.T) {
