@@ -52,7 +52,21 @@ sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-serve
 sudo python3 scripts/deploy/relkit.py install agent --binary ./dist/relkit-agent-linux-amd64
 ```
 
-已有实例且 `--addr`/`--dir` 与现网不一致时，`install serve` 拒绝执行（避免把 30341 / `/srv/releases` 写进内网机）。这时用 `upgrade`。
+内网 `update.devcloud.woa.com` 的数据放在 `/data`，不要用上面的默认值（`127.0.0.1:30341`、`/srv/releases`、`/var/lib/relkit-agent`、`/srv/relkit`）：
+
+```bash
+sudo python3 scripts/deploy/relkit.py install serve \
+  --binary ./dist/relkit-serve-linux-amd64 \
+  --addr :8080 \
+  --dir /data/relkit-serve
+sudo python3 scripts/deploy/relkit.py install agent \
+  --binary ./dist/relkit-agent-linux-amd64 \
+  --state-dir /data/relkit-agent \
+  --product-root /data/relkit \
+  --config-example scripts/deploy/relkit-agent.intranet.example.json
+```
+
+产品树在 `/data/relkit/<product>`。已有实例且 `--addr`/`--dir` 与现网不一致时，`install serve` 拒绝执行（避免把 30341 / `/srv/releases` 写进内网机）。这时用 `upgrade`。
 
 产品仓注册/轮换/吊销上传 token：`python scripts/host/relkit_host.py serve …`（需要 `--execute`；重启另加 `--restart`）。
 

@@ -866,7 +866,13 @@ def cmd_install_agent(args: argparse.Namespace) -> None:
     if leftover.is_file():
         print(f"WARNING: {leftover} is leftover instance-wide credential; delete after per-product tokens")
     if not config_path.is_file():
-        shutil.copy2(DEPLOY_DIR / "relkit-agent.example.json", config_path)
+        example = Path(args.config_example) if args.config_example else DEPLOY_DIR / "relkit-agent.example.json"
+        if not example.is_file():
+            die(f"{example} does not exist")
+        shutil.copy2(example, config_path)
+        cfg = load_json_object(config_path.read_text(encoding="utf-8"))
+        cfg["stateDir"] = str(state_dir)
+        config_path.write_text(dump_json(cfg), encoding="utf-8")
         os.chmod(config_path, 0o644)
     install_file(binary, dest_bin, 0o755)
     run([str(dest_bin), "-version"])
@@ -1387,6 +1393,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent_i.add_argument("--config-dir", default="/etc/relkit-agent")
     agent_i.add_argument("--state-dir", default="/var/lib/relkit-agent")
     agent_i.add_argument("--product-root", default="/srv/relkit")
+    agent_i.add_argument(
+        "--config-example",
+        default="",
+        help="JSON copied when relkit-agent.json is absent (default: relkit-agent.example.json)",
+    )
     agent_i.add_argument("--user", default="relkit")
     agent_i.add_argument("--prefix", default="/usr/local/bin")
 
