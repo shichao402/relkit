@@ -6,9 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/releasegate"
+	"github.com/shichao402/relkit/internal/stage"
 )
 
 // ciReleaseOptions carries the parsed `relkit ci release` arguments.
@@ -47,25 +50,56 @@ func cmdCI(args []string) error {
 	}
 }
 
-// ciReleaseArtifacts is the relkit.release-artifacts/1 manifest written by the
-// product's release.packScript.
+// ciReleaseArtifacts is the relkit.release-artifacts/2 manifest written by
+// the product's release.packScript. Schema /1 (single install/payload pair)
+// is still accepted: loadReleaseArtifactsManifest normalizes it into one
+// selector group, so downstream staging logic never branches on schema.
 type ciReleaseArtifacts struct {
-	Schema   string `json:"schema"`
-	Version  string `json:"version"`
-	Install  ciArtifactRef
-	Payload  ciArtifactRef
-	Archives []ciArchiveRef
+	Schema   string           `json:"schema"`
+	Version  string           `json:"version"`
+	Groups   []ciSelectorGroup `json:"selectorGroups"`
+	Archives []ciArchiveRef   `json:"archives"`
 }
 
+// ciSelectorGroup is one selector profile: a full-install artifact plus its
+// matching update payloads. Each group expands to its own --install/--payload
+// argv pair when staging.
+type ciSelectorGroup struct {
+	Selectors map[string]string `json:"selectors"`
+	Install   ciArtifactRef     `json:"install"`
+	Payloads  []ciPayloadRef    `json:"payloads"`
+}
+
+// ciArtifactRef names one install-track file. Kind mirrors the stage engine
+// (installer/binary/blob); Filename is the download-side archive name and
+// only the manifest /2 path sets it explicitly.
 type ciArtifactRef struct {
-	Path      string `json:"path"`
-	Kind      string `json:"kind"`
-	Selectors string `json:"selectors"`
+	Path     string            `json:"path"`
+	Kind     string            `json:"kind"`
+	Filename string            `json:"filename,omitempty"`
+	Selectors map[string]string `json:"selectors,omitempty"`
+}
+
+// ciPayloadRef names one payload-track directory. Payloads are always kind
+// payload with apply=relkit-payload, so only path and selectors remain.
+type ciPayloadRef struct {
+	Path     string            `json:"path"`
+	Filename string            `json:"filename,omitempty"`
+	Selectors map[string]string `json:"selectors,omitempty"`
 }
 
 type ciArchiveRef struct {
 	Path string `json:"path"`
 	Role string `json:"role"`
+}
+
+// ciArtifactRefWire is the /1 wire form of one artifact reference: selectors
+// are a comma-joined string. Only the loader consumes it; everything past
+// loadReleaseArtifactsManifest works with structured maps.
+type ciArtifactRefWire struct {
+	Path      string `json:"path"`
+	Kind      string `json:"kind"`
+	Selectors string `json:"selectors"`
 }
 
 // cmdCIRelease implements `relkit ci release`: install → pack → stage →
@@ -102,15 +136,17 @@ func cmdCIRelease(opts *ciReleaseOptions) error {
 		return err
 	}
 
-	stageArgs := []string{
-		"stage", version,
-		"--channel", opts.channel,
-		"--install", artifacts.Install.Path,
-		"kind=" + artifacts.Install.Kind + "," + artifacts.Install.Selectors,
-		"--payload", artifacts.Payload.Path, artifacts.Payload.Selectors,
+	stageArgs := []string{"stage", version, "--channel", opts.channel}
+	for _, group := range artifacts.Groups {
+		stageArgs = append(stageArgs, "--install", group.Install.Path)
+		stageArgs = append(stageArgs, installPairsText(group)...)
+		for _, payload := range group.Payloads {
+			stageArgs = append(stageArgs, "--payload", payload.Path)
+			stageArgs = append(stageArgs, payloadPairsText(payload)...)
+		}
 	}
-	fmt.Printf("staging install=%s payload=%s archives=%d (ci-only, not staged)\n",
-		artifacts.Install.Path, artifacts.Payload.Path, len(artifacts.Archives))
+	fmt.Printf("staging groups=%d archives=%d (ci-only, not staged)\n",
+		len(artifacts.Groups), len(artifacts.Archives))
 	if err := dispatch(stageArgs, ""); err != nil {
 		return err
 	}
@@ -246,43 +282,74 @@ func runReleasePackScript(root, script string) error {
 	return nil
 }
 
-// loadReleaseArtifactsManifest reads and validates the relkit.release-artifacts/1
-// manifest written by packScript.
+// loadReleaseArtifactsManifest reads and validates the release manifest
+// written by packScript. Schema /2 (selectorGroups) is the structured form:
+// selectors are maps and id/kind/filename are explicit fields. Schema /1
+// (single install/payload with comma-joined selector strings) is accepted
+// for compatibility and normalized into one selector group.
 func loadReleaseArtifactsManifest(root, manifestPath, expectedVersion string) (*ciReleaseArtifacts, error) {
 	path := filepath.Join(root, manifestPath)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("release manifest missing after packScript: %s", manifestPath)
 	}
-	var artifacts struct {
-		Schema   string         `json:"schema"`
-		Version  string         `json:"version"`
-		Install  ciArtifactRef  `json:"install"`
-		Payload  ciArtifactRef  `json:"payload"`
-		Archives []ciArchiveRef `json:"archives"`
+	var raw struct {
+		Schema         string            `json:"schema"`
+		Version        string            `json:"version"`
+		SelectorGroups []json.RawMessage `json:"selectorGroups"`
+		Install        *ciArtifactRefWire `json:"install"`
+		Payload        *ciArtifactRefWire `json:"payload"`
+		Archives       []ciArchiveRef    `json:"archives"`
 	}
-	if err := json.Unmarshal(data, &artifacts); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("release manifest is not readable JSON: %v", err)
 	}
-	if artifacts.Schema != "relkit.release-artifacts/1" {
-		return nil, fmt.Errorf("release manifest schema must be 'relkit.release-artifacts/1'")
+	if raw.Schema != "relkit.release-artifacts/2" && raw.Schema != "relkit.release-artifacts/1" {
+		return nil, fmt.Errorf("release manifest schema must be 'relkit.release-artifacts/2' (or /1)")
 	}
-	if strings.TrimSpace(artifacts.Version) != expectedVersion {
-		return nil, fmt.Errorf("release manifest version %q does not match project version %q", artifacts.Version, expectedVersion)
+	if strings.TrimSpace(raw.Version) != expectedVersion {
+		return nil, fmt.Errorf("release manifest version %q does not match project version %q", raw.Version, expectedVersion)
 	}
-	if artifacts.Install.Kind != "installer" {
-		return nil, fmt.Errorf("install.kind must be \"installer\" for the full-install track")
+
+	var groups []ciSelectorGroup
+	if raw.Schema == "relkit.release-artifacts/2" {
+		if len(raw.SelectorGroups) == 0 {
+			return nil, fmt.Errorf("selectorGroups must contain at least one group")
+		}
+		for i, entry := range raw.SelectorGroups {
+			group, err := decodeSelectorGroup(entry)
+			if err != nil {
+				return nil, fmt.Errorf("selectorGroups[%d]: %v", i, err)
+			}
+			groups = append(groups, group)
+		}
+	} else {
+		if raw.Install == nil || raw.Payload == nil {
+			return nil, fmt.Errorf("schema /1 requires both install and payload")
+		}
+		installSelectors, err := parseSelectorsString(raw.Install.Selectors, "install.selectors")
+		if err != nil {
+			return nil, err
+		}
+		payloadSelectors, err := parseSelectorsString(raw.Payload.Selectors, "payload.selectors")
+		if err != nil {
+			return nil, err
+		}
+		groups = []ciSelectorGroup{{
+			Selectors: installSelectors,
+			Install:   ciArtifactRef{Path: raw.Install.Path, Kind: raw.Install.Kind},
+			Payloads:  []ciPayloadRef{{Path: raw.Payload.Path, Selectors: payloadSelectors}},
+		}}
 	}
-	if strings.TrimSpace(artifacts.Install.Selectors) == "" || strings.TrimSpace(artifacts.Payload.Selectors) == "" {
-		return nil, fmt.Errorf("install/payload selectors must be non-empty")
+
+	artifacts := &ciReleaseArtifacts{
+		Schema:   raw.Schema,
+		Version:  raw.Version,
+		Groups:   groups,
+		Archives: raw.Archives,
 	}
-	installPath := filepath.Join(root, artifacts.Install.Path)
-	if info, err := os.Stat(installPath); err != nil || info.Size() == 0 {
-		return nil, fmt.Errorf("install artifact missing or empty: %s", artifacts.Install.Path)
-	}
-	payloadPath := filepath.Join(root, artifacts.Payload.Path)
-	if info, err := os.Stat(payloadPath); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("payload path must be a directory: %s", artifacts.Payload.Path)
+	if err := validateGroups(root, artifacts); err != nil {
+		return nil, err
 	}
 	for i, archive := range artifacts.Archives {
 		role := strings.TrimSpace(archive.Role)
@@ -297,13 +364,126 @@ func loadReleaseArtifactsManifest(root, manifestPath, expectedVersion string) (*
 			return nil, fmt.Errorf("archives[%d] missing or empty: %s", i, archive.Path)
 		}
 	}
-	return &ciReleaseArtifacts{
-		Schema:   artifacts.Schema,
-		Version:  artifacts.Version,
-		Install:  artifacts.Install,
-		Payload:  artifacts.Payload,
-		Archives: artifacts.Archives,
+	return artifacts, nil
+}
+
+// decodeSelectorGroup unmarshals one selectorGroups entry. The wire format
+// keeps manifest-level fields (id/kind/filename) explicit so no string
+// parsing survives past this function.
+func decodeSelectorGroup(entry json.RawMessage) (ciSelectorGroup, error) {
+	var group struct {
+		Selectors map[string]string `json:"selectors"`
+		Install   *ciArtifactRef    `json:"install"`
+		Payloads  []ciPayloadRef    `json:"payloads"`
+	}
+	if err := json.Unmarshal(entry, &group); err != nil {
+		return ciSelectorGroup{}, err
+	}
+	if len(group.Selectors) == 0 {
+		return ciSelectorGroup{}, fmt.Errorf("selectors must be a non-empty object")
+	}
+	if group.Install == nil {
+		return ciSelectorGroup{}, fmt.Errorf("install is required in every group")
+	}
+	if len(group.Payloads) == 0 {
+		return ciSelectorGroup{}, fmt.Errorf("payloads must contain at least one payload directory")
+	}
+	for j, payload := range group.Payloads {
+		if len(payload.Selectors) == 0 {
+			return ciSelectorGroup{}, fmt.Errorf("payloads[%d].selectors must be a non-empty object", j)
+		}
+	}
+	return ciSelectorGroup{
+		Selectors: group.Selectors,
+		Install:   *group.Install,
+		Payloads:  group.Payloads,
 	}, nil
+}
+
+// parseSelectorsString decodes the /1 comma-joined selector form
+// ("os=windows,arch=amd64") into a map. Only used on the /1 compatibility
+// path; /2 manifests carry structured maps.
+func parseSelectorsString(text, what string) (map[string]string, error) {
+	pairs, err := stage.ParseKeyValues(strings.TrimSpace(text))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", what, err)
+	}
+	if len(pairs) == 0 {
+		return nil, fmt.Errorf("%s must be non-empty", what)
+	}
+	return pairs, nil
+}
+
+// validateGroups enforces the invariants every group must hold regardless of
+// schema version: group selectors non-empty and well-formed, install present
+// on disk with a stage-recognized kind, payload directories present, and
+// selector keys shared between install and its payloads.
+func validateGroups(root string, artifacts *ciReleaseArtifacts) error {
+	if len(artifacts.Groups) == 0 {
+		return fmt.Errorf("selectorGroups must contain at least one group")
+	}
+	for i, group := range artifacts.Groups {
+		if err := model.CheckSelectors(group.Selectors, fmt.Sprintf("selectorGroups[%d].selectors", i)); err != nil {
+			return err
+		}
+		switch group.Install.Kind {
+		case "installer", "binary", "blob":
+		default:
+			return fmt.Errorf("selectorGroups[%d].install.kind must be installer, binary, or blob; got %q", i, group.Install.Kind)
+		}
+		installPath := filepath.Join(root, group.Install.Path)
+		if info, err := os.Stat(installPath); err != nil || info.Size() == 0 {
+			return fmt.Errorf("selectorGroups[%d].install missing or empty: %s", i, group.Install.Path)
+		}
+		for j, payload := range group.Payloads {
+			if err := model.CheckSelectors(payload.Selectors, fmt.Sprintf("selectorGroups[%d].payloads[%d].selectors", i, j)); err != nil {
+				return err
+			}
+			payloadPath := filepath.Join(root, payload.Path)
+			if info, err := os.Stat(payloadPath); err != nil || !info.IsDir() {
+				return fmt.Errorf("selectorGroups[%d].payloads[%d] path must be a directory: %s", i, j, payload.Path)
+			}
+		}
+	}
+	return nil
+}
+
+// installPairsText renders one group's install pairs for the stage argv. The
+// stage engine still accepts k=v text (hand-written CLI), and ci release is
+// an in-process caller of that same engine, so the text form is assembled
+// here without a subprocess boundary.
+func installPairsText(group ciSelectorGroup) []string {
+	pairs := make([]string, 0, len(group.Selectors)+3)
+	pairs = append(pairs, "kind="+group.Install.Kind)
+	if group.Install.Filename != "" {
+		pairs = append(pairs, "filename="+group.Install.Filename)
+	}
+	for _, key := range sortedKeys(group.Selectors) {
+		pairs = append(pairs, key+"="+group.Selectors[key])
+	}
+	return []string{strings.Join(pairs, ",")}
+}
+
+// payloadPairsText renders one payload's pairs for the stage argv.
+func payloadPairsText(payload ciPayloadRef) []string {
+	pairs := make([]string, 0, len(payload.Selectors)+3)
+	if payload.Filename != "" {
+		pairs = append(pairs, "filename="+payload.Filename)
+	}
+	for _, key := range sortedKeys(payload.Selectors) {
+		pairs = append(pairs, key+"="+payload.Selectors[key])
+	}
+	return []string{strings.Join(pairs, ",")}
+}
+
+// sortedKeys returns map keys in sorted order for deterministic argv.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // resolveCIChannel validates the channel against relkit.json defaults.

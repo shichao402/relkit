@@ -37,8 +37,9 @@ func (e Error) Error() string {
 
 type AddSpec struct {
 	Path      string
-	PairsText string
-	Track     string // "install" or "payload"
+	PairsText string            // hand-written CLI form: "id=app,kind=binary,os=windows"
+	Pairs     map[string]string // structured form; wins over PairsText on key clash
+	Track     string            // "install" or "payload"
 }
 
 type Printer func(string)
@@ -254,10 +255,18 @@ func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, 
 	}()
 	for _, add := range adds {
 		pairs := map[string]string{}
+		for key, value := range add.Pairs {
+			pairs[key] = value
+		}
 		if add.PairsText != "" {
-			pairs, err = ParseKeyValues(add.PairsText)
+			textPairs, err := ParseKeyValues(add.PairsText)
 			if err != nil {
 				return nil, err
+			}
+			for key, value := range textPairs {
+				if _, exists := pairs[key]; !exists {
+					pairs[key] = value
+				}
 			}
 		}
 		source := add.Path

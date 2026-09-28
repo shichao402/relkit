@@ -8,6 +8,7 @@ import (
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/payload"
 )
 
@@ -188,5 +189,68 @@ func TestRunDerivesDistinctPayloadFilenamesAndRejectsCollisions(t *testing.T) {
 	if _, err := Run(cfg, "1.0.1", 2, 0, colliding, "", "", "", "", false, nil); err == nil ||
 		!strings.Contains(err.Error(), "artifact filenames must be unique") {
 		t.Fatalf("duplicate filename err=%v", err)
+	}
+}
+
+// TestRunStructuredPairs covers the AddSpec.Pairs structured form: entries
+// win over PairsText on key clash, PairsText fills remaining keys, and
+// manifest-level controls (filename) work without string parsing.
+func TestRunStructuredPairs(t *testing.T) {
+	root := t.TempDir()
+	tree := filepath.Join(root, "tree")
+	if err := os.MkdirAll(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "app.bin"), []byte("payload"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installer := filepath.Join(root, "setup.zip")
+	if err := os.WriteFile(installer, []byte("install"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Root:           root,
+		Product:        "app",
+		DefaultChannel: "stable",
+		Channels:       []string{"stable"},
+		CodeStrategy:   "explicit",
+	}
+	staged, err := Run(cfg, "2.0.0", 1, 0, []AddSpec{
+		{
+			Path:  installer,
+			Track: "install",
+			Pairs: map[string]string{"kind": "installer", "id": "win-installer", "os": "windows", "component": "runtime"},
+		},
+		{
+			Path:      tree,
+			Track:     "payload",
+			Pairs:     map[string]string{"filename": "custom-payload.zip", "os": "windows"},
+			PairsText: "os=windows,component=runtime",
+		},
+	}, "stable", "", "", "", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var install *model.StagedArtifact
+	var payload *model.StagedArtifact
+	for _, artifact := range staged.Artifacts {
+		if artifact.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
+			payload = artifact
+		} else {
+			install = artifact
+		}
+	}
+	if install == nil || install.Id != "win-installer" {
+		t.Fatalf("structured id not honored: %+v", install)
+	}
+	if payload == nil || payload.Filename != "custom-payload.zip" {
+		t.Fatalf("structured filename not honored: %+v", payload)
+	}
+	payloadSelectors := model.SelectorsToMap(payload.Selectors)
+	if payloadSelectors["component"] != "runtime" {
+		t.Fatalf("PairsText supplement not merged: %v", payloadSelectors)
+	}
+	if payloadSelectors["apply"] != "relkit-payload" {
+		t.Fatalf("apply selector missing: %v", payloadSelectors)
 	}
 }

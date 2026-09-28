@@ -76,8 +76,14 @@ func redactSecrets(text string) string {
 	return bearerPattern.ReplaceAllString(text, "Bearer ***redacted***")
 }
 
-// AgentBaseURL mirrors release.py agent_base_url.
+// AgentBaseURL mirrors release.py agent_base_url, with the same env-first
+// precedence cas-put already uses (RELKIT_AGENT_URL beats relkit.json
+// agent.url; CI passes it as a secret since products with a serve backend
+// may not have an agent block at all).
 func AgentBaseURL(root string) string {
+	if url := strings.TrimSpace(os.Getenv("RELKIT_AGENT_URL")); url != "" {
+		return url
+	}
 	config, err := readJSONMap(filepath.Join(root, "relkit.json"))
 	if err != nil {
 		return ""
@@ -144,10 +150,12 @@ func PublishViaAgent(root, version string, execute bool) error {
 	}
 
 	minimum, maximum := PublishProtocolWindow(root, 2)
+	idempotencyKey := fmt.Sprintf("%s/%s/%s", product, version, result.StagedSHA256)
 	payload, err := jsonMarshal(map[string]string{
-		"product":      product,
-		"version":      version,
-		"stagedSha256": result.StagedSHA256,
+		"product":       product,
+		"version":       version,
+		"stagedSha256":  result.StagedSHA256,
+		"idempotencyKey": idempotencyKey,
 	})
 	if err != nil {
 		return err
