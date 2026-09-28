@@ -9,14 +9,18 @@ import (
 	"os/signal"
 
 	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	"github.com/shichao402/relkit/internal/buildver"
 	"github.com/shichao402/relkit/internal/ipc"
 	"github.com/shichao402/relkit/internal/updater"
 )
 
 // Overridden at release via -ldflags "-X main.version=...".
-var version = "dev"
+// Without ldflags (module channel: go install @vX) this resolves from
+// debug.ReadBuildInfo; see internal/buildver.
+var version = buildver.Placeholder
 
 func main() {
+	version = buildver.Resolve(version)
 	os.Exit(run(os.Args[1:]))
 }
 

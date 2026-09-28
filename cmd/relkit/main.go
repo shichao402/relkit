@@ -12,6 +12,7 @@ import (
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/backends"
+	"github.com/shichao402/relkit/internal/buildver"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/directory"
 	"github.com/shichao402/relkit/internal/envelope"
@@ -30,9 +31,12 @@ import (
 )
 
 // Overridden at release build time via -ldflags "-X main.version=...".
-var version = "0.2.0"
+// Without ldflags (module channel: go run / go install @vX) this resolves
+// from debug.ReadBuildInfo; see internal/buildver.
+var version = buildver.Placeholder
 
 func main() {
+	version = buildver.Resolve(version)
 	os.Exit(run(os.Args[1:]))
 }
 
