@@ -181,15 +181,22 @@ func (l *Lock) ArtifactSpecFor(component, target string) (*ArtifactSpec, error) 
 		}
 		return nil, fmt.Errorf("lock has no %s artifact for %s", component, target)
 	}
-	// consume/3: flat {urls: [...], sha256}
+	// consume/3: flat {urls: [...], sha256} for product-tree rows, or the
+	// by-target {target: {urls, sha256}} shape for the prebuilt-CLI fallback.
 	var spec ArtifactSpec
-	if err := json.Unmarshal(row, &spec); err != nil {
-		return nil, fmt.Errorf("lock artifact %s is malformed: %w", component, err)
+	if err := json.Unmarshal(row, &spec); err == nil && len(spec.URLs) > 0 && spec.SHA256 != "" {
+		return &spec, nil
 	}
-	if len(spec.URLs) == 0 || spec.SHA256 == "" {
-		return nil, fmt.Errorf("lock artifact %s needs urls and sha256", component)
+	var byTarget map[string]ArtifactSpec
+	if err := json.Unmarshal(row, &byTarget); err == nil {
+		if spec, ok := byTarget[target]; ok && len(spec.URLs) > 0 && spec.SHA256 != "" {
+			return &spec, nil
+		}
+		if len(byTarget) > 0 {
+			return nil, fmt.Errorf("lock has no %s artifact for %s", component, target)
+		}
 	}
-	return &spec, nil
+	return nil, fmt.Errorf("lock artifact %s is malformed: needs urls and sha256", component)
 }
 
 // PinnedComponents returns the component names the lock pins artifacts for,
@@ -205,8 +212,45 @@ func (l *Lock) PinnedComponents() map[string]bool {
 	return out
 }
 
-// WriteResolved writes the resolved-installation JSON report (the
-// --resolved-out payload) to path with parent directories created.
+// WriteLock serializes the lock to path with parent directories created.
+// The artifacts block round-trips through its raw JSON so the on-disk shape
+// (flat vs per-target) is preserved exactly as parsed.
+func (l *Lock) WriteLock(path string) error {
+	type wireLock struct {
+		Schema            string                     `json:"schema"`
+		Release           string                     `json:"release"`
+		Commit            string                     `json:"commit"`
+		Source            *SourceBlock               `json:"source,omitempty"`
+		ConsumerSHA256    string                     `json:"consumerSha256,omitempty"`
+		HostScriptsSHA256 string                     `json:"hostScriptsSha256,omitempty"`
+		Protocol          IntWindow                  `json:"protocol"`
+		UpdaterIPC        IntWindow                  `json:"updaterIpc"`
+		Artifacts         map[string]json.RawMessage `json:"artifacts"`
+	}
+	wire := wireLock{
+		Schema:            l.Schema,
+		Release:           l.Release,
+		Commit:            l.Commit,
+		Source:            l.Source,
+		ConsumerSHA256:    l.ConsumerSHA256,
+		HostScriptsSHA256: l.HostScriptsSHA256,
+		Protocol:          l.Protocol,
+		UpdaterIPC:        l.UpdaterIPC,
+		Artifacts:         l.Artifacts,
+	}
+	data, err := json.MarshalIndent(&wire, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
 func WriteResolved(path string, resolved *ResolvedArtifacts) error {
 	if resolved.Artifacts == nil {
 		resolved.Artifacts = map[string]string{}

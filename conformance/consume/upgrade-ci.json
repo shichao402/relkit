@@ -1,0 +1,82 @@
+{
+  "name": "upgrade-ci",
+  "description": "Upgrade and CI-release flows shared by every relkit consumer implementation: lock rewrite from an immutable release, channel resolution, dry-run vs execute gating.",
+  "cases": [
+    {
+      "name": "upgrade-builds-consume-3-lock",
+      "description": "upgrade vX.Y.Z rebuilds the whole lock from the release manifest + SHA256SUMS: consume/3, source block, url lists, updater absent.",
+      "release": "v0.5.0",
+      "manifest": {
+        "commit": "6666666666666666666666666666666666666666",
+        "hostScriptsSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "consumerSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "minProtocol": 2,
+        "maxProtocol": 2,
+        "minUpdaterIpc": 3,
+        "maxUpdaterIpc": 3
+      },
+      "sha256sums": {
+        "relkit-host-scripts.zip": "4444444444444444444444444444444444444444444444444444444444444444",
+        "relkit-sdk-dart.zip": "8888888888888888888888888888888888888888888888888888888888888888",
+        "relkit-sdk-rust.zip": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "relkit-windows-amd64.exe": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      "previousLock": {
+        "schema": "relkit.consume/2",
+        "release": "v0.4.24",
+        "commit": "1111111111111111111111111111111111111111111111111111111111111111",
+        "consumerSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "hostScriptsSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "artifacts": {}
+      },
+      "expectLock": {
+        "schema": "relkit.consume/3",
+        "release": "v0.5.0",
+        "commit": "6666666666666666666666666666666666666666",
+        "sourceModule": "github.com/shichao402/relkit",
+        "sourceVersion": "v0.5.0",
+        "hostScriptsSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "artifactComponents": ["cli", "host-scripts", "sdk-dart", "sdk-rust"],
+        "cliUrlsLen": 2,
+        "protocolMin": 2,
+        "updaterIpcMin": 3,
+        "updaterInArtifacts": false
+      },
+      "expectMessages": ["rewrote scripts/relkit.lock.json from relkit.consume/2 to relkit.consume/3", "updated scripts/relkit.lock.json to v0.5.0"]
+    },
+    {
+      "name": "upgrade-rejects-invalid-release-name",
+      "description": "upgrade refuses a non vX.Y.Z argument before any network access.",
+      "release": "0.5.0",
+      "expectError": "upgrade expects vX.Y.Z"
+    },
+    {
+      "name": "upgrade-rejects-manifest-without-commit",
+      "description": "A manifest without a 40-char commit is refused; the previous lock commit is never kept.",
+      "release": "v0.5.0",
+      "manifest": {
+        "commit": "",
+        "hostScriptsSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "consumerSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "sha256sums": {
+        "relkit-host-scripts.zip": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "expectError": "manifest.json must pin a 40-char commit"
+    },
+    {
+      "name": "upgrade-rejects-sums-without-host-scripts",
+      "description": "SHA256SUMS missing the host-scripts attachment is refused; the host tree hash cannot be pinned without it.",
+      "release": "v0.5.0",
+      "manifest": {
+        "commit": "6666666666666666666666666666666666666666",
+        "hostScriptsSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "consumerSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "sha256sums": {
+        "relkit-sdk-dart.zip": "8888888888888888888888888888888888888888888888888888888888888888"
+      },
+      "expectError": "SHA256SUMS has no relkit-host-scripts.zip"
+    }
+  ]
+}

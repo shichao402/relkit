@@ -105,6 +105,10 @@ func run(argv []string) (code int) {
 		err = cmdConsumeStatus(rest)
 	case "check":
 		err = cmdConsumeCheck(rest)
+	case "upgrade":
+		err = cmdConsumeUpgrade(rest)
+	case "ci":
+		err = cmdCI(rest)
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
@@ -1013,5 +1017,7 @@ Commands:
   install
   status
   check
+  upgrade
+  ci
 `)
 }

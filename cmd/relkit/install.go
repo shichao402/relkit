@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/shichao402/relkit/internal/consume"
@@ -86,6 +89,14 @@ func cmdConsumeInstall(args []string) error {
 		Artifacts: map[string]string{},
 	}
 	for _, name := range installable {
+		if name == "updater" && lock.Schema == consume.SchemaV3 && !pinned[name] {
+			// ADR 0017 decision 7: the updater exits the artifacts block on
+			// consume/3; install it through the module channel instead.
+			if err := installUpdaterViaModule(root, lock); err != nil {
+				return err
+			}
+			continue
+		}
 		spec, err := lock.ArtifactSpecFor(name, target)
 		if err != nil {
 			return err
@@ -125,4 +136,95 @@ func cmdConsumeInstall(args []string) error {
 	}
 	fmt.Printf("relkit consume: install complete release=%s target=%s\n", lock.Release, target)
 	return nil
+}
+
+// installUpdaterViaModule installs the updater through the module channel
+// (ADR 0017 decision 7): go install the pinned module version, then place the
+// built binary under the registry install name. GOPROXY stays untouched so
+// the unified entry (mirrors.tencent.com/go/) set by the environment wins;
+// only when nothing is configured do we seed the unified default.
+func installUpdaterViaModule(root string, lock *consume.Lock) error {
+	module := "github.com/shichao402/relkit/cmd/relkit-updater"
+	version := lock.Source.Version
+	if lock.Source != nil && lock.Source.Module != "" {
+		module = lock.Source.Module + "/cmd/relkit-updater"
+	}
+	if version == "" {
+		return fmt.Errorf("consume/3 lock has no source.version; cannot install updater via module channel")
+	}
+
+	command := exec.Command("go", "install", module+"@"+version)
+	command.Dir = root
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	if strings.TrimSpace(os.Getenv("GOPROXY")) == "" {
+		command.Env = append(os.Environ(), "GOPROXY=https://mirrors.tencent.com/go/")
+	}
+	fmt.Printf("relkit: installing updater via module channel: go install %s@%s\n", module, version)
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("go install %s@%s failed: %w", module, version, err)
+	}
+
+	// go install drops the binary into GOBIN/GOPATH/bin; place it under the
+	// registry install name inside the product tree (tools/bin).
+	row := registry.ByName["updater"]
+	installName, err := row.InstallName(hostTargetString())
+	if err != nil {
+		return err
+	}
+	destination := filepath.Join(root, filepath.FromSlash(row.Destination), installName)
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	built := filepath.Join(goBinDir(), updaterBinaryName())
+	if _, err := os.Stat(built); err != nil {
+		return fmt.Errorf("go install succeeded but %s is missing", built)
+	}
+	if err := copyFile(built, destination); err != nil {
+		return err
+	}
+	fmt.Printf("relkit: updater placed at %s\n", filepath.ToSlash(destination))
+	return nil
+}
+
+func hostTargetString() string {
+	return runtime.GOOS + "-" + runtime.GOARCH
+}
+
+func updaterBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "relkit-updater.exe"
+	}
+	return "relkit-updater"
+}
+
+// goBinDir resolves GOBIN or GOPATH/bin (where go install places binaries).
+func goBinDir() string {
+	if gobin := strings.TrimSpace(os.Getenv("GOBIN")); gobin != "" {
+		return gobin
+	}
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, "go", "bin")
+		}
+		return ""
+	}
+	return filepath.Join(strings.Split(gopath, string(os.PathListSeparator))[0], "bin")
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
 }
