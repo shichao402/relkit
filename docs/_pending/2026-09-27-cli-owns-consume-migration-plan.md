@@ -7,7 +7,7 @@
 
 1. module path 迁移：**已完成**（main `ac9860b`，master `edbbf1c` 合入；`go.mod` 已为 `github.com/shichao402/relkit`，158 文件 import 替换随提交落地）。历史调研（2026-09-27）作证：goproxy.woa.com 与 goproxy.cn 均已在该路径收录至 v0.4.23，此前唯一阻塞即 zip 内 module path 不匹配，本步骤是解锁既有通道，不是新建。
 2. 打 v0.5.0 tag（CLI 收编首版；打前按 ADR 0004 把项目版本 SSOT 推到 0.5.0），随后统一入口实测：`GOPROXY=https://mirrors.tencent.com/go/`（内外网边缘均 302 → `goproxy.woa.com`，split-DNS 双宿，内外网 CI 共用同一配置）下跑 `go run github.com/shichao402/relkit/cmd/relkit@vX` 与 `go install github.com/shichao402/relkit/cmd/relkit-updater@vX`。v0.4.24 已用该入口端到端验证成功（2026-09-28，sumdb 透传校验通过，`--version` 正常）。fallback：直连 `goproxy.woa.com`；备源 `goproxy.cn` / `goproxy.io`（新路径均 200）。注意 v0.4.23 及更早 zip 在新路径下 module path 不匹配属预期（tag 早于迁移提交），客户端拒绝不影响 v0.4.24+。
-3. 回填 ADR：0005/0007/0012 文中所有 `go.firoyang.com` 引用的指向说明（协议面不动，只改指针）。
+3. 回填 ADR：0005/0007/0012 文中所有 `go.firoyang.com` 引用的指向说明（协议面不动，只改指针）。**2026-09-28 核实完毕：三份 ADR 正文均无 `go.firoyang.com` 引用**（0007 的 `raw2.firoyang.com` 是 COS 时代 raw 域名，与 module path 无关），无需回填，本条关闭。
 
 ## 阶段 1：CLI 吸收产品 CI 面（2–3 周）
 
