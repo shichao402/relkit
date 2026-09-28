@@ -109,6 +109,8 @@ func run(argv []string) (code int) {
 		err = cmdConsumeUpgrade(rest)
 	case "ci":
 		err = cmdCI(rest)
+	case "release":
+		err = cmdRelease(rest)
 	case "build":
 		err = cmdBuild(rest)
 	default:
@@ -1021,6 +1023,7 @@ Commands:
   check
   upgrade
   ci
+  release
   build
 `)
 }

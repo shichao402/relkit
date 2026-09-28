@@ -63,6 +63,7 @@ staged 鈹€鈹€鈻?relkit publish 鈹€鈹€鈻?鈶?鏍￠獙鍙揪鎬�
 | `relkit min-supported` | 鏄?| 璁剧疆寮哄埗鏇存柊涓嬮檺 |
 | `relkit conformance` | 鍚?| 璺戜竴鑷存€х敤渚嬶紙鑷锛?|
 | `relkit backends` | 鍚?| 鍒楀嚭鏈鏋勫缓瀹為檯鏀寔鐨勫悗绔被鍨?|
+| `relkit release` | 是 | 发布已 stage 的树（发布门 + agent 发布；`--execute` 仅 CI） |
 
 ---
 
@@ -468,6 +469,18 @@ CAS 路径把上面的打包与 `staged-put` 换成。跨地域直传时把片�
 ```
 
 随后仍调用 `POST /v1/publish`；`cas-put` 的输出包含瘦 staged tar 的 sha256，可传给 `stagedSha256`。
+
+`relkit release`（ADR 0017 消费面编排）把「staged 树就位 → 发布」的收尾收进单命令：lock reconcile 门（drift、staged 存在性、release-contract 协议窗口）、IncompleteSteps 门、清理 stale staged 树，最后经 agent `POST /v1/publish` 完成发布。多平台 Job 聚合的流水线在各平台产物收集、stage 完成后，收尾统一交给：
+
+```yaml
+- name: Release via relkit CLI
+  env:
+    RELKIT_RELEASE_VIA_CI: "1"
+    RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
+  run: relkit release --execute
+```
+
+`RELKIT_RELEASE_VIA_CI=1` 是 `--execute` 的前置门——本机 shell 不持 agent token，不得发布；未设该变量时 `relkit release` 为 dry-run，打印发布计划后返回。单机全流程（install → pack → stage → publish）走 `relkit ci release --execute`，两者分别是收集面与发布面的入口。门禁实现见 `internal/releasegate`，决策记录见 [ADR 0017](docs/adr/0017-cli-owns-consume-source-channel.md)。
 
 不要在 CI 里设置 `RELKIT_PRIVATE_KEY` 或任何签名私钥环境变量。设计说明：[`docs/design/publish-agent.md`](docs/design/publish-agent.md)。
 
