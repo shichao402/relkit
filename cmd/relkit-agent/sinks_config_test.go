@@ -61,11 +61,12 @@ func TestLoadConfigRejectsMakersPlusSinks(t *testing.T) {
 }
 
 func TestLoadConfigParsesSinks(t *testing.T) {
+	siteDir := t.TempDir()
 	path := writeAgentConfig(t, map[string]any{
 		"sinks": []any{
 			map[string]any{"type": "makers", "projectId": "relkit-updates-index"},
 			map[string]any{"type": "backend", "backend": "intranet-serve"},
-			map[string]any{"type": "directory", "path": "/srv/relkit-site"},
+			map[string]any{"type": "directory", "path": siteDir},
 		},
 	})
 	cfg, err := LoadConfig(path)
@@ -94,10 +95,11 @@ func TestLoadConfigRejectsBadSink(t *testing.T) {
 
 func TestSiteStatusReportsSinks(t *testing.T) {
 	t.Setenv("PAGES_SECRET", "must-not-leak")
+	siteDir := t.TempDir()
 	cfg, err := LoadConfig(writeAgentConfig(t, map[string]any{
 		"sinks": []any{
 			map[string]any{"type": "makers", "projectId": "makers-demo", "tokenEnv": "PAGES_SECRET", "region": "china"},
-			map[string]any{"type": "directory", "path": "/srv/relkit-site"},
+			map[string]any{"type": "directory", "path": siteDir},
 		},
 	}))
 	if err != nil {

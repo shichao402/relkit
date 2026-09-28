@@ -9,8 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,12 +32,32 @@ jobs:
           cache: npm
           cache-dependency-path: bindings/ts/package-lock.json
       - name: Test
+        shell: bash
         run: |
           go test ./...
           cargo test --manifest-path sdk/rust/Cargo.toml
           python -m unittest scripts/deploy/test_relkit.py scripts/test_relkit_consume.py scripts/test_relkit_host.py
           npm --prefix bindings/ts ci
           npm --prefix bindings/ts test
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: bindings/ts/package-lock.json
       - name: Build immutable release artifacts
         run: |
           go run ./cmd/relkit build --all --check-tag "${GITHUB_REF_NAME}" --out dist

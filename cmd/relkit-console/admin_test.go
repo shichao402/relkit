@@ -362,10 +362,15 @@ func TestInitResetAdmin(t *testing.T) {
 	tree := t.TempDir()
 
 	// A box that migrated from serve: config with a populated tree, one
-	// operator, legacy state file name.
+	// operator, legacy state file name. Marshal the tree path in: a
+	// hand-built literal breaks on Windows, where TempDir is
+	// C:\Users\... and "\U" is an invalid JSON escape.
+	configJSON, err := json.Marshal(map[string]string{"dir": tree})
+	if err != nil {
+		t.Fatal(err)
+	}
 	configPath := filepath.Join(out, ConfigName)
-	if err := os.WriteFile(configPath, []byte(`{"dir": "`+tree+`"}
-`), 0o644); err != nil {
+	if err := os.WriteFile(configPath, append(configJSON, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	token, admin := bootstrapAdmin(t, tree)

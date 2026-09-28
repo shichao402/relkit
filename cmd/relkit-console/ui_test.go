@@ -341,6 +341,7 @@ func TestDownloadCountsPersistAcrossConsoleRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRootAdapter: %v", err)
 	}
+	t.Cleanup(func() { _ = adapter.root.Close() })
 	c2 := &console{
 		adapter: adapter,
 		stats:   newDownloadStats(defaultStatsPath(dir), dir),

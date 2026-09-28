@@ -32,6 +32,10 @@ func newTestConsole(t *testing.T) (*console, string) {
 	if err != nil {
 		t.Fatalf("newRootAdapter: %v", err)
 	}
+	// os.Root pins the temp dir on Windows: without Close, t.TempDir's
+	// RemoveAll cleanup fails with "being used by another process" on
+	// every test. relkit-store's tests already close theirs; same here.
+	t.Cleanup(func() { _ = adapter.root.Close() })
 	c := &console{
 		adapter: adapter,
 		stats:   newDownloadStats(defaultStatsPath(dir), dir),
@@ -171,6 +175,7 @@ func TestRootAdapterListsAndReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = a.root.Close() })
 	if a.Name() != "local" {
 		t.Fatalf("name = %q", a.Name())
 	}
