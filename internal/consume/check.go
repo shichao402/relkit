@@ -2,6 +2,7 @@ package consume
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -161,6 +162,15 @@ type CheckResult struct {
 func CheckInstalled(root string, lock *Lock, component, target string) CheckResult {
 	spec, err := lock.ArtifactSpecFor(component, target)
 	if err != nil {
+		moduleChannel := component == "updater" && lock.Schema == SchemaV3 &&
+			(errors.Is(err, ErrNoArtifact) || strings.Contains(err.Error(), "lock has no updater artifact"))
+		if moduleChannel {
+			// ADR 0017 decision 7: the updater exits the artifacts block on
+			// consume/3; install placed it through the module channel, so
+			// verification falls to the on-disk binary + smoke probe rather
+			// than a pinned artifact hash.
+			return checkModuleChannelUpdater(root, component, target)
+		}
 		return CheckResult{Component: component, OK: false, Detail: err.Error()}
 	}
 	row, ok := registry.ByName[component]
@@ -214,6 +224,30 @@ func CheckInstalled(root string, lock *Lock, component, target string) CheckResu
 		return CheckResult{Component: component, OK: true}
 	}
 	return CheckResult{Component: component, OK: false, Detail: "unsupported role"}
+}
+
+// checkModuleChannelUpdater verifies the updater installed through the
+// module channel (consume/3): the binary exists under the registry install
+// name and answers --version. The lock pins the source version, not the
+// binary bytes (release CI patch drift makes byte pinning impossible), so
+// the probe is the verification.
+func checkModuleChannelUpdater(root, component, target string) CheckResult {
+	row, ok := registry.ByName[component]
+	if !ok {
+		return CheckResult{Component: component, OK: false, Detail: "unknown component"}
+	}
+	name, err := row.InstallName(target)
+	if err != nil {
+		return CheckResult{Component: component, OK: false, Detail: err.Error()}
+	}
+	destination := filepath.Join(root, row.Destination, name)
+	if _, err := os.Stat(destination); err != nil {
+		return CheckResult{Component: component, OK: false, Detail: fmt.Sprintf("module-channel updater missing: %s", destination)}
+	}
+	if err := smokeTest(destination); err != nil {
+		return CheckResult{Component: component, OK: false, Detail: err.Error()}
+	}
+	return CheckResult{Component: component, OK: true}
 }
 
 // smokeTest runs --version as the install/verify probe.
