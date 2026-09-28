@@ -12,12 +12,13 @@ import (
 
 // upgradeCase is one case in conformance/consume/upgrade-ci.json.
 type upgradeCase struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Release     string            `json:"release"`
-	Manifest    *ReleaseManifest  `json:"manifest"`
-	SHA256SUMS  map[string]string `json:"sha256sums"`
-	Previous    *Lock             `json:"previousLock"`
+	Name            string            `json:"name"`
+	Description     string            `json:"description"`
+	Release         string            `json:"release"`
+	Manifest        *ReleaseManifest  `json:"manifest"`
+	SHA256SUMS      map[string]string `json:"sha256sums"`
+	Previous        *Lock             `json:"previousLock"`
+	OmitHostScripts bool              `json:"omitHostScripts"`
 	ExpectLock  *struct {
 		Schema             string   `json:"schema"`
 		Release            string   `json:"release"`
@@ -30,6 +31,7 @@ type upgradeCase struct {
 		ProtocolMin        int      `json:"protocolMin"`
 		UpdaterIpcMin      int      `json:"updaterIpcMin"`
 		UpdaterInArtifacts bool     `json:"updaterInArtifacts"`
+		NoHostScripts      bool     `json:"noHostScripts"`
 	} `json:"expectLock"`
 	ExpectError string `json:"expectError"`
 }
@@ -62,7 +64,7 @@ func TestConsumeUpgradeConformance(t *testing.T) {
 				// from nothing; hand UpgradeLock an empty prior.
 				previous = &Lock{Schema: "relkit.consume/2"}
 			}
-			lock, err := UpgradeLock(tc.Release, tc.Manifest, tc.SHA256SUMS, previous)
+		lock, err := UpgradeLock(tc.Release, tc.Manifest, tc.SHA256SUMS, previous, tc.OmitHostScripts)
 			if tc.ExpectError != "" {
 				if err == nil {
 					t.Fatalf("expected error %q, got lock", tc.ExpectError)
@@ -97,7 +99,14 @@ func TestConsumeUpgradeConformance(t *testing.T) {
 			if lock.Source.Version != want.SourceVersion {
 				t.Errorf("source.version = %q, want %q", lock.Source.Version, want.SourceVersion)
 			}
-			if lock.HostScriptsSHA256 != want.HostScriptsSHA256 {
+			if want.NoHostScripts {
+				if lock.HostScriptsSHA256 != "" {
+					t.Errorf("hostScriptsSha256 = %q; want empty in the hostless form", lock.HostScriptsSHA256)
+				}
+				if _, ok := lock.Artifacts["host-scripts"]; ok {
+					t.Error("host-scripts must not be pinned in the hostless form")
+				}
+			} else if lock.HostScriptsSHA256 != want.HostScriptsSHA256 {
 				t.Errorf("hostScriptsSha256 = %q, want %q", lock.HostScriptsSHA256, want.HostScriptsSHA256)
 			}
 			var got []string

@@ -115,7 +115,12 @@ func ReleaseManifestFor(base string) (*ReleaseManifest, error) {
 // Constructing instead of patching is what lets a consume/1 or consume/2 repo
 // run upgrade directly: every pinned value is restated by the release, so the
 // old lock's shape is never a precondition.
-func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]string, previous *Lock) (*Lock, error) {
+//
+// omitHostScripts writes the hostless form (ADR 0017 phase-3 target): the
+// product retired scripts/host, so the lock pins neither hostScriptsSha256
+// nor a host-scripts artifact row. Install and the release gate both follow
+// the lock — nothing resurrects the tree or demands its hash.
+func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]string, previous *Lock, omitHostScripts bool) (*Lock, error) {
 	if !releasePattern.MatchString(release) {
 		return nil, fmt.Errorf("upgrade expects vX.Y.Z")
 	}
@@ -124,18 +129,23 @@ func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]stri
 		return nil, fmt.Errorf("manifest.json must pin a 40-char commit; refusing to keep the previous lock commit")
 	}
 	hostTree := strings.ToLower(strings.TrimSpace(manifest.HostScriptsSHA))
-	if !sha256Pattern.MatchString(hostTree) {
-		return nil, fmt.Errorf("manifest.json has no valid hostScriptsSha256")
+	if !omitHostScripts {
+		if !sha256Pattern.MatchString(hostTree) {
+			return nil, fmt.Errorf("manifest.json has no valid hostScriptsSha256")
+		}
+		if _, ok := sums["relkit-host-scripts.zip"]; !ok {
+			return nil, fmt.Errorf("SHA256SUMS has no relkit-host-scripts.zip")
+		}
 	}
 	_ = strings.ToLower(strings.TrimSpace(manifest.ConsumerSHA))
-	if _, ok := sums["relkit-host-scripts.zip"]; !ok {
-		return nil, fmt.Errorf("SHA256SUMS has no relkit-host-scripts.zip")
-	}
 
 	base := ReleaseBase(release)
 	artifacts := map[string]json.RawMessage{}
 	for _, row := range registry.ProductComponents() {
 		if row.Role != registry.RoleProductTree {
+			continue
+		}
+		if row.Name == "host-scripts" && omitHostScripts {
 			continue
 		}
 		if sum, ok := sums[row.Archive]; ok {
@@ -178,19 +188,21 @@ func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]stri
 	}
 
 	lock := &Lock{
-		Schema:  SchemaV3,
-		Release: release,
-		Commit:  commit,
-		Source: &SourceBlock{
+		Schema:     SchemaV3,
+		Release:    release,
+		Commit:     commit,
+		Source:     &SourceBlock{
 			Module:  "github.com/shichao402/relkit",
 			Version: release,
 			H1:      "",
 			Commit:  commit,
 		},
-		HostScriptsSHA256: hostTree,
-		Protocol:          intWindow(manifest.MinProtocol, manifest.MaxProtocol, PublishProtocolFallback),
-		UpdaterIPC:        intWindow(manifest.MinUpdaterIpc, manifest.MaxUpdaterIpc, UpdaterIpcFallback),
-		Artifacts:         artifacts,
+		Protocol:   intWindow(manifest.MinProtocol, manifest.MaxProtocol, PublishProtocolFallback),
+		UpdaterIPC: intWindow(manifest.MinUpdaterIpc, manifest.MaxUpdaterIpc, UpdaterIpcFallback),
+		Artifacts:  artifacts,
+	}
+	if !omitHostScripts {
+		lock.HostScriptsSHA256 = hostTree
 	}
 	return lock, nil
 }

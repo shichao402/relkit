@@ -24,7 +24,8 @@ type Report struct {
 
 // LockDrift mirrors the reconcile lock checks: schema guard and the
 // scripts/host tree hash against the lock's hostScriptsSha256. A missing
-// lock file is not drift here (install owns that error).
+// lock file is not drift here (install owns that error). A consume/3 lock
+// without hostScriptsSha256 is the hostless form: unpinned is not drift.
 func LockDrift(root string) []string {
 	lockPath := filepath.Join(root, "scripts", "relkit.lock.json")
 	data, err := os.ReadFile(lockPath)
@@ -37,6 +38,17 @@ func LockDrift(root string) []string {
 	}
 	var drift []string
 	pinned := strings.ToLower(strings.TrimSpace(lock.HostScriptsSHA256))
+	if pinned == "" {
+		if lock.Schema == consume.SchemaV3 {
+			// Hostless consume/3 lock (ADR 0017): the product retired
+			// scripts/host, so neither the tree nor its hash exists to
+			// reconcile. Unpinned is not drift; consume/2 locks always
+			// pinned the hash, so an empty one there stays malformed.
+			return nil
+		}
+		drift = append(drift, "lock has no valid hostScriptsSha256")
+		return drift
+	}
 	if !sha256HexPattern.MatchString(pinned) {
 		drift = append(drift, "lock has no valid hostScriptsSha256")
 		return drift

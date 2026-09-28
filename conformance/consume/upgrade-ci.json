@@ -77,6 +77,39 @@
         "relkit-sdk-dart.zip": "8888888888888888888888888888888888888888888888888888888888888888"
       },
       "expectError": "SHA256SUMS has no relkit-host-scripts.zip"
+    },
+    {
+      "name": "upgrade-hostless-omits-host-scripts-pin",
+      "description": "A product that retired scripts/host (ADR 0017 phase-3 target) upgrades into the hostless form: no hostScriptsSha256, no host-scripts artifact row, manifest and sums may omit them entirely.",
+      "release": "v0.5.4",
+      "omitHostScripts": true,
+      "manifest": {
+        "commit": "7777777777777777777777777777777777777777",
+        "consumerSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "minProtocol": 2,
+        "maxProtocol": 2,
+        "minUpdaterIpc": 3,
+        "maxUpdaterIpc": 3
+      },
+      "sha256sums": {
+        "relkit-sdk-dart.zip": "8888888888888888888888888888888888888888888888888888888888888888",
+        "relkit-sdk-rust.zip": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "relkit-windows-amd64.exe": "5555555555555555555555555555555555555555555555555555555555555"
+      },
+      "expectLock": {
+        "schema": "relkit.consume/3",
+        "release": "v0.5.4",
+        "commit": "7777777777777777777777777777777777777777",
+        "sourceModule": "github.com/shichao402/relkit",
+        "sourceVersion": "v0.5.4",
+        "hostScriptsSha256": "",
+        "artifactComponents": ["cli", "sdk-dart", "sdk-rust"],
+        "cliUrlsLen": 1,
+        "protocolMin": 2,
+        "updaterIpcMin": 3,
+        "updaterInArtifacts": false,
+        "noHostScripts": true
+      }
     }
   ]
 }

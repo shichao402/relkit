@@ -57,6 +57,28 @@ func TestLockDrift(t *testing.T) {
 	if drift := LockDrift(root); len(drift) != 1 || drift[0] != "lock has no valid hostScriptsSha256" {
 		t.Errorf("non-hex hash drift = %v", drift)
 	}
+
+	// Hostless consume/3 lock (ADR 0017 phase-3 target): no hash pinned,
+	// no scripts/host tree, no drift either.
+	hostlessRoot := t.TempDir()
+	writeLock(t, hostlessRoot, consume3HostlessLock())
+	if drift := LockDrift(hostlessRoot); len(drift) != 0 {
+		t.Errorf("hostless consume/3 lock must be clean; got %v", drift)
+	}
+}
+
+// consume3HostlessLock builds the hostless form: consume/3 without
+// hostScriptsSha256, the shape products get after retiring scripts/host.
+func consume3HostlessLock() string {
+	return `{
+	"schema": "relkit.consume/3",
+	"release": "v0.5.4",
+	"commit": "7777777777777777777777777777777777777777",
+	"source": {"module": "github.com/shichao402/relkit", "version": "v0.5.4", "h1": "", "commit": "7777777777777777777777777777777777777777"},
+	"protocol": {"min": 2, "max": 2},
+	"updaterIpc": {"min": 3, "max": 3},
+	"artifacts": {"cli": {"urls": ["https://example.invalid/relkit.exe"], "sha256": "` + strings64("b") + `"}}
+}`
 }
 
 // TestStagedDrift pins the staged-presence check keyed by the release

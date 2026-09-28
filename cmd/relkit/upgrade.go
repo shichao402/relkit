@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -16,6 +17,7 @@ func cmdConsumeUpgrade(args []string) error {
 	root := "."
 	release := ""
 	finalize := false
+	noHostScripts := false
 
 	nonFlags := []string{}
 	for i := 0; i < len(args); i++ {
@@ -26,6 +28,8 @@ func cmdConsumeUpgrade(args []string) error {
 			root = mustValue(args, i, "--project-root")
 		case arg == "--finalize":
 			finalize = true
+		case arg == "--no-host-scripts":
+			noHostScripts = true
 		case strings.HasPrefix(arg, "-"):
 			return fmt.Errorf("unknown flag %q", arg)
 		default:
@@ -33,7 +37,7 @@ func cmdConsumeUpgrade(args []string) error {
 		}
 	}
 	if len(nonFlags) != 1 {
-		return fmt.Errorf("usage: relkit upgrade vX.Y.Z [--project-root DIR] [--finalize]")
+		return fmt.Errorf("usage: relkit upgrade vX.Y.Z [--project-root DIR] [--finalize] [--no-host-scripts]")
 	}
 	release = nonFlags[0]
 	_ = finalize
@@ -51,11 +55,21 @@ func cmdConsumeUpgrade(args []string) error {
 	}
 	sums := consume.ParseSHA256SUMS(sumsText)
 
+	// Hostless form (ADR 0017 phase-3 target): a product that retired
+	// scripts/host gets a lock without hostScriptsSha256 or a host-scripts
+	// artifact row. Auto-detected from the missing tree; --no-host-scripts
+	// forces it for products keeping the tree around untracked.
+	if !noHostScripts {
+		if _, err := os.Stat(filepath.Join(root, "scripts", "host")); os.IsNotExist(err) {
+			noHostScripts = true
+		}
+	}
+
 	var previous *consume.Lock
 	if prev, err := consume.LoadLock(lockPath); err == nil {
 		previous = prev
 	}
-	lock, err := consume.UpgradeLock(release, manifest, sums, previous)
+	lock, err := consume.UpgradeLock(release, manifest, sums, previous, noHostScripts)
 	if err != nil {
 		return err
 	}
