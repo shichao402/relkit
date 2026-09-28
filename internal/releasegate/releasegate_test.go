@@ -3,6 +3,7 @@ package releasegate
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -205,5 +206,35 @@ func TestPublishProtocolWindow(t *testing.T) {
 	}
 	if min, max := PublishProtocolWindow(root, 2); min != 3 || max != 5 {
 		t.Errorf("locked window = (%d, %d); want (3, 5)", min, max)
+	}
+}
+
+// publishEndpointFor pins the agent-URL normalization the Python tail and
+// casput.normalizeBase already had: a site-root form (no /v1) and an explicit
+// /v1 form must both reach /v1/publish. A root-form base POSTing to /publish
+// gets 405 from the agent (dec dev/v1.13.104 drill caught this).
+func publishEndpointFor(url string) string {
+	base := strings.TrimRight(url, "/")
+	if !strings.HasSuffix(base, "/v1") {
+		base += "/v1"
+	}
+	return base + "/publish"
+}
+
+func TestPublishEndpointNormalization(t *testing.T) {
+	cases := map[string]string{
+		"https://publish.firoyang.com":        "https://publish.firoyang.com/v1/publish",
+		"https://publish.firoyang.com/":       "https://publish.firoyang.com/v1/publish",
+		"https://publish.firoyang.com/v1":     "https://publish.firoyang.com/v1/publish",
+		"https://publish.firoyang.com/v1/":    "https://publish.firoyang.com/v1/publish",
+		"http://127.0.0.1:8080":               "http://127.0.0.1:8080/v1/publish",
+		"https://example.com/base/":           "https://example.com/base/v1/publish",
+		"https://example.com/base/v1":         "https://example.com/base/v1/publish",
+		"https://example.com/v11":             "https://example.com/v11/v1/publish",
+	}
+	for url, want := range cases {
+		if got := publishEndpointFor(url); got != want {
+			t.Errorf("publishEndpointFor(%q) = %q; want %q", url, got, want)
+		}
 	}
 }

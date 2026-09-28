@@ -115,7 +115,15 @@ func PublishViaAgent(root, version string, execute bool) error {
 	if url == "" {
 		return fmt.Errorf("relkit.json agent.url is required for ci release --execute")
 	}
-	publish := strings.TrimRight(url, "/") + "/publish"
+	// The agent base may be the site root or already end in /v1 (the Python
+	// tail normalized the same way; casput.normalizeBase does this for the
+	// cas endpoints). Without this, a root-form RELKIT_AGENT_URL POSTs to
+	// /publish and the agent answers 405.
+	base := strings.TrimRight(url, "/")
+	if !strings.HasSuffix(base, "/v1") {
+		base += "/v1"
+	}
+	publish := base + "/publish"
 	fmt.Printf("agent %s\n", url)
 	fmt.Printf("staged %s\n", filepath.ToSlash(staged))
 	if !execute {
