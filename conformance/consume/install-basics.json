@@ -1,0 +1,95 @@
+{
+  "name": "install-basics",
+  "description": "Install flows shared by every relkit consumer implementation: lock parse, artifact pick, atomic place, smoke probe.",
+  "cases": [
+    {
+      "name": "parse-consume-2-lock",
+      "description": "A consume/2 lock parses: single url per artifact, hostScriptsSha256 honored.",
+      "lock": {
+        "schema": "relkit.consume/2",
+        "release": "v0.4.24",
+        "commit": "1111111111111111111111111111111111111111",
+        "consumerSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "hostScriptsSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "protocol": { "min": 2, "max": 2 },
+        "updaterIpc": { "min": 3, "max": 3 },
+        "artifacts": {
+          "host-scripts": {
+            "url": "https://github.com/shichao402/relkit/releases/download/v0.4.24/relkit-host-scripts.zip",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+          },
+          "cli": {
+            "windows-amd64": {
+              "url": "https://github.com/shichao402/relkit/releases/download/v0.4.24/relkit-windows-amd64.exe",
+              "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+            }
+          }
+        }
+      },
+      "expectParse": {
+        "schema": "relkit.consume/2",
+        "release": "v0.4.24",
+        "artifactComponents": ["cli", "host-scripts"],
+        "cliWindowsAmd64URL": "https://github.com/shichao402/relkit/releases/download/v0.4.24/relkit-windows-amd64.exe"
+      }
+    },
+    {
+      "name": "parse-consume-3-lock",
+      "description": "A consume/3 lock parses: source block present, url lists, updater absent from artifacts.",
+      "lock": {
+        "schema": "relkit.consume/3",
+        "release": "v0.5.0",
+        "commit": "6666666666666666666666666666666666666666",
+        "source": {
+          "module": "github.com/shichao402/relkit",
+          "version": "v0.5.0",
+          "h1": "7777777777777777777777777777777777777777777777777777777777777777",
+          "commit": "6666666666666666666666666666666666666666"
+        },
+        "protocol": { "min": 2, "max": 2 },
+        "updaterIpc": { "min": 3, "max": 3 },
+        "artifacts": {
+          "sdk-dart": {
+            "urls": [
+              "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-dart.zip",
+              "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-sdk-dart.zip"
+            ],
+            "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+          },
+          "cli": {
+            "urls": [
+              "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-windows-amd64.exe",
+              "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-windows-amd64.exe"
+            ],
+            "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+          }
+        }
+      },
+      "expectParse": {
+        "schema": "relkit.consume/3",
+        "release": "v0.5.0",
+        "artifactComponents": ["cli", "sdk-dart"],
+        "sourceModule": "github.com/shichao402/relkit"
+      }
+    },
+    {
+      "name": "reject-source-build-lock",
+      "description": "A lock with any other schema is refused: source builds are unsupported consumption.",
+      "lock": { "schema": "relkit.consume/1", "release": "v0.1.0", "commit": "aaaa" },
+      "expectParse": null
+    },
+    {
+      "name": "reject-v3-without-source",
+      "description": "consume/3 without a source block is refused; the module channel is not optional.",
+      "lock": {
+        "schema": "relkit.consume/3",
+        "release": "v0.5.0",
+        "commit": "6666666666666666666666666666666666666666",
+        "protocol": { "min": 2, "max": 2 },
+        "updaterIpc": { "min": 3, "max": 3 },
+        "artifacts": {}
+      },
+      "expectParse": null
+    }
+  ]
+}

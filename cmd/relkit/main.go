@@ -99,6 +99,12 @@ func run(argv []string) (code int) {
 		err = cmdDirectory(rest, configPath)
 	case "backends":
 		err = cmdBackends(rest)
+	case "install":
+		err = cmdConsumeInstall(rest)
+	case "status":
+		err = cmdConsumeStatus(rest)
+	case "check":
+		err = cmdConsumeCheck(rest)
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
@@ -1004,5 +1010,8 @@ Commands:
   fallback
   directory
   backends
+  install
+  status
+  check
 `)
 }

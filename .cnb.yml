@@ -15,7 +15,7 @@
         - name: build release artifacts
           script: |
             python3 scripts/deploy/relkit.py version --check-tag "${CNB_BRANCH}"
-            python3 scripts/deploy/relkit.py build --store --agent --cli --updater --dart-sdk --out dist
+            python3 scripts/deploy/relkit.py build --store --agent --console --cli --updater --dart-sdk --go-sdk --rust-sdk --bindings-ts --host-scripts --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu

@@ -1,0 +1,45 @@
+{
+  "name": "status-verify",
+  "description": "Status and verify behaviors: stack detection, component selection, installed-tree checks.",
+  "cases": [
+    {
+      "name": "stack-detect-dart",
+      "description": "A pubspec.yaml at the root signals the dart stack; sdk-dart is selected.",
+      "tree": ["pubspec.yaml", "lib/main.dart"],
+      "expectLanguages": ["dart"],
+      "expectComponents": ["sdk-dart", "cli", "updater"]
+    },
+    {
+      "name": "stack-detect-rust-and-node",
+      "description": "Cargo.toml plus package.json (outside excluded dirs) selects both SDKs; updater ownership is ambiguous.",
+      "tree": ["Cargo.toml", "src/main.rs", "package.json", "index.js"],
+      "expectLanguages": ["rust", "node"],
+      "expectComponents": ["sdk-rust", "bindings-ts", "cli", "updater"]
+    },
+    {
+      "name": "stack-detect-skips-vendor",
+      "description": "Signals under node_modules/third_party/target/dist/.git/.relkit are ignored.",
+      "tree": ["node_modules/x/package.json", "third_party/relkit/sdk/rust/Cargo.toml", "app/main.py"],
+      "expectLanguages": [],
+      "expectComponents": ["cli", "updater"]
+    },
+    {
+      "name": "stack-detect-webview-projection",
+      "description": "A package.json anywhere outside excluded dirs projects bindings-ts even without a node SDK consumer at the root. Languages follow registry order: sdk-rust's rust, then bindings-ts's node.",
+      "tree": ["src-tauri/Cargo.toml", "web/package.json"],
+      "expectLanguages": ["rust", "node"],
+      "expectComponents": ["sdk-rust", "bindings-ts", "cli", "updater"]
+    },
+    {
+      "name": "host-scripts-tree-hash",
+      "description": "The tree hash is LF-normalized, sorted by path, excludes __pycache__, and hashes path+content pairs.",
+      "files": {
+        "b.py": "x = 1\r\n",
+        "a.py": "x = 2\n",
+        "__pycache__/c.pyc": "junk",
+        "sub/d.py": "x = 3"
+      },
+      "expectTreeSHA256": "343b09d9e7eef4bf958ee786bb5f87fd2f699705e875523ebf3ed591efaa2a10"
+    }
+  ]
+}
