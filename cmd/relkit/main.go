@@ -109,6 +109,8 @@ func run(argv []string) (code int) {
 		err = cmdConsumeUpgrade(rest)
 	case "ci":
 		err = cmdCI(rest)
+	case "build":
+		err = cmdBuild(rest)
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
@@ -1019,5 +1021,6 @@ Commands:
   check
   upgrade
   ci
+  build
 `)
 }

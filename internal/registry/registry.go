@@ -69,6 +69,7 @@ type PackConfig struct {
 	ExcludeParts    []string
 	ExcludeSuffixes []string
 	ExcludePaths    []string
+	PackExtras      [][2]string
 	GoEntrypoints   []string
 	GoModule        string
 }
@@ -246,7 +247,10 @@ var Components = []Component{
 		ImportSignals:  []string{"relkit_updater", "relkit-updater"},
 		HostAPI:        []string{"facade"},
 		FacadePaths:    []string{"src/lib.rs"},
-		Pack:           PackConfig{Kind: PackTrackedTree},
+		Pack: PackConfig{
+			Kind:       PackTrackedTree,
+			PackExtras: [][2]string{{"proto/updater/v1/updater.proto", "proto/updater/v1/updater.proto"}},
+		},
 	},
 	{
 		Name:              "bindings-ts",

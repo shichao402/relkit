@@ -1,0 +1,92 @@
+{
+  "name": "pack-shape",
+  "description": "Product-tree pack shapes shared by every relkit build implementation: entry sets, tree hashes, and refusal faces. Zip framing is not pinned (deflate streams differ across implementations); entry names + contents + tree-sha256 are.",
+  "cases": [
+    {
+      "name": "host-scripts-working-tree-shape",
+      "description": "host-scripts packs every file under scripts/host (working tree, __pycache__ excluded) — the registry required paths plus the release contract, the backfill script, and the e2e compat check.",
+      "component": "host-scripts",
+      "expectEntries": [
+        "backfill-cronkit-stable.sh",
+        "e2e_raw_compat_check.go",
+        "hostlib/__init__.py",
+        "hostlib/const.py",
+        "hostlib/digest.py",
+        "hostlib/facets.py",
+        "hostlib/gates.py",
+        "hostlib/inspect.py",
+        "hostlib/onboard.py",
+        "hostlib/reconcile.py",
+        "hostlib/release.py",
+        "hostlib/remote.py",
+        "hostlib/retrospect.py",
+        "hostlib/runtime.py",
+        "hostlib/ssh.py",
+        "hostlib/state.py",
+        "release-contract.json",
+        "relkit_consume.py",
+        "relkit_host.py"
+      ],
+      "expectTreeSha256": "77e19e1bff6bb0dba2dfab495fa628fbae39251f20cb7c88be82f49470845cad"
+    },
+    {
+      "name": "bindings-ts-listed-files",
+      "description": "bindings-ts packs exactly the four listed files.",
+      "component": "bindings-ts",
+      "expectEntries": [
+        "README.md",
+        "dist/updater_pb.d.ts",
+        "dist/updater_pb.js",
+        "package.json"
+      ]
+    },
+    {
+      "name": "sdk-rust-tracked-tree-with-proto-extra",
+      "description": "sdk-rust packs the tracked rust sdk tree (Cargo.toml/lock, build.rs, src, README, .gitignore) plus the proto pack extra.",
+      "component": "sdk-rust",
+      "expectEntries": [
+        ".gitignore",
+        "Cargo.lock",
+        "Cargo.toml",
+        "README.md",
+        "build.rs",
+        "proto/updater/v1/updater.proto",
+        "src/json.rs",
+        "src/lib.rs"
+      ]
+    },
+    {
+      "name": "sdk-go-go-deps-shape",
+      "description": "sdk-go packs go.mod/go.sum plus module-internal packages resolved by go list -deps, test files excluded, only the entrypoint packages' own directories.",
+      "component": "sdk-go",
+      "expectEntries": [
+        "api/rup/v2/codec.go",
+        "api/rup/v2/envelope.pb.go",
+        "api/rup/v2/http.pb.go",
+        "api/rup/v2/keys.pb.go",
+        "api/rup/v2/objects.pb.go",
+        "api/updater/v1/payload.pb.go",
+        "api/updater/v1/updater.pb.go",
+        "go.mod",
+        "go.sum",
+        "internal/ipc/frame.go",
+        "sdk/code.go",
+        "sdk/doc.go",
+        "sdk/download.go",
+        "sdk/fetch.go",
+        "sdk/keys.go",
+        "sdk/policy.go",
+        "sdk/preference.go",
+        "sdk/state.go",
+        "sdk/updaterfacade/facade.go",
+        "sdk/updaterfacade/ipc.go"
+      ]
+    },
+    {
+      "name": "refuses-non-product-tree",
+      "description": "A binary component is not a packed product-tree.",
+      "component": "store",
+      "expectError": "store is not a packed product-tree"
+    }
+  ]
+}

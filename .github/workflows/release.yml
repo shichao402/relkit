@@ -36,8 +36,7 @@ jobs:
           npm --prefix bindings/ts test
       - name: Build immutable release artifacts
         run: |
-          python scripts/deploy/relkit.py version --check-tag "${GITHUB_REF_NAME}"
-          python scripts/deploy/relkit.py build --all --out dist
+          go run ./cmd/relkit build --all --check-tag "${GITHUB_REF_NAME}" --out dist
       - name: Write checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS

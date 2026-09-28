@@ -14,8 +14,7 @@
       stages:
         - name: build release artifacts
           script: |
-            python3 scripts/deploy/relkit.py version --check-tag "${CNB_BRANCH}"
-            python3 scripts/deploy/relkit.py build --store --agent --console --cli --updater --dart-sdk --go-sdk --rust-sdk --bindings-ts --host-scripts --out dist
+            go run ./cmd/relkit build --store --agent --console --cli --updater --dart-sdk --go-sdk --rust-sdk --bindings-ts --host-scripts --check-tag "${CNB_BRANCH}" --out dist
         - name: verify linux serve binaries are static
           script: |
             set -eu
