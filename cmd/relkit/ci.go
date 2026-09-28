@@ -369,7 +369,9 @@ func loadReleaseArtifactsManifest(root, manifestPath, expectedVersion string) (*
 
 // decodeSelectorGroup unmarshals one selectorGroups entry. The wire format
 // keeps manifest-level fields (id/kind/filename) explicit so no string
-// parsing survives past this function.
+// parsing survives past this function. An entry may omit payloads entirely:
+// install-only groups cover installer and blob components without an update
+// surface (dec's console installers and runtime manifest are the archetype).
 func decodeSelectorGroup(entry json.RawMessage) (ciSelectorGroup, error) {
 	var group struct {
 		Selectors map[string]string `json:"selectors"`
@@ -384,14 +386,6 @@ func decodeSelectorGroup(entry json.RawMessage) (ciSelectorGroup, error) {
 	}
 	if group.Install == nil {
 		return ciSelectorGroup{}, fmt.Errorf("install is required in every group")
-	}
-	if len(group.Payloads) == 0 {
-		return ciSelectorGroup{}, fmt.Errorf("payloads must contain at least one payload directory")
-	}
-	for j, payload := range group.Payloads {
-		if len(payload.Selectors) == 0 {
-			return ciSelectorGroup{}, fmt.Errorf("payloads[%d].selectors must be a non-empty object", j)
-		}
 	}
 	return ciSelectorGroup{
 		Selectors: group.Selectors,
@@ -416,8 +410,10 @@ func parseSelectorsString(text, what string) (map[string]string, error) {
 
 // validateGroups enforces the invariants every group must hold regardless of
 // schema version: group selectors non-empty and well-formed, install present
-// on disk with a stage-recognized kind, payload directories present, and
-// selector keys shared between install and its payloads.
+// on disk with a stage-recognized kind, payload directories present when
+// declared, and selector keys shared between install and its payloads.
+// Install-only groups (no payloads) are valid: installer/blob components
+// without an update surface stage no payload.
 func validateGroups(root string, artifacts *ciReleaseArtifacts) error {
 	if len(artifacts.Groups) == 0 {
 		return fmt.Errorf("selectorGroups must contain at least one group")

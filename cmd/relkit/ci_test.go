@@ -182,6 +182,52 @@ func TestLoadReleaseArtifactsManifestSchema2RejectsMissingInstall(t *testing.T) 
 	}
 }
 
+func TestLoadReleaseArtifactsManifestSchema2InstallOnlyGroup(t *testing.T) {
+	root := t.TempDir()
+	// dec's publish face: console installers and the runtime manifest blob
+	// stage no payload — install-only groups are the /2 expression of that.
+	doc := map[string]any{
+		"schema":  "relkit.release-artifacts/2",
+		"version": "1.13.78",
+		"selectorGroups": []map[string]any{
+			{
+				"selectors": map[string]string{"os": "windows", "arch": "amd64", "component": "console", "audience": "user"},
+				"install": map[string]any{
+					"path": "dist/dec-console-windows-amd64.exe",
+					"kind": "installer",
+				},
+			},
+			{
+				"selectors": map[string]string{"component": "manifest", "audience": "runtime"},
+				"install": map[string]any{
+					"path":     "dist/dec-runtime-manifest.json",
+					"kind":     "blob",
+					"filename": "dec-runtime-manifest.json",
+				},
+				"payloads": []map[string]any{},
+			},
+		},
+		"archives": []map[string]string{},
+	}
+	writeManifest(t, root, doc,
+		map[string]string{
+			"dist/dec-console-windows-amd64.exe": "console installer",
+			"dist/dec-runtime-manifest.json":     "{}",
+		},
+		nil)
+
+	artifacts, err := loadReleaseArtifactsManifest(root, "dist/release-artifacts.json", "1.13.78")
+	if err != nil {
+		t.Fatalf("expected install-only groups to load: %v", err)
+	}
+	if len(artifacts.Groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(artifacts.Groups))
+	}
+	if len(artifacts.Groups[0].Payloads) != 0 || len(artifacts.Groups[1].Payloads) != 0 {
+		t.Fatalf("expected no payloads in install-only groups, got %+v", artifacts.Groups)
+	}
+}
+
 func TestLoadReleaseArtifactsManifestRejectsUnknownSchema(t *testing.T) {
 	root := t.TempDir()
 	doc := map[string]any{
