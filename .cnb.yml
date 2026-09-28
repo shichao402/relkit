@@ -1,58 +1,9 @@
-# CNB 云原生构建：CI + Release
+# CNB 云原生构建：Release
 # 文档：https://docs.cnb.cool/zh/build/grammar.html
 # Release 附件：git:release 建 Release，再由 cnbcool/attachments 上传二进制
-
-main:
-  push: &ci
-    - name: ci
-      docker:
-        image: golang:1.26
-      stages:
-        - name: go test
-          script: go test ./...
-        - name: updater facade signatures
-          script: go run ./cmd/relkit-facade-gen .
-        - name: proto gen drift
-          script: |
-            if command -v buf >/dev/null 2>&1; then
-              (cd proto && buf generate)
-              git diff --exit-code -- api/updater sdk/dart/lib/src/gen/updater || {
-                echo "protobuf gen drift"; exit 1
-              }
-            else
-              echo "buf not installed; skip gen drift"
-            fi
-        - name: store and console lint and race
-          script: |
-            unformatted=$(gofmt -l ./cmd/relkit-store ./cmd/relkit-console)
-            if [ -n "$unformatted" ]; then
-              echo "not gofmt'd:"; echo "$unformatted"; exit 1
-            fi
-            go vet ./cmd/relkit-store/... ./cmd/relkit-console/...
-            go test -race ./cmd/relkit-store/... ./cmd/relkit-console/...
-        - name: deploy python tests
-          script: |
-            apt-get update && apt-get install -y python3
-            python3 -m unittest scripts/deploy/test_relkit.py scripts/test_relkit_consume.py
-    - name: node-sdk
-      docker:
-        image: node:22
-      stages:
-        - name: npm test
-          script: |
-            cd sdk/node
-            npm ci
-            npm test
-    - name: dart-sdk
-      docker:
-        image: dart:3.6
-      stages:
-        - name: dart test
-          script: |
-            cd sdk/dart
-            dart pub get
-            dart test
-  pull_request: *ci
+# main/PR 测试流水线已于 2026-09-28 移除：GitHub 为主仓（cnb.cool 为每日同步镜像），
+# push CI 在镜像上约 24h 滞后且结果不可匿名判读；测试门禁由 GitHub release.yml 在 v* tag 时执行。
+# 本文件仅保留 v* tag_push 发布构建面（CNB Release 附件，预编译 CLI 兜底通道，ADR 0017 决策 4）。
 
 # tag_push 时 $CNB_BRANCH 为 tag 名（如 v0.2.0），不是分支名
 "v*":
