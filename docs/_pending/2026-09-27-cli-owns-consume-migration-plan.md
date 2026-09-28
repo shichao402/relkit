@@ -25,7 +25,7 @@
 | 批次 | 产品 | 现状（来自 relkit 文档档案） | 迁移动作 |
 |---|---|---|---|
 | 2a | svnmergetool | 内网蓝盾 CI、git.woa.com、独立消费 ADR-007；PAC 定义在中央仓 osgame-client/bkci（windows-2016 池 + macos-macOS15.6 + docker tlinux3_ci 三环境） | 产品仓已有 toolchain.json `go: 1.26.3` 条目与 toolchain.py 自装机制（ensure_flutter 先例），补 `ensure_go`（`GOPROXY=https://mirrors.tencent.com/go/`，约 1.2MB/版本）即可，无需依赖蓝盾镜像预装；lock → consume/3；入口 `relkit_host.py ci` → `relkit ci`；删除检入的 scripts/host 全套 17 文件；updater 一并走 module 通道，蓝盾三环境跨网制品仅剩 dart SDK zip（GitHub 主 / CNB 备） |
-| 2a | dec | 公网产品、与 cronkit 共用发布机 profile | 同上；dec 也在腾讯生态内，`mirrors.tencent.com/go/` 对公网边缘同样 302 → `goproxy.woa.com` 双宿（公网 IP 175.27.22.2 直连 200），内外网同一句配置；updater 同通道，跨网制品仅剩 SDK zip；另因 dec 是发布机上的消费者（publish-agent.md），升级时序注意先升 CLI 并验证一次真实发布，后停 host-scripts 附件；publish 尾巴折叠进 `release --execute` 按双跑验证节奏：手搓 bash 段（字符串解析 sha256、手写 curl 头）先当 spec 标本保留，Go 路径完整跑通一次真实发布且产出与 bash 版一致后，才删 bash 段，并存期内 bash 版为回退线（此双跑为 dec 仓内 bash/Go 并存，区别于 relkit 侧 Python/Go 双轨） |
+| 2a | dec | 公网产品、与 cronkit 共用发布机 profile | **已完成（2026-09-28）**：CI 入口五处 + publish 尾段全换 `go run github.com/shichao402/relkit/cmd/relkit@v0.5.7`；lock 重写为 hostless consume/3（无 hostScriptsSha256，updater 走 module 通道）；scripts/host 全套 19 文件删除；relkit.json 新增 release 块（packScript + manifest）驱动结构化 /2 编组；发布演练 dev/v1.13.104 三次迭代后端到端通过（run 36437241383：staging 17 组 → cas 32 blob（重跑命中 CAS 去重）→ publish `ok:true, sequence 16`；旧 bash 尾段不再保留，回退线依赖 git 历史）。演练抓出并修复两处缺口：dec 侧 ADR 0036 系列测试债（7a6b473）、relkit 侧 PublishViaAgent 未归一 agent URL 导致 POST /publish 405（f813fb3，v0.5.7 发布）；详见 dec docs/_pending/2026-09-28-phase2a-autonomy-decision-log.md |
 | 2b | cronkit | 与 dec 共机、人页策略未定、尚未发版 | 随 dec 同机升级；人页策略悬而未决，不当作验收阻塞项 |
 | 2b | loomeditor / loomlauncher | 接入档案不在 relkit 文档内 | 迁移前先盘接入面（lock 版本、CI 入口、SDK 依赖）；「先盘后迁」是该两仓的前置条件 |
 
