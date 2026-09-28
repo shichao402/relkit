@@ -37,7 +37,7 @@
         "sourceVersion": "v0.5.0",
         "hostScriptsSha256": "3333333333333333333333333333333333333333333333333333333333333333",
         "artifactComponents": ["cli", "host-scripts", "sdk-dart", "sdk-rust"],
-        "cliUrlsLen": 2,
+        "cliUrlsLen": 1,
         "protocolMin": 2,
         "updaterIpcMin": 3,
         "updaterInArtifacts": false

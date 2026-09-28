@@ -140,7 +140,7 @@ func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]stri
 		}
 		if sum, ok := sums[row.Archive]; ok {
 			spec := ArtifactSpec{
-				URLs:   []string{base + "/" + row.Archive, cnbAttachmentURL(release, row.Archive)},
+				URLs:   []string{base + "/" + row.Archive},
 				SHA256: sum,
 			}
 			encoded, err := json.Marshal(&spec)
@@ -163,7 +163,7 @@ func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]stri
 			filename := row.ArtifactFilename(target)
 			if sum, ok := sums[filename]; ok {
 				byTarget[target] = ArtifactSpec{
-					URLs:   []string{base + "/" + filename, cnbAttachmentURL(release, filename)},
+					URLs:   []string{base + "/" + filename},
 					SHA256: sum,
 				}
 			}
@@ -208,9 +208,4 @@ func intWindow(min, max, fallback int) IntWindow {
 // ReleaseBase is the GitHub release download base URL for release.
 func ReleaseBase(release string) string {
 	return "https://github.com/" + GitHubRepo + "/releases/download/" + release
-}
-
-// cnbAttachmentURL is the CNB mirror attachment URL for release/filename.
-func cnbAttachmentURL(release, filename string) string {
-	return "https://cnb.cool/" + GitHubRepo + "/-/releases/download/" + release + "/" + filename
 }

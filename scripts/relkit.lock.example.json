@@ -20,43 +20,37 @@
   "artifacts": {
     "host-scripts": {
       "urls": [
-        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-host-scripts.zip",
-        "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-host-scripts.zip"
+        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-host-scripts.zip"
       ],
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "sdk-dart": {
       "urls": [
-        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-dart.zip",
-        "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-sdk-dart.zip"
+        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-dart.zip"
       ],
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "sdk-go": {
       "urls": [
-        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-go.zip",
-        "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-sdk-go.zip"
+        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-go.zip"
       ],
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "sdk-rust": {
       "urls": [
-        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-rust.zip",
-        "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-sdk-rust.zip"
+        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-rust.zip"
       ],
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "bindings-ts": {
       "urls": [
-        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-bindings-ts.zip",
-        "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-bindings-ts.zip"
+        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-bindings-ts.zip"
       ],
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "cli": {
       "urls": [
-        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-linux-amd64",
-        "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-linux-amd64"
+        "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-linux-amd64"
       ],
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }

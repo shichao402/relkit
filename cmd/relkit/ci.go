@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/shichao402/relkit/internal/releasegate"
 )
 
 // ciReleaseOptions carries the parsed `relkit ci release` arguments.
@@ -122,9 +124,23 @@ func cmdCIRelease(opts *ciReleaseOptions) error {
 		fmt.Println("ci release dry-run complete (install → pack → stage → simulate → fake); pass --execute with RELKIT_RELEASE_VIA_CI=1 to publish")
 		return nil
 	}
-	// Existing release gate owns drift / incomplete / agent publish; the
-	// publish-side `release` command is still Python-only in this batch.
-	return fmt.Errorf("ci release --execute publishing lands with the release batch; run relkit_host.py ci release --execute until then")
+	// The release gate: unresolved onboarding steps block the publish. The
+	// state file stays Python-written during migration; Go only reads it.
+	state, err := releasegate.LoadState(".")
+	if err != nil {
+		return err
+	}
+	if missing := releasegate.IncompleteSteps(state, true, "."); len(missing) > 0 {
+		return fmt.Errorf("release refused: incomplete steps: %s", strings.Join(missing, ", "))
+	}
+	// Agent mode is the only publish path from CI: cas-put + POST /publish,
+	// signing key stays on the publish host.
+	if removed, err := releasegate.ClearStaleStagedTrees(".", version); err != nil {
+		return err
+	} else if len(removed) > 0 {
+		fmt.Printf("removed stale staged caches: %s\n", strings.Join(removed, ", "))
+	}
+	return releasegate.PublishViaAgent(".", version, true)
 }
 
 // dispatch routes an internal command line through the same switch main()

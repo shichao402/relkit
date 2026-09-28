@@ -51,15 +51,13 @@
         "artifacts": {
           "sdk-dart": {
             "urls": [
-              "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-dart.zip",
-              "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-sdk-dart.zip"
+              "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-sdk-dart.zip"
             ],
             "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
           },
           "cli": {
             "urls": [
-              "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-windows-amd64.exe",
-              "https://cnb.cool/shichao402/relkit/-/releases/download/v0.5.0/relkit-windows-amd64.exe"
+              "https://github.com/shichao402/relkit/releases/download/v0.5.0/relkit-windows-amd64.exe"
             ],
             "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
           }

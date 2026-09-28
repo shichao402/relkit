@@ -13,7 +13,7 @@
 
 按消费频率与风险分三批重写 `scripts/host` → `cmd/relkit`（每批一个 PR，conformance 测试先行）：
 
-1. **第一批 `install` / `status` / `verify`**（consume 51KB 主体）：下载、验哈希、原子安装、版本探针。lock 升 consume/3：新增 `source` 块（module/version/H1/commit），制品块仅剩 dart/node/rust SDK zip 与预编译 CLI 兜底（updater 退出制品块，完整性由 H1 + sumdb 覆盖）。制品块 URL 为列表（GitHub Release 主、CNB 附件备）；CNB 侧 build 面需扩至制品块全量（当前 `.cnb.yml` 仅产 store/agent/cli/updater/dart-sdk）。`--version` 探针沿用，CLI 版本号解析链为 ldflags 注入（Release 制品）→ `debug.ReadBuildInfo` module version（module 通道，`v` 前缀归一化）→ `devel` 占位，由 `internal/buildver` 统一实现（CLI 与 updater 共用，两通道都出真实版本）。
+1. **第一批 `install` / `status` / `verify`**（consume 51KB 主体）：下载、验哈希、原子安装、版本探针。lock 升 consume/3：新增 `source` 块（module/version/H1/commit），制品块仅剩 dart/node/rust SDK zip 与预编译 CLI 兜底（updater 退出制品块，完整性由 H1 + sumdb 覆盖）。制品块 URL 为 GitHub Release 单源（原「CNB 附件备」已废弃：`.cnb.yml` 发布面于 2026-09-28 删除，CNB 定位收缩为每日同步镜像）。`--version` 探针沿用，CLI 版本号解析链为 ldflags 注入（Release 制品）→ `debug.ReadBuildInfo` module version（module 通道，`v` 前缀归一化）→ `devel` 占位，由 `internal/buildver` 统一实现（CLI 与 updater 共用，两通道都出真实版本）。
 2. **第二批 `release` / `ci` / `upgrade` / `fake`**（release.py 43KB + gates/inspect/reconcile 部分）：此时 lock 兼容读 consume/2 与 consume/3，写只出 consume/3。
 3. **第三批收编 `build`**：`internal/registry` 落地（Go 单源），`relkit build --all` 产出全部 Release 附件，与 `scripts/deploy/relkit.py build --all` 字节对齐断言后切换 release.yml。updater 源码构建以 `-trimpath` + toolchain 钉死（go 1.26.3）保证可复现；release CI 镜像与 `ensure_go` 同 patch 才能断言 byte-equal，否则 envelope 只锁 H1、二进制哈希作可选交叉验证。
 4. 全程双轨并存：Python 与 Go 版本同 release 发出，conformance 套件交叉验证，直到五产品全部切完。
@@ -33,7 +33,7 @@
 
 ## 阶段 3：退役（1 周）
 
-1. 停发 host-scripts 附件（release.yml 摘掉；lock 无 hostScriptsSha256 的 consume/3 不再需要它）。updater 附件在五产品全部切至 consume/3 后停发（`.cnb.yml` build 面同步收缩为 store/agent/cli/SDK）。
+1. 停发 host-scripts 附件（release.yml 摘掉；lock 无 hostScriptsSha256 的 consume/3 不再需要它）。updater 附件在五产品全部切至 consume/3 后停发（`.cnb.yml` 发布面已于 2026-09-28 整体删除，无收缩项）。
 2. 删 `relkit_consume.py` 与 `hostlib` 产品 CI 面文件；`relkit_host.py` 缩为发布机运维工具。
 3. `scripts/deploy/relkit.py` 的 `build` 面删除；`release.yml` 的 Test 步骤里 Python unittest 相应缩减。
 4. docs 全面改版：CLI.md 增补 install/release/ci/build 章节，宿主接入文档从「下载附件」改为「go run 入口 + GOPROXY 配置（内外网统一 `https://mirrors.tencent.com/go/`，备源 goproxy.cn / goproxy.io）」。
@@ -48,7 +48,7 @@
 ## 风险与回退
 
 - **module path 阻塞已解除且消费侧通道已打通**（2026-09-28 核对）：迁移已合入 master/main，v0.4.24 tag 已发（`edbbf1c`），镜像 `.mod` 已是新 module path，统一入口下 `go run@v0.4.24` 端到端成功。v0.4.23 及更早版本在新路径下不可 `go run` 属预期，无需镜像站侧操作。
-- **CNB 附件可达性未实测**：SDK zip 与预编译 CLI 兜底的备援通道依赖蓝盾构建机直连 CNB 附件域名，动工前实测一次；不可达则兜底退化为 GitHub 单源（锁 sha256 不变）。
+- **CNB 附件可达性风险已消除**：备援通道随 `.cnb.yml` 发布面删除（2026-09-28）一并废弃，SDK zip 与预编译 CLI 兜底为 GitHub 单源，无可达性待测项。
 - **byte-equal 断言条件**：release CI 的 golang 镜像 tag 是浮动 patch，与 `ensure_go` 1.26.3 不同 patch 时 Release 附件与源码构建字节不同——此时 envelope 只锁 H1，二进制哈希作可选交叉验证。
 - **双轨漂移**：并存期 conformance 交叉验证 + tag CI 断言两实现同 commit。
 - **回退线**：任一产品迁移失败即恢复其 lock 为 consume/2 与 Python 入口（双轨并存期保留此能力），relkit 侧不删任何 Python 文件直至阶段 3 开始。
