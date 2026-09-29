@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -134,7 +135,7 @@ func cmdVersionSet(args []string, configPath string) error {
 			return err
 		}
 	}
-	return writeVersion(doc)
+	return writeVersion(doc, configPath)
 }
 
 func cmdVersionBump(args []string, configPath string) error {
@@ -149,7 +150,7 @@ func cmdVersionBump(args []string, configPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := writeVersion(doc); err != nil {
+	if err := writeVersion(doc, configPath); err != nil {
 		return err
 	}
 	fmt.Println(parts.String())
@@ -222,12 +223,67 @@ func resolveProjectCode(configPath, versionString string, explicit *int) (int, e
 	return cfg.ResolveCode(versionString, explicit)
 }
 
-func writeVersion(doc *projver.Document) error {
+func writeVersion(doc *projver.Document, configPath string) error {
 	if err := doc.Write(); err != nil {
 		return err
 	}
 	fmt.Println("wrote " + doc.Path)
 	fmt.Println(doc.Version)
+	return runVersionSyncScript(doc, configPath)
+}
+
+// runVersionSyncScript executes relkit.json version.syncScript after the
+// SSOT file changed, so generated mirrors (package.json.version,
+// src/generated/version.ts, ...) stay in lockstep and check-version can only
+// fail on an uncommitted tree, never on a forgotten manual step (cronkit#1).
+// No config or no version.syncScript is the common case and stays silent.
+func runVersionSyncScript(doc *projver.Document, configPath string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		// Auto-discovery found no relkit.json: nothing to sync. `version
+		// set` on a bare VERSION.json repo must keep working without a
+		// config. An explicit --config that cannot load is a user error.
+		if configPath == "" {
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(cfg.Version.SyncScript) == "" {
+		return nil
+	}
+	script := cfg.Version.SyncScript
+	scriptPath := filepath.Join(cfg.Root, script)
+	if _, err := os.Stat(scriptPath); err != nil {
+		return fmt.Errorf("version.syncScript is missing: %s", script)
+	}
+	var command *exec.Cmd
+	switch strings.ToLower(filepath.Ext(script)) {
+	case ".mjs", ".js", ".cjs":
+		node := os.Getenv("RELKIT_NODE")
+		if node == "" {
+			node = "node"
+		}
+		command = exec.Command(node, scriptPath)
+	case ".py":
+		python := os.Getenv("RELKIT_PYTHON")
+		if python == "" {
+			python = "python"
+		}
+		command = exec.Command(python, scriptPath)
+	case ".ps1":
+		command = exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath)
+	case ".cmd", ".bat":
+		command = exec.Command("cmd.exe", "/c", scriptPath)
+	default:
+		return fmt.Errorf("unsupported version.syncScript type %s; use .mjs/.js/.py/.ps1/.cmd", filepath.Ext(script))
+	}
+	command.Dir = cfg.Root
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	fmt.Printf("> %s\n", command.String())
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("version.syncScript failed: %w", err)
+	}
 	return nil
 }
 

@@ -185,3 +185,63 @@ func TestLoadRetainVersionsRejectsNegative(t *testing.T) {
 		t.Fatal("expected error for negative retainVersions")
 	}
 }
+
+func TestLoadVersionSyncScript(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigName)
+	raw := `{
+  "product": "demo",
+  "version": {"syncScript": "scripts/sync-version.mjs"},
+  "backends": {
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
+  }
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version.SyncScript != "scripts/sync-version.mjs" {
+		t.Fatalf("Version.SyncScript = %q", cfg.Version.SyncScript)
+	}
+}
+
+func TestLoadVersionSyncScriptRejectsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigName)
+	raw := `{
+  "product": "demo",
+  "version": {"syncScript": "  "},
+  "backends": {
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
+  }
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "version.syncScript") {
+		t.Fatalf("expected version.syncScript empty rejection, got %v", err)
+	}
+}
+
+func TestLoadVersionSyncScriptRejectsNonString(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigName)
+	raw := `{
+  "product": "demo",
+  "version": {"syncScript": 42},
+  "backends": {
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
+  }
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "version.syncScript") {
+		t.Fatalf("expected version.syncScript type rejection, got %v", err)
+	}
+}

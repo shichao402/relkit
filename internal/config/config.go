@@ -53,9 +53,22 @@ type Config struct {
 	// Site is optional copy for the human-facing release portal. Publish writes
 	// it to site/<product>.json; protocol clients never read it.
 	Site SiteConfig
+	// Version is optional. When syncScript is set, `relkit version set|bump`
+	// runs it after writing VERSION.json so generated files (package.json,
+	// version.ts, ...) never drift behind the SSOT (cronkit#1 class of bugs).
+	Version VersionConfig
 	// Recovery is compile-time last-resort copy shown when every remote
 	// update path fails. Protocol clients never fetch it over the network.
 	Recovery *RecoveryConfig
+}
+
+// VersionConfig mirrors the optional relkit.json "version" object.
+type VersionConfig struct {
+	// SyncScript is a repo-relative script executed after `version set|bump`
+	// writes VERSION.json. Same dispatch rules as release.packScript
+	// (.mjs/.js/.py/.ps1/.cmd). Failure is fatal: a half-synced tree must not
+	// look releasable.
+	SyncScript string `json:"syncScript,omitempty"`
 }
 
 // DirectoryConfig mirrors the optional relkit.json "directory" object.
@@ -357,6 +370,23 @@ func Load(path string) (*Config, error) {
 		}
 		if cfg.Site.Title == "" && cfg.Site.Description == "" && cfg.Site.Homepage == "" {
 			return nil, Error{Message: "site needs at least one of title / description / homepage"}
+		}
+	}
+
+	if value, ok := raw["version"]; ok {
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil, Error{Message: "version must be an object"}
+		}
+		if syncScript, exists := obj["syncScript"]; exists {
+			asString, ok := syncScript.(string)
+			if !ok {
+				return nil, Error{Message: "version.syncScript must be a string"}
+			}
+			if strings.TrimSpace(asString) == "" {
+				return nil, Error{Message: "version.syncScript must be a non-empty string when present"}
+			}
+			cfg.Version.SyncScript = asString
 		}
 	}
 
