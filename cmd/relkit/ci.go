@@ -15,17 +15,41 @@ import (
 
 // ciReleaseOptions carries the parsed `relkit ci release` arguments.
 type ciReleaseOptions struct {
-	channel string
-	execute bool
+	channel   string
+	execute   bool
+	fromDrop  string
+	platforms string
 }
 
 // cmdCI implements `relkit ci <sub>`: the CI-facing product release entry.
-// Only `release` exists today, mirroring relkit_host.py's ci subcommand.
+// Subcommands: `release` (pack + stage + simulate + fake + publish) and
+// `upload` (multi-platform drop push, ADR 0017 collected aggregation).
 func cmdCI(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: relkit ci release --channel <dev|stable> [--execute]")
+		return fmt.Errorf("usage: relkit ci release --channel <dev|stable> [--execute] [--from-drop <scope>] [--platforms p1,p2] | relkit ci upload --platform <windows|macos> --drop-scope <id>")
 	}
 	switch args[0] {
+	case "upload":
+		rest := args[1:]
+		opts := ciUploadOptions{}
+		for i := 0; i < len(rest); i++ {
+			switch rest[i] {
+			case "--platform":
+				i++
+				opts.platform = mustValue(rest, i, "--platform")
+			case "--drop-scope":
+				i++
+				opts.dropScope = mustValue(rest, i, "--drop-scope")
+			case "--channel":
+				// accepted for interface symmetry with ci release; the
+				// platform push is channel-agnostic (channel is decided by
+				// the aggregate job's release command).
+				i++
+			default:
+				return fmt.Errorf("unknown flag %q for ci upload", rest[i])
+			}
+		}
+		return cmdCIUpload(&opts)
 	case "release":
 		rest := args[1:]
 		opts := ciReleaseOptions{}
@@ -36,6 +60,12 @@ func cmdCI(args []string) error {
 				opts.channel = mustValue(rest, i, "--channel")
 			case "--execute":
 				opts.execute = true
+			case "--from-drop":
+				i++
+				opts.fromDrop = mustValue(rest, i, "--from-drop")
+			case "--platforms":
+				i++
+				opts.platforms = mustValue(rest, i, "--platforms")
 			default:
 				return fmt.Errorf("unknown flag %q for ci release", rest[i])
 			}
@@ -47,6 +77,12 @@ func cmdCI(args []string) error {
 	default:
 		return fmt.Errorf("unknown ci subcommand %q", args[0])
 	}
+}
+
+// ciUploadOptions carries the parsed `relkit ci upload` arguments.
+type ciUploadOptions struct {
+	platform  string
+	dropScope string
 }
 
 // ciReleaseArtifacts is the relkit.release-artifacts/2 manifest written by
@@ -94,9 +130,21 @@ type ciArchiveRef struct {
 }
 
 // cmdCIRelease implements `relkit ci release`: install → pack → stage →
-// simulate → fake → publish. Execute is CI-only (RELKIT_RELEASE_VIA_CI=1 and
-// RELKIT_UPLOAD_TOKEN both required), mirroring the Python entry.
+// simulate → fake → publish (single platform), or the from-drop variant
+// for multi-platform aggregation. Execute is CI-only
+// (RELKIT_RELEASE_VIA_CI=1 and RELKIT_UPLOAD_TOKEN both required).
 func cmdCIRelease(opts *ciReleaseOptions) error {
+	dropCleanup := []string(nil)
+	publishedVersion := ""
+	if opts.fromDrop != "" {
+		scope := opts.fromDrop
+		defer func() {
+			if len(dropCleanup) > 0 && opts.execute && publishedVersion != "" {
+				cleanupDropFiles(".", publishedVersion, scope, dropCleanup)
+			}
+		}()
+	}
+	fmt.Printf("relkit ci release channel=%s execute=%t\n", opts.channel, opts.execute)
 	if err := resolveCIChannel(opts.channel); err != nil {
 		return err
 	}
@@ -106,29 +154,54 @@ func cmdCIRelease(opts *ciReleaseOptions) error {
 	if opts.execute && strings.TrimSpace(os.Getenv("RELKIT_UPLOAD_TOKEN")) == "" {
 		return fmt.Errorf("ci release --execute requires RELKIT_UPLOAD_TOKEN (product agent Bearer injected by CI secrets)")
 	}
-
-	fmt.Printf("relkit ci release channel=%s execute=%t\n", opts.channel, opts.execute)
-	if err := cmdConsumeInstall([]string{}); err != nil {
-		return err
+	if opts.fromDrop != "" {
+		if err := validateDropScope(opts.fromDrop); err != nil {
+			return err
+		}
 	}
+
 	version, err := projectVersionForRelkit(".")
 	if err != nil {
 		return err
 	}
-	pack, err := releasePackConfig(".")
-	if err != nil {
-		return err
-	}
-	if err := runReleasePackScript(".", pack.script); err != nil {
-		return err
-	}
-	artifacts, err := loadReleaseArtifactsManifest(".", pack.manifest, version)
-	if err != nil {
-		return err
+	publishedVersion = version
+
+	var groups []ciSelectorGroup
+	if opts.fromDrop != "" {
+		// Multi-platform aggregation (ADR 0017, 2026-09-29): pull every
+		// platform's partial manifest from the scoped drop, materialize
+		// the referenced artifacts, and stage the merged group list. The
+		// packScript does not run on the aggregate job — each platform
+		// job already ran its own pack before `ci upload`.
+		platformList, err := dropPlatforms(".", opts.platforms)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("from-drop scope=%s platforms=%s\n", opts.fromDrop, strings.Join(platformList, ","))
+		groups, dropCleanup, err = assembleFromDrop(".", version, opts.fromDrop, platformList)
+		if err != nil {
+			return err
+		}
+	} else {
+		if err := cmdConsumeInstall([]string{}); err != nil {
+			return err
+		}
+		pack, err := releasePackConfig(".")
+		if err != nil {
+			return err
+		}
+		if err := runReleasePackScript(".", pack.script); err != nil {
+			return err
+		}
+		artifacts, err := loadReleaseArtifactsManifest(".", pack.manifest, version)
+		if err != nil {
+			return err
+		}
+		groups = artifacts.Groups
 	}
 
 	stageArgs := []string{"stage", version, "--channel", opts.channel}
-	for _, group := range artifacts.Groups {
+	for _, group := range groups {
 		stageArgs = append(stageArgs, "--install", group.Install.Path)
 		stageArgs = append(stageArgs, installPairsText(group)...)
 		for _, payload := range group.Payloads {
@@ -136,8 +209,7 @@ func cmdCIRelease(opts *ciReleaseOptions) error {
 			stageArgs = append(stageArgs, payloadPairsText(payload)...)
 		}
 	}
-	fmt.Printf("staging groups=%d archives=%d (ci-only, not staged)\n",
-		len(artifacts.Groups), len(artifacts.Archives))
+	fmt.Printf("staging groups=%d (from-drop=%t)\n", len(groups), opts.fromDrop != "")
 	if err := dispatch(stageArgs, ""); err != nil {
 		return err
 	}
@@ -485,4 +557,59 @@ func cmdFakeVerify(version string) error {
 		return fmt.Errorf("no staged tree for %s; run relkit stage first (dummy staging lands with the release batch)", resolved)
 	}
 	return dispatch([]string{"simulate", "--with-staged", resolved, "--from", "all"}, "")
+}
+
+// cmdCIUpload implements `relkit ci upload`: the platform-job half of the
+// collected multi-platform aggregation (ADR 0017, 2026-09-29). The
+// platform's own build already produced its artifacts; this entry runs
+// the packScript (which writes the /2 partial manifest), validates it,
+// and pushes the install artifacts, payload transport zips, and finally
+// the manifest itself into the scoped agent drop. The manifest goes last:
+// its presence is the aggregate job's signal that this platform finished.
+func cmdCIUpload(opts *ciUploadOptions) error {
+	if err := validateDropScope(opts.dropScope); err != nil {
+		return err
+	}
+	if opts.platform == "" {
+		inferred, err := detectDropPlatform()
+		if err != nil {
+			return err
+		}
+		opts.platform = inferred
+	}
+	if err := validateDropPlatform(opts.platform); err != nil {
+		return err
+	}
+	if strings.TrimSpace(os.Getenv("RELKIT_UPLOAD_TOKEN")) == "" {
+		return fmt.Errorf("ci upload requires RELKIT_UPLOAD_TOKEN (product agent Bearer injected by CI secrets)")
+	}
+
+	fmt.Printf("relkit ci upload platform=%s drop-scope=%s\n", opts.platform, opts.dropScope)
+	if err := cmdConsumeInstall([]string{}); err != nil {
+		return err
+	}
+	version, err := projectVersionForRelkit(".")
+	if err != nil {
+		return err
+	}
+	pack, err := releasePackConfig(".")
+	if err != nil {
+		return err
+	}
+	if err := runReleasePackScript(".", pack.script); err != nil {
+		return err
+	}
+	artifacts, err := loadReleaseArtifactsManifest(".", pack.manifest, version)
+	if err != nil {
+		return err
+	}
+	product, err := readProductID(".")
+	if err != nil {
+		return err
+	}
+	client, err := newDropClient(".", product, version, opts.dropScope, os.Getenv("RELKIT_UPLOAD_TOKEN"))
+	if err != nil {
+		return err
+	}
+	return uploadArtifacts(client, ".", artifacts, pack.manifest, opts.dropScope, opts.platform)
 }

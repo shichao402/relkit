@@ -1,5 +1,6 @@
 .relkit/cache/
 .relkit/onboarding.json
+.relkit/drop-incoming/
 /dist/
 scripts/deploy/.venv/
 tmp/
