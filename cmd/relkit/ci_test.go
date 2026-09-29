@@ -103,8 +103,11 @@ func TestLoadReleaseArtifactsManifestSchema2(t *testing.T) {
 	}
 }
 
-func TestLoadReleaseArtifactsManifestSchema1Normalized(t *testing.T) {
+func TestLoadReleaseArtifactsManifestRejectsSchema1(t *testing.T) {
 	root := t.TempDir()
+	// The /1 wire form (comma-joined selector strings) was removed with the
+	// "fully structured, no special cases" decision: /2 is the only accepted
+	// release manifest schema, and /1 manifests fail fast with a schema hint.
 	doc := map[string]any{
 		"schema":  "relkit.release-artifacts/1",
 		"version": "1.0.0",
@@ -116,19 +119,12 @@ func TestLoadReleaseArtifactsManifestSchema1Normalized(t *testing.T) {
 		map[string]string{"dist/app-setup.exe": "installer bytes"},
 		[]string{"dist/payload/app/"})
 
-	artifacts, err := loadReleaseArtifactsManifest(root, "dist/release-artifacts.json", "1.0.0")
-	if err != nil {
-		t.Fatalf("expected /1 manifest to load: %v", err)
+	_, err := loadReleaseArtifactsManifest(root, "dist/release-artifacts.json", "1.0.0")
+	if err == nil {
+		t.Fatal("expected /1 manifest to be rejected")
 	}
-	if len(artifacts.Groups) != 1 {
-		t.Fatalf("expected /1 to normalize to 1 group, got %d", len(artifacts.Groups))
-	}
-	group := artifacts.Groups[0]
-	if group.Selectors["os"] != "windows" || group.Selectors["arch"] != "amd64" {
-		t.Fatalf("expected parsed selectors, got %v", group.Selectors)
-	}
-	if len(group.Payloads) != 1 || group.Payloads[0].Selectors["arch"] != "amd64" {
-		t.Fatalf("expected payload selectors parsed, got %+v", group.Payloads)
+	if !strings.Contains(err.Error(), "relkit.release-artifacts/2") {
+		t.Fatalf("expected schema hint in error, got %q", err.Error())
 	}
 }
 
@@ -225,6 +221,63 @@ func TestLoadReleaseArtifactsManifestSchema2InstallOnlyGroup(t *testing.T) {
 	}
 	if len(artifacts.Groups[0].Payloads) != 0 || len(artifacts.Groups[1].Payloads) != 0 {
 		t.Fatalf("expected no payloads in install-only groups, got %+v", artifacts.Groups)
+	}
+}
+
+func TestLoadReleaseArtifactsManifestSchema2CronkitShape(t *testing.T) {
+	root := t.TempDir()
+	// cronkit's publish face after the /2 unification: a single group for the
+	// win-x64 product — installer install + versionedDir payload, explicit
+	// filenames, structured selectors. One group is the /2 expression of a
+	// single-target product, not a schema special case.
+	doc := map[string]any{
+		"schema":  "relkit.release-artifacts/2",
+		"version": "0.1.0+15",
+		"selectorGroups": []map[string]any{
+			{
+				"selectors": map[string]string{"os": "windows", "arch": "x64"},
+				"install": map[string]any{
+					"path":     "dist/cronkit-0.1.0+15-win-x64-setup.exe",
+					"kind":     "installer",
+					"filename": "cronkit-0.1.0+15-win-x64-setup.exe",
+				},
+				"payloads": []map[string]any{
+					{
+						"path":      ".release/versioned/versions/0.1.0+15",
+						"filename":  "cronkit-0.1.0+15-win-x64-payload.zip",
+						"selectors": map[string]string{"os": "windows", "arch": "x64"},
+					},
+				},
+			},
+		},
+		"archives": []map[string]string{{"path": "dist/cronkit-0.1.0+15-win-x64.zip", "role": "ci-only"}},
+	}
+	writeManifest(t, root, doc,
+		map[string]string{
+			"dist/cronkit-0.1.0+15-win-x64-setup.exe": "installer bytes",
+			"dist/cronkit-0.1.0+15-win-x64.zip":       "archive bytes",
+		},
+		[]string{".release/versioned/versions/0.1.0+15"})
+
+	artifacts, err := loadReleaseArtifactsManifest(root, "dist/release-artifacts.json", "0.1.0+15")
+	if err != nil {
+		t.Fatalf("expected cronkit /2 shape to load: %v", err)
+	}
+	if len(artifacts.Groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(artifacts.Groups))
+	}
+	group := artifacts.Groups[0]
+	if group.Selectors["os"] != "windows" || group.Selectors["arch"] != "x64" {
+		t.Fatalf("expected structured selectors, got %v", group.Selectors)
+	}
+	if group.Install.Kind != "installer" {
+		t.Fatalf("expected kind installer, got %q", group.Install.Kind)
+	}
+	if len(group.Payloads) != 1 || group.Payloads[0].Filename != "cronkit-0.1.0+15-win-x64-payload.zip" {
+		t.Fatalf("expected explicit payload filename, got %+v", group.Payloads)
+	}
+	if len(artifacts.Archives) != 1 || artifacts.Archives[0].Role != "ci-only" {
+		t.Fatalf("expected ci-only archive, got %+v", artifacts.Archives)
 	}
 }
 

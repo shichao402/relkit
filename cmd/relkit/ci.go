@@ -11,7 +11,6 @@ import (
 
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/releasegate"
-	"github.com/shichao402/relkit/internal/stage"
 )
 
 // ciReleaseOptions carries the parsed `relkit ci release` arguments.
@@ -51,9 +50,10 @@ func cmdCI(args []string) error {
 }
 
 // ciReleaseArtifacts is the relkit.release-artifacts/2 manifest written by
-// the product's release.packScript. Schema /1 (single install/payload pair)
-// is still accepted: loadReleaseArtifactsManifest normalizes it into one
-// selector group, so downstream staging logic never branches on schema.
+// the product's release.packScript. All products emit /2; the /1 wire form
+// (single install/payload pair with comma-joined selector strings) was
+// removed with it, so downstream staging logic never branches on schema and
+// no string parsing survives loadReleaseArtifactsManifest.
 type ciReleaseArtifacts struct {
 	Schema   string           `json:"schema"`
 	Version  string           `json:"version"`
@@ -91,15 +91,6 @@ type ciPayloadRef struct {
 type ciArchiveRef struct {
 	Path string `json:"path"`
 	Role string `json:"role"`
-}
-
-// ciArtifactRefWire is the /1 wire form of one artifact reference: selectors
-// are a comma-joined string. Only the loader consumes it; everything past
-// loadReleaseArtifactsManifest works with structured maps.
-type ciArtifactRefWire struct {
-	Path      string `json:"path"`
-	Kind      string `json:"kind"`
-	Selectors string `json:"selectors"`
 }
 
 // cmdCIRelease implements `relkit ci release`: install → pack → stage →
@@ -283,10 +274,9 @@ func runReleasePackScript(root, script string) error {
 }
 
 // loadReleaseArtifactsManifest reads and validates the release manifest
-// written by packScript. Schema /2 (selectorGroups) is the structured form:
-// selectors are maps and id/kind/filename are explicit fields. Schema /1
-// (single install/payload with comma-joined selector strings) is accepted
-// for compatibility and normalized into one selector group.
+// written by packScript. Schema /2 (selectorGroups) is the only structured
+// form: selectors are maps and id/kind/filename are explicit fields. The /1
+// wire form (comma-joined selector strings) is no longer accepted.
 func loadReleaseArtifactsManifest(root, manifestPath, expectedVersion string) (*ciReleaseArtifacts, error) {
 	path := filepath.Join(root, manifestPath)
 	data, err := os.ReadFile(path)
@@ -294,52 +284,31 @@ func loadReleaseArtifactsManifest(root, manifestPath, expectedVersion string) (*
 		return nil, fmt.Errorf("release manifest missing after packScript: %s", manifestPath)
 	}
 	var raw struct {
-		Schema         string            `json:"schema"`
-		Version        string            `json:"version"`
-		SelectorGroups []json.RawMessage `json:"selectorGroups"`
-		Install        *ciArtifactRefWire `json:"install"`
-		Payload        *ciArtifactRefWire `json:"payload"`
-		Archives       []ciArchiveRef    `json:"archives"`
+		Schema         string             `json:"schema"`
+		Version        string             `json:"version"`
+		SelectorGroups []json.RawMessage  `json:"selectorGroups"`
+		Archives       []ciArchiveRef     `json:"archives"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("release manifest is not readable JSON: %v", err)
 	}
-	if raw.Schema != "relkit.release-artifacts/2" && raw.Schema != "relkit.release-artifacts/1" {
-		return nil, fmt.Errorf("release manifest schema must be 'relkit.release-artifacts/2' (or /1)")
+	if raw.Schema != "relkit.release-artifacts/2" {
+		return nil, fmt.Errorf("release manifest schema must be 'relkit.release-artifacts/2'")
 	}
 	if strings.TrimSpace(raw.Version) != expectedVersion {
 		return nil, fmt.Errorf("release manifest version %q does not match project version %q", raw.Version, expectedVersion)
 	}
 
+	if len(raw.SelectorGroups) == 0 {
+		return nil, fmt.Errorf("selectorGroups must contain at least one group")
+	}
 	var groups []ciSelectorGroup
-	if raw.Schema == "relkit.release-artifacts/2" {
-		if len(raw.SelectorGroups) == 0 {
-			return nil, fmt.Errorf("selectorGroups must contain at least one group")
-		}
-		for i, entry := range raw.SelectorGroups {
-			group, err := decodeSelectorGroup(entry)
-			if err != nil {
-				return nil, fmt.Errorf("selectorGroups[%d]: %v", i, err)
-			}
-			groups = append(groups, group)
-		}
-	} else {
-		if raw.Install == nil || raw.Payload == nil {
-			return nil, fmt.Errorf("schema /1 requires both install and payload")
-		}
-		installSelectors, err := parseSelectorsString(raw.Install.Selectors, "install.selectors")
+	for i, entry := range raw.SelectorGroups {
+		group, err := decodeSelectorGroup(entry)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("selectorGroups[%d]: %v", i, err)
 		}
-		payloadSelectors, err := parseSelectorsString(raw.Payload.Selectors, "payload.selectors")
-		if err != nil {
-			return nil, err
-		}
-		groups = []ciSelectorGroup{{
-			Selectors: installSelectors,
-			Install:   ciArtifactRef{Path: raw.Install.Path, Kind: raw.Install.Kind},
-			Payloads:  []ciPayloadRef{{Path: raw.Payload.Path, Selectors: payloadSelectors}},
-		}}
+		groups = append(groups, group)
 	}
 
 	artifacts := &ciReleaseArtifacts{
@@ -392,20 +361,6 @@ func decodeSelectorGroup(entry json.RawMessage) (ciSelectorGroup, error) {
 		Install:   *group.Install,
 		Payloads:  group.Payloads,
 	}, nil
-}
-
-// parseSelectorsString decodes the /1 comma-joined selector form
-// ("os=windows,arch=amd64") into a map. Only used on the /1 compatibility
-// path; /2 manifests carry structured maps.
-func parseSelectorsString(text, what string) (map[string]string, error) {
-	pairs, err := stage.ParseKeyValues(strings.TrimSpace(text))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %v", what, err)
-	}
-	if len(pairs) == 0 {
-		return nil, fmt.Errorf("%s must be non-empty", what)
-	}
-	return pairs, nil
 }
 
 // validateGroups enforces the invariants every group must hold regardless of
