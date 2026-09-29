@@ -91,7 +91,13 @@ func cmdConsumeInstall(args []string) error {
 	for _, name := range installable {
 		if name == "updater" && lock.Schema == consume.SchemaV3 && !pinned[name] {
 			// ADR 0017 decision 7: the updater exits the artifacts block on
-			// consume/3; install it through the module channel instead.
+			// consume/3; install it through the module channel instead —
+			// unless an identical, working binary is already placed (an
+			// injected env bundle pre-provisions it, mirroring how
+			// checkModuleChannelUpdater verifies: exists + --version probe).
+			if updaterAlreadyPlaced(root, target) {
+				continue
+			}
 			if err := installUpdaterViaModule(root, lock); err != nil {
 				return err
 			}
@@ -185,6 +191,30 @@ func installUpdaterViaModule(root string, lock *consume.Lock) error {
 	}
 	fmt.Printf("relkit: updater placed at %s\n", filepath.ToSlash(destination))
 	return nil
+}
+
+// updaterAlreadyPlaced reports whether a working updater binary already
+// sits under the registry install name: exists + the same --version probe
+// checkModuleChannelUpdater gates on. An injected env bundle (relkit-env/1)
+// pre-provisions the updater so hostile-network build machines never fall
+// back to the go module channel; a missing or broken binary still installs
+// through the module channel as before.
+func updaterAlreadyPlaced(root, target string) bool {
+	row := registry.ByName["updater"]
+	installName, err := row.InstallName(target)
+	if err != nil {
+		return false
+	}
+	placed := filepath.Join(root, filepath.FromSlash(row.Destination), installName)
+	if _, statErr := os.Stat(placed); statErr != nil {
+		return false
+	}
+	if probeErr := consume.SmokeTest(placed); probeErr != nil {
+		fmt.Printf("relkit: placed updater failed probe (%v); reinstalling via module channel\n", probeErr)
+		return false
+	}
+	fmt.Printf("relkit: updater already installed at %s; skipping module channel\n", filepath.ToSlash(placed))
+	return true
 }
 
 func hostTargetString() string {

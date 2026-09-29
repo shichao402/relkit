@@ -218,7 +218,7 @@ func CheckInstalled(root string, lock *Lock, component, target string) CheckResu
 		if err != nil || digest != spec.SHA256 {
 			return CheckResult{Component: component, OK: false, Detail: fmt.Sprintf("installed %s does not match lock: %s", component, destination)}
 		}
-		if err := smokeTest(destination); err != nil {
+		if err := SmokeTest(destination); err != nil {
 			return CheckResult{Component: component, OK: false, Detail: err.Error()}
 		}
 		return CheckResult{Component: component, OK: true}
@@ -244,14 +244,16 @@ func checkModuleChannelUpdater(root, component, target string) CheckResult {
 	if _, err := os.Stat(destination); err != nil {
 		return CheckResult{Component: component, OK: false, Detail: fmt.Sprintf("module-channel updater missing: %s", destination)}
 	}
-	if err := smokeTest(destination); err != nil {
+	if err := SmokeTest(destination); err != nil {
 		return CheckResult{Component: component, OK: false, Detail: err.Error()}
 	}
 	return CheckResult{Component: component, OK: true}
 }
 
-// smokeTest runs --version as the install/verify probe.
-func smokeTest(binary string) error {
+// SmokeTest runs --version as the install/verify probe. Exported so the
+// CLI install surface reuses the exact probe checkModuleChannelUpdater
+// gates on (updater already-installed shortcut, ADR 0017).
+func SmokeTest(binary string) error {
 	ctx := timeoutAfter(30 * time.Second)
 	cmd := exec.CommandContext(ctx, binary, "--version")
 	cmd.SysProcAttr = detachForProbe()
