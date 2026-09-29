@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/shichao402/relkit/internal/publishproto"
 )
 
 // Multi-platform drop aggregation, collected into the CLI (ADR 0017,
@@ -206,6 +208,11 @@ func (c *dropClient) dropURL(filename string) string {
 }
 
 func (c *dropClient) send(request *http.Request) (*http.Response, error) {
+	// Every publisher endpoint on the agent funnels through the same
+	// publishproto handshake (requireAuthFor); a request without the
+	// protocol headers parses as the degraded [0,0] offer and is rejected
+	// with 426 publisher_upgrade_required before the handler runs.
+	publishproto.Apply(request.Header)
 	request.Header.Set("Authorization", "Bearer "+c.token)
 	return c.client.Do(request)
 }

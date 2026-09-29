@@ -13,6 +13,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/relkit/internal/publishproto"
 )
 
 // dropFixture is an in-memory agent drop: it records PUT bodies and serves
@@ -45,6 +47,18 @@ func newDropFixture(t *testing.T) *dropFixture {
 		}
 		if r.Header.Get("Authorization") != "Bearer token-ok" {
 			http.Error(w, "bad token", http.StatusUnauthorized)
+			return
+		}
+		// Mirror the agent's requireAuthFor handshake: a drop request
+		// without publishproto headers parses as the degraded [0,0]
+		// offer and must be rejected with 426 before the handler runs.
+		// This keeps the fixture honest so a regression in dropClient.send
+		// (publishproto.Apply dropped again) fails tests instead of
+		// slipping through to production CI.
+		if publishproto.Declared(r.Header) <= 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUpgradeRequired)
+			_, _ = w.Write([]byte(`{"ok":false,"minProtocol":2,"maxProtocol":3,"error":"publisher_upgrade_required","message":"fixture requires publishproto headers; dropClient.send must call publishproto.Apply"}`))
 			return
 		}
 		key := strings.Join(parts, "/")
