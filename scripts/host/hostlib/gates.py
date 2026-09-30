@@ -111,9 +111,16 @@ def product_site_policy(root: Path, state: dict[str, Any], drift: list[str]) -> 
     if not cfg:
         return
     site = cfg.get("site")
-    if not isinstance(site, dict) or not str(site.get("title") or "").strip():
-        drift.append("relkit.json site.title is required for the human release catalog")
+    # site 块是 opt-in 的人页声明：产品可以只发协议面（updater 渠道）而
+    # 不进人页（例如被另一产品托管的组件）。缺失即合法 opt-out，publish
+    # 侧 hasSiteCopy 同样以 site 三字段全空为"不写 site 文档"。
+    if site is None:
         return
+    if not isinstance(site, dict):
+        drift.append("relkit.json site must be an object when present")
+        return
+    if not str(site.get("title") or "").strip():
+        drift.append("relkit.json site.title is required when the site block is present")
     if "makers" in site:
         drift.append("relkit.json site.makers is forbidden; configure site.sinks once in relkit-agent.json")
     if "sinks" in site:

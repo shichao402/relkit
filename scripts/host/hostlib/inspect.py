@@ -188,7 +188,7 @@ def _impl_env_inspect_report(root: Path) -> dict[str, Any]:
                 {
                     "severity": "error",
                     "code": "missing-site-title",
-                    "detail": "relkit.json site.title is required for the human release catalog",
+                    "detail": "relkit.json site.title is required when the site block is present; omit the site block entirely to opt out of the human catalog",
                 }
             )
         for name, kind in facts["backends"].items():
