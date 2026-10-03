@@ -300,6 +300,42 @@ func TestDirectorySinkAtomicReplaceAndPrefixStrip(t *testing.T) {
 	}
 }
 
+func TestDirectorySinkReplacesStalePrevious(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "site-root")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "old.html"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a leftover from a crashed/privilege-mismatched earlier run:
+	// the fixed ".previous" slot is occupied by junk the sweep must clear.
+	stale := filepath.Join(filepath.Dir(dir), "site-root.previous")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "junk"), []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dump := map[string][]byte{
+		browse.IndexKey(): []byte("<html>new</html>"),
+	}
+	if err := writeDumpDir(dir, dump); err != nil {
+		t.Fatalf("writeDumpDir with stale .previous: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "index.html")); err != nil || string(got) != "<html>new</html>" {
+		t.Fatalf("index.html = %q err=%v", got, err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("stale .previous survived the sweep")
+	}
+	// A second pass with no existing dir (fresh machine semantics) must
+	// also succeed: rename of a missing dir is not an error.
+	if err := writeDumpDir(dir, dump); err != nil {
+		t.Fatalf("second writeDumpDir: %v", err)
+	}
+}
+
 func TestDirectorySinkServesFullRebuild(t *testing.T) {
 	shared := map[string][]byte{}
 	putWebmeta(t, shared, "dec", "1.0.0", "dev")

@@ -621,8 +621,19 @@ func writeDumpDir(dir string, dump map[string][]byte) error {
 			return abort(err)
 		}
 	}
-	previous := dir + ".previous"
-	_ = os.RemoveAll(previous)
+	// A prior crash (or a root-run rebuild landing in this directory) can
+	// leave ".previous" leftovers the current user cannot remove. Sweep
+	// them first; a leftover we cannot delete is reported instead of being
+	// silently swallowed, because the rename below would otherwise hit
+	// EEXIST forever (exactly what stalled the public site for 6 days).
+	for _, leftover := range []string{dir + ".previous"} {
+		if err := os.RemoveAll(leftover); err != nil && !os.IsNotExist(err) {
+			return abort(fmt.Errorf("sweep %s: %w", filepath.Base(leftover), err))
+		}
+	}
+	// Unique rollback name: even if a sweep fails later (permissions), the
+	// rename below never collides with a fixed ".previous" slot.
+	previous := fmt.Sprintf("%s.previous-%d", dir, time.Now().UnixNano())
 	if err := os.Rename(dir, previous); err != nil && !os.IsNotExist(err) {
 		return abort(err)
 	}
@@ -632,7 +643,12 @@ func writeDumpDir(dir string, dump map[string][]byte) error {
 		}
 		return abort(err)
 	}
-	_ = os.RemoveAll(previous)
+	if err := os.RemoveAll(previous); err != nil {
+		// The new tree is live; an undeletable leftover is a warning, not
+		// a failure. It keeps accumulating one per rebuild until someone
+		// with sufficient privileges sweeps it, so surface it loudly.
+		return fmt.Errorf("dump deployed, but cleanup of %s failed: %w", filepath.Base(previous), err)
+	}
 	return nil
 }
 
