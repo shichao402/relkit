@@ -246,10 +246,11 @@ func TestProductAllowsKey(t *testing.T) {
 		"manifest/app/1.0.0.pb",
 		"artifact/app/1.0.0/app.zip",
 		"latest/app/stable.json",
+		"channel/app/stable.json",
+		"release/app/stable/1.0.0.json",
 		"directory/app.pb",
 		"fallback/app.pb",
 		"site/app.json",
-		"browse/app.html",
 	}
 	denied := []string{
 		"index/other/stable.pb",
@@ -379,8 +380,15 @@ func TestSkeletonIsUsableAndComplete(t *testing.T) {
 	if !strings.Contains(joined, "browse/") {
 		t.Errorf("noCache must contain browse/, got %v", cfg.Cache.NoCache)
 	}
-	if len(cfg.Cache.Immutable) != 2 {
-		t.Errorf("immutable should cover manifest/ and artifact/, got %v", cfg.Cache.Immutable)
+	if !strings.Contains(joined, "channel/") {
+		t.Errorf("noCache must contain channel/, got %v", cfg.Cache.NoCache)
+	}
+	if len(cfg.Cache.Immutable) != 3 {
+		t.Errorf("immutable should cover manifest/, artifact/ and release/, got %v", cfg.Cache.Immutable)
+	}
+	joinedImmutable := strings.Join(cfg.Cache.Immutable, ",")
+	if !strings.Contains(joinedImmutable, "release/") {
+		t.Errorf("immutable must contain release/, got %v", cfg.Cache.Immutable)
 	}
 	if _, err := ParseSize(cfg.MaxUpload); err != nil {
 		t.Errorf("skeleton maxUpload is not parseable: %v", err)

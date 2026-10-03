@@ -86,7 +86,7 @@ flowchart TB
   other --> done
 ```
 
-dump 包含 `index.html`（总目录）、全部 `<product>.html`、`catalog.json`（派生数据）。协议客户端不读，rebuild 也不把它当输入。
+dump 包含 SPA 壳（`index.html` + `assets/`）、`catalog.json`（派生聚合）与数据文档快照（`site/`、`latest/`、`channel/`、`release/`）。协议客户端不读，rebuild 也不把它当输入。
 
 > 2026-09-25 更新：外网数据面已从 COS 迁至本机 relkit-store（`/srv/releases`，serve 已退役）。人页 Makers 退出服务路径：agent sinks 为 `backend:serve` + `directory:/srv/relkit/site` 双落点，`update.firoyang.com` 由本机 nginx 直接伺服静态目录，与内网拓扑完全一致。原因：hk CVM 到广州 COS 公网入口 443 跨境不通（见 golden-path 归档），COS 托管暂不可用。Makers 云端项目 `relkit-updates-index` 尚未删除（Pages API token 已失效，待续期后清理）。
 
@@ -153,9 +153,9 @@ flowchart TB
 
 ## 6. 站点重建与 sink 选型（实现约定）
 
-`publish.Run` 只写 `site/<product>.json` 与 `latest/<product>/<channel>.json`，不渲染 HTML，也不打开站点 sink。发布成功后 agent 触发同一条 `site rebuild`；失败只使人页滞后，不回滚已提交的协议 index。
+`publish.Run` 在签名 index 提交之后写人面数据文档：`site/<product>.json`、`latest/<product>/<channel>.json`、`channel/<product>/<channel>.json`（渠道目录，从最终 index 全量投影，历史深度等于 retainVersions 窗口）与 `release/<product>/<channel>/<version>.json`（immutable 版本详情）。不渲染 HTML，也不打开站点 sink。发布成功后 agent 触发同一条 `site rebuild`；失败只使人页滞后，不回滚已提交的协议 index。数据文档写在 index commit 之后，人面永不超前协议面。
 
-- agent 的 `products` map 是站点产品集合。rebuild 从各产品数据面读全量 `site/`、`latest/`，调用纯函数 `browse.Build`，整站输出 `index.html`、全部 `<product>.html` 与 `catalog.json`。
+- agent 的 `products` map 是站点产品集合。rebuild 物化 SPA 表现面（embed 的 `index.html` + `assets/`，无构建步骤、零框架）并聚合 `catalog.json`（跨产品、单次发布写不出，只能整站聚合），再把收集到的数据文档（`site/`、`latest/`、`channel/`、`release/`）原样平铺进 dump 快照，表现与数据同源伺服。对缺 `release/` 文档的存量版本，rebuild 从 manifest backfill（同一投影逻辑；manifest 已被 GC 只警告不阻断）。
 - agent 顶层 `site.sinks[]` 声明 dump 去向（ADR 0015）：`{"type":"backend","backend":"<name>"}` 把完整 dump `PutPointer` 到该 backend 的 `browse/`（backend 须 `HostsBrowse()==true`）；`{"type":"makers",...}` Folder 部署到 EdgeOne Makers；`{"type":"directory","path":...}` 原子写目录给外部静态宿主。sink 配置不属于产品 policy/profile，`HostsBrowse` 只做能力校验、不再自动注册 sink。
 - rebuild 先把 dump 写入 agent state 目录 `site/dump/`（本机审计/回滚参照），再分发到各 sink；某 sink 失败不阻断协议发布，重跑 rebuild 即全量重发。
 - `catalog.json` 只是派生输出，禁止读回后 merge。相同输入的 dump 哈希不变，跳过重复部署。

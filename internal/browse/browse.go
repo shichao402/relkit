@@ -1,11 +1,17 @@
-// Package browse builds the unsigned HTML people open in a browser.
-// Protocol clients never read these files.
+// Package browse builds the human-facing site: a small SPA shell plus the
+// data documents it fetches at runtime. Protocol clients never read these
+// files.
 //
-// relkit-agent rebuilds the complete site from data-plane site/latest
-// documents. Product publishing never reads rendered catalog files.
+// The presentation plane is deliberately split from the data plane
+// (2026-10-03): webmeta documents (site/, latest/, channel/, release/) are
+// written by the publisher and never re-derived here. This package only
+// embeds the static SPA assets and aggregates the product catalog snapshot
+// (catalog.json), because that one document spans products and no single
+// product publish can write it.
 package browse
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -14,16 +20,19 @@ import (
 	"github.com/shichao402/relkit/internal/webmeta"
 )
 
+//go:embed web/index.html web/assets/app.js web/assets/style.css
+var webFS embed.FS
+
 const SchemaCatalog = "relkit.browse-catalog/1"
 
 func IndexKey() string { return "browse/index.html" }
 
 func CatalogKey() string { return "browse/catalog.json" }
 
-func ProductKey(product string) string {
-	return path.Join("browse", product+".html")
-}
+func AssetKey(name string) string { return path.Join("browse", "assets", name) }
 
+// Catalog is the product-list snapshot the SPA loads first. It is derived
+// data, never merged back, and rebuilt whole on every site rebuild.
 type Catalog struct {
 	Schema    string    `json:"schema"`
 	UpdatedAt string    `json:"updatedAt"`
@@ -39,129 +48,130 @@ type Product struct {
 }
 
 type Channel struct {
-	Name        string             `json:"name"`
-	Version     string             `json:"version"`
-	Code        int64              `json:"code"`
-	PublishedAt string             `json:"publishedAt,omitempty"`
-	Artifacts   []webmeta.Artifact `json:"artifacts"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Code        int64  `json:"code"`
+	PublishedAt string `json:"publishedAt,omitempty"`
 }
 
-// ProductData is the complete human-facing data for one product. It is read
-// from the data plane; rendered catalog files are never used as input.
+// ProductData is the collected human-facing data for one product: its site
+// document plus one channel document per channel. Releases carries the
+// release detail documents copied into the dump (backfilled during collect
+// or written by the publisher); the SPA fetches them on demand from these
+// exact paths.
 type ProductData struct {
-	Site    *webmeta.Site
-	Latests []webmeta.Latest
+	Site     *webmeta.Site
+	Latests  []webmeta.Latest
+	Channels []webmeta.Channel
+	Releases []webmeta.Release
 }
 
-// Build deterministically renders the entire static site from authoritative
-// site/latest documents.
+// Build renders the complete static site: the SPA shell, its assets, the
+// catalog snapshot, and a verbatim copy of every collected data document so
+// page and data leave from the same origin.
 func Build(products []ProductData) (map[string][]byte, error) {
 	catalog := &Catalog{Schema: SchemaCatalog}
 	for _, input := range products {
-		if len(input.Latests) == 0 {
+		if input.Site == nil || len(input.Channels) == 0 {
 			continue
 		}
-		product := productFromData(input)
-		if product.ID == "" {
-			continue
+		product := Product{
+			ID:          input.Site.Product,
+			Title:       input.Site.Product,
+			Description: input.Site.Description,
+			Homepage:    input.Site.Homepage,
 		}
-		catalog.Products = append(catalog.Products, product)
-		if input.Site != nil && input.Site.UpdatedAt > catalog.UpdatedAt {
-			catalog.UpdatedAt = input.Site.UpdatedAt
+		if input.Site.Title != "" {
+			product.Title = input.Site.Title
 		}
-		for _, latest := range input.Latests {
-			if latest.PublishedAt > catalog.UpdatedAt {
-				catalog.UpdatedAt = latest.PublishedAt
+		for _, channel := range input.Channels {
+			if channel.Product != input.Site.Product {
+				continue
 			}
+			product.Channels = append(product.Channels, Channel{
+				Name:        channel.Channel,
+				Version:     channel.Latest.Version,
+				Code:        channel.Latest.Code,
+				PublishedAt: channel.Latest.ReleasedAt,
+			})
+			if channel.UpdatedAt > catalog.UpdatedAt {
+				catalog.UpdatedAt = channel.UpdatedAt
+			}
+		}
+		if len(product.Channels) > 0 {
+			catalog.Products = append(catalog.Products, product)
 		}
 	}
 	sort.Slice(catalog.Products, func(i, j int) bool {
 		return catalog.Products[i].ID < catalog.Products[j].ID
 	})
+	for i := range catalog.Products {
+		sort.Slice(catalog.Products[i].Channels, func(a, b int) bool {
+			return channelRank(catalog.Products[i].Channels[a].Name) < channelRank(catalog.Products[i].Channels[b].Name)
+		})
+	}
 
-	indexHTML, err := RenderIndex(catalog)
+	indexHTML, err := webFS.ReadFile("web/index.html")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("spa shell: %w", err)
+	}
+	appJS, err := webFS.ReadFile("web/assets/app.js")
+	if err != nil {
+		return nil, fmt.Errorf("spa app: %w", err)
+	}
+	styleCSS, err := webFS.ReadFile("web/assets/style.css")
+	if err != nil {
+		return nil, fmt.Errorf("spa style: %w", err)
 	}
 	catalogJSON, err := MarshalCatalog(catalog)
 	if err != nil {
 		return nil, err
 	}
+
 	dump := map[string][]byte{
-		IndexKey():   indexHTML,
-		CatalogKey(): catalogJSON,
+		IndexKey():            indexHTML,
+		AssetKey("app.js"):    appJS,
+		AssetKey("style.css"): styleCSS,
+		CatalogKey():          catalogJSON,
 	}
-	for i := range catalog.Products {
-		productHTML, err := RenderProduct(&catalog.Products[i])
+
+	// Data snapshot: every collected document ships with the dump verbatim, so
+	// the SPA's fetches resolve on the static host regardless of whether that
+	// host is also the data plane (backend sink) or a standalone tree
+	// (directory/makers sinks).
+	for _, input := range products {
+		if input.Site == nil {
+			continue
+		}
+		siteData, err := webmeta.MarshalSite(*input.Site)
 		if err != nil {
 			return nil, err
 		}
-		dump[ProductKey(catalog.Products[i].ID)] = productHTML
+		dump[webmeta.SiteKey(input.Site.Product)] = siteData
+		for i := range input.Latests {
+			data, err := webmeta.MarshalLatest(input.Latests[i])
+			if err != nil {
+				return nil, err
+			}
+			dump[webmeta.LatestKey(input.Latests[i].Product, input.Latests[i].Channel)] = data
+		}
+		for i := range input.Channels {
+			data, err := webmeta.MarshalChannel(input.Channels[i])
+			if err != nil {
+				return nil, err
+			}
+			dump[webmeta.ChannelKey(input.Channels[i].Product, input.Channels[i].Channel)] = data
+		}
+		for i := range input.Releases {
+			data, err := webmeta.MarshalRelease(input.Releases[i])
+			if err != nil {
+				return nil, err
+			}
+			dump[webmeta.ReleaseKey(input.Releases[i].Product, input.Releases[i].Channel, input.Releases[i].Version)] = data
+		}
 	}
+
 	return dump, nil
-}
-
-func productFromData(input ProductData) Product {
-	id := ""
-	if input.Site != nil {
-		id = input.Site.Product
-	}
-	if id == "" && len(input.Latests) > 0 {
-		id = input.Latests[0].Product
-	}
-	page := Product{
-		ID:    id,
-		Title: id,
-	}
-	if input.Site != nil {
-		if input.Site.Title != "" {
-			page.Title = input.Site.Title
-		}
-		page.Description = input.Site.Description
-		page.Homepage = input.Site.Homepage
-	}
-	for _, latest := range input.Latests {
-		if latest.Product != id || latest.Channel == "" {
-			continue
-		}
-		page.Channels = append(page.Channels, Channel{
-			Name:        latest.Channel,
-			Version:     latest.Version,
-			Code:        latest.Code,
-			PublishedAt: latest.PublishedAt,
-			Artifacts:   humanArtifacts(latest.Artifacts),
-		})
-	}
-	sort.Slice(page.Channels, func(i, j int) bool {
-		return channelRank(page.Channels[i].Name) < channelRank(page.Channels[j].Name)
-	})
-	return page
-}
-
-// humanArtifacts lists the artifacts people install by hand. Payload stays in
-// the signed protocol for in-app updates; audience=runtime artifacts reach
-// machines only through RUP selectors, so both stay off the human page. Old
-// releases published before audience existed have no selector at all — keep
-// their full non-payload list so those pages do not go empty.
-func humanArtifacts(all []webmeta.Artifact) []webmeta.Artifact {
-	out := make([]webmeta.Artifact, 0, len(all))
-	hasUser := false
-	for _, artifact := range all {
-		if artifact.Selectors["audience"] == "user" {
-			hasUser = true
-			break
-		}
-	}
-	for _, artifact := range all {
-		if artifact.Kind == "payload" {
-			continue
-		}
-		if hasUser && artifact.Selectors["audience"] != "user" {
-			continue
-		}
-		out = append(out, artifact)
-	}
-	return out
 }
 
 func channelRank(name string) string {

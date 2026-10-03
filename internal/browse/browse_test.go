@@ -9,15 +9,25 @@ import (
 	"github.com/shichao402/relkit/internal/webmeta"
 )
 
-func TestBuildRendersAllProductsAndChannelsDeterministically(t *testing.T) {
+func TestBuildEmitsSPAAndDataSnapshotDeterministically(t *testing.T) {
 	input := []ProductData{
-		{Site: &webmeta.Site{Title: "Demo", Product: "demo", UpdatedAt: "2026-01-02T00:00:00Z"}, Latests: []webmeta.Latest{
-			{Product: "demo", Channel: "dev", Version: "1.1.0", Code: 110, PublishedAt: "2026-01-02T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo-dev.zip", URLs: []string{"https://raw.example/dev.zip"}}}},
-			{Product: "demo", Channel: "stable", Version: "1.0.0", Code: 100, PublishedAt: "2026-01-01T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo.zip", URLs: []string{"https://raw.example/demo.zip"}}}},
-		}},
-		{Site: &webmeta.Site{Title: "Other", Product: "other"}, Latests: []webmeta.Latest{
-			{Product: "other", Channel: "stable", Version: "2.0.0", Code: 200, PublishedAt: "2026-01-03T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "app", Filename: "other.zip"}}},
-		}},
+		{Site: &webmeta.Site{Title: "Demo", Product: "demo", UpdatedAt: "2026-01-02T00:00:00Z"},
+			Latests: []webmeta.Latest{{Product: "demo", Channel: "dev", Version: "1.1.0", Code: 110, PublishedAt: "2026-01-02T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo-dev.zip", URLs: []string{"https://raw.example/dev.zip"}}}}},
+			Channels: []webmeta.Channel{
+				{Product: "demo", Channel: "dev", UpdatedAt: "2026-01-02T00:00:00Z", Latest: webmeta.ChannelEntry{Version: "1.1.0", Code: 110, ReleasedAt: "2026-01-02T00:00:00Z"}, Versions: []webmeta.ChannelEntry{{Version: "1.1.0", Code: 110, ReleasedAt: "2026-01-02T00:00:00Z"}}},
+				{Product: "demo", Channel: "stable", UpdatedAt: "2026-01-01T00:00:00Z", Latest: webmeta.ChannelEntry{Version: "1.0.0", Code: 100, ReleasedAt: "2026-01-01T00:00:00Z"}, Versions: []webmeta.ChannelEntry{{Version: "1.0.0", Code: 100, ReleasedAt: "2026-01-01T00:00:00Z"}}},
+			},
+			Releases: []webmeta.Release{
+				{Product: "demo", Channel: "dev", Version: "1.1.0", Code: 110, ReleasedAt: "2026-01-02T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "win", Filename: "demo-dev.zip", URLs: []string{"https://raw.example/dev.zip"}}}},
+			}},
+		{Site: &webmeta.Site{Title: "Other", Product: "other", UpdatedAt: "2026-01-03T00:00:00Z"},
+			Latests: []webmeta.Latest{{Product: "other", Channel: "stable", Version: "2.0.0", Code: 200, PublishedAt: "2026-01-03T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "app", Filename: "other.zip"}}}},
+			Channels: []webmeta.Channel{
+				{Product: "other", Channel: "stable", UpdatedAt: "2026-01-03T00:00:00Z", Latest: webmeta.ChannelEntry{Version: "2.0.0", Code: 200, ReleasedAt: "2026-01-03T00:00:00Z"}, Versions: []webmeta.ChannelEntry{{Version: "2.0.0", Code: 200, ReleasedAt: "2026-01-03T00:00:00Z"}}},
+			},
+			Releases: []webmeta.Release{
+				{Product: "other", Channel: "stable", Version: "2.0.0", Code: 200, ReleasedAt: "2026-01-03T00:00:00Z", Artifacts: []webmeta.Artifact{{ID: "app", Filename: "other.zip"}}},
+			}},
 	}
 	first, err := Build(input)
 	if err != nil {
@@ -27,11 +37,31 @@ func TestBuildRendersAllProductsAndChannelsDeterministically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(first) != len(second) {
+		t.Fatalf("dump size changed: %d vs %d", len(first), len(second))
+	}
 	for key, body := range first {
 		if string(second[key]) != string(body) {
 			t.Fatalf("%s changed across identical builds", key)
 		}
 	}
+
+	// SPA shell and assets ship with the dump.
+	for _, key := range []string{IndexKey(), AssetKey("app.js"), AssetKey("style.css"), CatalogKey()} {
+		if len(first[key]) == 0 {
+			t.Fatalf("dump missing %s", key)
+		}
+	}
+	// Data snapshot: channel and release documents copied verbatim.
+	for _, key := range []string{
+		webmeta.ChannelKey("demo", "stable"), webmeta.ChannelKey("demo", "dev"), webmeta.ChannelKey("other", "stable"),
+		webmeta.ReleaseKey("demo", "dev", "1.1.0"), webmeta.ReleaseKey("other", "stable", "2.0.0"),
+	} {
+		if len(first[key]) == 0 {
+			t.Fatalf("dump missing data snapshot %s", key)
+		}
+	}
+
 	catalog, err := UnmarshalCatalog(first[CatalogKey()])
 	if err != nil {
 		t.Fatal(err)
@@ -43,88 +73,32 @@ func TestBuildRendersAllProductsAndChannelsDeterministically(t *testing.T) {
 		t.Fatalf("stable should sort first: %+v", catalog.Products[0].Channels)
 	}
 
-	body := string(first[IndexKey()])
-	for _, want := range []string{"Demo", "Other", "stable", "1.0.0", "dev", "1.1.0", "demo.html", "other.html"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("index missing %q\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "https://raw.example/") || strings.Contains(body, ">Download<") {
-		t.Errorf("index must link to product pages instead of guessing a platform download\n%s", body)
-	}
-	if strings.Contains(body, ".pb") {
-		t.Errorf("human index must not use .pb as navigation\n%s", body)
-	}
-	if strings.Contains(body, "fonts.google") || strings.Contains(body, "http://") && strings.Contains(body, "font") {
-		t.Errorf("must not load external fonts\n%s", body)
-	}
-
-	if !strings.Contains(string(first[ProductKey("demo")]), "Download") {
-		t.Fatalf("product page missing download\n%s", first[ProductKey("demo")])
-	}
-}
-
-func TestHumanPageListsAllNonPayloadArtifacts(t *testing.T) {
-	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
-		Product: "dec", Channel: "stable", Version: "1.0.0", Code: 1,
-		Artifacts: []webmeta.Artifact{
-			{ID: "runtime", Filename: "dec-server-linux-amd64", Kind: "binary", Selectors: map[string]string{"audience": "runtime"}},
-			{ID: "console", Filename: "dec-console-linux-amd64.AppImage", Kind: "installer", Selectors: map[string]string{"audience": "user"}},
-			{ID: "ota", Filename: "dec-payload.zip", Kind: "payload"},
-		},
-	}}})
-	artifacts := catalog.Channels[0].Artifacts
-	if len(artifacts) != 1 {
-		t.Fatalf("human artifacts = %+v", artifacts)
-	}
-	if artifacts[0].Filename != "dec-console-linux-amd64.AppImage" {
-		t.Fatalf("only the user-facing installer may stay: %+v", artifacts)
-	}
-}
-
-func TestHumanPageHidesRuntimeAudienceArtifacts(t *testing.T) {
-	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
-		Product: "dec", Channel: "stable", Version: "1.0.0", Code: 1,
-		Artifacts: []webmeta.Artifact{
-			{ID: "dec-server-linux-amd64", Filename: "dec-server-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64", "audience": "runtime"}},
-			{ID: "dec-exec-linux-amd64", Filename: "dec-exec-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64", "audience": "runtime"}},
-			{ID: "dec-host-setup-linux-amd64", Filename: "dec-host-setup-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64", "audience": "runtime"}},
-			{ID: "dec-runtime-manifest", Filename: "dec-runtime-manifest.json", Kind: "blob", Selectors: map[string]string{"component": "manifest", "audience": "runtime"}},
-			{ID: "dec-console-windows-amd64", Filename: "dec-console-windows-amd64.exe", Kind: "installer", Selectors: map[string]string{"os": "windows", "arch": "amd64", "audience": "user"}},
-			{ID: "dec-console-darwin-arm64", Filename: "dec-console-darwin-arm64.dmg", Kind: "installer", Selectors: map[string]string{"os": "darwin", "arch": "arm64", "audience": "user"}},
-		},
-	}}})
-	artifacts := catalog.Channels[0].Artifacts
-	if len(artifacts) != 2 {
-		t.Fatalf("human artifacts = %+v", artifacts)
-	}
-	for _, artifact := range artifacts {
-		if artifact.Selectors["audience"] != "user" {
-			t.Fatalf("runtime artifact leaked to human page: %+v", artifacts)
+	shell := string(first[IndexKey()])
+	for _, want := range []string{"assets/app.js", "assets/style.css", "id=\"view\""} {
+		if !strings.Contains(shell, want) {
+			t.Errorf("spa shell missing %q\n%s", want, shell)
 		}
 	}
 }
 
-func TestHumanPageKeepsLegacyArtifactsWithoutAudience(t *testing.T) {
-	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
-		Product: "dec", Channel: "stable", Version: "0.9.0", Code: 1,
-		Artifacts: []webmeta.Artifact{
-			{ID: "dec-server-linux-amd64", Filename: "dec-server-linux-amd64", Kind: "binary", Selectors: map[string]string{"os": "linux", "arch": "amd64"}},
-			{ID: "dec-console-windows-amd64", Filename: "dec-console-windows-amd64.exe", Kind: "installer", Selectors: map[string]string{"os": "windows", "arch": "amd64"}},
-		},
-	}}})
-	if got := len(catalog.Channels[0].Artifacts); got != 2 {
-		t.Fatalf("legacy artifact count = %d, want 2 (no audience selector → keep list intact)", got)
+func TestBuildSkipsProductsWithoutChannels(t *testing.T) {
+	input := []ProductData{
+		{Site: &webmeta.Site{Product: "empty", UpdatedAt: "2026-01-02T00:00:00Z"}},
 	}
-}
-
-func TestHumanPageKeepsInstallArtifacts(t *testing.T) {
-	catalog := productFromData(ProductData{Latests: []webmeta.Latest{{
-		Product: "old", Channel: "stable", Version: "1.0.0", Code: 1,
-		Artifacts: []webmeta.Artifact{{ID: "setup", Filename: "app-setup.exe", Kind: "installer"}},
-	}}})
-	if got := len(catalog.Channels[0].Artifacts); got != 1 {
-		t.Fatalf("install artifact count = %d, want 1", got)
+	dump, err := Build(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := UnmarshalCatalog(dump[CatalogKey()])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Products) != 0 {
+		t.Fatalf("expected empty catalog, got %+v", catalog.Products)
+	}
+	// Site document still ships verbatim even when the product has no channels.
+	if len(dump[webmeta.SiteKey("empty")]) == 0 {
+		t.Fatal("site document missing from data snapshot")
 	}
 }
 
@@ -137,14 +111,25 @@ func TestWriteSampleDump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(index), "SVN Auto Merge") {
-		t.Fatalf("sample index missing title\n%s", index)
+	if !strings.Contains(string(index), "assets/app.js") {
+		t.Fatalf("sample shell missing app reference\n%s", index)
 	}
-	product, err := os.ReadFile(filepath.Join(dir, "svn-auto-merge.html"))
+	for _, rel := range []string{
+		"assets/app.js", "assets/style.css", "catalog.json",
+		"channel/svn-auto-merge/stable.json", "channel/svn-auto-merge/dev.json",
+		"site/svn-auto-merge.json", "latest/svn-auto-merge/stable.json",
+		"release/svn-auto-merge/stable/0.2.0+100.json",
+		"release/svn-auto-merge/dev/0.2.0+106.json",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("sample dump missing %s: %v", rel, err)
+		}
+	}
+	catalog, err := os.ReadFile(filepath.Join(dir, "catalog.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(product), "Download") {
-		t.Fatalf("sample product missing download\n%s", product)
+	if !strings.Contains(string(catalog), "SVN Auto Merge") {
+		t.Fatalf("sample catalog missing title\n%s", catalog)
 	}
 }

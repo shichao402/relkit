@@ -323,6 +323,8 @@ func productAllowsKey(product, name string) bool {
 		"manifest/" + product + "/",
 		"artifact/" + product + "/",
 		"latest/" + product + "/",
+		"channel/" + product + "/",
+		"release/" + product + "/",
 	} {
 		if strings.HasPrefix(name, prefix) {
 			return true
@@ -330,8 +332,7 @@ func productAllowsKey(product, name string) bool {
 	}
 	return name == "directory/"+product+".pb" ||
 		name == "fallback/"+product+".pb" ||
-		name == "site/"+product+".json" ||
-		name == "browse/"+product+".html"
+		name == "site/"+product+".json"
 }
 
 // checkPermissions warns when a secret-bearing file is readable beyond its
@@ -431,8 +432,8 @@ func skeletonBytes(dir, adminStateFile string) []byte {
 		AdminStateFile:  adminStateFile,
 		MaxUpload:       "4GiB",
 		Cache: &CacheConfig{
-			NoCache:       []string{"index/", "fallback/", "directory/", "site/", "latest/", "browse/"},
-			Immutable:     []string{"manifest/", "artifact/"},
+			NoCache:       []string{"index/", "fallback/", "directory/", "site/", "latest/", "browse/", "channel/"},
+			Immutable:     []string{"manifest/", "artifact/", "release/"},
 			DefaultMaxAge: &maxAge,
 		},
 		GC: &GCConfig{

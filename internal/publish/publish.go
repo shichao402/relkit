@@ -152,12 +152,14 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 				printer("  " + casKey + "  <- cas (skip PUT when size matches)")
 			}
 		}
-		printer("  " + model.ManifestKey(cfg.Product, version))
+	printer("  " + model.ManifestKey(cfg.Product, version))
 		printer("  " + model.IndexKey(cfg.Product, channel) + "  <- pointer, written last")
 		if hasSiteCopy(cfg) {
 			printer("  " + webmeta.SiteKey(cfg.Product) + "  <- site copy")
 		}
 		printer("  " + webmeta.LatestKey(cfg.Product, channel) + "  <- fixed latest links")
+		printer("  " + webmeta.ChannelKey(cfg.Product, channel) + "  <- channel directory (history)")
+		printer("  " + webmeta.ReleaseKey(cfg.Product, channel, version) + "  <- release details (immutable)")
 		return nil, nil
 	}
 
@@ -285,7 +287,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	// a fixed "latest" URL must never advertise a release that clients cannot
 	// yet see. They are derived entirely from this publish, so the HTTP request
 	// path only reads a pointer; it never scans index/manifest to calculate one.
-	webFailures, err := writeWebPointers(cfg, staged, manifest, committed, printer)
+	webFailures, err := writeWebPointers(cfg, staged, manifest, index, committed, printer)
 	if err != nil {
 		return nil, err
 	}
@@ -319,17 +321,29 @@ func hasSiteCopy(cfg *config.Config) bool {
 	return cfg.Site.Title != "" || cfg.Site.Description != "" || cfg.Site.Homepage != ""
 }
 
+// writeWebPointers projects the signed release into the human-facing data
+// documents: the per-version release detail, the channel directory with the
+// full retained history, and the fixed latest link. They are data, not
+// rendering: the site SPA fetches them at runtime, so the documents must move
+// with every publish instead of waiting for a site rebuild.
+//
+// These documents are deliberately written after the signed index commit:
+// a fixed "latest" URL must never advertise a release that clients cannot yet
+// see. They are derived entirely from this publish, so the HTTP request path
+// only reads a pointer; it never scans index/manifest to calculate one.
 func writeWebPointers(
 	cfg *config.Config,
 	staged *model.StagedDocument,
 	manifest *model.ManifestDocument,
+	index *model.IndexDocument,
 	targets []backends.Backend,
 	printer Printer,
 ) ([]string, error) {
 	var documents []struct {
-		label string
-		key   string
-		data  []byte
+		label   string
+		key     string
+		data    []byte
+		pointer bool // pointers are mutable directories; releases are immutable
 	}
 
 	if hasSiteCopy(cfg) {
@@ -345,10 +359,11 @@ func writeWebPointers(
 			return nil, err
 		}
 		documents = append(documents, struct {
-			label string
-			key   string
-			data  []byte
-		}{"site", webmeta.SiteKey(cfg.Product), data})
+			label   string
+			key     string
+			data    []byte
+			pointer bool
+		}{"site", webmeta.SiteKey(cfg.Product), data, true})
 	}
 
 	// Every channel gets its own pointer: a beta link has to keep tracking beta,
@@ -361,24 +376,73 @@ func writeWebPointers(
 		PublishedAt: manifest.ReleasedAt,
 		Artifacts:   webmeta.ArtifactsFromManifest(manifest),
 	}
-	data, err := webmeta.MarshalLatest(latestDoc)
+	latestData, err := webmeta.MarshalLatest(latestDoc)
 	if err != nil {
 		return nil, err
 	}
 	documents = append(documents, struct {
-		label string
-		key   string
-		data  []byte
-	}{"latest", webmeta.LatestKey(cfg.Product, staged.Channel), data})
+		label   string
+		key     string
+		data    []byte
+		pointer bool
+	}{"latest", webmeta.LatestKey(cfg.Product, staged.Channel), latestData, true})
+
+	// Channel directory: the full retained version list projected from the
+	// final signed index. History depth equals the protocol retainVersions
+	// window; pruning shows up here on the same publish, with no second ledger.
+	channelDoc, err := channelFromIndex(index, model.UTCNow())
+	if err != nil {
+		return nil, err
+	}
+	channelData, err := webmeta.MarshalChannel(channelDoc)
+	if err != nil {
+		return nil, err
+	}
+	documents = append(documents, struct {
+		label   string
+		key     string
+		data    []byte
+		pointer bool
+	}{"channel", webmeta.ChannelKey(cfg.Product, staged.Channel), channelData, true})
+
+	// Release details: one immutable document per version, written once at
+	// publish time. Versions published before this schema existed are
+	// backfilled by the site rebuild, which reads their manifests for the
+	// same purpose.
+	releaseDoc := webmeta.Release{
+		Product:    cfg.Product,
+		Channel:    staged.Channel,
+		Version:    staged.Version,
+		Code:       staged.Code,
+		ReleasedAt: manifest.ReleasedAt,
+		NotesURL:   staged.NotesUrl,
+		Artifacts:  webmeta.ArtifactsFromManifest(manifest),
+	}
+	releaseData, err := webmeta.MarshalRelease(releaseDoc)
+	if err != nil {
+		return nil, err
+	}
+	documents = append(documents, struct {
+		label   string
+		key     string
+		data    []byte
+		pointer bool
+	}{"release", webmeta.ReleaseKey(cfg.Product, staged.Channel, staged.Version), releaseData, false})
 
 	if len(targets) == 0 {
 		return nil, nil
 	}
-	printer("writing web pointers...")
+	printer("writing web documents...")
 	var failures []string
 	for _, backend := range targets {
 		for _, document := range documents {
-			if _, err := backend.PutPointer(document.data, document.key); err != nil {
+			var err error
+			if document.pointer {
+				_, err = backend.PutPointer(document.data, document.key)
+			} else {
+				_, err = backend.PutImmutable(document.data, document.key)
+			}
+			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s %s: %v", backend.Name(), document.label, err))
 				printer(fmt.Sprintf("  %-12s %s FAILED: %v", backend.Name(), document.key, err))
 				continue
@@ -388,6 +452,45 @@ func writeWebPointers(
 	}
 
 	return failures, nil
+}
+
+// channelFromIndex projects a final signed index into a channel directory
+// document. Yanked nodes stay visible but marked, because hiding a version
+// clients may still reference would make the page lie about the protocol.
+func channelFromIndex(index *model.IndexDocument, updatedAt string) (webmeta.Channel, error) {
+	if index == nil {
+		return webmeta.Channel{}, fmt.Errorf("cannot project a nil index into a channel document")
+	}
+	if len(index.Versions) == 0 {
+		return webmeta.Channel{}, fmt.Errorf("cannot project an empty index for %s/%s", index.Product, index.Channel)
+	}
+	doc := webmeta.Channel{
+		Product:   index.Product,
+		Channel:   index.Channel,
+		UpdatedAt: updatedAt,
+		Versions:  make([]webmeta.ChannelEntry, 0, len(index.Versions)),
+	}
+	for _, node := range index.Versions {
+		if node == nil {
+			continue
+		}
+		doc.Versions = append(doc.Versions, webmeta.ChannelEntry{
+			Version:    node.Version,
+			Code:       node.Code,
+			ReleasedAt: node.ReleasedAt,
+			NotesURL:   node.NotesUrl,
+			Yanked:     node.Yanked,
+		})
+	}
+	// The highest code is the latest release the channel advertises.
+	latest := doc.Versions[0]
+	for _, entry := range doc.Versions[1:] {
+		if entry.Code > latest.Code || (entry.Code == latest.Code && entry.Version > latest.Version) {
+			latest = entry
+		}
+	}
+	doc.Latest = latest
+	return doc, nil
 }
 
 func trustedKeys(cfg *config.Config, signers []envelope.Signer) map[string]ed25519.PublicKey {

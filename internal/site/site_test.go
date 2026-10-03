@@ -266,9 +266,10 @@ func TestDirectorySinkAtomicReplaceAndPrefixStrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	dump := map[string][]byte{
-		browse.IndexKey():        []byte("<html>index</html>"),
-		browse.CatalogKey():      []byte("{}"),
-		browse.ProductKey("dec"): []byte("<html>dec</html>"),
+		browse.IndexKey():                []byte("<html>index</html>"),
+		browse.CatalogKey():              []byte("{}"),
+		browse.AssetKey("app.js"):        []byte("// app"),
+		webmeta.ChannelKey("dec", "dev"): webmetaJSON(`{"schema":"relkit.channel/1","product":"dec","channel":"dev","latest":{"version":"1.0.0"},"versions":[{"version":"1.0.0"}]}`),
 	}
 	if err := writeDumpDir(dir, dump); err != nil {
 		t.Fatal(err)
@@ -277,9 +278,10 @@ func TestDirectorySinkAtomicReplaceAndPrefixStrip(t *testing.T) {
 		t.Fatal("stale file survived atomic replace")
 	}
 	for name, body := range map[string]string{
-		"index.html":   "<html>index</html>",
-		"catalog.json": "{}",
-		"dec.html":     "<html>dec</html>",
+		"index.html":           "<html>index</html>",
+		"catalog.json":         "{}",
+		"assets/app.js":        "// app",
+		"channel/dec/dev.json": `{"schema":"relkit.channel/1","product":"dec","channel":"dev","latest":{"version":"1.0.0"},"versions":[{"version":"1.0.0"}]}`,
 	} {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || string(got) != body {
@@ -324,8 +326,17 @@ func TestDirectorySinkServesFullRebuild(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("changed=%v err=%v", changed, err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "dec.html")); err != nil {
-		t.Fatalf("directory sink missing product page: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "index.html")); err != nil {
+		t.Fatalf("directory sink missing spa shell: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "assets", "app.js")); err != nil {
+		t.Fatalf("directory sink missing spa assets: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "channel", "dec", "dev.json")); err != nil {
+		t.Fatalf("directory sink missing channel data snapshot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "release", "dec", "dev", "1.0.0.json")); err != nil {
+		t.Fatalf("directory sink missing release data snapshot: %v", err)
 	}
 	// Second run: same sinks + same dump is skipped.
 	changed, err = Rebuild(cfg, products, nil)
@@ -351,6 +362,20 @@ func putWebmeta(t *testing.T, data map[string][]byte, id, version, channel strin
 		PublishedAt: "2026-09-16T00:00:00Z",
 		Artifacts:   []webmeta.Artifact{{ID: "app", Filename: id + ".zip"}},
 	})
+	entry := webmeta.ChannelEntry{Version: version, Code: 1, ReleasedAt: "2026-09-16T00:00:00Z"}
+	channelRaw, _ := webmeta.MarshalChannel(webmeta.Channel{
+		Product: id, Channel: channel, UpdatedAt: "2026-09-16T00:00:00Z",
+		Latest: entry, Versions: []webmeta.ChannelEntry{entry},
+	})
+	releaseRaw, _ := webmeta.MarshalRelease(webmeta.Release{
+		Product: id, Channel: channel, Version: version, Code: 1,
+		ReleasedAt: "2026-09-16T00:00:00Z",
+		Artifacts:  []webmeta.Artifact{{ID: "app", Filename: id + ".zip"}},
+	})
 	data[webmeta.SiteKey(id)] = siteRaw
 	data[webmeta.LatestKey(id, channel)] = latestRaw
+	data[webmeta.ChannelKey(id, channel)] = channelRaw
+	data[webmeta.ReleaseKey(id, channel, version)] = releaseRaw
 }
+
+func webmetaJSON(raw string) []byte { return []byte(raw) }

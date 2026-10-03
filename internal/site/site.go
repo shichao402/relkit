@@ -19,10 +19,12 @@ import (
 	"strings"
 	"time"
 
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/browse"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/webmeta"
 )
 
@@ -383,9 +385,10 @@ func writeMembers(path string, members []string) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// collect reads every product's site/latest documents from its publish
-// backends. Backends are also indexed by profile name so declarative backend
-// sinks can be resolved; sinks are no longer derived from HostsBrowse.
+// collect reads every product's site/channel/latest documents from its
+// publish backends and backfills missing release details. Backends are also
+// indexed by profile name so declarative backend sinks can be resolved;
+// sinks are no longer derived from HostsBrowse.
 func collect(products []Product, printer Printer) ([]browse.ProductData, map[string][]backends.Backend, error) {
 	sorted := append([]Product(nil), products...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
@@ -449,12 +452,114 @@ func collect(products []Product, printer Printer) ([]browse.ProductData, map[str
 				return nil, nil, fmt.Errorf("%s latest/%s document identity mismatch", product.ID, channel)
 			}
 			input.Latests = append(input.Latests, *doc)
+
+			channelRaw, err := firstGet(sources, webmeta.ChannelKey(product.ID, channel))
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s channel/%s: %w", product.ID, channel, err)
+			}
+			if len(channelRaw) == 0 {
+				// Publisher predates the channel document: project one from the
+				// latest pointer so the SPA history page still renders. The
+				// release detail is projected from the latest document too, so
+				// the dump stays servable on a standalone directory sink.
+				printer(fmt.Sprintf("site rebuild: %s has no channel/%s; falling back to latest", product.ID, channel))
+				fallbackEntry := webmeta.ChannelEntry{
+					Version: doc.Version, Code: doc.Code, ReleasedAt: doc.PublishedAt,
+				}
+				input.Channels = append(input.Channels, webmeta.Channel{
+					Product:   product.ID,
+					Channel:   channel,
+					UpdatedAt: doc.PublishedAt,
+					Latest:    fallbackEntry,
+					Versions:  []webmeta.ChannelEntry{fallbackEntry},
+				})
+				input.Releases = append(input.Releases, webmeta.Release{
+					Product: doc.Product, Channel: doc.Channel, Version: doc.Version,
+					Code: doc.Code, ReleasedAt: doc.PublishedAt, Artifacts: doc.Artifacts,
+				})
+				continue
+			}
+			channelDoc, err := webmeta.UnmarshalChannel(channelRaw)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s channel/%s: %w", product.ID, channel, err)
+			}
+			if channelDoc.Product != product.ID || channelDoc.Channel != channel {
+				return nil, nil, fmt.Errorf("%s channel/%s document identity mismatch", product.ID, channel)
+			}
+			backfilled, err := backfillReleaseDocs(sources, product.ID, channel, channelDoc, printer)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s channel/%s backfill: %w", product.ID, channel, err)
+			}
+			input.Channels = append(input.Channels, *channelDoc)
+			input.Releases = append(input.Releases, backfilled...)
 		}
 		if len(input.Latests) > 0 {
 			inputs = append(inputs, input)
 		}
 	}
 	return inputs, backendsByName, nil
+}
+
+// backfillReleaseDocs writes the immutable release detail document for any
+// retained version that predates the schema. The document is projected from
+// the version's manifest (same projection the publisher uses), so the SPA's
+// per-version download cards work for the full retained history, not just
+// versions published since the schema landed.
+//
+// It returns every release document for the channel — the ones it backfilled
+// plus the ones it found already published — so the site dump carries a
+// complete, servable copy for directory sinks that never see the data plane.
+//
+// A missing manifest is a warning, not an error: retainVersions already
+// pruned artifacts may make backfill impossible, and a half-empty history
+// table must not block the whole site rebuild.
+func backfillReleaseDocs(sources []backends.Backend, product, channel string, channelDoc *webmeta.Channel, printer Printer) ([]webmeta.Release, error) {
+	var releases []webmeta.Release
+	for i := range channelDoc.Versions {
+		entry := &channelDoc.Versions[i]
+		releaseKey := webmeta.ReleaseKey(product, channel, entry.Version)
+		if raw, err := firstGet(sources, releaseKey); err == nil && len(raw) > 0 {
+			if doc, err := webmeta.UnmarshalRelease(raw); err == nil {
+				releases = append(releases, *doc)
+				continue // already published or backfilled
+			}
+		}
+		manifestKey := model.ManifestKey(product, entry.Version)
+		manifestRaw, err := firstGet(sources, manifestKey)
+		if err != nil {
+			return nil, fmt.Errorf("read manifest %s: %w", manifestKey, err)
+		}
+		if len(manifestRaw) == 0 {
+			printer(fmt.Sprintf("site rebuild: %s/%s %s has no manifest; history row stays without downloads", product, channel, entry.Version))
+			continue
+		}
+		manifest, err := rupv2.UnmarshalManifest(manifestRaw)
+		if err != nil {
+			printer(fmt.Sprintf("site rebuild: %s/%s %s manifest unreadable: %v", product, channel, entry.Version, err))
+			continue
+		}
+		releaseDoc := webmeta.Release{
+			Product:    product,
+			Channel:    channel,
+			Version:    entry.Version,
+			Code:       entry.Code,
+			ReleasedAt: entry.ReleasedAt,
+			NotesURL:   entry.NotesURL,
+			Artifacts:  webmeta.ArtifactsFromManifest(manifest),
+		}
+		data, err := webmeta.MarshalRelease(releaseDoc)
+		if err != nil {
+			return nil, err
+		}
+		for _, backend := range sources {
+			if _, err := backend.PutImmutable(data, releaseKey); err != nil {
+				return nil, fmt.Errorf("%s: %w", backend.Name(), err)
+			}
+		}
+		printer(fmt.Sprintf("site rebuild: backfilled %s", releaseKey))
+		releases = append(releases, releaseDoc)
+	}
+	return releases, nil
 }
 
 func firstGet(sources []backends.Backend, key string) ([]byte, error) {
@@ -531,12 +636,28 @@ func writeDumpDir(dir string, dump map[string][]byte) error {
 	return nil
 }
 
+// dumpFileRel maps a dump key to its on-disk path. browse/ files are the SPA
+// shell and land at the root the static host points at; data documents
+// (site/, latest/, channel/, release/) keep their key verbatim so the SPA's
+// relative fetches resolve on a standalone directory sink exactly as they do
+// on the data plane.
 func dumpFileRel(name string) (string, error) {
-	rel := strings.TrimPrefix(path.Clean(name), "browse/")
-	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "../") {
-		return "", fmt.Errorf("dump key %q is not a servable file name", name)
+	if rel := strings.TrimPrefix(path.Clean(name), "browse/"); rel != name {
+		if rel == "" || rel == ".." || strings.HasPrefix(rel, "../") || strings.HasPrefix(rel, "/") {
+			return "", fmt.Errorf("dump key %q is not a servable file name", name)
+		}
+		return rel, nil
 	}
-	return rel, nil
+	for _, prefix := range []string{"site/", "latest/", "channel/", "release/"} {
+		if strings.HasPrefix(name, prefix) {
+			cleaned := path.Clean(name)
+			if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") {
+				return "", fmt.Errorf("dump key %q is not a servable file name", name)
+			}
+			return cleaned, nil
+		}
+	}
+	return "", fmt.Errorf("dump key %q is not a servable file name", name)
 }
 
 func hashDump(dump map[string][]byte, sinks []sink) string {
