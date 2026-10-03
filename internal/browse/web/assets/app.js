@@ -19,7 +19,9 @@
     if (attrs) {
       Object.keys(attrs).forEach(function (key) {
         if (key === "text") node.textContent = attrs[key];
-        else if (key === "href" || key === "class" || key.indexOf("data-") === 0) node.setAttribute(key, attrs[key]);
+        else if (key === "href" || key === "class" || key.indexOf("data-") === 0) {
+          if (attrs[key] !== null && attrs[key] !== undefined) node.setAttribute(key, attrs[key]);
+        }
         else node[key] = attrs[key];
       });
     }
