@@ -167,7 +167,6 @@ func cmdCIRelease(opts *ciReleaseOptions) error {
 	if err != nil {
 		return err
 	}
-	publishedVersion = version
 
 	var groups []ciSelectorGroup
 	if opts.fromDrop != "" {
@@ -242,10 +241,18 @@ func cmdCIRelease(opts *ciReleaseOptions) error {
 	} else if len(removed) > 0 {
 		fmt.Printf("removed stale staged caches: %s\n", strings.Join(removed, ", "))
 	}
-	return releasegate.PublishViaAgentOpts(".", version, releasegate.PublishOptions{
+	if err := releasegate.PublishViaAgentOpts(".", version, releasegate.PublishOptions{
 		Execute:       true,
 		AllowBackfill: opts.allowBackfill,
-	})
+	}); err != nil {
+		return err
+	}
+	// publishedVersion is only set AFTER a successful publish: the deferred
+	// drop cleanup must not fire when the publish failed (the svnmergetool
+	// #35 recovery hit this: a rejected backfill publish still deleted the
+	// drop files, leaving --from-drop reruns with nothing to assemble).
+	publishedVersion = version
+	return nil
 }
 
 // dispatch routes an internal command line through the same switch main()
