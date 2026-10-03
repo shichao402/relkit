@@ -154,7 +154,7 @@ func InstallBinary(root, component, target, artifactPath, digest string) (string
 	if err := os.WriteFile(tmp, data, 0o755); err != nil {
 		return "", err
 	}
-	if err := os.Rename(tmp, destination); err != nil {
+	if err := replaceLockedBinary(tmp, destination); err != nil {
 		return "", err
 	}
 	got, err := FileSHA256(destination)
@@ -165,6 +165,50 @@ func InstallBinary(root, component, target, artifactPath, digest string) (string
 		return "", fmt.Errorf("installed binary hash drifted: %s", destination)
 	}
 	return destination, nil
+}
+
+// replaceLockedBinary moves tmp onto destination, tolerating a Windows
+// destination that is still mapped by a running process or a scanner: the
+// locked inode is sidestepped to "<name>.old-<ms>" first (renaming a locked
+// exe is allowed; overwriting it is not), the new file lands under the
+// original name, and stale sidesteps are swept best-effort. Mirrors the
+// Python consumer's fs_utils.place_binary semantics (build #26 fix).
+func replaceLockedBinary(tmp, destination string) error {
+	firstErr := os.Rename(tmp, destination)
+	if firstErr == nil {
+		return nil
+	}
+	if runtime.GOOS != "windows" {
+		return firstErr
+	}
+	sidestep := fmt.Sprintf("%s.old-%d", destination, time.Now().UnixMilli())
+	if err := os.Rename(destination, sidestep); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, destination); err != nil {
+		// The sidestep never got superseded; put the old inode back so the
+		// tree keeps its previous state instead of a half-landed swap.
+		_ = os.Rename(sidestep, destination)
+		return err
+	}
+	sweepSidestepped(destination)
+	return nil
+}
+
+// sweepSidestepped removes leftover "<name>.old-<ms>" siblings best-effort;
+// entries still held open by a lingering process are skipped, not fatal.
+func sweepSidestepped(destination string) {
+	prefix := filepath.Base(destination) + ".old-"
+	entries, err := os.ReadDir(filepath.Dir(destination))
+	if err != nil {
+		return
+	}
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasPrefix(ent.Name(), prefix) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(filepath.Dir(destination), ent.Name()))
+	}
 }
 
 // ExtractTree unpacks an SDK zip into destination with safe path checking,
