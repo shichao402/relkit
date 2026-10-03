@@ -15,10 +15,11 @@ import (
 
 // ciReleaseOptions carries the parsed `relkit ci release` arguments.
 type ciReleaseOptions struct {
-	channel   string
-	execute   bool
-	fromDrop  string
-	platforms string
+	channel       string
+	execute       bool
+	fromDrop      string
+	platforms     string
+	allowBackfill bool
 }
 
 // cmdCI implements `relkit ci <sub>`: the CI-facing product release entry.
@@ -66,6 +67,8 @@ func cmdCI(args []string) error {
 			case "--platforms":
 				i++
 				opts.platforms = mustValue(rest, i, "--platforms")
+			case "--allow-backfill":
+				opts.allowBackfill = true
 			default:
 				return fmt.Errorf("unknown flag %q for ci release", rest[i])
 			}
@@ -239,7 +242,10 @@ func cmdCIRelease(opts *ciReleaseOptions) error {
 	} else if len(removed) > 0 {
 		fmt.Printf("removed stale staged caches: %s\n", strings.Join(removed, ", "))
 	}
-	return releasegate.PublishViaAgent(".", version, true)
+	return releasegate.PublishViaAgentOpts(".", version, releasegate.PublishOptions{
+		Execute:       true,
+		AllowBackfill: opts.allowBackfill,
+	})
 }
 
 // dispatch routes an internal command line through the same switch main()

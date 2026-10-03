@@ -93,12 +93,24 @@ func AgentBaseURL(root string) string {
 	return strings.TrimSpace(url)
 }
 
-// PublishViaAgent mirrors release.py publish_via_agent: cas-put the staged
-// tree, then POST the publish request; the signing key stays on the publish
-// host. Unlike the Python side (which shells out to its own CLI and regexes
-// the sha back out of stdout), this calls casput.Put in-process and uses
-// the returned StagedSHA256 directly.
+// PublishOptions carries the knobs PublishViaAgentOpts accepts. CI keeps
+// the default (monotonic codes); deliberate historical backfills pass
+// AllowBackfill, which the agent applies to its own publish.Run.
+type PublishOptions struct {
+	Execute       bool
+	AllowBackfill bool
+}
+
+// PublishViaAgent mirrors release.py publish_via_agent with the default
+// options (no backfill).
 func PublishViaAgent(root, version string, execute bool) error {
+	return PublishViaAgentOpts(root, version, PublishOptions{Execute: execute})
+}
+
+// PublishViaAgentOpts is the option-aware publish path: cas-put the staged
+// tree, then POST the publish request; the signing key stays on the publish
+// host. AllowBackfill is forwarded verbatim in the JSON body.
+func PublishViaAgentOpts(root, version string, opts PublishOptions) error {
 	staged := filepath.Join(root, ".relkit", "cache", "staged", version)
 	if info, err := os.Stat(staged); err != nil || !info.IsDir() {
 		return fmt.Errorf("no staged tree for %s; run relkit stage first (%s)", version, filepath.ToSlash(staged))
@@ -126,7 +138,7 @@ func PublishViaAgent(root, version string, execute bool) error {
 	publish := base + "/publish"
 	fmt.Printf("agent %s\n", url)
 	fmt.Printf("staged %s\n", filepath.ToSlash(staged))
-	if !execute {
+	if !opts.Execute {
 		fmt.Printf("plan: relkit cas-put --version %s --product %s\n", version, product)
 		fmt.Printf("plan: POST %s\n", publish)
 		fmt.Println("pass --execute to upload and publish; the signing key stays on the publish host")
@@ -159,11 +171,12 @@ func PublishViaAgent(root, version string, execute bool) error {
 
 	minimum, maximum := PublishProtocolWindow(root, 2)
 	idempotencyKey := fmt.Sprintf("%s/%s/%s", product, version, result.StagedSHA256)
-	payload, err := jsonMarshal(map[string]string{
+	payload, err := jsonMarshal(map[string]any{
 		"product":       product,
 		"version":       version,
 		"stagedSha256":  result.StagedSHA256,
 		"idempotencyKey": idempotencyKey,
+		"allowBackfill": opts.AllowBackfill,
 	})
 	if err != nil {
 		return err
