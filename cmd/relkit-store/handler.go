@@ -92,9 +92,10 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	file, err := c.root.Open(name)
 	if err != nil {
 		// Dump files live under browse/. GET / serves that index without
-		// changing the URL, so relative links like svn-auto-merge.html resolve
-		// at the site root. Fall back once for a single-segment *.html.
-		if isRootBrowseHTML(name) && c.serveExistingFile(w, r, "browse/"+name) {
+		// changing the URL, so relative links like assets/app.js and
+		// catalog.json resolve at the site root. Fall back once for the SPA's
+		// own files (single-segment *.html, catalog.json, assets/*).
+		if isRootBrowseFile(name) && c.serveExistingFile(w, r, "browse/"+name) {
 			return
 		}
 		http.Error(w, "not found", http.StatusNotFound)
@@ -144,11 +145,23 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
-func isRootBrowseHTML(name string) bool {
-	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+// isRootBrowseFile reports whether a root-level GET that missed the real tree
+// should fall back into browse/. The SPA shell links catalog.json and
+// assets/app.js, assets/style.css relatively, so exactly those paths (plus the
+// legacy single-segment *.html pages) are eligible. Anything else — protocol
+// keys, nested paths — 404s without probing the dump.
+func isRootBrowseFile(name string) bool {
+	if name == "" || strings.Contains(name, "..") {
 		return false
 	}
-	return strings.HasSuffix(name, ".html")
+	if strings.HasPrefix(name, "assets/") {
+		rest := strings.TrimPrefix(name, "assets/")
+		return rest != "" && !strings.Contains(rest, "/")
+	}
+	if strings.Contains(name, "/") {
+		return false
+	}
+	return strings.HasSuffix(name, ".html") || name == "catalog.json"
 }
 
 func (c *config) serveExistingFile(w http.ResponseWriter, r *http.Request, name string) bool {

@@ -107,6 +107,55 @@ func TestPublishPreflight(t *testing.T) {
 	}
 }
 
+// The browse dump lands under browse/, but the SPA shell links its assets and
+// catalog relatively, at the site root. Root GETs for exactly those paths
+// must fall back into the dump; everything else still 404s.
+func TestRootFallsBackToBrowseDumpForSPAFiles(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	srv := newLocalServer(t, cfg)
+
+	writeFile(t, dir, "browse/index.html", []byte("<html>spa</html>"))
+	writeFile(t, dir, "browse/catalog.json", []byte(`{"schema":"relkit.browse-catalog/1"}`))
+	writeFile(t, dir, "browse/assets/app.js", []byte("// app"))
+	writeFile(t, dir, "browse/assets/style.css", []byte("body{}"))
+
+	cases := map[string]string{
+		"/":              "<html>spa</html>",
+		"/catalog.json":  `{"schema":"relkit.browse-catalog/1"}`,
+		"/assets/app.js": "// app",
+		// Trailing slash on a directory must not break the fallback.
+		"/assets/style.css": "body{}",
+	}
+	for urlPath, want := range cases {
+		resp, err := http.Get(srv.URL + urlPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s: status = %d, want 200", urlPath, resp.StatusCode)
+			continue
+		}
+		if string(body) != want {
+			t.Errorf("GET %s body = %q, want %q", urlPath, body, want)
+		}
+	}
+
+	// Paths outside the SPA's own files never probe the dump: a stray
+	// nested path or a protocol key stays a plain 404.
+	for _, urlPath := range []string{"/assets/app.min/app.js", "/nested/deep.html", "/index/app/stable.pb"} {
+		resp, err := http.Get(srv.URL + urlPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s: status = %d, want 404", urlPath, resp.StatusCode)
+		}
+	}
+}
+
 func TestRangeRequestServesExactSlice(t *testing.T) {
 	cfg, dir := newTestConfig(t, false)
 	srv := newLocalServer(t, cfg)
