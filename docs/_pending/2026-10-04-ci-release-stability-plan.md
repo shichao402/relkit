@@ -4,7 +4,7 @@
 - 日期：2026-10-04
 - 来源：三个 agent 系统性排查报告的综合裁决（约 90 条历史失败事件 → 六类失败模式）
 - 范围：五产品（loom / loom-launcher / SvnMergeTool / Dec / cronkit）+ relkit 主仓
-- 铁律：全程不动 stable 渠道、不动 relkit 主干架构；T1-T7 不引入新网络面。T8（独立轨）经用户五次裁决引入 mirrors 通道替代 ci-env 孤儿分支通道（ADR 0018 五修），不属本铁律约束范围
+- 铁律：全程不动 stable 渠道、不动 relkit 主干架构；T1-T7 不引入新网络面。T8（独立轨）经用户六次裁决引入 mirrors 懒加载通道替代 ci-env 孤儿分支通道（ADR 0018 六修），不属本铁律约束范围
 
 ## 0. 背景与结论
 
@@ -17,7 +17,7 @@
 3. relkit CLI 已有 22 个子命令，verify / directory 已存在，T3 是扩展而非新建
 4. 脚本族漂移实测：三仓 hostlib 8 个文件逐字节一致，但 SvnMergeTool 的 relkit_cli.py 分叉 2.2KB、launcher 的 gates.py 落后一版、三仓三个 lock 版本
 
-2026-10-04 追加议题（离线环境包，→ T8 / ADR 0018）：ci-env 机制三个残留缺陷同根——打包在开发者本机手工执行。打包半衰期（+60 漏 14 个 rustup 垫片、+61 junction 顺序倒挂，盲区随打包间隔积累）；跨平台缺失（loom ci_prepare_env.ps1:16 钉死 windows-amd64、svn ci_prepare_env.py:227 非 Windows 直接跳过，而 svn 发布矩阵含 mac，mac job 走 goproxy 网络自举、无离线保障）；重打包成本（每次 re-pin 手工重打全量 bundle，实测当前分支约 750 MB：rust-toolchain 510 + npm-deps 146 + node 41 主导，且本机组装 zip 重打即字节漂移，每次全量重打在服务端 LFS 留数百 MB 新对象）。用户拍板：保留内网离线机制，打包进 relkit 发布链下游子流程（多平台、不阻塞主发布、开发者零参与）。用户二次裁决：分层通过；设计意图为单分支只存最新版、不留历史（该意图随五修的 mirrors 版本化路径以新形态延续——新版本即新路径，旧代由保留策略清理）。用户三次裁决（拆包，后随五修作废）：bundle 改裸文件树 + manifest 直存分支，动机为 git blob 内容寻址零传输。用户四次裁决（弃 LFS，后随五修作废）：内网分支普通 blob 直存换掉 LFS，动机为旧代对象 GC 可回收。用户五次裁决（存储与分发整体换血，现行方案）：git 仓库当文件服务器的全部方案废弃——GitHub 侧离线环境文件只进 Release 构建产物、不进任何仓库分支；内网存储位改为腾讯软件源 mirrors Generic 仓库（mirrors.tencent.com，研发管理部运营，bk-repo + 内网 COS 底层，99.9% SLA），`relkit` 公开仓库当日创建（repo id 9871，owner firoyang）并端到端实证：建仓 API / PUT 上传 / X-Checksum-Sha256 校验头 / 公开匿名下载 / list / DELETE 全通，已存在文件 PUT 不可覆盖（不可变制品保护）；内网侧由新增蓝盾下载流水线从 GitHub Release 拉资产上传 mirrors 版本化路径，消费端构建机阶段 1 改 HTTP 下载（win/mac/linux 同构），非 CI 环节清零（摆渡器作废）；bundle 形态回归分层 zip + manifest（git 内容寻址动机消失，解压物化环节回归是唯一真实回退）。已回写 ADR 0018（决策 2/4/5/9/10、流程图、结果、开放问题整体重写）与第 8 节 T8 分解（T8.0/T8.1/T8.3/T8.4/T8.5 全部按 mirrors 方案换血）。方案全文：[ADR 0018 草稿](../adr/0018-offline-env-pack-in-ci.md)
+2026-10-04 追加议题（离线环境包，→ T8 / ADR 0018）：ci-env 机制三个残留缺陷同根——打包在开发者本机手工执行。打包半衰期（+60 漏 14 个 rustup 垫片、+61 junction 顺序倒挂，盲区随打包间隔积累）；跨平台缺失（loom ci_prepare_env.ps1:16 钉死 windows-amd64、svn ci_prepare_env.py:227 非 Windows 直接跳过，而 svn 发布矩阵含 mac，mac job 走 goproxy 网络自举、无离线保障）；重打包成本（每次 re-pin 手工重打全量 bundle，实测当前分支约 750 MB：rust-toolchain 510 + npm-deps 146 + node 41 主导）。用户拍板：保留内网离线机制，打包进 relkit 发布链下游子流程（多平台、不阻塞主发布、开发者零参与）。用户二次裁决：分层通过；设计意图为单分支只存最新版、不留历史。用户三次裁决（拆包，后随五修作废）：bundle 改裸文件树 + manifest 直存分支。用户四次裁决（弃 LFS，后随五修作废）：内网分支普通 blob 直存换掉 LFS。用户五次裁决（存储与分发整体换血）：git 仓库当文件服务器废弃，GitHub 侧只进 Release 产物，内网存储改 mirrors Generic 仓库（repo id 9871 端到端实证全通），蓝盾下载流水线拉 Release 上传，消费端阶段 1 改 HTTP 下载。用户六次裁决（六修，生产与消费模式整体重构，现行方案）：①GitHub Actions 永远无法触发内网蓝盾流水线（硬事实，不验证）；蓝盾手动触发不可靠（"顺便触发"），正常流程从消费方考虑；②消费方 CI 第 0 步阻塞式触发蓝盾同步流水线、指定 relkit 版本，执行完成才放行下一步；③同步流水线消费 GitHub Release 本身，缺资产补 release.yml；④工具链准备弃大环境 zip，改 generic mirror 懒加载回填（mirrors GET → 未命中走官方源朴素下载 → sha256 校验后顺便 PUT 回填 mirrors → 官方源不通则开发者自行上传兜底）；⑤mirrors 读写鉴权，key 进蓝盾环境变量。六修当日现场：pack 三件套删除、两提交回滚（master 回 a01aa85）、ci-env-latest Release 删除、仓库默认分支修正为 master（独立卫生项，保留）。已回写 ADR 0018 六修版全文。方案全文：[ADR 0018](../adr/0018-offline-env-pack-in-ci.md)
 
 ## 1. 任务总览与依赖图
 
@@ -29,12 +29,12 @@ graph LR
     T1 --> T4["T4 门禁分级+契约化<br/>(半天)"]
     T3 --> T7["T7 v0.5.18 发版<br/>+ 全舰队 re-pin"]
     T4 --> T7
-    T6["T6 失败台账<br/>(1小时)"]
-    A["ADR 0018 审阅通过"] --> T8["T8 离线环境包 CI 化<br/>(3-4天, 独立轨)"]
+    T6["T6 夯败台账<br/>(1小时)"]
+    A["ADR 0018 六修版"] --> T8["T8 环境分发懒加载化<br/>(3-4天, 独立轨)"]
 ```
 
 - 执行顺序：T1 → (T2、T3、T4 并行) → T7；T6 独立可随时做
-- T8 独立成轨：ADR 0018 审阅通过后启动，不阻塞 T1-T7；其 relkit 层随 tag 自动前进与 T1/T7 的 re-pin 天然配套
+- T8 独立成轨：六修版 ADR 0018 已批准，不阻塞 T1-T7；消费方驱动同步与 T1/T7 的 re-pin 天然配套
 - T1-T7 总工作量约 3 个工作日，全程无需用户介入（自主推进授权已在记忆中）
 - T0 现场收尾：launcher 0.1.0+27 仍在串行队列（tag 已带钉定修复），无需干预，开工时顺带确认落地
 
@@ -56,13 +56,13 @@ graph LR
 | Dec | scripts/relkit.lock.json + workflow 硬编码 6 处 | v0.5.7（workflow 5 处 release.yml + 1 处 upload-bench.yml） | workflow 收敛为顶部单一 RELKIT_REF env；同步检查双 SSOT 的 internal/update/embed/relkit.json |
 | cronkit | 硬编码 9 处 | workflow 4 处 v0.5.11 + package.json/README/scripts 5 处 v0.5.9 | 全数收敛为单一版本常量；脚本/文档改引用已安装的 tools/bin/relkit，不再 go run @版本 |
 
-注：T8 落地后，loom/launcher 的 ci-env 重打包一步被 T8 的蓝盾下载流水线 + mirrors 版本化路径替代（relkit 层自动前进，git 分支通道退役）；T1 执行时若 ADR 0018 尚未批准，仍按手工重打包走。
+注：T8 落地后，loom/launcher 的 ci-env 重打包一步被消费方驱动的蓝盾同步流水线 + mirrors 懒加载回填替代（git 分支通道退役）；T1 执行时 T8.2 未完成前，仍按手工重打包走。
 
 ### 2.3 步骤
 
 1. relkit 主仓发 v0.5.17（见 2.1）
 2. 五仓逐仓钉定（2.2 表），每仓一个独立 commit，便于单仓 revert
-3. loom/launcher 的 ci-env 重打包照 ADR 0017 loom-env/1 流程走，.gitattributes 必须在提交里（过渡期现状流程；T8 落地后 git 分支通道整体退役，该步骤消失）
+3. loom/launcher 的 ci-env 重打包照 ADR 0017 loom-env/1 流程走，.gitattributes 必须在提交里（过渡期现状流程；T8.2 落地后同步流水线 + 懒加载通道接管，git 分支通道退役，该步骤消失）
 4. 每仓发一次 dev 版本验证（顺带完成一轮惯例验证矩阵）
 
 ### 2.4 验收与回退
@@ -146,25 +146,23 @@ svn 迁 T2 后，其 33KB 的 test_relkit_cli.py 相应缩减为只测薄包装�
 
 T3（verify --released）与 T4 落地后，按 T1 同样流程发 v0.5.18：新 CLI + 各仓 lock 更新 + 每仓一次 dev 验证。此后 re-pin 已是一条命令级操作（T2 顺手项），版本漂移不再有手工横向复制环节。
 
-## 8. T8 离线环境包 CI 化（ADR 0018 实施分解，审阅通过后启动）
+## 8. T8 环境分发懒加载化（ADR 0018 六修版实施分解）
 
-前置已满足：[ADR 0018](../adr/0018-offline-env-pack-in-ci.md) 已于 2026-10-04 经用户批准（"继续推进"指示，状态转 Accepted），T8 轨当日启动。独立成轨，不阻塞 T1-T7；约 3-4 个工作日。
+前置已满足：[ADR 0018 六修版](../adr/0018-offline-env-pack-in-ci.md) 已于 2026-10-04 经用户批准，T8 轨当日启动。独立成轨，不阻塞 T1-T7；约 3-4 个工作日。
 
-- T8.0 盘点与连通性实测（半天）【已完成 2026-10-04】：静态盘点结论——蓝盾 mac 池规格 macos-macOS15.6 / Macmini-5 / xcode 26.3；darwin bundle 基线：Flutter SDK 3.38.3 bundle 自带（不信任 fvm 预置）+ Flutter engine artifacts（架构面随实测定）+ Go 1.26.3 toolchain + pub 预物化 + CocoaPods + relkit 层；xcode 池预置不进包、记入 manifest 残余依赖；mac 现状网络面实测为 goproxy / storage.googleapis.com / pub.dev / CocoaPods CDN 四条公网直连。连通性实测（RelkitEnvProbe 构建 #1 `b-f6f82d26`，探测脚本 SvnMergeTool `e0b6215` + 流水线 yaml bkci `3935989`）：linux docker 池 GitHub 直连 PASS（4.3s，11.1MB sha256 过）+ mirrors 匿名 GET PASS（302→内网 IP，0.1s）——T8.3 下载流水线执行池连通性门关闭；mac 池 GitHub PASS（2.8s）+ mirrors PASS（302→COS 内网 HTTPS 域名，证书校验通过，0.3s），且实测发现 `os.arch: aarch64`（Apple Silicon），推翻静态盘点的 Intel x64 判断，darwin 覆盖面修正定案为单 darwin-arm64 包（Release 资产 sha256 `df1d942e...aa009b`）；win 池 mirrors PASS（302→内网 IP，0.3s）、GitHub FAIL（企业根证书链缺失，python 3.10.7 `SSLCertVerificationError`，默认与 no-proxy 双变体均败）——不阻塞主链路（win 消费端阶段 1 走 mirrors 实测绿，GitHub 直下只发生在 T8.3 docker 池），记为已知事实；三池 proxy env 全空，COS 302 no_proxy 坑当前无暴露面；构建机 Python 版本实测盘点 3.6.8 / 3.10.7 / 3.11.12。结论已回填 ADR 0018 开放问题 1（修正）/ 3（定案）；探针对象 probe/t8.0/probe.bin 实测后已从 mirrors 删除；探测流水线按 yaml 注释可归档停用
-- T8.1 relkit 仓打包子流程（1 天）：新增 .github/workflows/pack-ci-env.yml（workflow_run 挂 release 成功 + workflow_dispatch + 可选 schedule）+ 打包脚本落仓（纯度铁律：干净 runner 从零下载钉定版本、禁 runner 预装/setup-*/cache）+ 工具链版本清单单一源。bundle 形态分层 zip + manifest（每层一个 zip：toolchain 按平台 / deps 按产品 / relkit 层聚合该 tag 资产；manifest 记层 zip sha256 + 逐文件 path/sha256/size/mode，物化端按 manifest 恢复可执行位）；darwin 层按 T8.0 修正定案执行（mac 池 aarch64 → darwin-arm64 资产）
-- T8.2 release.yml 补 darwin CLI 资产 target（若缺）【已证实无需动作 2026-10-04：v0.5.15 起 Release 已含 darwin-amd64 / darwin-arm64 CLI 资产（lock 文件 URL+sha256 证实），build --all 产物面无需补 target】
-- T8.3 蓝盾下载流水线（半天）：bkci 新 yaml + 项目脚本——拉 GitHub Release 层产物 → sha256 校验 → PUT 上传 mirrors 版本化路径（basic auth 凭证进蓝盾凭据管理，不落 yaml/仓库；X-BKREPO-EXPIRES: 0 永久）→ list+delete 保留清理（toolchain 严格一份约 570 MB、relkit 留最近 5 代约 22 MB/代）；yaml 冻结铁律：只做 step 编排，逻辑全在项目脚本
-- T8.4 manifest loom-env/2 + 消费端改造（1 天）：schema /2 一刀切不留 /1 兼容（沿 v0.5.8 先例）；loom/launcher ci_prepare_env.ps1 的 $Target 参数化 + 物化逻辑改 HTTP 下载（curl -L 拉 mirrors URL，公开仓库匿名）+ 三段式物化（zip sha 校验 → 确定性顺序解压 → 逐文件 sha 校验）；svn ci_prepare_env.py 删非 Windows 跳过分支、mac 阶段 1 改同构 HTTP 物化、阶段 2 全离线；删 .gitattributes LFS 追踪与 smudge/clone 依赖（git 存储通道整体退役）
-- T8.5 收尾（半天）：mirrors 存量盘点（保留策略生效确认：toolchain 单份、relkit ≤5 代，超出即 list+delete）；五仓各一次 dev 验证
-- 验收：tag 后 bundle 全自动前进（零人工打包动作、零非 CI 环节）；svn mac job 阶段 2 全离线发布一次成功；per-tag 新增上传为 relkit 层量级（约 22 MB），未变层零重传；消费端从 mirrors 匿名 GET + sha 校验物化全绿
-- 回退：停用 pack-ci-env.yml + 下载流水线 + 消费端逐仓 revert，回到手工打包现状
+- T8.0 盘点与连通性实测（半天）【已完成 2026-10-04，成果对六修仍有效】：静态盘点结论——蓝盾 mac 池规格 macos-macOS15.6 / Macmini-5 / xcode 26.3；mac 现状网络面实测为 goproxy / storage.googleapis.com / pub.dev / CocoaPods CDN 四条公网直连。连通性实测（RelkitEnvProbe 构建 #1 `b-f6f82d26`，探测脚本 SvnMergeTool `e0b6215` + 流水线 bkci `3935989`）：linux docker 池 GitHub 直连 PASS（4.3s，11.1MB sha256 过）+ mirrors 匿名 GET PASS（302→内网 IP，0.1s）——同步流水线执行池连通性门关闭；mac 池 GitHub PASS（2.8s）+ mirrors PASS（302→COS 内网 HTTPS 域名，证书校验通过，0.3s），且实测发现 `os.arch: aarch64`（Apple Silicon），推翻静态盘点的 Intel x64 判断，darwin 覆盖面修正定案为单 darwin-arm64 面（Release 资产 sha256 `df1d942e...aa009b`）；win 池 mirrors PASS（302→内网 IP，0.3s）、GitHub FAIL（企业根证书链缺失，python 3.10.7 `SSLCertVerificationError`，默认与 no-proxy 双变体均败）——六修后 win 池的暴露面变化：工具链层官方源直下同样受 TLS 企业证书问题影响，懒加载回填模式下 win 池必须依赖 mirrors 命中或开发者兜底通道（同步流水线在 docker 池执行不受影响）；三池 proxy env 全空，COS 302 no_proxy 坑当前无暴露面；构建机 Python 版本实测盘点 3.6.8 / 3.10.7 / 3.11.12。结论已回填 ADR 0018 开放问题 1（修正）/ 3（定案）；探针对象 probe/t8.0/probe.bin 实测后已从 mirrors 删除；探测流水线按 yaml 注释可归档停用
+- T8.1 蓝盾同步流水线（1 天）：bkci 新 yaml + 项目脚本——入参指定 relkit 版本（来自消费方 lock）；拉指定版本 GitHub Release 资产（cli/updater/sdk 全家桶）→ sha256 校验（对 SHA256SUMS）→ PUT 上传 mirrors 版本化路径（`mirror/github/relkit/<version>/`，X-BKREPO-EXPIRES: 0 永久）→ list+delete 保留清理（relkit ≤5 代）；basic auth 凭证进蓝盾凭据管理/环境变量（用户配置），不落 yaml 与仓库；yaml 冻结铁律：只做 step 编排，逻辑全在项目脚本；docker 池执行（T8.0 已实测 GitHub 直连绿）；支持被消费方 CI 阻塞式调用（消费方等待执行完成，失败即红不降级）
+- T8.2 消费端改造（1-2 天）：各产品仓 ci_prepare_env 从"ci-env 孤儿分支 clone + 物化"改为：第 0 步读本仓 lock 的 relkit 版本 → 阻塞式触发蓝盾同步流水线（等执行完成）；relkit 层从 mirrors GET `mirror/github/relkit/<lock版本>/`（同步刚上传，命中有保障）；工具链层懒加载回填——逐工具 GET mirrors `mirror/<tool>/<version>/`，命中即用；未命中走官方源朴素下载（nodejs.org / python.org / static.rust-lang.org / storage.googleapis.com / proxy.golang.org，与外网同思路，不复杂化）+ toolchain.json sha256 校验 → 顺便 PUT 回填 mirrors（写鉴权 key 从蓝盾环境变量取）→ 官方源不通（如 win 池 TLS）则红并提示开发者自行上传 mirrors 兜底。退役面：ci-env 孤儿分支 clone、.gitattributes LFS、manifest loom-env/1、git clone 物化链整体退役；loom/launcher 的 $Target 参数化目标消失（懒加载按平台逐工具取）。mac 面：flutter 官方 arm64 SDK zip（sha256 `76a41524f58c4fabbfd2036d449feb369af7f81711e9752a6371568a55aa8381`）+ precache --macos 按需生成 engine artifacts；go darwin-arm64 模块 zip（sha256 `9ac3978a...ccb945`）；relkit darwin-arm64 CLI（sha256 `df1d942e...aa009b`）
+- T8.3 收尾（半天）：mirrors 存量盘点（`mirror/github/relkit/` ≤5 代确认 + 懒加载回填区域自然生长状况）；五仓各一次 dev 验证（第 0 步同步 + 换机验证）
+- 验收：五仓 CI 第 0 步同步流水线阻塞式注入全绿；工具链懒加载回填链路全绿（mirrors 命中路径 + 首次官方源下载回填路径）；per-tag 上传量为 relkit 资产量级（约 22 MB，随消费方声明触发）；ci-env 孤儿分支机制退役
+- 回退：停用同步流水线 + 消费端逐仓 revert，回到 ci-env 孤儿分支手工打包现状（git 历史与 LFS 机制未被破坏，可完整恢复）
 
 ## 9. 待用户拍板项
 
 按依赖图自主推进外，以下两项需要用户确认：
 
 1. retainVersions stable 存量残留（dec 3 节点、cronkit 5 节点）是否随 T7 一并清理（2026-10-02 拍板遗留）
-2. 【已拍板 2026-10-04】ADR 0018（五修版）：用户确认开放问题 4 解释后指示"继续推进"，按批准处理，状态转 Accepted、T8 轨启动；开放问题 1（darwin 单包架构）与 4（linux 容器维持不动）同日定案，其中 1 于 T8.0 实测后同日修正（mac 池 aarch64 → darwin-arm64）；开放问题 3（蓝盾→GitHub 连通性）经 RelkitEnvProbe 构建 #1 实测定案（docker 池全绿，门关闭）。剩余开放问题 2（deps 层生产点）不阻塞 T8.1-T8.4 主线，随 deps 层实际动工再定
+2. 【已拍板 2026-10-04】ADR 0018：五修批准启动后同日六修重构——用户六次裁决内容见第 0 节裁决链；六修后开放问题 2（deps 层产物形态）随 T8.2 消费端改造时按实测定；开放问题 5（mirrors repo 命名）与 6（同步失败行为细则）为六修新增待拍板项，不阻塞 T8.1 主线
 
 ## 10. 明确不做（本轮裁决已排除）
 
