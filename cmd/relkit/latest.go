@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/shichao402/relkit/internal/consume"
 )
@@ -91,4 +92,80 @@ func writeResolvedLatestMarker(path string, marker *resolvedLatestMarker) error 
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// cmdConsumeLatest implements `relkit latest`: print the concrete release
+// tag a follow-latest lock would consume right now (redirect -> API ->
+// mirrors listing chain). This is the delegated resolution entry for
+// product CI scripts: the Sync-stage version reader and the mirror-first
+// installer both call this instead of reimplementing the chain. With
+// --project-root the resolution also refreshes the resolved-latest marker
+// (same artifact install/check materialize), so a clean checkout can
+// resolve once here and every later consumer reads the marker.
+func cmdConsumeLatest(args []string) error {
+	root := "."
+	asJSON := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--project-root":
+			i++
+			root = mustValue(args, i, "--project-root")
+		case arg == "--json":
+			asJSON = true
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown flag %q", arg)
+		default:
+			return fmt.Errorf("unexpected argument %q", arg)
+		}
+	}
+
+	tag, err := consume.ResolveLatestTag()
+	if err != nil {
+		return fmt.Errorf("latest resolution failed: %w", err)
+	}
+
+	commit := ""
+	if asJSON {
+		base := consume.ReleaseBase(tag)
+		manifest, err := consume.ReleaseManifestFor(base)
+		if err != nil {
+			return fmt.Errorf("latest %s: %w", tag, err)
+		}
+		commit = manifest.Commit
+	}
+
+	// Refresh the marker when a project root is given: the Sync stage runs
+	// this before any install (clean checkout has no marker yet), and the
+	// mirror-first installer relies on the marker for the concrete
+	// partition. Keeping the write here means one resolution per build,
+	// shared by every consumer in that workspace.
+	if root != "" {
+		markerPath := filepath.Join(root, ".relkit", "cache", "resolved-latest.json")
+		marker := resolvedLatestMarker{
+			Schema:  "relkit.resolved-latest/1",
+			Release: tag,
+			Commit:  commit,
+		}
+		if err := writeResolvedLatestMarker(markerPath, &marker); err != nil {
+			return err
+		}
+	}
+
+	if asJSON {
+		out := resolvedLatestMarker{
+			Schema:  "relkit.resolved-latest/1",
+			Release: tag,
+			Commit:  commit,
+		}
+		encoded, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(encoded))
+		return nil
+	}
+	fmt.Println(tag)
+	return nil
 }
