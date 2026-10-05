@@ -31,3 +31,4 @@ internal/browse/preview/out/
 /.secrets/
 
 bindings/ts/node_modules/
+.with/
