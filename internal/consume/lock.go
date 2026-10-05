@@ -99,8 +99,15 @@ func ParseLock(data []byte) (*Lock, error) {
 	default:
 		return nil, fmt.Errorf("lock must use schema %q or %q; source-build locks are unsupported", SchemaV2, SchemaV3)
 	}
-	if strings.TrimSpace(lock.Release) == "" || strings.TrimSpace(lock.Commit) == "" {
-		return nil, fmt.Errorf("lock must pin non-empty release and commit")
+	releaseFollow := IsLatest(lock.Release)
+	sourceFollow := lock.Schema == SchemaV3 && lock.Source != nil && IsLatest(lock.Source.Version)
+	if releaseFollow != sourceFollow {
+		return nil, fmt.Errorf("lock release and source.version must both be %q or both be pinned vX.Y.Z", LatestKeyword)
+	}
+	if !releaseFollow {
+		if strings.TrimSpace(lock.Release) == "" || strings.TrimSpace(lock.Commit) == "" {
+			return nil, fmt.Errorf("lock must pin non-empty release and commit")
+		}
 	}
 	if lock.Artifacts == nil {
 		return nil, fmt.Errorf("lock must contain an artifacts object")

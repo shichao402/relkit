@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,13 @@ import (
 
 	"github.com/shichao402/relkit/internal/consume"
 )
+
+// intWindowLike builds the protocol windows for the follow-latest lock. The
+// values are placeholders: resolution replaces them wholesale, so they only
+// need to be structurally valid.
+func intWindowLike(min, max int) consume.IntWindow {
+	return consume.IntWindow{Min: min, Max: max}
+}
 
 // cmdConsumeUpgrade implements `relkit upgrade vX.Y.Z`: rewrite the lock from
 // an immutable release (manifest.json + SHA256SUMS) and install. Mirrors
@@ -43,6 +51,42 @@ func cmdConsumeUpgrade(args []string) error {
 	_ = finalize
 
 	lockPath := filepath.Join(root, "scripts", "relkit.lock.json")
+
+	if strings.ToLower(strings.TrimSpace(release)) == consume.LatestKeyword {
+		// Follow-latest form (P4): the lock records intent, not a version.
+		// install/check/status resolve at run time; a breaking release
+		// surfaces as an install error the product then adapts to.
+		previous, _ := consume.LoadLock(lockPath)
+		hostless := true
+		if _, err := os.Stat(filepath.Join(root, "scripts", "host")); err == nil {
+			hostless = false
+		}
+		if previous != nil && previous.Schema == consume.SchemaV2 {
+			hostless = false
+		}
+		follow := &consume.Lock{
+			Schema: consume.SchemaV3,
+			Release: consume.LatestKeyword,
+			Commit: "",
+			Source: &consume.SourceBlock{
+				Module:  "github.com/shichao402/relkit",
+				Version: consume.LatestKeyword,
+			},
+			Protocol:   intWindowLike(2, 2),
+			UpdaterIPC: intWindowLike(3, 3),
+			Artifacts:  map[string]json.RawMessage{},
+		}
+		if !hostless {
+			if previous != nil && previous.HostScriptsSHA256 != "" {
+				follow.HostScriptsSHA256 = previous.HostScriptsSHA256
+			}
+		}
+		if err := follow.WriteLock(lockPath); err != nil {
+			return err
+		}
+		fmt.Printf("wrote %s in follow-latest form (resolved at install/check time)\n", filepath.ToSlash(lockPath))
+		return cmdConsumeInstall([]string{"--project-root", root})
+	}
 
 	base := consume.ReleaseBase(release)
 	manifest, err := consume.ReleaseManifestFor(base)

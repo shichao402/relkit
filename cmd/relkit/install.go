@@ -56,6 +56,10 @@ func cmdConsumeInstall(args []string) error {
 	if err != nil {
 		return err
 	}
+	lock, err = resolveFollowLatest(root, lock, lockPath)
+	if err != nil {
+		return err
+	}
 	if target == "host" {
 		target, err = consume.HostTarget()
 		if err != nil {
