@@ -26,6 +26,9 @@ type Report struct {
 // scripts/host tree hash against the lock's hostScriptsSha256. A missing
 // lock file is not drift here (install owns that error). A consume/3 lock
 // without hostScriptsSha256 is the hostless form: unpinned is not drift.
+// A follow-latest lock (release=latest) resolves at install/check time;
+// its on-disk placeholder windows and stale hostScriptsSha256 are intent,
+// not drift, so those checks are skipped for that form.
 func LockDrift(root string) []string {
 	lockPath := filepath.Join(root, "scripts", "relkit.lock.json")
 	data, err := os.ReadFile(lockPath)
@@ -35,6 +38,12 @@ func LockDrift(root string) []string {
 	lock, err := consume.ParseLock(data)
 	if err != nil {
 		return []string{fmt.Sprintf("%s is not a readable lock: %v", filepath.ToSlash(lockPath), err)}
+	}
+	if consume.IsLatest(lock.Release) {
+		// Follow-latest form: placeholders on disk, real values materialize
+		// at install/check time (resolveFollowLatest). Nothing on-disk can
+		// drift against a value that is deliberately not pinned yet.
+		return nil
 	}
 	var drift []string
 	pinned := strings.ToLower(strings.TrimSpace(lock.HostScriptsSHA256))
@@ -145,6 +154,12 @@ func Reconcile(root, version string) (*Report, error) {
 	var lock map[string]any
 	if err := jsonUnmarshal(lockData, &lock); err != nil {
 		report.Drift = append(report.Drift, fmt.Sprintf("release lock contract is unreadable: %v", err))
+		return report, nil
+	}
+	if release, _ := lock["release"].(string); consume.IsLatest(strings.TrimSpace(release)) {
+		// Follow-latest form: the on-disk protocol/updaterIpc windows are
+		// placeholders until install resolves the release; the contract
+		// cross-check applies to the resolved values, not the intent.
 		return report, nil
 	}
 	for _, field := range []string{"protocol", "updaterIpc"} {

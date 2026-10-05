@@ -65,6 +65,15 @@ func TestLockDrift(t *testing.T) {
 	if drift := LockDrift(hostlessRoot); len(drift) != 0 {
 		t.Errorf("hostless consume/3 lock must be clean; got %v", drift)
 	}
+
+	// Follow-latest lock (P4): on-disk placeholders are intent, not drift.
+	// A stale hostScriptsSha256 or a placeholder window must not block the
+	// release gate; the resolved values govern at install/check time.
+	followRoot := t.TempDir()
+	writeLock(t, followRoot, followLatestLock("deadbeef"))
+	if drift := LockDrift(followRoot); len(drift) != 0 {
+		t.Errorf("follow-latest lock must be clean; got %v", drift)
+	}
 }
 
 // consume3HostlessLock builds the hostless form: consume/3 without
@@ -78,6 +87,22 @@ func consume3HostlessLock() string {
 	"protocol": {"min": 2, "max": 2},
 	"updaterIpc": {"min": 3, "max": 3},
 	"artifacts": {"cli": {"urls": ["https://example.invalid/relkit.exe"], "sha256": "` + strings64("b") + `"}}
+}`
+}
+
+// followLatestLock builds the follow-latest form with a stale
+// hostScriptsSha256 (upgrade latest keeps the previous pin) to prove the
+// gate does not treat follow-form placeholders as drift.
+func followLatestLock(staleHostSHA string) string {
+	return `{
+	"schema": "relkit.consume/3",
+	"release": "latest",
+	"commit": "",
+	"source": {"module": "github.com/shichao402/relkit", "version": "latest", "h1": "", "commit": ""},
+	"hostScriptsSha256": "` + staleHostSHA + `",
+	"protocol": {"min": 2, "max": 2},
+	"updaterIpc": {"min": 3, "max": 3},
+	"artifacts": {}
 }`
 }
 
@@ -162,6 +187,20 @@ func TestReconcileContractGate(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("updaterIpc disagreement must drift; got %v", report.Drift)
+	}
+
+	// Follow-latest lock: the contract cross-check is skipped (placeholders
+	// on disk), so a contract disagreeing with the placeholder window is
+	// still clean.
+	writeLock(t, root, followLatestLock(actual2))
+	report, err = Reconcile(root, "0.2.0+160")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range report.Drift {
+		if strings.Contains(item, "contract") || strings.Contains(item, "lock protocol") || strings.Contains(item, "lock updaterIpc") {
+			t.Errorf("follow-latest lock must skip the contract gate; got %q", item)
+		}
 	}
 }
 

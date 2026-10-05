@@ -221,3 +221,59 @@ func intWindow(min, max, fallback int) IntWindow {
 func ReleaseBase(release string) string {
 	return "https://github.com/" + GitHubRepo + "/releases/download/" + release
 }
+
+// PrependMirrorURLs inserts the mirrors URL for each pinned artifact row of
+// the resolved lock, ahead of the GitHub URL. DownloadArtifact walks URLs in
+// order, so GitHub-unreachable networks hit mirrors first while plain
+// environments never notice (the GitHub URL stays as a fallback and the
+// sha256 pin rejects any mismatch either way). Handles both artifact row
+// shapes: flat {urls, sha256} trees and by-target {target: {urls, sha256}}
+// binaries.
+func PrependMirrorURLs(lock *Lock, release string) {
+	for name, raw := range lock.Artifacts {
+		var flat ArtifactSpec
+		if err := json.Unmarshal(raw, &flat); err == nil && len(flat.URLs) > 0 {
+			lock.Artifacts[name] = mustEncodeSpec(prependMirrorSpec(flat, release, rowAssetName(name, "")))
+			continue
+		}
+		var byTarget map[string]ArtifactSpec
+		if err := json.Unmarshal(raw, &byTarget); err == nil && len(byTarget) > 0 {
+			for target, spec := range byTarget {
+				byTarget[target] = prependMirrorSpec(spec, release, rowAssetName(name, target))
+			}
+			encoded, err := json.Marshal(&byTarget)
+			if err == nil {
+				lock.Artifacts[name] = encoded
+			}
+		}
+	}
+}
+
+func prependMirrorSpec(spec ArtifactSpec, release, filename string) ArtifactSpec {
+	mirror := MirrorAssetURL(release, filename)
+	for _, existing := range spec.URLs {
+		if existing == mirror {
+			return spec
+		}
+	}
+	spec.URLs = append([]string{mirror}, spec.URLs...)
+	return spec
+}
+
+func mustEncodeSpec(spec ArtifactSpec) json.RawMessage {
+	encoded, err := json.Marshal(&spec)
+	if err != nil {
+		return nil
+	}
+	return encoded
+}
+
+// rowAssetName maps a component row + target to the release asset filename
+// the mirrors partition uses (registry naming: relkit-<component>.zip for
+// trees, relkit-<target> binaries with platform suffixes).
+func rowAssetName(component, target string) string {
+	if row, ok := registry.ByName[component]; ok {
+		return row.ArtifactFilename(target)
+	}
+	return component
+}

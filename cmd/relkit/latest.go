@@ -25,7 +25,7 @@ func resolveFollowLatest(root string, lock *consume.Lock, lockPath string) (*con
 		return lock, nil
 	}
 
-	tag, err := consume.ResolveLatest()
+	tag, err := consume.ResolveLatestTag()
 	if err != nil {
 		return nil, fmt.Errorf("lock follows latest but resolution failed: %w", err)
 	}
@@ -52,6 +52,12 @@ func resolveFollowLatest(root string, lock *consume.Lock, lockPath string) (*con
 	if lock.Source != nil {
 		resolved.Source.Version = lock.Source.Version
 	}
+	// Prepend the mirrors URL for every resolved artifact: the sync
+	// pipeline keeps the partition current, and DownloadArtifact walks the
+	// URLs in order, so GitHub-unreachable pools fall through to mirrors
+	// without special-casing. The sha256 pin stays the single truth either
+	// way, so a stale mirrors copy self-rejects.
+	consume.PrependMirrorURLs(resolved, tag)
 
 	markerPath := filepath.Join(root, ".relkit", "cache", "resolved-latest.json")
 	marker := resolvedLatestMarker{
