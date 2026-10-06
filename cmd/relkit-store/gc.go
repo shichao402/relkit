@@ -161,7 +161,11 @@ func (c *config) gcOnce() (gcResult, error) {
 	parsed := 0
 	var parseErrors []string
 	for _, name := range indexes {
-		if strings.HasSuffix(name, ".tmp~") {
+		// Skip upload temp files and index-surgery backups: only
+		// index/<product>/<channel>.pb is a real published index. A stray
+		// backup referencing pruned manifests would otherwise abort every
+		// GC round (observed: .bak.20261006T... froze cleanup for hours).
+		if !isPublishedIndexFile(name) {
 			continue
 		}
 		manifestURLs, err := readIndexManifestURLs(c.root, name)
@@ -310,6 +314,23 @@ func listFilesUnder(root *os.Root, prefix string) ([]string, error) {
 		return nil
 	})
 	return out, err
+}
+
+// isPublishedIndexFile reports whether name is a real published index:
+// index/<product>/<channel>.pb with no extra suffix. Backup files left next
+// to a real index (index-surgery .bak copies) and upload temp files are not
+// live indexes; the GC must derive its live set from published indexes only.
+func isPublishedIndexFile(name string) bool {
+	if !strings.HasPrefix(name, "index/") || !strings.HasSuffix(name, ".pb") {
+		return false
+	}
+	rest := strings.TrimSuffix(strings.TrimPrefix(name, "index/"), ".pb")
+	// Exactly two non-empty segments: <product>/<channel>.
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	return true
 }
 
 func removeEmptyDirs(root *os.Root, prefix string) (int, error) {

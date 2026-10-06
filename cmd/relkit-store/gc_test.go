@@ -275,6 +275,60 @@ func TestGCAbortsWhenReferencedManifestMissing(t *testing.T) {
 	}
 }
 
+func TestGCIgnoresIndexSurgeryBackups(t *testing.T) {
+	cfg, dir := newTestConfig(t, false)
+	writeRelease(t, dir, "app", "stable", "2.0.0", 200)
+	// Simulate an index-surgery backup: a stale envelope referencing a
+	// manifest that was already pruned. The live index still points at
+	// 2.0.0; GC must ignore the backup instead of aborting forever.
+	staleEnv := mustEnvelope(t, indexDoc("app", "stable", "1.0.0", 100,
+		"http://example.com/manifest/app/1.0.0.pb"))
+	writeFile(t, dir, "index/app/stable.pb.bak.20261006T153539Z", staleEnv)
+
+	// An orphan that only the backup would consider live.
+	writeFile(t, dir, "manifest/app/1.9.0.pb", manifestDoc("app", "1.9.0", 190,
+		"http://example.com/artifact/app/1.9.0/app.zip"))
+	writeFile(t, dir, "artifact/app/1.9.0/app.zip", []byte("backup-only"))
+
+	result, err := cfg.gcOnce()
+	if err != nil {
+		t.Fatalf("gcOnce aborted on surgery backup: %v", err)
+	}
+	if fileExists(dir, "manifest/app/1.9.0.pb") || fileExists(dir, "artifact/app/1.9.0/app.zip") {
+		t.Fatal("backup-only objects were kept alive")
+	}
+	if !fileExists(dir, "manifest/app/2.0.0.pb") || !fileExists(dir, "artifact/app/2.0.0/app.zip") {
+		t.Fatal("live release was deleted")
+	}
+	if !fileExists(dir, "index/app/stable.pb.bak.20261006T153539Z") {
+		t.Fatal("surgery backup was deleted by GC")
+	}
+	if result.filesRemoved < 2 {
+		t.Fatalf("filesRemoved = %d, want at least 2", result.filesRemoved)
+	}
+}
+
+func TestIsPublishedIndexFile(t *testing.T) {
+	cases := []struct {
+		in  string
+		want bool
+	}{
+		{"index/app/stable.pb", true},
+		{"index/app/dev.pb", true},
+		{"index/app/stable.pb.bak.20261006T153539Z", false},
+		{"index/app/stable.pb.tmp~", false},
+		{"index/stable.pb", false},
+		{"index/app/extra/stable.pb", false},
+		{"index/app/stable.json", false},
+		{"manifest/app/stable.pb", false},
+	}
+	for _, tc := range cases {
+		if got := isPublishedIndexFile(tc.in); got != tc.want {
+			t.Errorf("isPublishedIndexFile(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestLocalKeyFromURL(t *testing.T) {
 	cases := []struct {
 		in   string
