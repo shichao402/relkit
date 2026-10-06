@@ -273,7 +273,7 @@ func (b *relkitCompatibleBackend) Delete(key string) error {
 	if err != nil {
 		return err
 	}
-	return httpx.Delete(b.uploadTarget(key), token, minDuration(b.timeout, 60*time.Second))
+	return httpx.Delete(b.uploadTarget(key), token, minDuration(b.timeout, 60*time.Second), publisherHeaders())
 }
 
 func (b *relkitCompatibleBackend) uploadTarget(key string) string {

@@ -1,9 +1,7 @@
-// Command relkit-agent receives staged trees from CI and publishes them
-// (signing keys and COS credentials stay on the host).
-//
 //	relkit-agent [flags]                         run the server
 //	relkit-agent init …                          internal: called by product relkit_host.py
-//	relkit-agent site-rebuild [-config PATH]      rebuild the static release site
+//	relkit-agent site-rebuild [-config PATH]     rebuild the static release site
+//	relkit-agent unpublish [flags]               remove one published version
 //	relkit-agent -version
 package main
 
@@ -12,15 +10,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/shichao402/relkit/internal/publishproto"
 )
 
-var version = "0.1.4"
+var version = "0.1.5"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -36,6 +37,9 @@ func run(argv []string) int {
 	}
 	if len(argv) > 0 && argv[0] == "site-rebuild" {
 		return runSiteRebuild(argv[1:])
+	}
+	if len(argv) > 0 && argv[0] == "unpublish" {
+		return runUnpublish(argv[1:])
 	}
 
 	fs := flag.NewFlagSet("relkit-agent", flag.ContinueOnError)
@@ -100,6 +104,134 @@ func runSiteRebuild(argv []string) int {
 		fmt.Fprintln(os.Stdout, "site rebuild: deployed")
 	}
 	return 0
+}
+
+// runUnpublish removes one published version by calling the running agent's
+// /v1/unpublish endpoint. Going through the agent (instead of hitting the
+// store directly) keeps the product lock shared with concurrent publishes.
+func runUnpublish(argv []string) int {
+	fs := flag.NewFlagSet("relkit-agent unpublish", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	configPath := fs.String("config", "relkit-agent.json", "agent config path")
+	addr := fs.String("addr", "", "agent address (defaults to the configured addr)")
+	product := fs.String("product", "", "product id")
+	version := fs.String("version", "", "version to remove")
+	dryRun := fs.Bool("dry-run", false, "validate only, remove nothing")
+	var to []string
+	fs.Func("to", "target backend (repeatable)", func(value string) error { to = append(to, value); return nil })
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *product == "" || *version == "" {
+		fmt.Fprintln(os.Stderr, "usage: relkit-agent unpublish -product <id> -version <version> [-config PATH] [-addr HOST:PORT] [-to name] [--dry-run]")
+		return 2
+	}
+
+	cfg, err := LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: config: %v\n", err)
+		return 1
+	}
+	target := *addr
+	if target == "" {
+		target = cfg.Addr
+	}
+	if target == "" {
+		target = "127.0.0.1:8787"
+	}
+
+	token, err := productToken(cfg, *product)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"product": *product,
+		"version": *version,
+		"to":      to,
+		"dryRun":  *dryRun,
+	})
+	req, err := http.NewRequest(http.MethodPost, "http://"+target+"/v1/unpublish", strings.NewReader(string(body)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	publishproto.Apply(req.Header)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: agent at %s: %v\n", target, err)
+		return 1
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "agent returned %d: %s\n", resp.StatusCode, firstLine(raw))
+		return 1
+	}
+	var out struct {
+		OK       bool     `json:"ok"`
+		Sequence int64    `json:"sequence"`
+		Channel  string   `json:"channel"`
+		Log      []string `json:"log"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	for _, line := range out.Log {
+		fmt.Println(line)
+	}
+	return 0
+}
+
+// productToken reads the plaintext token for product from the agent config's
+// uploadTokens entries. The CLI runs on the same host as the agent, so the
+// token files are readable with the same privileges.
+func productToken(cfg *Config, product string) (string, error) {
+	for _, cred := range cfg.credentials {
+		for _, id := range cred.products {
+			if id == product {
+				return credTokenFromFile(cfg, product)
+			}
+		}
+	}
+	return "", fmt.Errorf("product %q has no upload token entry in the agent config", product)
+}
+
+func credTokenFromFile(cfg *Config, product string) (string, error) {
+	// The token files are listed in the raw config; reload it to find the path.
+	raw, err := loadFileConfig(cfg.ConfigPath)
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range raw.UploadTokens {
+		for _, id := range entry.Products {
+			if id != product {
+				continue
+			}
+			path := entry.File
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(filepath.Dir(cfg.ConfigPath), path)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(data)), nil
+		}
+	}
+	return "", fmt.Errorf("no token file for %s", product)
+}
+
+func firstLine(data []byte) string {
+	text := strings.TrimSpace(string(data))
+	if idx := strings.Index(text, "\n"); idx >= 0 {
+		text = text[:idx]
+	}
+	return text
 }
 
 // newHTTPServer deliberately leaves ReadTimeout and WriteTimeout unset. A

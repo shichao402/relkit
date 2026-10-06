@@ -369,6 +369,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/cas/abort", s.handleCASAbort)
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
+	mux.HandleFunc("/v1/unpublish", s.handleUnpublish)
 	return mux
 }
 

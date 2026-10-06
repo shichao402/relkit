@@ -149,8 +149,11 @@ func Head(rawURL, token string, timeout time.Duration) (int64, bool, error) {
 	return size, true, nil
 }
 
-func Delete(rawURL, token string, timeout time.Duration) error {
+func Delete(rawURL, token string, timeout time.Duration, extraHeaders map[string]string) error {
 	headers := map[string]string{}
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
 	if token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}

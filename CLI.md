@@ -418,6 +418,7 @@ CI 只 `stage`（staged 树含 `staged.pb`、`release-policy.json`、`artifacts/
 - `POST /v1/cas/credentials` — 为缺失 blob 返回唯一 ingest 的 `requests[]`；每项都是绝对 URL。COS/S3 用长期钥 query 预签名，relkit-store 用对象能力 URL，客户端不签名。协议 3 且对象大于一片时，COS/S3 改为多条带 `offset`/`length` 的分片 URL，客户端把 `ETag` 交回 `POST /v1/cas/complete`
 - `relkit cas-put --version VER [--product ID] [--url URL] [--concurrency N]` — 上传缺失 CAS blob，然后自动上传只含 `staged.pb` + `release-policy.json` 的瘦 staged tar。片大小认 `RELKIT_UPLOAD_PART_SIZE`（缺省 8MiB），在途 PUT 上限认 `RELKIT_UPLOAD_CONCURRENCY`（缺省 4，片和 blob 共用；`--concurrency` 覆盖该变量）
 - `POST /v1/publish` — 触发 `publish.Run`（按 product 串行 + 幂等键）
+- `POST /v1/unpublish` — 从签名索引移除一个版本：删节点 + 重签提交指针 + 重投影 site/latest/channel + 删 release 文档。CAS/manifest 孤儿由 store GC 回收，不主动删。与 publish 共产品锁，并发 409。CLI：`relkit-agent unpublish -product <id> -version <v> [--dry-run]`（在发布机上跑；配置取该版本 staged release-policy.json，staged 树已清则取最近一次 staged 的 policy）
 - `GET /-/health`
 
 部署样例与 Caddy 反代见 [`scripts/deploy/`](scripts/deploy/)。设计说明：[`docs/design/publish-agent.md`](docs/design/publish-agent.md)。

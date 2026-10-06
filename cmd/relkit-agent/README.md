@@ -88,6 +88,7 @@ dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审
 - `GET` / `DELETE` `/v1/staged/{product}/{version}/uploads/{id}`
 - `POST /v1/staged/{product}/{version}/uploads/{id}/complete`
 - `POST /v1/publish`
+- `POST /v1/unpublish`（从签名索引移除一个版本：删节点 + 重签提交指针 + 重投影 site/latest/channel + 删 release 文档；与 publish 共产品锁，并发 409；CLI 侧 `relkit-agent unpublish -product <id> -version <v>`）
 
 无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`python3 scripts/deploy/relkit.py install agent --binary …`。已有实例：`python scripts/deploy/relkit.py upgrade --host <Host>`。
 
