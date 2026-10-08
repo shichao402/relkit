@@ -60,6 +60,18 @@ Go 的 `relkit` / `relkit-store` / `relkit-agent` 不是人用的第二套运维
 - 失败记账：带 `code=` 的 `Fail` 写入 `.relkit/cache/ops-journal.jsonl`（`unclassified` 不记）。`retrospect` 输出本次遇到 / 已修进脚本或 skill / 未消化；未消化非 0。
 - 会话结论记账：命令全部退出 0 时 journal 是空的，`本次遇到` 只会是「无」。所以复盘结论必须用 `retrospect note --code <类名> --class generic|product|agent --text "现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动"` 落盘。它把该项记成未消化并把 `ops.retrospect` 打回 `stale`，`retrospect` 随之非 0——这是唯一能让「命令成功但交付结果不对」挡住完成宣告的机制。
 
+## 发版操作链（tag 驱动）
+
+宿主产品仓发版是同构链条：跑测试 → 功能提交 → bump → release 提交 → 渠道 tag → push 触发 CI → 轮询构建 → 验渠道索引。照链走，不要凭记忆跳步、不要每次会话重新考古。
+
+- 版本单源是 VERSION.json（`relkit.version/1`）。relkit v0.5.9+ 产品仓在 relkit.json `version` 块声明 `syncScript` 后，用 `relkit version set|bump` 写版本并自动同步生成物；未声明时直接编辑 VERSION.json。bump 与功能改动分开提交，风格 `chore(release): bump version to <version>`。
+- 发版前 CHANGELOG 必须已有该版本小节：`ci release` 的 release notes 只来自 CHANGELOG，静态门禁会拦「缺小节」；不要用 CI flags 临时传说明。
+- 渠道由 tag 前缀路由：`stable/<version>`、`dev/<version>`。tag 前缀优先于分支名与 RUP_CHANNEL；其他前缀不算发布 tag。tag push 触发蓝盾 PAC 流水线（PAC 定义位置以产品 `.relkit/onboarding.json` 决策记录为准，可能在中央 bkci 仓也可能在产品仓 `ci/`），链路：准备环境 → `relkit_host.py install` → `npm ci` → 静态门禁 → `relkit_host.py ci release --channel <ch> --execute`。本地无独立发布路径；`release --execute` 只由 CI 设 `RELKIT_RELEASE_VIA_CI=1`。
+- 发版前先确认流水线 ID 的可信来源（产品 README、bkci 仓或 `.relkit/onboarding.json` 决策记录）；`.with/` 一类会话工件里的旧轮询脚本只是线索，不算来源。查构建走蓝盾 `build_histories` API（`pipelineId` + `page`/`pageSize`/`updateTimeDesc`）；失败排障看响应的 `errorInfoList`（含步骤名、脚本行号、原始报错），足够定位就别去试日志端点——apigw-user 网关不开放日志 API（404）。
+- 落版验证：轮询渠道索引 `https://update.devcloud.woa.com/index/<product>/<channel>.pb` 出现新版本号才算发布完成（单次构建约 15–20 分钟，轮询预算 ≥ 25 分钟）；构建绿了不等于落版。
+- 构建失败重发：该版本从未进任何渠道索引时无 RUP 不可变性约束，删 tag 重打到修复提交即可；若平台对同 tag 不重触发，bump 到下一 build 号兜底。已落渠道索引的版本禁止重打。
+- 环境准备偶发失败（Access denied 类）先判性质再修：同代码历史构建全绿、本地无法复现、失败点在解压后立即移动/删除，即共享构建机句柄竞态（Defender 实时扫描或解压句柄未释放），修法是脚本内重试退避（1s 起翻倍、总预算约 30s），不是代码逻辑错误，不要重构流程。
+
 ## 完成后：先复盘会话，再跑机械闸门
 
 `retrospect` 只能看文件与带错误码的命令失败；它看不到用户纠正、人工验收结果，
