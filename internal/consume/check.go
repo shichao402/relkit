@@ -14,7 +14,11 @@ import (
 	"github.com/shichao402/relkit/internal/registry"
 )
 
-// StackSkipDirs are never scanned for stack detection signals.
+// StackSkipDirs are never scanned for stack detection signals. CI tool
+// caches (issue #27): .ci-tools holds the go module cache mirroring the
+// relkit repo itself (its go.mod and sdk/dart/pubspec.yaml false-trigger
+// sdk-go/sdk-dart on products that consume nothing but the rust SDK), so
+// both it and the generic vendor/ cache are skipped.
 var StackSkipDirs = map[string]bool{
 	"node_modules": true,
 	"third_party":  true,
@@ -22,6 +26,8 @@ var StackSkipDirs = map[string]bool{
 	"dist":         true,
 	".git":         true,
 	".relkit":      true,
+	".ci-tools":    true,
+	"vendor":       true,
 }
 
 // Stack is the detected product stack: which updater processes own the host
@@ -120,6 +126,37 @@ func ConsumeComponents(root string) ([]string, error) {
 	}
 	names = append(names, "cli", "updater")
 	return dedupe(names), nil
+}
+
+// FilterComponentsBySdks narrows an auto-detected component list to the sdks
+// declaration (issue #27): when sdks is set, SDK rows (product-tree rows
+// with an UpdaterProcess) survive only for declared languages; rows without
+// an UpdaterProcess (host-scripts) and product-binaries (cli, updater) pass
+// through untouched. A nil sdks returns the input unchanged (auto-detect).
+func FilterComponentsBySdks(names []string, sdks []string) []string {
+	if len(sdks) == 0 {
+		return names
+	}
+	declared := make(map[string]bool, len(sdks))
+	for _, lang := range sdks {
+		declared[strings.ToLower(strings.TrimSpace(lang))] = true
+	}
+	var out []string
+	for _, name := range names {
+		row, ok := registry.ByName[name]
+		if !ok {
+			out = append(out, name)
+			continue
+		}
+		if row.Role != registry.RoleProductTree || row.UpdaterProcess == "" {
+			out = append(out, name)
+			continue
+		}
+		if declared[row.UpdaterProcess] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // hasWebview mirrors hostlib/gates.has_webview: any package.json outside
@@ -285,6 +322,40 @@ func isSHA256(value string) bool {
 		}
 	}
 	return true
+}
+
+// ValidateSdks normalizes an sdks declaration: trim, lowercase, dedupe, and
+// reject names that are not an UpdaterProcess in the registry. Returns the
+// canonical order of first occurrence.
+func ValidateSdks(sdks []string) ([]string, error) {
+	if len(sdks) == 0 {
+		return nil, nil
+	}
+	known := map[string]bool{}
+	for _, row := range registry.ProductComponents() {
+		if row.UpdaterProcess != "" {
+			known[row.UpdaterProcess] = true
+		}
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, raw := range sdks {
+		lang := strings.ToLower(strings.TrimSpace(raw))
+		if lang == "" {
+			continue
+		}
+		if !known[lang] {
+			return nil, fmt.Errorf("unknown sdk %q; known: dart, go, node, rust", raw)
+		}
+		if !seen[lang] {
+			seen[lang] = true
+			out = append(out, lang)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--sdk needs at least one language")
+	}
+	return out, nil
 }
 
 // dedupe keeps first occurrences in order.

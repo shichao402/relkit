@@ -68,6 +68,9 @@ func cmdConsumeStatus(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The sdks declaration narrows status the same way it narrows
+	// install/check: what is not materialized is not reported either.
+	components = consume.FilterComponentsBySdks(components, lock.Sdks)
 
 	if asJSON {
 		report := map[string]any{
@@ -111,8 +114,9 @@ func marshalStatusJSON(report map[string]any) ([]byte, error) {
 }
 
 // consumeComponentsFor resolves the component list for install: explicit
-// --component flags win; otherwise the detected consume selection plus
-// host-scripts first when the lock pins it (mirroring relkit_consume.main).
+// --component flags win; otherwise the detected consume selection narrowed
+// by the lock's sdks declaration (issue #27), plus host-scripts first when
+// the lock pins it (mirroring relkit_consume.main).
 func consumeComponentsFor(root string, explicit []string, lock *consume.Lock) ([]string, error) {
 	if len(explicit) > 0 {
 		return explicit, nil
@@ -121,6 +125,7 @@ func consumeComponentsFor(root string, explicit []string, lock *consume.Lock) ([
 	if err != nil {
 		return nil, err
 	}
+	names = consume.FilterComponentsBySdks(names, lockSdks(lock))
 	if lock == nil {
 		return names, nil
 	}
@@ -134,4 +139,12 @@ func consumeComponentsFor(root string, explicit []string, lock *consume.Lock) ([
 		}
 	}
 	return append([]string{"host-scripts"}, names...), nil
+}
+
+// lockSdks returns the sdks declaration, tolerating a nil lock.
+func lockSdks(lock *consume.Lock) []string {
+	if lock == nil {
+		return nil
+	}
+	return lock.Sdks
 }

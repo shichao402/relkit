@@ -61,6 +61,14 @@ type Lock struct {
 	UpdaterIPC        IntWindow                  `json:"updaterIpc"`
 	Artifacts         map[string]json.RawMessage `json:"artifacts"`
 
+	// Sdks optionally declares the SDK languages the product consumes
+	// (issue #27): each entry is an UpdaterProcess name (dart/go/rust/node).
+	// Absent (nil) means auto-detect decides, exactly as before. When set,
+	// install/check/status materialize and verify only the matching
+	// product-tree components plus cli/updater — a rust product stops
+	// dragging the dart SDK and the Go source tree around.
+	Sdks []string `json:"sdks,omitempty"`
+
 	// V2Artifacts holds consume/2 shaped entries (single url string) after a
 	// successful parse of a consume/2 lock, keyed by component name. For
 	// product-binary rows the value is per-target map; for product-tree rows
@@ -232,6 +240,7 @@ func (l *Lock) WriteLock(path string) error {
 		HostScriptsSHA256 string                     `json:"hostScriptsSha256,omitempty"`
 		Protocol          IntWindow                  `json:"protocol"`
 		UpdaterIPC        IntWindow                  `json:"updaterIpc"`
+		Sdks              []string                   `json:"sdks,omitempty"`
 		Artifacts         map[string]json.RawMessage `json:"artifacts"`
 	}
 	wire := wireLock{
@@ -243,6 +252,7 @@ func (l *Lock) WriteLock(path string) error {
 		HostScriptsSHA256: l.HostScriptsSHA256,
 		Protocol:          l.Protocol,
 		UpdaterIPC:        l.UpdaterIPC,
+		Sdks:              l.Sdks,
 		Artifacts:         l.Artifacts,
 	}
 	data, err := json.MarshalIndent(&wire, "", "  ")

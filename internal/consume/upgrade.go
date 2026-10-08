@@ -188,10 +188,10 @@ func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]stri
 	}
 
 	lock := &Lock{
-		Schema:     SchemaV3,
+		Schema: SchemaV3,
 		Release:    release,
 		Commit:     commit,
-		Source:     &SourceBlock{
+		Source: &SourceBlock{
 			Module:  "github.com/shichao402/relkit",
 			Version: release,
 			H1:      "",
@@ -203,6 +203,13 @@ func UpgradeLock(release string, manifest *ReleaseManifest, sums map[string]stri
 	}
 	if !omitHostScripts {
 		lock.HostScriptsSHA256 = hostTree
+	}
+	// The sdks declaration is the consuming product's intent, not a property
+	// of the release: a rebuild from previous must carry it forward (issue
+	// #27), or every upgrade/follow-latest resolution would silently widen
+	// the materialization scope back to auto-detect.
+	if previous != nil && len(previous.Sdks) > 0 {
+		lock.Sdks = append([]string(nil), previous.Sdks...)
 	}
 	return lock, nil
 }

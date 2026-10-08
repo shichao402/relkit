@@ -478,6 +478,28 @@ class StateTests(unittest.TestCase):
             self.assertEqual(host.detect_stack(root)["updater"], "rust")
             self.assertEqual(host.consume_components(root)[0], "sdk-rust")
 
+    def test_ci_tools_module_cache_does_not_false_detect(self) -> None:
+        # issue #27: .ci-tools/go-mod mirrors the relkit repo itself, so its
+        # go.mod and sdk/dart/pubspec.yaml must not signal a go/dart stack on
+        # a product that consumes nothing but the rust SDK.
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            tauri = root / "src-tauri"
+            tauri.mkdir()
+            (tauri / "Cargo.toml").write_text("[package]\nname='launcher'\n", encoding="utf-8")
+            cache = root / ".ci-tools" / "go-mod" / "github.com" / "relkit@v0.5.12"
+            cache.mkdir(parents=True)
+            (cache / "go.mod").write_text("module github.com/shichao402/relkit\n", encoding="utf-8")
+            dart = cache / "sdk" / "dart"
+            dart.mkdir(parents=True)
+            (dart / "pubspec.yaml").write_text("name: rup_client\n", encoding="utf-8")
+            vendored = root / "vendor" / "golang.org" / "x"
+            vendored.mkdir(parents=True)
+            (vendored / "package.json").write_text("{}\n", encoding="utf-8")
+            stack = host.detect_stack(root)
+            self.assertEqual(stack["languages"], ["rust"])
+            self.assertEqual(host.consume_components(root), ["sdk-rust", "cli", "updater"])
+
     def test_updater_process_explain_forbids_handwritten_bridge(self) -> None:
         text = host.UPDATER_PROCESS_EXPLAIN
         self.assertNotIn("开工窄桥", text)

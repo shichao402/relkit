@@ -45,7 +45,16 @@ def _impl_product_id(state: dict[str, Any]) -> str:
     return str(value)
 
 def _impl_detect_stack(root: Path) -> dict[str, Any]:
-    skip = {"node_modules", "third_party", "target", "dist", ".git", ".relkit"}
+    skip = {
+        "node_modules",
+        "third_party",
+        "target",
+        "dist",
+        ".git",
+        ".relkit",
+        ".ci-tools",
+        "vendor",
+    }
     signals: list[str] = []
     seen: set[str] = set()
     for row in registry_components("product-tree"):

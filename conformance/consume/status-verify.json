@@ -24,6 +24,18 @@
       "expectComponents": ["cli", "updater"]
     },
     {
+      "name": "stack-detect-skips-ci-tools",
+      "description": "Signals under .ci-tools (go module cache mirroring the relkit repo) and vendor are ignored: a rust product with a CI module cache must not false-detect dart/go (issue #27).",
+      "tree": [
+        "Cargo.toml",
+        ".ci-tools/go-mod/github.com/shichao402/relkit@v0.5.12/go.mod",
+        ".ci-tools/go-mod/github.com/shichao402/relkit@v0.5.12/sdk/dart/pubspec.yaml",
+        "vendor/golang.org/x/tools/package.json"
+      ],
+      "expectLanguages": ["rust"],
+      "expectComponents": ["sdk-rust", "cli", "updater"]
+    },
+    {
       "name": "stack-detect-webview-projection",
       "description": "A package.json anywhere outside excluded dirs projects bindings-ts even without a node SDK consumer at the root. Languages follow registry order: sdk-rust's rust, then bindings-ts's node.",
       "tree": ["src-tauri/Cargo.toml", "web/package.json"],

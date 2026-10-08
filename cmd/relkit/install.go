@@ -21,6 +21,7 @@ func cmdConsumeInstall(args []string) error {
 	target := "host"
 	resolvedOut := ""
 	var components []string
+	var sdks []string
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -35,10 +36,11 @@ func cmdConsumeInstall(args []string) error {
 			i++
 			target = mustValue(args, i, "--target")
 		case arg == "--component":
-			i++
 			components = append(components, mustValue(args, i, "--component"))
-		case arg == "--resolved-out":
+		case arg == "--sdk":
 			i++
+			sdks = append(sdks, mustValue(args, i, "--sdk"))
+		case arg == "--resolved-out":
 			resolvedOut = mustValue(args, i, "--resolved-out")
 		default:
 			return fmt.Errorf("unknown flag %q", arg)
@@ -55,6 +57,22 @@ func cmdConsumeInstall(args []string) error {
 	lock, err := consume.LoadLock(lockPath)
 	if err != nil {
 		return err
+	}
+	if len(sdks) > 0 {
+		// --sdk declares the materialization scope (issue #27): validate
+		// against the registry's UpdaterProcess names, then persist into
+		// the lock so check/status stay in the declared scope without the
+		// flag — the lock is the single source of truth for scope, not the
+		// command line that happened to run install.
+		normalized, err := consume.ValidateSdks(sdks)
+		if err != nil {
+			return err
+		}
+		lock.Sdks = normalized
+		if err := lock.WriteLock(lockPath); err != nil {
+			return fmt.Errorf("persisting sdks declaration into %s: %w", filepath.ToSlash(lockPath), err)
+		}
+		fmt.Printf("relkit: sdks %s recorded in %s\n", strings.Join(normalized, ","), filepath.ToSlash(lockPath))
 	}
 	lock, err = resolveFollowLatest(root, lock, lockPath)
 	if err != nil {

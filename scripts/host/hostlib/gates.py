@@ -15,7 +15,7 @@ from .facets import BY_NAME, components
 
 Gate = Callable[[Path, dict[str, Any], list[str]], None]
 GATES: dict[str, Gate] = {}
-EXCLUDED = {".git", ".relkit", "third_party", "node_modules", "gen", "target", "dist"}
+EXCLUDED = {".git", ".relkit", "third_party", "node_modules", "gen", "target", "dist", ".ci-tools", "vendor"}
 TEXT_SUFFIXES = {
     ".rs", ".go", ".dart", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
     ".py", ".sh", ".ps1", ".json", ".toml", ".yaml", ".yml", ".proto",
