@@ -39,6 +39,17 @@
 - **边缘函数**：继续留给无状态改写（鉴权、跳转、geo、功能开关）。KV 只当偶尔更新的配置盘，不当账本。
 - **落点（规划）**：`internal/browse` 生成的 HTML 嵌入 51.la；契约 README 写明。内网数据面同一份 dump 会带上脚本；精确下载次数仍以 serve 面板已有计数为准，不在此重复造账本。
 
+## SDK 物化路径：改名摆脱 third_party 语义（挂下次大版本）
+
+- **状态**：意向（改名方向已论证，不专门发版做；下次 breaking change 大版本搭车）。
+- **背景**：`third_party/relkit` 在各语言惯例里暗示「vendored 源码依赖、需要进 git」，实态却是按 lock 可整树重建的 install 物化产物（issue #27 的 84 条 untracked、`git add -A` 险情、AI/工具按惯例误判，都源于名字与实态不符）。仅 Loom-Launcher 有真 vendored 面（rust SDK 9 文件入库），其余消费仓整树忽略。
+- **候选**：`tools/relkit`（语义直译工具链产物）或 `.relkit/vendor`（dot 语义最强）。工具链兼容性已全部实测排除障碍：npm `file:` 依赖、Dart pubspec `path:`、Cargo `path` 指向 dot 目录均正常。但 `tools/` 在现消费仓里是入库惯例不是忽略惯例，省不掉 gitignore 规则；`.relkit/` 现装「可随时删的运行时状态」（cache/onboarding/secrets，`onboard reset` 整删），与「不可删的构建依赖」天性相反，若 dot 化须另起新名（如 `.relkit-vendor/`）不混居。
+- **代价（已实测，非估）**：relkit 仓 16 文件引用面（registry/check/install + `facets.py` 注册表镜像 + conformance + 测试 + 文档）；五消费仓约 60 处引用点，含真红构建的 path dep（Dec/SvnMergeTool/Loom/Loom-Launcher 的 Cargo 与 pubspec）与 npm `file:` 依赖、Loom-Launcher 9 个入库文件 `git mv`；五仓 lock 钉 CLI 版本，**CLI 发版与五仓改动必须同一窗口落地**，不能渐进。lock schema 本身不含路径，不用动。
+- **宿主项目规则（届时强制）**：升级到改路径的大版本时，宿主仓必须同步迁移引用点（path dep / `file:` 依赖 / CI 物化脚本）并把旧 `third_party/relkit` 树整删重建，不留双路径。消费仓 CI 门禁：非白名单仓 `git ls-files <物化路径>` 非空即红（真 vendored 的子树显式豁免，如 Loom-Launcher 的 `sdk/rust`）。
+- **过渡期（现在就成立，不依赖改名）**：各消费仓 `third_party/README.md` 锚点说明「此树按 lock 可重建、非 vendored 依赖」；relkit 侧 `StackSkipDirs` 已补 `.ci-tools`/`vendor`（issue #27 根因）。
+- **不做**：为改名单独发版、单独开五仓协调窗口；渐进双路径长期共存；把物化树挪进 `.relkit/` 现有状态命名空间。
+- **落点**：`internal/registry` Destination、`internal/consume`（check/install/stage）、`scripts/host/hostlib/facets.py`、conformance 用例；各宿主仓构建清单与 `.gitignore`。
+
 ## 操作面板：从本机盘长成发布管理
 
 - **状态**：后台壳已部署，COS 管理未实现。内网 `/-/admin` 管本机数据面（ADR 0006）；外网 `publish.firoyang.com/-/admin` 已接到只监听 loopback 的 `relkit-console`（读 `relkit-store` 本机树）。
