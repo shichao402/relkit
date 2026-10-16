@@ -290,8 +290,8 @@ func main() {
 
 	logPath := filepath.Join(root, "calls.log")
 	run := func(fail bool) error {
-		commandLine := `call "` + filepath.Join(root, "relkitw.cmd") + `" probe two`
-		command := exec.Command("cmd.exe", "/d", "/c", commandLine)
+		command := exec.Command("cmd.exe", "/d", "/c", `call .\relkitw.cmd probe two`)
+		command.Dir = root
 		command.Env = append(os.Environ(),
 			"RELKIT_BOOTSTRAP_CLI="+helperBinary,
 			"WRAPPER_LOG="+logPath,
