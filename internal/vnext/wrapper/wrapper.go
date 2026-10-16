@@ -121,6 +121,7 @@ if [ ! -x "${BOOTSTRAP:-}" ]; then
 fi
 
 export RELKIT_EXPECTED_ROOT_FINGERPRINT="$EXPECTED_ROOT"
+export RELKIT_PROJECT="$PROJECT"
 if [ "${RELKIT_REFRESH_RESOLUTION:-0}" = "1" ]; then
   if [ -n "$CANDIDATE" ]; then
     "$BOOTSTRAP" resolve --project "$PROJECT" --out "$RESOLUTION" --candidate "$CANDIDATE" --replace
@@ -162,6 +163,7 @@ set "RESOLUTION=%%ROOT%%.relkit\resolution.json"
 set "CANDIDATE=%%RELKIT_CANDIDATE_DIGEST%%"
 if not "%%CANDIDATE%%"=="" set "RESOLUTION=%%ROOT%%.relkit\candidate\resolution.json"
 set "RELKIT_EXPECTED_ROOT_FINGERPRINT=%s"
+set "RELKIT_PROJECT=%%PROJECT%%"
 set "OPERATOR_HASH=%s"
 
 if not "%%RELKIT_BOOTSTRAP_CLI%%"=="" (

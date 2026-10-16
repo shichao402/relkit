@@ -450,6 +450,12 @@ def cmd_build(args: argparse.Namespace) -> None:
     protocol = contract.get("protocol")
     if not isinstance(protocol, dict):
         die("scripts/host/release-contract.json protocol must be an object")
+    protocol_min, protocol_max = publish_protocol_window()
+    if protocol != {"min": protocol_min, "max": protocol_max}:
+        die(
+            "scripts/host/release-contract.json protocol does not match "
+            "internal/publishproto/publishproto.go"
+        )
     built: list[dict[str, Any]] = []
     for kind in targets:
         pkg, prefix = pkgs[kind]
@@ -516,6 +522,18 @@ def updater_ipc_window() -> tuple[int, int]:
     found_max = re.search(r"IPCMax\s+uint32\s*=\s*(\d+)", text)
     if found_min is None or found_max is None:
         die("cannot read IPCMin/IPCMax from internal/updater/const.go")
+    return int(found_min.group(1)), int(found_max.group(1))
+
+
+def publish_protocol_window() -> tuple[int, int]:
+    """Publisher HTTP window from internal/publishproto/publishproto.go."""
+    text = (REPO_ROOT / "internal" / "publishproto" / "publishproto.go").read_text(
+        encoding="utf-8"
+    )
+    found_min = re.search(r"^\s*Min\s*=\s*(\d+)\s*$", text, re.MULTILINE)
+    found_max = re.search(r"^\s*Max\s*=\s*(\d+)\s*$", text, re.MULTILINE)
+    if found_min is None or found_max is None:
+        die("cannot read Min/Max from internal/publishproto/publishproto.go")
     return int(found_min.group(1)), int(found_max.group(1))
 
 
@@ -1572,7 +1590,24 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         except ValueError as exc:
             die(f"profile {name}: {exc}")
     ident = git_identity()
-    print("source:", json.dumps({"commit": ident["commit"], "dirty": ident["dirty"], "protocol": "2-2"}, indent=2))
+    protocol_min, protocol_max = publish_protocol_window()
+    contract_protocol = host_release_contract().get("protocol")
+    if contract_protocol != {"min": protocol_min, "max": protocol_max}:
+        die(
+            "scripts/host/release-contract.json protocol does not match "
+            "internal/publishproto/publishproto.go"
+        )
+    print(
+        "source:",
+        json.dumps(
+            {
+                "commit": ident["commit"],
+                "dirty": ident["dirty"],
+                "protocol": f"{protocol_min}-{protocol_max}",
+            },
+            indent=2,
+        ),
+    )
     if ident["dirty"] == "true" and args.apply and not args.allow_dirty:
         die("refusing to upgrade from a dirty HEAD; commit or pass --allow-dirty")
     if args.plan:
