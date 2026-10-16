@@ -37,7 +37,7 @@ func TestCompleteBundleVerifiesInstallsAndMaterializesOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Files) != 3 {
+	if len(manifest.Files) != 4 {
 		t.Fatalf("files=%d", len(manifest.Files))
 	}
 	projectRoot := filepath.Join(fixture.root, "checkout")
@@ -73,6 +73,9 @@ func TestCompleteBundleVerifiesInstallsAndMaterializesOffline(t *testing.T) {
 		t.Fatalf("offline materialize: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".relkit", "components", "bin", "relkit")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".relkit", "bootstrap", "relkit-ops")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -210,6 +213,7 @@ func newBundleFixture(t *testing.T) bundleFixture {
 		t.Fatal(err)
 	}
 	cliPath := filepath.Join(root, "cli")
+	opsPath := filepath.Join(root, "ops")
 	updaterPath := filepath.Join(root, "updater")
 	archivePath := filepath.Join(root, "bindings.zip")
 	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -218,8 +222,12 @@ func newBundleFixture(t *testing.T) bundleFixture {
 	if err := os.WriteFile(updaterPath, []byte("updater"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(opsPath, []byte("#!/bin/sh\necho ops\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	makeZip(t, archivePath)
 	cliDigest := digestFile(t, cliPath)
+	opsDigest := digestFile(t, opsPath)
 	updaterDigest := digestFile(t, updaterPath)
 	archiveDigest := digestFile(t, archivePath)
 	distributionDigest := "sha256:" + strings.Repeat("d", 64)
@@ -231,6 +239,7 @@ func newBundleFixture(t *testing.T) bundleFixture {
 		CertificationSequence: 1,
 		Components: []catalog.Component{
 			{Name: "cli", Version: "v1.0.0", Platform: "linux-amd64", SHA256: cliDigest, Source: catalog.Source{Kind: "release-asset", URL: "https://offline.invalid/relkit"}},
+			{Name: "ops", Version: "v1.0.0", Platform: "linux-amd64", SHA256: opsDigest, Source: catalog.Source{Kind: "release-asset", URL: "https://offline.invalid/relkit-ops"}},
 			{Name: "updater", Version: "v1.0.0", Platform: "linux-amd64", SHA256: updaterDigest, Source: catalog.Source{Kind: "release-asset", URL: "https://offline.invalid/relkit-updater"}},
 			{Name: "bindings-ts", Version: "v1.0.0", Platform: "all", SHA256: archiveDigest, Source: catalog.Source{Kind: "release-asset", URL: "https://offline.invalid/bindings.zip"}},
 		},
@@ -276,7 +285,7 @@ func newBundleFixture(t *testing.T) bundleFixture {
 	return bundleFixture{
 		root: root, seed: seed, project: product, operator: operatorDocument, bundle: bundle,
 		assets: map[string]string{
-			cliDigest: cliPath, updaterDigest: updaterPath, archiveDigest: archivePath,
+			cliDigest: cliPath, opsDigest: opsPath, updaterDigest: updaterPath, archiveDigest: archivePath,
 		},
 	}
 }

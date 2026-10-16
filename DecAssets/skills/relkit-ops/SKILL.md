@@ -56,7 +56,9 @@ relkit-ops bundle install \
 ```
 
 Bundle 必须包含所选 distribution 的全部 component/release asset；缺一个摘要即失败。
-不得只塞一份 CLI 冒充完整离线供给。
+不得只塞一份 CLI 冒充完整离线供给。安装会把目标平台的 `relkit` 与
+`relkit-ops` 一并放入项目 `.relkit/bootstrap/`，后续产品 Job 使用这份受信
+`relkit-ops` 传递 ArtifactSet，不继续依赖外部 bootstrap。
 
 Operator 将 Release 组件同步到内容寻址 mirror 时使用 core 命令，不复制宿主脚本：
 
