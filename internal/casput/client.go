@@ -18,9 +18,11 @@ import (
 
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/httpx"
+	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/publishproto"
 	"github.com/shichao402/relkit/internal/stage"
 	"github.com/shichao402/relkit/internal/stagedput"
+	vnextrelease "github.com/shichao402/relkit/internal/vnext/release"
 )
 
 type Options struct {
@@ -131,7 +133,7 @@ func Put(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	thin, err := buildThinArchive(opts.Root, opts.Version)
+	thin, err := buildThinArchive(opts.Root, opts.Version, staged)
 	if err != nil {
 		return nil, err
 	}
@@ -590,7 +592,7 @@ func redactErr(err error) error {
 	return fmt.Errorf("%s", httpx.RedactText(err.Error()))
 }
 
-func buildThinArchive(root, version string) (string, error) {
+func buildThinArchive(root, version string, staged *model.StagedDocument) (string, error) {
 	file, err := os.CreateTemp("", "relkit-staged-thin-*.tar.gz")
 	if err != nil {
 		return "", err
@@ -603,7 +605,21 @@ func buildThinArchive(root, version string) (string, error) {
 	}
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
-	for _, source := range []string{stage.StagedPath(root, version), stage.ReleasePolicyPath(root, version)} {
+	sources := []string{stage.StagedPath(root, version)}
+	if staged.ResolutionDigest == "" {
+		sources = append(sources, stage.ReleasePolicyPath(root, version))
+	} else {
+		stagingRoot := stage.StagingDir(root, version)
+		for _, name := range []string{
+			vnextrelease.ResolutionFile,
+			vnextrelease.ResolutionBundleFile,
+			vnextrelease.ProjectFile,
+			vnextrelease.ArtifactSetFile,
+		} {
+			sources = append(sources, filepath.Join(stagingRoot, name))
+		}
+	}
+	for _, source := range sources {
 		info, err := os.Stat(source)
 		if err != nil {
 			return cleanup(err)
