@@ -1,0 +1,23 @@
+{
+  "schema": "relkit.production-escape/1",
+  "code": "runtime-bootstrap.key_encoding_mismatch",
+  "category": "generic",
+  "stage": "resolve",
+  "capability": "runtime-profile-bootstrap",
+  "crossComponent": true,
+  "symptom": "A stable product release passed publication and consumer readback, but every updater facade rejected its embedded Runtime Bootstrap before check because trustedKeys[].key was emitted as a numeric array instead of the schema-required base64 string.",
+  "whyGateMissed": "The control-plane model validated raw key bytes and the facade tests used hand-written schema-conforming JSON; no gate serialized the generated control-plane document and parsed those exact bytes through a public SDK.",
+  "earliestDetection": "Immediately after resolution, serialize the generated Runtime Bootstrap and require the public facade SDK to parse it before any host artifact is built.",
+  "evidence": [
+    {
+      "path": "internal/vnext/runtimebootstrap/runtimebootstrap_test.go",
+      "symbol": "TestGeneratedRuntimeBootstrapMatchesPublicSDK",
+      "kind": "scenario"
+    }
+  ],
+  "fix": {
+    "pr": 55,
+    "commit": "6af1b3d0dc90cd2decb8fefe4b2a699dc6b82463",
+    "release": "v0.6.16"
+  }
+}
