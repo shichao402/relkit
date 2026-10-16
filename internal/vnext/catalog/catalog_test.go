@@ -131,3 +131,29 @@ func TestStateTransitions(t *testing.T) {
 		t.Fatal("revoked distribution unexpectedly returned to certified")
 	}
 }
+
+func TestDistributionIdentityExcludesLifecycleFields(t *testing.T) {
+	value, _ := testCatalog(t)
+	distribution := value.Distributions[1]
+	first, err := distribution.IdentityDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	distribution.State = StateSuperseded
+	distribution.CertificationSequence += 100
+	second, err := distribution.IdentityDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("lifecycle transition changed immutable identity: %s != %s", first, second)
+	}
+	distribution.Components[0].Source.URL += "/mutated"
+	third, err := distribution.IdentityDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == third {
+		t.Fatal("immutable component mutation did not change distribution identity")
+	}
+}

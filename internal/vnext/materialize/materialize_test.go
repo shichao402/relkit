@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -172,7 +174,11 @@ func TestRunCreatesVerifiedTemporaryGoModOverlay(t *testing.T) {
 	if err := zipFile.Close(); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(proxy))
+	proxyPath := filepath.ToSlash(proxy)
+	if runtime.GOOS == "windows" && !strings.HasPrefix(proxyPath, "/") {
+		proxyPath = "/" + proxyPath
+	}
+	t.Setenv("GOPROXY", (&url.URL{Scheme: "file", Path: proxyPath}).String())
 	t.Setenv("GOSUMDB", "off")
 	moduleCacheRoot := t.TempDir()
 	moduleCache := filepath.Join(moduleCacheRoot, "gomodcache")

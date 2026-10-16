@@ -28,7 +28,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|impact|certify|bootstrap|bundle|catalog|operator|runtime-profile|artifact-set|key> [flags]")
+		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|impact|certify|bootstrap|bundle|distribution|catalog|operator|runtime-profile|artifact-set|agent|key> [flags]")
 	}
 	switch args[0] {
 	case "status":
@@ -47,6 +47,8 @@ func run(ctx context.Context, args []string) error {
 		return cmdBootstrap(args[1:])
 	case "bundle":
 		return cmdBundle(args[1:])
+	case "distribution":
+		return cmdDistribution(args[1:])
 	case "catalog":
 		return cmdCatalog(args[1:])
 	case "operator":
@@ -55,11 +57,75 @@ func run(ctx context.Context, args []string) error {
 		return cmdRuntimeProfile(ctx, args[1:])
 	case "artifact-set":
 		return cmdArtifactSet(ctx, args[1:])
+	case "agent":
+		return cmdAgent(args[1:])
 	case "key":
 		return cmdKey(args[1:])
 	default:
 		return fmt.Errorf("unknown relkit-ops command %q", args[0])
 	}
+}
+
+func cmdAgent(args []string) error {
+	if len(args) == 0 || args[0] != "policy" {
+		return fmt.Errorf("agent requires policy")
+	}
+	flags := flag.NewFlagSet("agent policy", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	configPath := flags.String("config", "", "existing relkit-agent JSON config")
+	policyPath := flags.String("policy", "", "relkit.agent-product-policy/1 document")
+	backupPath := flags.String("backup", "", "new rollback backup path")
+	execute := flags.Bool("execute", false, "atomically apply the reviewed policy")
+	jsonOutput := flags.Bool("json", false, "print JSON")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	result, err := ops.ApplyAgentPolicy(ops.AgentPolicyOptions{
+		Config: *configPath, Policy: *policyPath, Backup: *backupPath, Execute: *execute,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return printJSON(result)
+	}
+	if !*execute {
+		fmt.Printf("plan only: changed=%t products=%v; pass --execute with --backup to apply\n",
+			result.Changed, result.ChangedProducts)
+		return nil
+	}
+	fmt.Printf("agent policy applied: changed=%t products=%v backup=%s\n",
+		result.Changed, result.ChangedProducts, result.Backup)
+	return nil
+}
+
+func cmdDistribution(args []string) error {
+	if len(args) == 0 || args[0] != "create" {
+		return fmt.Errorf("distribution requires create")
+	}
+	flags := flag.NewFlagSet("distribution create", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	version := flags.String("version", "", "immutable release version, for example v0.6.1")
+	manifest := flags.String("manifest", "", "relkit.release/1 manifest")
+	assets := flags.String("assets", "", "directory containing downloaded release assets")
+	sourceBase := flags.String("source-base", "", "immutable release asset URL prefix")
+	output := flags.String("out", "", "new distribution row JSON")
+	jsonOutput := flags.Bool("json", false, "print JSON")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	value, err := ops.BuildDistribution(ops.BuildDistributionOptions{
+		Version: *version, ManifestPath: *manifest, Assets: *assets,
+		SourceBase: *sourceBase, Output: *output,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return printJSON(value)
+	}
+	fmt.Printf("created distribution %s (%s) -> %s\n", value.Version, value.Digest, *output)
+	return nil
 }
 
 func cmdArtifactSet(ctx context.Context, args []string) error {

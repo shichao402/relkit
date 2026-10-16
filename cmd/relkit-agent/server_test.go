@@ -590,6 +590,7 @@ type agentFixtureOpts struct {
 type vNextFixtureOptions struct {
 	identity           resolution.Identity
 	tamperStable       bool
+	tamperReleaseCode  bool
 	runtimeProfile     bool
 	osArch             []string
 	selectorDimensions []string
@@ -813,6 +814,12 @@ func makeVNextAgentFixture(t *testing.T, options vNextFixtureOptions) *agentFixt
 			t.Fatal(err)
 		}
 		artifacts.Channel = "stable"
+		if err := document.Write(filepath.Join(stage.StagingDir(fx.productRoot, "1.0.0"), vnextrelease.ArtifactSetFile), artifacts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if options.tamperReleaseCode {
+		artifacts.ReleaseCode++
 		if err := document.Write(filepath.Join(stage.StagingDir(fx.productRoot, "1.0.0"), vnextrelease.ArtifactSetFile), artifacts); err != nil {
 			t.Fatal(err)
 		}
@@ -1450,6 +1457,16 @@ func TestAgentCandidateUsesIndependentRootAndCannotStageStable(t *testing.T) {
 	status, body := fx.putStaged(t, "demo", "1.0.0")
 	if status != http.StatusBadRequest || !strings.Contains(string(body), "does not allow channel") {
 		t.Fatalf("candidate stable upload status=%d body=%s", status, body)
+	}
+}
+
+func TestAgentRejectsArtifactSetReleaseCodeTampering(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{
+		identity: resolution.IdentityProduction, tamperReleaseCode: true,
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "releaseCode") {
+		t.Fatalf("releaseCode tamper status=%d body=%s", status, body)
 	}
 }
 
