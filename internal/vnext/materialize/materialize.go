@@ -225,7 +225,7 @@ func installModuleBinary(
 	if fileDigest(destination) == component.SHA256 {
 		return nil
 	}
-	if err := verifyModule(ctx, modulePath, component.Version, moduleH1, ""); err != nil {
+	if err := verifyModule(ctx, modulePath, component.Version, moduleH1, "", ""); err != nil {
 		return err
 	}
 	binDir, err := os.MkdirTemp("", "relkit-module-bin-")
@@ -292,10 +292,11 @@ func installGoOverlay(
 		return "", err
 	}
 	command := exec.CommandContext(ctx, "go", "mod", "edit", "-modfile="+overlay, "-require="+modulePath+"@"+component.Version)
+	command.Dir = projectRoot
 	if output, err := command.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("generate temporary modfile: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	if err := verifyModule(ctx, modulePath, component.Version, moduleH1, overlay); err != nil {
+	if err := verifyModule(ctx, modulePath, component.Version, moduleH1, overlay, projectRoot); err != nil {
 		return "", err
 	}
 	return overlay, nil
@@ -340,6 +341,7 @@ func installGoArchiveOverlay(ctx context.Context, projectRoot, sdkRoot string) (
 		"-require="+modulePath+"@v0.0.0",
 		"-replace="+modulePath+"=./"+filepath.ToSlash(relativeSDK),
 	)
+	command.Dir = projectRoot
 	if output, err := command.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("generate Go facade overlay: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -381,7 +383,7 @@ func installGoOverlaySum(overlay string, inputs ...string) error {
 	return nil
 }
 
-func verifyModule(ctx context.Context, modulePath, version, expectedH1, modFile string) error {
+func verifyModule(ctx context.Context, modulePath, version, expectedH1, modFile, workingDirectory string) error {
 	if modulePath == "" || version == "" || expectedH1 == "" {
 		return fmt.Errorf("module identity is incomplete")
 	}
@@ -391,6 +393,9 @@ func verifyModule(ctx context.Context, modulePath, version, expectedH1, modFile 
 	}
 	args = append(args, "-json", modulePath+"@"+version)
 	command := exec.CommandContext(ctx, "go", args...)
+	if workingDirectory != "" {
+		command.Dir = workingDirectory
+	}
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("verify module %s@%s: %w: %s", modulePath, version, err, strings.TrimSpace(string(output)))
