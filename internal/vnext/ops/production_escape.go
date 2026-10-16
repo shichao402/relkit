@@ -1286,7 +1286,7 @@ func executeProductionEscapeEvidence(repoRoot string, evidence ProductionEscapeE
 		args = []string{
 			"--test",
 			"--test-name-pattern=^" + regexp.QuoteMeta(evidence.Symbol) + "$",
-			"--test-reporter=" + reporterPath,
+			"--test-reporter=" + filePathURL(reporterPath),
 			path,
 		}
 		nodeEvidence = true
@@ -1436,6 +1436,18 @@ func sameFilePath(value, expected string) bool {
 		return strings.EqualFold(value, expected)
 	}
 	return value == expected
+}
+
+func filePathURL(path string) string {
+	absolute, err := filepath.Abs(path)
+	if err == nil {
+		path = absolute
+	}
+	slashPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" && !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+	return (&url.URL{Scheme: "file", Path: slashPath}).String()
 }
 
 func validateRustEvidenceExecution(output []byte, symbol string) error {
