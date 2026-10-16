@@ -8,8 +8,7 @@
 relkitw ──► relkit CLI (selected distribution)
               ├─ resolve → relkit.resolution/1
               ├─ install / doctor / inspect
-              ├─ stage → simulate → fake → publish
-              └─ verify released
+              └─ stage → release plan → execute → verify released
 
 relkit-ops ──► Operator Profile 签发 / upgrade / rotate / mirror / fleet cert
 relkit-deploy ──► agent / store / console 二进制落机

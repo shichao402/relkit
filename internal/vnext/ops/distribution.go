@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -264,12 +265,16 @@ func verifyReleaseAsset(root, name, expectedHex string) (string, error) {
 }
 
 func fileDigest(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
-	return canonical.DigestPrefix + hex.EncodeToString(sum[:]), nil
+	defer file.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return canonical.DigestPrefix + hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func verifyChecksumFile(root string, assets map[string]string) error {

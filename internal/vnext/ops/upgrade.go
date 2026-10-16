@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/shichao402/relkit/internal/vnext/canonical"
@@ -104,6 +105,7 @@ type UpgradeStepInput struct {
 	OperationID        string               `json:"operationId"`
 	Phase              string               `json:"phase"`
 	Operator           string               `json:"operator"`
+	Mirrors            []string             `json:"mirrors,omitempty"`
 	CurrentProfile     operator.Document    `json:"currentProfile"`
 	TargetDistribution catalog.Distribution `json:"targetDistribution"`
 	TargetProfilePath  string               `json:"targetProfilePath,omitempty"`
@@ -133,6 +135,20 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 	}
 	if plan.Operator != inventory.Operator {
 		return nil, operationError("operator.plan_wrong_target", "upgrade", "Upgrade plan targets another Operator", nil, nil)
+	}
+	if !slices.Equal(plan.Services, inventory.Services) || !slices.Equal(plan.Mirrors, inventory.Mirrors) {
+		return nil, operationError(
+			"operator.plan_stale",
+			"upgrade",
+			"Operator services or mirrors changed after the plan was created",
+			map[string]any{
+				"plannedServices": plan.Services,
+				"currentServices": inventory.Services,
+				"plannedMirrors":  plan.Mirrors,
+				"currentMirrors":  inventory.Mirrors,
+			},
+			nil,
+		)
 	}
 	profileDigest, _ := profile.Digest()
 	catalogDigest, _ := distributions.Digest()
@@ -194,6 +210,7 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 			OperationID:        plan.OperationID,
 			Phase:              step.name,
 			Operator:           inventory.Operator,
+			Mirrors:            append([]string(nil), plan.Mirrors...),
 			CurrentProfile:     *profile,
 			TargetDistribution: target,
 			PriorEvidence:      cloneEvidence(prior),
@@ -220,6 +237,7 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 		DistributionDigest: target.Digest,
 	}
 	targetProfile.Provides = append(targetProfile.Provides[:0:0], target.Provides...)
+	targetProfile.Sources.Mirrors = append([]string(nil), plan.Mirrors...)
 	targetProfile.Sequence = profile.Sequence + 1
 	keyID, seed, err := loadSigningKey(inventory.SigningKeyPath)
 	if err != nil {
@@ -246,6 +264,7 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 		OperationID:        plan.OperationID,
 		Phase:              "activate",
 		Operator:           inventory.Operator,
+		Mirrors:            append([]string(nil), plan.Mirrors...),
 		CurrentProfile:     *profile,
 		TargetDistribution: target,
 		TargetProfilePath:  stagedProfile,
@@ -322,6 +341,7 @@ func rollbackUpgrade(
 		OperationID:        plan.OperationID,
 		Phase:              "rollback",
 		Operator:           inventory.Operator,
+		Mirrors:            append([]string(nil), plan.Mirrors...),
 		CurrentProfile:     profile,
 		TargetDistribution: target,
 		PriorEvidence:      cloneEvidence(prior),

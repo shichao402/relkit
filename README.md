@@ -108,6 +108,20 @@ relkit-ops rotate <credential> \
   --inventory <inventory> --execute --json
 ```
 
+将正式 Release 的组件同步到 Operator 声明的内容寻址 mirror：
+
+```bash
+relkit-ops distribution mirror \
+  --distribution relkit-distribution.json \
+  --mirror-root https://mirror.example/relkit \
+  --json
+```
+
+命令从 `MIRRORS_USERNAME` / `MIRRORS_PASSWORD` 读取写凭据，逐项校验上游
+SHA-256，上传到 `blobs/<sha256>`，并在上传后读回校验。产品 Job 与持 Token 的
+Operator Job 之间使用 `relkit-ops artifact-set push|pull` 传递不可变 ArtifactSet；
+产品 Job 不接触 `RELKIT_UPLOAD_TOKEN`。
+
 升级只暴露完整旧 Profile 或完整新 Profile。轮换必须完成 mint、secret store 更新、
 reload/restart、健康与写权限验证、旧凭据吊销后才可激活。
 
