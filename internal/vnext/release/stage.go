@@ -79,6 +79,10 @@ func Stage(
 	if artifacts.Product != product.Product || artifacts.ResolutionDigest != resolved.Digest {
 		return nil, fmt.Errorf("ArtifactSet product/resolution does not match the selected project and resolution")
 	}
+	if options.Code != 0 && options.Code != artifacts.ReleaseCode {
+		return nil, fmt.Errorf("stage code %d does not match ArtifactSet releaseCode %d", options.Code, artifacts.ReleaseCode)
+	}
+	releaseCode := artifacts.ReleaseCode
 	if !contains(resolved.AllowedChannels, artifacts.Channel) {
 		return nil, fmt.Errorf("resolution identity %s does not allow channel %q", resolved.Identity, artifacts.Channel)
 	}
@@ -149,7 +153,7 @@ func Stage(
 	staged, err := model.NewStagedDocument(
 		product.Product,
 		artifacts.Version,
-		options.Code,
+		releaseCode,
 		options.MinFrom,
 		artifacts.Channel,
 		stagedArtifacts,

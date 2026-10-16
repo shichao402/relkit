@@ -1151,7 +1151,7 @@ func cmdStageVNext(args []string) error {
 	bundlePath := ""
 	artifactSetPath := ""
 	candidateRootFingerprint := ""
-	code := -1
+	code := 0
 	minFrom := 0
 	notesURL := ""
 	for i := 0; i < len(args); i++ {
@@ -1177,6 +1177,9 @@ func cmdStageVNext(args []string) error {
 			if err != nil {
 				return fmt.Errorf("--code: %w", err)
 			}
+			if value <= 0 {
+				return fmt.Errorf("--code must be positive")
+			}
 			code = value
 		case arg == "--min-from":
 			i++
@@ -1194,8 +1197,8 @@ func cmdStageVNext(args []string) error {
 			return fmt.Errorf("unexpected argument %q", arg)
 		}
 	}
-	if artifactSetPath == "" || code < 0 {
-		return fmt.Errorf("vNext stage requires --artifact-set and --code")
+	if artifactSetPath == "" {
+		return fmt.Errorf("vNext stage requires --artifact-set")
 	}
 	if bundlePath == "" {
 		bundlePath = filepath.Join(filepath.Dir(resolutionPath), "resolution-bundle.json")

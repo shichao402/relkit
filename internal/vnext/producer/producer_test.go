@@ -35,6 +35,7 @@ func TestArtifactProducerHelperProcess(t *testing.T) {
 		ResolutionDigest: input.ResolutionDigest,
 		Product:          input.Product,
 		Version:          input.Version,
+		ReleaseCode:      12,
 		Channel:          input.Channel,
 		Artifacts: []artifactset.Artifact{
 			{

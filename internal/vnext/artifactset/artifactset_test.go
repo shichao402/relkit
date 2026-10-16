@@ -17,6 +17,7 @@ func platformSet(platform string, artifacts []Artifact) Document {
 		ResolutionDigest: artifactDigest,
 		Product:          "demo",
 		Version:          "1.2.3",
+		ReleaseCode:      12,
 		Channel:          "stable",
 		MergeIdentity: &MergeIdentity{
 			Product:          "demo",

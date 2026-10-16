@@ -18,6 +18,7 @@ vNext 不读取旧 `/1`、`/2`，保留有效语义：
 
 - 文件、kind、platform、selectors
 - install / payload 关系
+- 产品生成的单调 `releaseCode`（Operator 不得从 tag 或仓库规则二次猜测）
 - changelog、展示元数据
 - multi-platform drop merge identity
 
@@ -25,7 +26,7 @@ vNext 不读取旧 `/1`、`/2`，保留有效语义：
 
 1. core 把 resolution digest、product version、channel、target、输出目录传给 producer
 2. producer **只返回候选制品**；不得写 staged / index / manifest、签名或 backend
-3. merge 拒绝 resolution、版本、selector、payload 关系不一致的 drop
+3. merge 拒绝 resolution、版本、releaseCode、selector、payload 关系不一致的 drop
 4. `stage → simulate → fake → publish` 使用同一 channel 与同一 resolution
 5. 输出必须符合 resolution 声明的 RUP Schema Set
 6. 平台不对称合法：例如 Windows 有 installer+payload，macOS 仅 installer；不得强迫全平台同构
@@ -50,6 +51,7 @@ Schema 草案：[`../design/vnext/schemas/relkit.artifact-set.1.schema.json`](..
 5. **物理交付**：作为与 directory 同事务发布的 **RUP 签名对象**（内容寻址路径由 directory/index 指向）；不是 distribution catalog 条目，也不是手抄静态文件
 6. **发布顺序**：被订阅产品的 Runtime Profile 必须先 publish 且 `verify released` 通过；依赖方（如 Launcher）本窗口才可进入 publish。失败则依赖方硬失败，不允许“先发后补”
 7. **freshness**：subscriber resolution 记录所消费 profile digest；离线复用时 digest 不一致则失败
+8. **首次自订阅自举**：首个 vNext release 尚不存在可供自身 resolution 消费的 Profile 时，由 `relkit-ops runtime-profile publish` 使用 product-scoped token 请求 agent 在签名机上签发并原子更新 directory；私钥不离开 agent，Operator 只取得公开 Profile。首发之后仍由正常 release 事务更新。
 8. root 轮换必须显式跨仓变更（subscriber 更新 fingerprint）
 
 Loom 发布 `loom` profile；Launcher 订阅 `loom-launcher` 与 `loom`，禁止手写另一仓 URL/公钥。

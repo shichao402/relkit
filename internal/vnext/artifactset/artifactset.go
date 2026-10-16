@@ -57,6 +57,7 @@ type Document struct {
 	ResolutionDigest string         `json:"resolutionDigest"`
 	Product          string         `json:"product"`
 	Version          string         `json:"version"`
+	ReleaseCode      int            `json:"releaseCode"`
 	Channel          string         `json:"channel"`
 	Changelog        string         `json:"changelog,omitempty"`
 	Display          map[string]any `json:"display,omitempty"`
@@ -84,6 +85,9 @@ func (d Document) Validate() error {
 	}
 	if d.Product == "" || d.Version == "" || d.Channel == "" {
 		return fmt.Errorf("product, version, and channel must not be empty")
+	}
+	if d.ReleaseCode <= 0 {
+		return fmt.Errorf("releaseCode must be positive")
 	}
 	if len(d.Artifacts) == 0 {
 		return fmt.Errorf("artifacts must not be empty")
@@ -239,9 +243,10 @@ func Merge(documents ...Document) (*Document, error) {
 	for index, candidate := range documents {
 		if candidate.Product != base.Product ||
 			candidate.Version != base.Version ||
+			candidate.ReleaseCode != base.ReleaseCode ||
 			candidate.Channel != base.Channel ||
 			candidate.ResolutionDigest != base.ResolutionDigest {
-			return nil, fmt.Errorf("artifact set %d has a different product/version/channel/resolution identity", index)
+			return nil, fmt.Errorf("artifact set %d has a different product/version/releaseCode/channel/resolution identity", index)
 		}
 		if len(documents) > 1 && candidate.MergeIdentity == nil {
 			return nil, fmt.Errorf("artifact set %d is missing mergeIdentity", index)

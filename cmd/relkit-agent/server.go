@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -398,6 +399,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/cas/complete", s.handleCASComplete)
 	mux.HandleFunc("/v1/cas/abort", s.handleCASAbort)
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
+	mux.HandleFunc("/v1/runtime-profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
 	mux.HandleFunc("/v1/unpublish", s.handleUnpublish)
 	return mux
@@ -952,7 +954,87 @@ func mergeVNextPublishConfig(
 			Services:  append([]config.DirectoryServiceConfig(nil), profile.Directory.Services...),
 		}
 	}
+	if err := completeVNextDirectory(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// completeVNextDirectory keeps deployment URLs out of relkit.project.json.
+// Existing publish profiles only had to name the backends that receive the
+// signed directory; derive the standard consumer URLs from those backend
+// base URLs when the profile does not override them explicitly.
+func completeVNextDirectory(cfg *config.Config) error {
+	if cfg.Directory == nil {
+		return fmt.Errorf("vNext publish profile directory is required")
+	}
+	targets := append([]string(nil), cfg.Directory.PublishTo...)
+	if len(targets) == 0 {
+		targets = append(targets, cfg.PublishTo...)
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("vNext publish profile has no directory publication backends")
+	}
+	type endpoint struct {
+		name string
+		base string
+	}
+	endpoints := make([]endpoint, 0, len(targets))
+	seenBase := map[string]bool{}
+	for _, name := range targets {
+		values, ok := cfg.Backends[name]
+		if !ok {
+			return fmt.Errorf("directory backend %q is not configured", name)
+		}
+		raw, _ := values["baseUrl"].(string)
+		base, err := normalizedConsumerBaseURL(raw)
+		if err != nil {
+			return fmt.Errorf("directory backend %q baseUrl: %w", name, err)
+		}
+		if seenBase[base] {
+			continue
+		}
+		seenBase[base] = true
+		endpoints = append(endpoints, endpoint{name: name, base: base})
+	}
+	if len(cfg.Directory.EntryURLs) == 0 {
+		for _, item := range endpoints {
+			cfg.Directory.EntryURLs = append(
+				cfg.Directory.EntryURLs,
+				item.base+"directory/"+url.PathEscape(cfg.Product)+".pb",
+			)
+		}
+	}
+	if len(cfg.Directory.Services) == 0 {
+		for endpointIndex, item := range endpoints {
+			for _, channel := range cfg.Channels {
+				id := item.name + "-" + channel
+				cfg.Directory.Services = append(cfg.Directory.Services, config.DirectoryServiceConfig{
+					ID:       id,
+					Priority: int32(endpointIndex + 1),
+					IndexURL: item.base + "index/" + url.PathEscape(cfg.Product) + "/" + url.PathEscape(channel) + ".pb",
+					Channel:  channel,
+				})
+			}
+		}
+	}
+	return nil
+}
+
+func normalizedConsumerBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("must be an absolute http(s) URL, got %q", raw)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("must be http(s), got %q", raw)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("must not contain query or fragment, got %q", raw)
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/"
+	return parsed.String(), nil
 }
 
 func cloneBackendConfig(source map[string]map[string]any) map[string]map[string]any {
@@ -965,6 +1047,109 @@ func cloneBackendConfig(source map[string]map[string]any) map[string]map[string]
 		result[name] = cloned
 	}
 	return result
+}
+
+type runtimeProfileRequest struct {
+	Product string                `json:"product"`
+	Project vnextproject.Document `json:"project"`
+	To      []string              `json:"to,omitempty"`
+	DryRun  bool                  `json:"dryRun,omitempty"`
+}
+
+// handleRuntimeProfile bootstraps a signed Runtime Profile before a
+// self-subscribing product can create its first vNext resolution. The product
+// private key remains on the agent host; the caller receives only the signed
+// public document. The product lock is shared with normal publication so the
+// directory sequence cannot race a release.
+func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+	var req runtimeProfileRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if req.Product == "" || req.Project.Product == "" {
+		http.Error(w, "product and project are required", http.StatusBadRequest)
+		return
+	}
+	if req.Project.Product != req.Product {
+		http.Error(w, "project product does not match request product", http.StatusBadRequest)
+		return
+	}
+	if err := req.Project.Validate(); err != nil {
+		http.Error(w, "invalid project: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !s.requireAuthFor(w, r, req.Product) {
+		return
+	}
+	pc, ok := s.cfg.Products[req.Product]
+	if !ok {
+		http.Error(w, "unknown product", http.StatusNotFound)
+		return
+	}
+	mu := s.productLock(req.Product)
+	if !mu.TryLock() {
+		http.Error(w, "publish already in progress for this product", http.StatusConflict)
+		return
+	}
+	defer mu.Unlock()
+
+	profile, err := config.LoadPublishProfile(pc.Profile)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.publish_profile_invalid", "error": err.Error(),
+		})
+		return
+	}
+	cfg, err := mergeVNextPublishConfig(&req.Project, profile, pc.Root)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.config_invalid", "error": err.Error(),
+		})
+		return
+	}
+	var logs []string
+	printer := func(line string) { logs = append(logs, line) }
+	preview, err := directory.Set(cfg, directory.Options{To: req.To, DryRun: true}, printer)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.directory_preflight_failed", "error": err.Error(), "log": logs,
+		})
+		return
+	}
+	result, err := vnextruntimeprofile.Publish(cfg, req.Project, vnextruntimeprofile.PublishOptions{
+		To: req.To, ProfileVersion: preview.DirectorySequence, DryRun: req.DryRun,
+	}, printer)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.publish_failed", "error": err.Error(), "log": logs,
+		})
+		return
+	}
+	directorySequence := preview.DirectorySequence
+	if !req.DryRun {
+		publishedDirectory, directoryErr := directory.Set(cfg, directory.Options{
+			To: req.To, RuntimeProfile: &result.Reference,
+		}, printer)
+		if directoryErr != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"ok": false, "code": "runtime_profile.directory_commit_failed", "error": directoryErr.Error(),
+				"profile": result.Profile, "reference": result.Reference, "log": logs,
+			})
+			return
+		}
+		directorySequence = publishedDirectory.DirectorySequence
+		s.triggerSiteRebuild(req.Product, "runtime-profile")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "dryRun": req.DryRun, "profile": result.Profile,
+		"reference": result.Reference, "directorySequence": directorySequence, "log": logs,
+	})
 }
 
 type publishRequest struct {

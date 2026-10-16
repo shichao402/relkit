@@ -107,6 +107,7 @@ func TestStageCarriesImmutableResolutionProvenance(t *testing.T) {
 		ResolutionDigest: resolved.Digest,
 		Product:          "demo",
 		Version:          "1.2.3",
+		ReleaseCode:      12,
 		Channel:          "dev",
 		Artifacts: []artifactset.Artifact{
 			{

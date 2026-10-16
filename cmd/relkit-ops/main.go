@@ -28,7 +28,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|impact|certify|bootstrap|bundle|catalog|operator|runtime-profile> [flags]")
+		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|impact|certify|bootstrap|bundle|catalog|operator|runtime-profile|artifact-set|key> [flags]")
 	}
 	switch args[0] {
 	case "status":
@@ -52,15 +52,171 @@ func run(ctx context.Context, args []string) error {
 	case "operator":
 		return cmdOperator(args[1:])
 	case "runtime-profile":
-		return cmdRuntimeProfile(args[1:])
+		return cmdRuntimeProfile(ctx, args[1:])
+	case "artifact-set":
+		return cmdArtifactSet(ctx, args[1:])
+	case "key":
+		return cmdKey(args[1:])
 	default:
 		return fmt.Errorf("unknown relkit-ops command %q", args[0])
 	}
 }
 
-func cmdRuntimeProfile(args []string) error {
-	if len(args) == 0 || args[0] != "create" {
-		return fmt.Errorf("runtime-profile requires create")
+func cmdArtifactSet(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("artifact-set requires push or pull")
+	}
+	switch args[0] {
+	case "push":
+		flags := flag.NewFlagSet("artifact-set push", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		projectPath := flags.String("project", "relkit.project.json", "project declaration")
+		artifactSetPath := flags.String("artifact-set", "", "ArtifactSet JSON")
+		rawURL := flags.String("url", "", "immutable CI transfer URL")
+		usernameEnv := flags.String("username-env", "MIRRORS_USERNAME", "environment variable containing upload username")
+		passwordEnv := flags.String("password-env", "MIRRORS_PASSWORD", "environment variable containing upload password")
+		jsonOutput := flags.Bool("json", false, "print JSON")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := ops.PushArtifactSet(ctx, ops.PushArtifactSetOptions{
+			ProjectPath: *projectPath, ArtifactSetPath: *artifactSetPath, URL: *rawURL,
+			Username: os.Getenv(*usernameEnv), Password: os.Getenv(*passwordEnv),
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(result)
+		}
+		fmt.Printf("uploaded %s %s (%s)\n", result.Product, result.Version, result.ArchiveSHA256)
+		return nil
+	case "pull":
+		flags := flag.NewFlagSet("artifact-set pull", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		projectPath := flags.String("project", "relkit.project.json", "project declaration")
+		rawURL := flags.String("url", "", "immutable CI transfer URL")
+		digest := flags.String("sha256", "", "expected sha256:... archive digest")
+		output := flags.String("out-dir", "", "new ArtifactSet output directory")
+		usernameEnv := flags.String("username-env", "MIRRORS_USERNAME", "optional environment variable containing read username")
+		passwordEnv := flags.String("password-env", "MIRRORS_PASSWORD", "optional environment variable containing read password")
+		jsonOutput := flags.Bool("json", false, "print JSON")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := ops.PullArtifactSet(ctx, ops.PullArtifactSetOptions{
+			ProjectPath: *projectPath, URL: *rawURL, ExpectedSHA256: *digest,
+			OutputDirectory: *output, Username: os.Getenv(*usernameEnv), Password: os.Getenv(*passwordEnv),
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(result)
+		}
+		fmt.Printf("downloaded %s %s (%s) -> %s\n", result.Product, result.Version, result.ArchiveSHA256, result.OutputDirectory)
+		return nil
+	default:
+		return fmt.Errorf("unknown artifact-set command %q", args[0])
+	}
+}
+
+func cmdKey(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("key requires generate or fingerprint")
+	}
+	switch args[0] {
+	case "generate":
+		flags := flag.NewFlagSet("key generate", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		keyID := flags.String("key-id", "", "key identifier")
+		privatePath := flags.String("private", "", "new private key document")
+		publicPath := flags.String("public", "", "new public key document")
+		jsonOutput := flags.Bool("json", false, "print JSON")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := ops.GenerateKeyPair(*keyID, *privatePath, *publicPath)
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(result)
+		}
+		fmt.Printf("generated %s (%s)\npublic: %s\nprivate: %s\n",
+			result.KeyID, result.Fingerprint, result.PublicPath, result.PrivatePath)
+		return nil
+	case "fingerprint":
+		flags := flag.NewFlagSet("key fingerprint", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		publicPath := flags.String("public", "", "public key document")
+		jsonOutput := flags.Bool("json", false, "print JSON")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := ops.FingerprintKey(*publicPath)
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(result)
+		}
+		fmt.Printf("%s %s\n", result.KeyID, result.Fingerprint)
+		return nil
+	default:
+		return fmt.Errorf("unknown key command %q", args[0])
+	}
+}
+
+func cmdRuntimeProfile(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("runtime-profile requires create or publish")
+	}
+	if args[0] == "publish" {
+		flags := flag.NewFlagSet("runtime-profile publish", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		projectPath := flags.String("project", "relkit.project.json", "project declaration")
+		agentURL := flags.String("agent", os.Getenv("RELKIT_AGENT_URL"), "product agent URL")
+		tokenFile := flags.String("token-file", "", "file containing the product upload token")
+		output := flags.String("out", "", "signed Runtime Profile JSON")
+		replace := flags.Bool("replace", false, "atomically replace an existing output")
+		dryRun := flags.Bool("dry-run", false, "sign and validate without publishing")
+		jsonOutput := flags.Bool("json", false, "print JSON")
+		var targets stringList
+		flags.Var(&targets, "to", "publication backend (repeatable)")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		token := strings.TrimSpace(os.Getenv("RELKIT_UPLOAD_TOKEN"))
+		if *tokenFile != "" {
+			raw, err := os.ReadFile(*tokenFile)
+			if err != nil {
+				return err
+			}
+			token = strings.TrimSpace(string(raw))
+		}
+		result, err := ops.PublishRuntimeProfile(ctx, ops.PublishRuntimeProfileOptions{
+			ProjectPath: *projectPath, AgentURL: *agentURL, Token: token, To: targets,
+			DryRun: *dryRun, Output: *output, Replace: *replace,
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(result)
+		}
+		for _, line := range result.Log {
+			fmt.Println(line)
+		}
+		if *dryRun {
+			fmt.Printf("validated Runtime Profile %s sequence %d (dry run)\n", result.Profile.Digest, result.Profile.ProfileVersion)
+		} else {
+			fmt.Printf("published Runtime Profile %s sequence %d -> %s\n", result.Profile.Digest, result.Profile.ProfileVersion, *output)
+		}
+		return nil
+	}
+	if args[0] != "create" {
+		return fmt.Errorf("unknown runtime-profile command %q", args[0])
 	}
 	flags := flag.NewFlagSet("runtime-profile create", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)

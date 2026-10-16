@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -760,7 +761,7 @@ func makeVNextAgentFixture(t *testing.T, options vNextFixtureOptions) *agentFixt
 	}
 	artifacts := artifactset.Document{
 		Schema: artifactset.Schema, ResolutionDigest: resolved.Digest,
-		Product: "demo", Version: "1.0.0", Channel: "dev",
+		Product: "demo", Version: "1.0.0", ReleaseCode: 1, Channel: "dev",
 	}
 	for _, spec := range specs {
 		artifactPath := filepath.Join(inputRoot, filepath.FromSlash(spec.Path))
@@ -930,6 +931,86 @@ func (f *agentFixture) publish(t *testing.T, body string) (int, []byte) {
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, out
+}
+
+func TestMergeVNextPublishConfigDerivesStandardDirectoryURLs(t *testing.T) {
+	productDocument := project.Document{
+		Schema: project.Schema, Product: "demo", Channels: []string{"dev", "stable"},
+	}
+	profile := &config.PublishProfile{
+		Product: "demo",
+		Signing: config.PublishSigningProfile{
+			PublicKeys: []config.PublicKeyConfig{{KeyID: "k1", PublicKeyBase64: base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))}},
+		},
+		Backends: map[string]map[string]any{
+			"primary": {"type": "relkit-compatible", "baseUrl": "https://updates.example.invalid/root"},
+		},
+		PublishTo: []string{"primary"},
+		Directory: &config.PublishDirectoryProfile{
+			PublishTo: []string{"primary"},
+		},
+	}
+	cfg, err := mergeVNextPublishConfig(&productDocument, profile, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.Directory.EntryURLs, []string{"https://updates.example.invalid/root/directory/demo.pb"}; !slices.Equal(got, want) {
+		t.Fatalf("entry URLs=%v, want %v", got, want)
+	}
+	if len(cfg.Directory.Services) != 2 {
+		t.Fatalf("services=%+v", cfg.Directory.Services)
+	}
+	if cfg.Directory.Services[0].IndexURL != "https://updates.example.invalid/root/index/demo/dev.pb" ||
+		cfg.Directory.Services[1].IndexURL != "https://updates.example.invalid/root/index/demo/stable.pb" {
+		t.Fatalf("services=%+v", cfg.Directory.Services)
+	}
+}
+
+func TestAgentBootstrapsRuntimeProfileWithoutExposingPrivateKey(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{runtimeProfile: true})
+	payload, err := json.Marshal(runtimeProfileRequest{
+		Product: "demo", Project: fx.vNextProject,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/runtime-profile", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	req.Header.Set("Content-Type", "application/json")
+	publishproto.Apply(req.Header)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+	}
+	var result struct {
+		OK                bool                    `json:"ok"`
+		Profile           runtimeprofile.Document `json:"profile"`
+		DirectorySequence int64                   `json:"directorySequence"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || result.Profile.Product != "demo" || result.DirectorySequence < 1 {
+		t.Fatalf("result=%+v", result)
+	}
+	publicKey := ed25519.NewKeyFromSeed(fx.signingSeed).Public().(ed25519.PublicKey)
+	if err := result.Profile.Verify(map[string]ed25519.PublicKey{"k1": publicKey}); err != nil {
+		t.Fatalf("profile signature: %v", err)
+	}
+	if !fx.ingest.hasPrefix("runtime-profile/demo/") {
+		t.Fatal("Runtime Profile immutable object was not published")
+	}
+	if rawDirectory := fx.ingest.get("directory/demo.pb"); len(rawDirectory) == 0 {
+		t.Fatal("directory pointer was not published")
+	}
+	if bytes.Contains(raw, fx.signingSeed) || bytes.Contains(raw, []byte("private.pb")) {
+		t.Fatal("Runtime Profile response exposed private signing material")
+	}
 }
 
 func TestAgentRejectsReleasePolicyProductMismatch(t *testing.T) {
