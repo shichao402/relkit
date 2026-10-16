@@ -90,6 +90,48 @@ func TestEscapeAuditEmitsReviewAndReleaseReports(t *testing.T) {
 	}
 }
 
+func TestEmitCertificationReportJSONPreservesFailedExit(t *testing.T) {
+	report := &ops.CertificationReport{
+		Schema:          ops.CertificationReportSchema,
+		CandidateDigest: "sha256:failed",
+		Passed:          false,
+	}
+	output, err := captureOpsStdout(t, func() error {
+		return emitCertificationReport(report, true)
+	})
+	if err == nil {
+		t.Fatal("failed JSON certification report returned success")
+	}
+	var decoded ops.CertificationReport
+	if err := json.Unmarshal(output, &decoded); err != nil {
+		t.Fatalf("decode certification report: %v\n%s", err, output)
+	}
+	if decoded.Passed {
+		t.Fatalf("certification report=%+v", decoded)
+	}
+}
+
+func TestEmitCertificationReportJSONReturnsSuccessForPassingReport(t *testing.T) {
+	report := &ops.CertificationReport{
+		Schema:          ops.CertificationReportSchema,
+		CandidateDigest: "sha256:passed",
+		Passed:          true,
+	}
+	output, err := captureOpsStdout(t, func() error {
+		return emitCertificationReport(report, true)
+	})
+	if err != nil {
+		t.Fatalf("passing JSON certification report: %v", err)
+	}
+	var decoded ops.CertificationReport
+	if err := json.Unmarshal(output, &decoded); err != nil {
+		t.Fatalf("decode certification report: %v\n%s", err, output)
+	}
+	if !decoded.Passed {
+		t.Fatalf("certification report=%+v", decoded)
+	}
+}
+
 func captureOpsStdout(t *testing.T, call func() error) ([]byte, error) {
 	t.Helper()
 	output, err := os.CreateTemp(t.TempDir(), "stdout-*.json")
