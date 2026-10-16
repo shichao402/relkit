@@ -306,6 +306,15 @@ func Install(options InstallOptions) (*resolution.Document, error) {
 	if err := writeImmutableEqual(filepath.Join(root, ".relkit", "resolution.json"), bundle.Resolution); err != nil {
 		return nil, err
 	}
+	if bundle.Resolution.Identity == resolution.IdentityCandidate {
+		if err := writeTextAtomic(
+			filepath.Join(root, ".relkit", "candidate-root-fingerprint"),
+			[]byte(options.CandidateRootFingerprint+"\n"),
+			0o644,
+		); err != nil {
+			return nil, err
+		}
+	}
 	return &bundle.Resolution, nil
 }
 
@@ -371,6 +380,30 @@ func copyBlobAtomic(source, destination, expected string, mode os.FileMode) erro
 		return err
 	}
 	return fsx.Replace(temporaryPath, destination)
+}
+
+func writeTextAtomic(path string, data []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(mode); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return fsx.Replace(temporaryPath, path)
 }
 
 func writeImmutableEqual(path string, value any) error {

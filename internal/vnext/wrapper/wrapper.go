@@ -122,6 +122,11 @@ fi
 
 export RELKIT_EXPECTED_ROOT_FINGERPRINT="$EXPECTED_ROOT"
 export RELKIT_PROJECT="$PROJECT"
+CANDIDATE_ROOT_FILE="$ROOT/.relkit/candidate-root-fingerprint"
+if [ -z "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ] && [ -f "$CANDIDATE_ROOT_FILE" ]; then
+  IFS= read -r RELKIT_CANDIDATE_ROOT_FINGERPRINT < "$CANDIDATE_ROOT_FILE"
+  export RELKIT_CANDIDATE_ROOT_FINGERPRINT
+fi
 if [ "${RELKIT_REFRESH_RESOLUTION:-0}" = "1" ]; then
   if [ -n "$CANDIDATE" ]; then
     "$BOOTSTRAP" resolve --project "$PROJECT" --out "$RESOLUTION" --candidate "$CANDIDATE" --replace
@@ -145,8 +150,10 @@ if [ -f "$GO_MODFILE" ]; then
 fi
 SELECTED="$ROOT/.relkit/components/bin/relkit"
 if [ ! -x "$SELECTED" ]; then
-  echo "relkitw: selected CLI was not materialized at $SELECTED" >&2
-  exit 2
+  # The current machine may be an operator/developer host outside the
+  # product's declared release targets. The verified bootstrap remains the
+  # control-plane CLI for that host.
+  SELECTED="$BOOTSTRAP"
 fi
 export RELKIT_CORE="$SELECTED"
 exec "$SELECTED" "$@"
@@ -166,6 +173,7 @@ if not "%%CANDIDATE%%"=="" set "RESOLUTION=%%ROOT%%.relkit\candidate\resolution.
 set "RELKIT_EXPECTED_ROOT_FINGERPRINT=%s"
 set "RELKIT_PROJECT=%%PROJECT%%"
 set "OPERATOR_HASH=%s"
+if "%%RELKIT_CANDIDATE_ROOT_FINGERPRINT%%"=="" if exist "%%ROOT%%.relkit\candidate-root-fingerprint" set /p RELKIT_CANDIDATE_ROOT_FINGERPRINT=<"%%ROOT%%.relkit\candidate-root-fingerprint"
 
 if not "%%RELKIT_BOOTSTRAP_CLI%%"=="" (
   set "BOOTSTRAP=%%RELKIT_BOOTSTRAP_CLI%%"
@@ -202,8 +210,8 @@ set "GO_MODFILE=%%ROOT%%.relkit\components\sdk\go\relkit.mod"
 if exist "%%GO_MODFILE%%" set "GOFLAGS=-modfile=.relkit\components\sdk\go\relkit.mod %%GOFLAGS%%"
 set "SELECTED=%%ROOT%%.relkit\components\bin\relkit.exe"
 if not exist "%%SELECTED%%" (
-  echo relkitw: selected CLI was not materialized at %%SELECTED%% 1>&2
-  exit /b 2
+  REM The current machine may be outside the product's release targets.
+  set "SELECTED=%%BOOTSTRAP%%"
 )
 set "RELKIT_CORE=%%SELECTED%%"
 "%%SELECTED%%" %%*
