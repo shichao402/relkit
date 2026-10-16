@@ -137,6 +137,7 @@ func TestRunRejectsModuleFacadeWithoutPinnedH1(t *testing.T) {
 
 func TestRunCreatesVerifiedTemporaryGoModOverlay(t *testing.T) {
 	root := t.TempDir()
+	t.Chdir(t.TempDir())
 	originalMod := "module example.com/host\n\ngo 1.24\n"
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(originalMod), 0o644); err != nil {
 		t.Fatal(err)
@@ -260,6 +261,7 @@ func TestRunCreatesVerifiedTemporaryGoModOverlay(t *testing.T) {
 
 func TestInstallGoArchiveOverlayUsesMaterializedSDK(t *testing.T) {
 	root := t.TempDir()
+	t.Chdir(t.TempDir())
 	originalMod := "module example.com/host\n\ngo 1.24\n"
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(originalMod), 0o644); err != nil {
 		t.Fatal(err)
