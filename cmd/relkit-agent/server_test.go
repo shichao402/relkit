@@ -1284,6 +1284,7 @@ func TestVNextVerifyReleasedReadsConsumerVisibleDocuments(t *testing.T) {
 	findings, err := verify.RunReleasedHTTP(t.Context(), verify.ReleasedHTTPOptions{
 		Product: "demo", Channel: "dev", Version: "1.0.0",
 		ConsumerBaseURL: fx.ingest.URL,
+		DirectoryURL:    fx.ingest.URL,
 		TrustedProductRoots: map[string]ed25519.PublicKey{
 			"k1": publicKey,
 		},

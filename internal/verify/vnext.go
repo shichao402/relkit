@@ -18,7 +18,7 @@ type ReleasedHTTPOptions struct {
 	Channel              string
 	Version              string
 	ConsumerBaseURL      string
-	DirectoryURL         string
+	DirectoryURL         string // Base URL of the consumer-visible directory service.
 	TrustedProductRoots  map[string]ed25519.PublicKey
 	ResolutionDigest     string
 	OperatorDeploymentID string
@@ -86,8 +86,9 @@ func RunReleasedHTTP(ctx context.Context, options ReleasedHTTPOptions) (*Finding
 
 	directoryURL := options.DirectoryURL
 	if directoryURL == "" {
-		directoryURL = objectURL(options.ConsumerBaseURL, model.DirectoryKey(options.Product))
+		directoryURL = options.ConsumerBaseURL
 	}
+	directoryURL = objectURL(directoryURL, model.DirectoryKey(options.Product))
 	directoryRaw, err := fetchConsumer(ctx, client, directoryURL)
 	if err != nil {
 		findings.Error(err.Error())
