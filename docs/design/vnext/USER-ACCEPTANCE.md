@@ -98,7 +98,8 @@
 | B2 | | 连**滚动**服务 → 只用已认证且合同匹配的最新套件 | `latest-compatible` 选择记录 + catalog certified 证明 | 通过 |
 | B3 | **阻断** | **一次 CI 内版本钉死**；install/build/各平台/publish 同一份 resolution | 多 Job 共用同一 resolution 文件；digest 全程一致 | 通过 |
 | B4 | | 记录能回答「这次到底用了哪版、哪些摘要」，不能只写 latest | 发布 provenance / resolution 存档 | 通过 |
-| B5 | | 生产 pin 住的项目仍能在 **candidate 车道**提前试下一次升级 | 同仓 production 绿 + candidate 红/绿独立报告 | 通过 |
+| B5 | | 连接 `exact` Operator 的项目仍能在 **candidate 车道**提前试下一次升级 | 同仓 production 绿 + candidate 红/绿独立报告 | 通过 |
+| B6 | | 紧急回退改 Operator 服务/Profile 或切 `exact`，不往业务仓塞临时 Relkit pin | project 无版本字段 + Operator 回滚审计 | 通过 |
 
 **白话**：版本跟「你连的那台服务器」走；流水线中间不会偷偷换成另一版；想提前踩坑走 candidate，不污染生产。
 

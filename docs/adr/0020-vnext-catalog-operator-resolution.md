@@ -58,16 +58,26 @@ Operator Profile 是服务器现场权威，由 relkit-ops 从实际部署生成
 | `exact` | 固定自建、版本钉死的服务器 | 项目必须使用 Profile 声明的精确 server distribution |
 | `latest-compatible` | 愿意滚动且声明合同的托管/滚动服务 | 从 certified catalog 选最新且 `requires/provides` 相交的完整 distribution |
 
+这里拒绝 v0.5 的反模式：各宿主仓分别保存一个 Relkit 版本，升级时才发现每个 pin 都已
+依赖不同的宿主特判。共享同一 Operator 的项目必须共享该 Operator 的选择策略；升级风险
+通过独立 candidate lane 持续暴露，不能靠长期分仓 pin 推迟到下一次人工升级。
+
 无作用域裸 `latest` 不存在。运维命令 `relkit-ops upgrade <operator> --to latest` 中的 latest 仅表示“选最新 certified release 作为服务器升级目标”；升级完成后 Profile 仍记录精确 server version 与合同向量。
 
 也不存在 `fleet-latest` 这类全局产品版本。所有版本选择都以目标 Operator 为作用域：
 
-- 固定自建部署的 `exact` 是部署事实；连接该部署的项目自然得到同一精确 distribution，
-  不是各项目分别维护 pin
-- `latest-compatible` 是 `latest-compatible(operator)`，不是“全世界最新”
-- 若 Operator 要求客户端与服务整套同版，结果等于服务器版本；若公开了兼容窗口，
-  resolver 可以选择更新但合同相交的完整客户端 distribution
+- 固定自建部署的 `exact` 是部署事实；连接该部署的项目得到 Profile 声明的同一**完整**
+  distribution，包括 CLI、updater、facade 与服务组件；resolver 不自动抬升其中某个
+  客户端组件。服务器升级时先原子签发新的 Profile，再重新 resolve
+- `latest-compatible` 是 `latest-compatible(operator)`，不是“全世界最新”；它可以在
+  Operator 公布的合同窗口内选择比当前 server release 更新的 certified **完整**
+  distribution，但仍禁止逐组件混版
 - 无论哪种策略，解析结果都立即冻结为 immutable resolution；`latest` 不能在流水线中再次求值
+
+不存在额外的项目级 “emergency pin”。事故回退由 Operator 恢复旧服务/Profile，或把
+部署策略切为 `exact`；运维 inventory 记录原因、责任人与复核时间。固定自建部署可以
+长期保持 `exact`，临时事故 pin 则在复核后由 Operator 升级流程解除，产品仓始终不新增
+Relkit 版本字段。
 
 #### 发现与多环境
 

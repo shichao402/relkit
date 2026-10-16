@@ -12,6 +12,17 @@
 | `updaterIpc` | language facade | updater sidecar | `proto/updater/v1`，现网 lock 常见 `[3,3]` | inclusive `[min,max]`；无交集 tooOld/tooNew |
 | `artifactSet` | artifact producer | release core | `relkit.artifact-set/1` | schema 版本相等或声明兼容 |
 
+## Directory URL 推导属于合同
+
+Operator publish profile 可以只声明 relkit-compatible `baseUrl`。Agent 合并配置时必须用
+URL 语义推导 `directory/<product>.pb` 与 `index/<product>/<channel>.pb`，并保留 base URL
+已有的 path prefix；不能依赖末尾恰好有 `/`，也不能让宿主长期手填完整 URL 绕过推导。
+
+该行为是所有 RUP 消费者共用的跨宿主合同，不是某个产品的集成细节。conformance 锚点为
+`cmd/relkit-agent/server_test.go` 的
+`TestMergeVNextPublishConfigDerivesStandardDirectoryURLs`，覆盖根路径、path prefix 和
+尾斜杠组合；修改 merge 逻辑时必须同步更新该测试，生产逃逸则登记中央回归。
+
 ## 作用域（强制）
 
 每条 requirement 必须带 peer/domain，禁止裸 capability。

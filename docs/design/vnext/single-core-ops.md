@@ -37,6 +37,21 @@ Skill ──► 只编排上述命令，不实现第二套 schema/gates
 | producer 制品内容 | 发布事务、directory/index | Profile 签发与升级 |
 | 检查更新时机 | facade/projection 合同 | CI adapter / fleet 登记 |
 
+宿主与 Relkit 只有四条正式交界面：
+
+1. **工具消费**：宿主声明能力与逻辑 `operatorRef`；wrapper、Catalog/Profile 与 resolution
+   决定实际工具链。宿主可选择 Operator，不能复制 bootstrap、改 resolution 或单独钉 CLI。
+2. **制品发布**：producer 是业务客制化入口，只返回 ArtifactSet；Relkit 负责 merge、
+   stage、签名、发布事务和消费者读回。宿主可决定制品内容，不能直接写 index/directory。
+3. **运行时订阅**：宿主决定订阅哪些产品、UI 和检查时机；受信 Runtime Profile、
+   canonical facade 与 updater 状态机决定 URL、密钥和 apply。宿主不能复制 DTO 或另写 updater。
+4. **机器运维**：ops inventory、CI/deploy/mirror adapter 可适配现场；Operator Profile、
+   凭据、服务升级和认证域不进入产品仓，也不能反向改变业务制品。
+
+允许的客制化必须落在 project/producer/extension/ops adapter 的版本化合同中。凡是需要
+修改签名对象、resolution、发布事务、updater 状态机，或在 core 判断仓库名的需求，都不在
+允许范围内；应先补通用能力合同和组合测试。
+
 ## Skill 与用户交互
 
 Skill 不能把内部架构问题转交给产品使用者逐项拍板。默认流程是：

@@ -9,7 +9,7 @@
 | --- | --- |
 | [USER-ACCEPTANCE.md](USER-ACCEPTANCE.md) | **唯一推荐审查入口**：检查项、产品侧承诺、证据、一票否决 |
 | [representative-scenarios.md](representative-scenarios.md) | 能力维度与三个匿名场景；四仓仅作样本映射 |
-| [cutover.md](cutover.md) | Candidate→Production 顺序、认证域隔离、提交待确认与回滚 |
+| [cutover.md](cutover.md) | **唯一生产 runbook**：Candidate→Production、认证域隔离、提交待确认与回滚 |
 | [first-production-rollout.md](first-production-rollout.md) | 首次真实生产推进的事实、设计结论与通用缺口 |
 | [single-core-ops.md](single-core-ops.md) | core / wrapper / ops / Skill 职责与生产控制面命令 |
 | [schemas/](schemas/) | `project` / `operator-profile` / `resolution` / `artifact-set` / `runtime-profile` / `extension` 草案 |
