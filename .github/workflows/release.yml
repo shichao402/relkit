@@ -1,6 +1,7 @@
 name: Release artifacts
 
 on:
+  pull_request:
   push:
     tags:
       - "v*"
@@ -80,6 +81,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
   release:
+    if: github.event_name == 'push'
     needs: [test, universal]
     runs-on: ubuntu-latest
     steps:
