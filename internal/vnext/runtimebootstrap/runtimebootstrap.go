@@ -6,6 +6,7 @@ package runtimebootstrap
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"fmt"
 	"sort"
 
@@ -18,7 +19,7 @@ const Schema = "relkit.runtime-bootstrap/1"
 
 type TrustedKey struct {
 	KeyID string `json:"keyId"`
-	Key   []byte `json:"key"`
+	Key   string `json:"key"`
 }
 
 type Document struct {
@@ -38,7 +39,10 @@ func New(
 ) (*Document, error) {
 	keys := make([]TrustedKey, 0, len(roots))
 	for keyID, key := range roots {
-		keys = append(keys, TrustedKey{KeyID: keyID, Key: append([]byte(nil), key...)})
+		keys = append(keys, TrustedKey{
+			KeyID: keyID,
+			Key:   base64.StdEncoding.EncodeToString(key),
+		})
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i].KeyID < keys[j].KeyID })
 	value := &Document{
@@ -83,17 +87,21 @@ func (d Document) Validate() error {
 		if previous != "" && key.KeyID <= previous {
 			return fmt.Errorf("trustedKeys must be unique and sorted by keyId")
 		}
-		if len(key.Key) != ed25519.PublicKeySize {
+		raw, err := base64.StdEncoding.DecodeString(key.Key)
+		if err != nil {
+			return fmt.Errorf("trusted key %q is not base64: %w", key.KeyID, err)
+		}
+		if len(raw) != ed25519.PublicKeySize {
 			return fmt.Errorf("trusted key %q must contain a %d-byte ed25519 key", key.KeyID, ed25519.PublicKeySize)
 		}
-		fingerprint, err := trust.Fingerprint(ed25519.PublicKey(key.Key))
+		fingerprint, err := trust.Fingerprint(ed25519.PublicKey(raw))
 		if err != nil {
 			return err
 		}
 		if fingerprint != d.RootFingerprint {
 			return fmt.Errorf("trusted key %q fingerprint %s does not match rootFingerprint %s", key.KeyID, fingerprint, d.RootFingerprint)
 		}
-		roots[key.KeyID] = ed25519.PublicKey(append([]byte(nil), key.Key...))
+		roots[key.KeyID] = ed25519.PublicKey(append([]byte(nil), raw...))
 		previous = key.KeyID
 	}
 	if err := d.Profile.Verify(roots); err != nil {
