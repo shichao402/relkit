@@ -155,3 +155,179 @@ esac
 		t.Fatalf("selected CLI did not run from project root with original args:\n%s", logText)
 	}
 }
+
+func TestGeneratedWindowsWrapperUsesSafeRootAndHardFailures(t *testing.T) {
+	script := cmdScript("relkit.project.json", "sha256:"+strings.Repeat("d", 64), "operator")
+	if !strings.Contains(script, `set "PROJECT_ROOT=%ROOT%."`) {
+		t.Fatal("Windows wrapper does not remove the trailing separator from executable arguments")
+	}
+	if !strings.Contains(script, `--project-root "%PROJECT_ROOT%"`) {
+		t.Fatal("Windows wrapper does not pass the safe project root")
+	}
+	if strings.Contains(script, `|| exit /b %errorlevel%`) {
+		t.Fatal("Windows wrapper expands a stale errorlevel on the same command line")
+	}
+}
+
+func TestGeneratedWindowsWrapperRunsAndPropagatesMaterializeFailure(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows command-line parsing is covered on Windows runners")
+	}
+	root := filepath.Join(t.TempDir(), "project with spaces")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	value := project.Document{
+		Schema:           project.Schema,
+		Product:          "demo",
+		OperatorRef:      "prod",
+		TrustFingerprint: "sha256:" + strings.Repeat("e", 64),
+		Roles:            []project.Role{project.RoleUpdaterHost},
+		CapabilityFingerprint: project.CapabilityFingerprint{
+			OSArch:   []string{"windows-amd64"},
+			Facades:  []string{"go"},
+			Topology: "self-update",
+		},
+	}
+	projectPath := filepath.Join(root, "relkit.project.json")
+	if err := document.Write(projectPath, value); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Generate(Options{ProjectPath: projectPath, OutputDir: root}); err != nil {
+		t.Fatal(err)
+	}
+
+	helperSource := filepath.Join(t.TempDir(), "main.go")
+	helperBinary := filepath.Join(filepath.Dir(helperSource), "fake-bootstrap.exe")
+	const helper = `package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+)
+
+func value(name string) string {
+	for index := 1; index+1 < len(os.Args); index++ {
+		if os.Args[index] == name {
+			return os.Args[index+1]
+		}
+	}
+	return ""
+}
+
+func appendLog(line string) {
+	file, err := os.OpenFile(os.Getenv("WRAPPER_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	fmt.Fprintln(file, line)
+}
+
+func copySelf(destination string) {
+	sourcePath, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		panic(err)
+	}
+	defer source.Close()
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		panic(err)
+	}
+	output, err := os.Create(destination)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := io.Copy(output, source); err != nil {
+		output.Close()
+		panic(err)
+	}
+	if err := output.Close(); err != nil {
+		panic(err)
+	}
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		os.Exit(90)
+	}
+	switch os.Args[1] {
+	case "resolve":
+		output := value("--out")
+		if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(output, []byte("{}\n"), 0o644); err != nil {
+			panic(err)
+		}
+	case "doctor":
+	case "materialize":
+		root := value("--project-root")
+		appendLog("materialize-root=" + root)
+		if os.Getenv("FAIL_MATERIALIZE") == "1" {
+			os.Exit(37)
+		}
+		copySelf(filepath.Join(root, ".relkit", "components", "bin", "relkit.exe"))
+	case "probe":
+		appendLog("selected=" + fmt.Sprint(os.Args[1:]))
+	default:
+		os.Exit(91)
+	}
+}
+`
+	if err := os.WriteFile(helperSource, []byte(helper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", "build", "-o", helperBinary, helperSource)
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build helper: %v\n%s", err, output)
+	}
+
+	logPath := filepath.Join(root, "calls.log")
+	run := func(fail bool) error {
+		commandLine := `call "` + filepath.Join(root, "relkitw.cmd") + `" probe two`
+		command := exec.Command("cmd.exe", "/d", "/c", commandLine)
+		command.Env = append(os.Environ(),
+			"RELKIT_BOOTSTRAP_CLI="+helperBinary,
+			"WRAPPER_LOG="+logPath,
+		)
+		if fail {
+			command.Env = append(command.Env, "FAIL_MATERIALIZE=1")
+		}
+		output, err := command.CombinedOutput()
+		if err != nil && !fail {
+			t.Fatalf("wrapper failed: %v\n%s", err, output)
+		}
+		return err
+	}
+	if err := run(true); err == nil {
+		t.Fatal("materialize failure was reported as success")
+	}
+	if err := run(false); err != nil {
+		t.Fatal(err)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var materializedRoot string
+	for _, line := range strings.Split(string(logData), "\n") {
+		if strings.HasPrefix(line, "materialize-root=") {
+			materializedRoot = strings.TrimPrefix(line, "materialize-root=")
+		}
+	}
+	if strings.Contains(materializedRoot, `"`) {
+		t.Fatalf("project root contains a stray quote: %q", materializedRoot)
+	}
+	if filepath.Clean(materializedRoot) != filepath.Clean(root) {
+		t.Fatalf("project root = %q, want %q", materializedRoot, root)
+	}
+	if !strings.Contains(string(logData), "selected=[probe two]") {
+		t.Fatalf("selected CLI did not receive original arguments:\n%s", logData)
+	}
+}
