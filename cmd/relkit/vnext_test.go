@@ -203,3 +203,34 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 		t.Fatalf("doctor through wrapper-provided project context: %v", err)
 	}
 }
+
+func TestReleasedVerificationScenarioRecoversProductRootFromInstalledRuntimeProfile(t *testing.T) {
+	productDocument := project.Document{
+		Product: "demo",
+		RuntimeProfilePublication: &project.RuntimeProfilePublication{
+			RootFingerprint: "sha256:" + strings.Repeat("a", 64),
+			RUPSchemaSet:    "rup.v2",
+		},
+	}
+	mapping := &bootstrap.Document{
+		ProductRoots: map[string][]string{
+			"demo": {"/keys/product.public.pb"},
+		},
+		RuntimeProfiles: map[string]bootstrap.RuntimeProfile{
+			"demo": {Roots: []string{"/keys/runtime.public.pb"}},
+		},
+	}
+	if got := releaseProductRootPaths(mapping, &productDocument); len(got) != 1 || got[0] != "/keys/product.public.pb" {
+		t.Fatalf("explicit Product RUP Root = %v", got)
+	}
+
+	delete(mapping.ProductRoots, "demo")
+	if got := releaseProductRootPaths(mapping, &productDocument); len(got) != 1 || got[0] != "/keys/runtime.public.pb" {
+		t.Fatalf("Runtime Profile Root fallback = %v", got)
+	}
+
+	productDocument.RuntimeProfilePublication = nil
+	if got := releaseProductRootPaths(mapping, &productDocument); len(got) != 0 {
+		t.Fatalf("subscriber-only project unexpectedly reused Runtime Profile Root: %v", got)
+	}
+}

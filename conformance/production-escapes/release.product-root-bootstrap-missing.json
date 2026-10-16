@@ -1,0 +1,23 @@
+{
+  "schema": "relkit.production-escape/1",
+  "code": "release.product_root_bootstrap_missing",
+  "category": "generic",
+  "stage": "verify-released",
+  "capability": "product-root-provisioning",
+  "crossComponent": true,
+  "symptom": "A production release committed successfully, but verify released rejected the installed offline bundle because its Product RUP Root was available only through the same-product Runtime Profile mapping.",
+  "whyGateMissed": "Offline bundle and resolver tests verified Runtime Profile trust, while released-state tests supplied Product RUP roots directly and never exercised the bootstrap mapping written by bundle install.",
+  "earliestDetection": "Install a production bundle whose publisher reuses its Product RUP Root as the Runtime Profile Root, then run released-state verification without an explicit --product-root override.",
+  "evidence": [
+    {
+      "path": "cmd/relkit/vnext_test.go",
+      "symbol": "TestReleasedVerificationScenarioRecoversProductRootFromInstalledRuntimeProfile",
+      "kind": "scenario"
+    }
+  ],
+  "fix": {
+    "pr": 54,
+    "commit": "6275f992fea686350200e4702241a043bad9171b",
+    "release": "v0.6.15"
+  }
+}
