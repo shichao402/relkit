@@ -24,6 +24,24 @@
    与完整 bundle；内网 Catalog 未随之晋升。
 8. control-plane auxiliary Release 一度成为 GitHub Latest，可能污染下一次正式 release
    的 baseline；已改为 prerelease，并把正式基线筛选收紧为 `vX.Y.Z`。
+9. Dec `dev/v1.13.137` 已完成远端提交，但 CI 的最终读回暴露：离线 bundle 只把 Product
+   Root 放在 Runtime Profile mapping，而 `verify released` 只查可选 `productRoots`。
+   已提交的 tag 没有移动或重跑，修复按 fix-forward 进入 Relkit v0.6.15 与 Dec v1.13.138。
+10. v0.6.15 新增真实 bundle install → bootstrap → released-state 回归；公网 Dec-only
+    fleet 在干净候选 commit 上重新 full certification，并将同一 distribution 晋升 certified。
+11. 公网 agent/store 原子升级到 v0.6.15，既有 Dec production policy 保持不变；
+    v1.13.138 的 dev/stable 流水线均从同一 production resolution 安装工具链。
+12. 流水线成功不等于客户端更新成功。最终三组件 `check → download → apply` smoke 在
+    updater 打开阶段发现：实际生成的 `relkit.runtime-bootstrap/1` 把
+    `trustedKeys[].key` 编码成数字数组，而正式 Schema 与公开 Go/Rust SDK 要求
+    canonical base64 字符串。v1.13.138 tag 与已发布记录保持不动，不能算最终生产验收通过。
+13. 既有门禁分别验证了控制面内部模型和手写 SDK fixture，却没有把**实际生成的 JSON**
+    送入公开 SDK。这是测试边界分裂，不是某个宿主的特殊问题。
+14. 修复按 immutable fix-forward 进入 Relkit v0.6.16 与 Dec v1.13.139：生成器改用
+    canonical base64，控制面在验证时 decode 后检查长度、fingerprint 与签名，并新增
+    `TestGeneratedRuntimeBootstrapMatchesPublicSDK`。同一 Candidate commit 重新执行
+    production escape audit、公网 Dec-only full certification、Catalog 晋升、production
+    resolution/bundle、服务升级、dev/stable 发布与真实三组件更新。
 
 ## 设计结论
 
@@ -79,6 +97,27 @@ Product RUP Root 验证产品数据。旧环境变量或 bootstrap mapping 可�
 用户只需从产品和接入产品角度验收。Skill 先从结构化命令读取事实，只询问真实业务选择，
 不把信任根、fleet、schema 等内部默认逐项交给用户拍板；同时也不保存第二套门禁账本。
 
+### 9. Product Root 必须从真实安装结果取证
+
+`Runtime Profile Root` 默认复用对应的 `Product RUP Root`。离线 bundle 安装后，
+这个公钥可能以 Runtime Profile mapping 的形式存在，而不一定同时复制为另一份
+`productRoots` mapping。`verify released` 必须优先使用显式 Product Root；publisher
+声明复用且显式 mapping 缺失时，才回退到同产品 Runtime Profile roots，并继续按
+`runtimeProfilePublication.rootFingerprint` 校验。
+
+门禁不能只在测试中直接传 `--product-root`，否则会绕过 bundle install → bootstrap →
+wrapper → released-state verify 的真实链路。至少保留一条不带显式 root override 的场景回归。
+
+### 10. 生成物才是跨组件合同的最终证据
+
+控制面类型能 marshal、SDK 能解析手写 fixture，两项同时通过仍不能证明互操作。
+凡是公开给 wrapper、SDK、updater 或宿主 CI 的 JSON/Protobuf，都必须保留一条
+“正式生成器 → 落盘字节 → 公开消费者”的 conformance。Schema 中表示字节的字段必须明确
+规定 canonical 编码；不能依赖 Go 默认 JSON 编码、内部类型或另一份手写样例恰好一致。
+
+发布流水线绿只能证明 ArtifactSet 与发布事务完成；最终生产门禁仍须从签发的 Runtime
+Bootstrap 启动真实 updater，至少执行一次 `check → download → apply → --version`。
+
 ## 首次推进暴露的通用缺口
 
 | 现象 | 最早应拦截的位置 | 持久处理 |
@@ -88,10 +127,17 @@ Product RUP Root 验证产品数据。旧环境变量或 bootstrap mapping 可�
 | 本机旧 root 造成误导性 policy 错误 | inspect/doctor | 输出 resolution authority、实际 root 来源与 Product RUP mapping |
 | 内网噪声阻塞公网推进 | certification domain 选择 | Catalog/fleet/report 按 Operator 域隔离，延期不越域 |
 | auxiliary Release 抢占正式 baseline | tag release gate | auxiliary 标 prerelease；基线只接受 `vX.Y.Z` |
+| macOS Bash 3.2 在 `set -u` 下展开空可选参数数组失败 | 宿主 CI adapter 的跨平台门禁 | 构造始终非空的完整 argv；Candidate Root 存在/缺失两条路径都在实际 Linux/macOS shell 执行 |
+| 测试直接传 Product Root，掩盖离线 bundle 的真实 bootstrap mapping | released-state 场景门禁 | 安装真实 bundle 后不带 root override 验证；显式 Product Root 优先，publisher 才允许复用同产品 Runtime Profile Root |
+| 生成的 Runtime Bootstrap key 是数字数组，但公开 SDK 只接受 base64 | 生成器→公开 SDK conformance | Schema 固定 canonical base64；实际生成 JSON 必须被公开 Go SDK 解析并完成签名/fingerprint 校验 |
+| dev/stable CI 全绿，却未执行真实 updater apply | 最终产品验收 | CI 后从签发 bootstrap 对所有 runtime component 执行 `check → download → apply → --version` |
+| 已推送的 dev tag 失败后想原地补跑 | immutable release 输入 | 不移动、不覆写旧 tag；修复后提升产品版本并创建新 tag |
 | 复杂问题全部抛给使用者 | Skill questions | 先取证并采用安全默认，只展示可观察结果与回滚 |
 
 ## 状态
 
-截至本文首次提交，公网 production Catalog 与 bundle 已就绪；Agent production policy、
-Dec stable 发布、真实更新/回滚仍需按 [使用者验收](USER-ACCEPTANCE.md) 闭合。完成后只更新
-真实证据，不改写上述设计边界。
+公网 `firoyang-public` + Dec 认证域已以 Relkit v0.6.16 / Dec v1.13.139 完成
+production Catalog、Operator、bundle、服务二进制、dev/stable 发布和三个 runtime
+component 的真实更新验收；证据见 [使用者验收](USER-ACCEPTANCE.md)。v0.6.15 /
+v1.13.138 保留为不可变逃逸证据，不是最终通过版本。Loom 系列与 SvnMergeTool 的内网
+生产验证仍延期，且不由本次公网结论代验。

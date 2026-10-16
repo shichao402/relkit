@@ -6,7 +6,9 @@
 > 实现完成后，每项用真实命令/CI/运行结果打勾；**只有设计文档不算通过**。
 
 状态约定：`通过` / `不通过` / `不适用`。  
-当前阶段（2026-10-16 实现验收）：A–I 全部通过。这里的「通过」指实现、合同测试和本机宿主验收已闭合；生产 Operator 切换、远端发布和目标平台正式发布仍按正常发布窗口执行，不属于本次本地验收的写操作。
+2026-10-16 的实现验收中 A–I 全部通过；2026-10-17 又完成公网
+`firoyang-public` + Dec 生产窗口。Loom 系列与 SvnMergeTool 的内网生产状态不在本次
+公网结论内。
 
 ---
 
@@ -33,31 +35,42 @@
 
 ---
 
-## 2026-10-17 公网生产窗口（进行中）
+## 2026-10-17 公网生产窗口（完成）
 
 本窗口只验收 `firoyang-public` Operator + Dec；Loom、Loom-Launcher、SvnMergeTool
 属于独立内网认证域，因现场特殊而延期。公网通过不代表内网通过，内网 Catalog 不自动晋升。
 
-已取得的真实证据：
+最终真实证据：
 
-- Relkit v0.6.14：commit `391998d0025867df1b0f5a2e58d211b9e8bbaa3a`，distribution
-  `sha256:2fb5b73a7a6b04acfd286bc7cd61331920958a210bb2ffc070b36bcfb66b9051`；
-  公网 agent/store 已升级并保留服务器回滚快照。
-- Dec `dev/v1.13.134` 的 [GitHub Actions](https://github.com/shichao402/Dec/actions/runs/38954988609)
-  完成测试、五平台 ArtifactSet 与合并。最终 Job 在提交后的立即读回失败，但随后用同一
-  candidate resolution 从消费者入口执行 `verify released` 已通过；因此没有盲目重发。
-- 公网 Dec-only full certification 绑定同一 Candidate commit、impact、fleet digest 与
-  `local-go` / `local-client` 两条 required CI，结果 `passed=true`。
-- production Catalog 已将 v0.6.14 晋升为 certified（sequence 5）；Dec production
-  resolution 为 `sha256:7976c53799ae3cbf567d9c3116eecb13bc94f15deb078a49ecc1361d47bcec56`。
-- 完整 production bundle 已通过 `relkit-ops bundle verify`，并发布为不可变资产；
-  SHA-256 为 `1af72822a15151c2248107917f585a920039c7b03c7fdb98992cef54d63637d8`。
-
-仍未完成，因此本节不能标为生产通过：
-
-1. 公网 Agent 从 candidate policy 原子切换到 production policy
-2. Dec stable CI 与消费者可见发布
-3. 真实更新/回滚与凭据不泄漏复核
+- v0.6.15 / v1.13.138 的发布流水线曾全部成功，但最终 updater smoke 发现正式生成的
+  Runtime Bootstrap 把 `trustedKeys[].key` 写成数字数组，公开 SDK 要求 base64 字符串。
+  两个既有 tag 和 release 均未移动；修复以 v0.6.16 / v1.13.139 fix-forward，且该逃逸已进入
+  production escape registry。
+- [Relkit v0.6.16](https://github.com/shichao402/relkit/releases/tag/v0.6.16)：
+  commit `1b83cb8c3a4f4dc83f9a176df83031577b32dff7`，distribution
+  `sha256:2fe12d58774f5b34cdb765fc9d26e6a87aa31bac0c91c2a22f76e8c049e16734`。
+  公网 agent/store 已升级并通过七项 store 自检与 agent health；当前二进制均报告 v0.6.16，
+  回滚快照 `/var/backups/relkit/20261016T223238Z` 中保留并可执行 v0.6.15 二进制。
+- 公网 Dec-only full certification 绑定上述 Candidate commit、impact、
+  fleet `sha256:7142333c8de87f00ab6a34a59065f83a7692f8c53f652db1764efedb5f30ab1a`
+  与 `local-go` / `local-client` 两条 required CI，结果 `passed=true`；production escape
+  coverage 为 `sha256:6bd278058dfe633e6d0dec847e6c6685ebd9e4ea02df01356f521f03b70d5bcb`。
+- production Catalog 已将 v0.6.16 晋升为 certified（sequence 9）；Operator sequence 15；
+  Dec production resolution 为
+  `sha256:031eac9c056e6d5a34dd75902f8de2fe596a8f72a1d7902b3c66b821c470a07a`。
+- 完整 production bundle 经签名、全资产摘要、离线安装、`doctor` 和独立消费者读回验证，
+  并以 [control-plane-v0.6.16](https://github.com/shichao402/relkit/releases/tag/control-plane-v0.6.16)
+  发布；ZIP SHA-256 为 `e19bb82dc8ae6702909737a9a1a6faecb775cff8507d665097a75224147b09cc`。
+  实际生成的 bootstrap 中 key 为 canonical base64，并由公开 Go SDK 解析。
+- Dec `dev/v1.13.139` 的 [GitHub Actions](https://github.com/shichao402/Dec/actions/runs/38976632550)
+  完成测试、五平台 ArtifactSet、合并、Operator 发布与消费者读回；`stable/v1.13.139`
+  的 [GitHub Actions](https://github.com/shichao402/Dec/actions/runs/38978402573)
+  完成同一链路并产出
+  [GitHub Release](https://github.com/shichao402/Dec/releases/tag/stable/v1.13.139)。
+- 从 production bundle 安装的 v0.6.16 工具和签发 bootstrap 独立执行
+  `verify released` 及 `check → download → apply → --version`；`dec-server`、`dec-exec`、
+  `dec-host-setup` 均报告 v1.13.139。stable CI 日志安全扫描只出现 GitHub 已脱敏的
+  `***`，未发现明文 Bearer、私钥、Token 或带签名查询串。
 
 生产顺序与“提交状态待确认”处理见 [cutover.md](cutover.md)。
 
@@ -139,6 +152,7 @@
 | F2 | 声明兼容窗口内，**旧 updater 仍能读**服务升级后的新数据 | 旧 sidecar + 新 directory 实机 | 通过 |
 | F3 | 非法 selector、合同不匹配、摘要/签名错误、回放旧配置 → 改本机或发布前失败 | 负面用例 | 通过 |
 | F4 | 多版本切换 / 原地更新 / installer-only 仅在声明支持时出现 | 未声明则不可达 | 通过 |
+| F5 | 控制面实际生成的跨语言 JSON/Protobuf 必须被公开 SDK 读取，不能只验证内部模型与手写 fixture | 正式生成 Runtime Bootstrap → 公开 SDK → 真 updater | 通过 |
 
 ---
 
@@ -185,6 +199,7 @@
 - 关键发布失败仍可能返回成功  
 - candidate 能碰 stable 写权限  
 - 为救一个宿主改未声明的全局行为，且无新合同与组合测试  
+- 生成器与 SDK 只各测各的手写对象，没有“正式生成字节 → 公开消费者”门禁
 - 只有「应该兼容」的文字，给不出上表流程证据  
 
 ---
