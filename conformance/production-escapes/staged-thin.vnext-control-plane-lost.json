@@ -1,0 +1,22 @@
+{
+  "schema": "relkit.production-escape/1",
+  "code": "staged_thin.vnext_control_plane_lost",
+  "category": "generic",
+  "stage": "staged-upload",
+  "capability": "cas-staged-upload",
+  "crossComponent": true,
+  "symptom": "A vNext publisher uploaded every release artifact into CAS, then failed before staged upload because the thin archive path required the legacy release-policy.json and omitted the signed vNext control-plane documents.",
+  "whyGateMissed": "The agent tests uploaded complete staged trees while the CAS client test only covered a legacy staged tree, so no scenario exercised the thin archive produced by a vNext client and validated by a real agent.",
+  "earliestDetection": "Stage a vNext release, send it through casput.Put to a real agent handler, and require the agent to accept the thin tree and complete a publish dry run.",
+  "evidence": [
+    {
+      "path": "cmd/relkit-agent/server_test.go",
+      "symbol": "TestScenarioCASPutPreservesVNextControlPlane",
+      "kind": "scenario"
+    }
+  ],
+  "tracking": {
+    "kind": "issue",
+    "number": 44
+  }
+}

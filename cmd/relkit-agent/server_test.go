@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/casput"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/inprocess"
 	"github.com/shichao402/relkit/internal/keys"
@@ -1212,6 +1213,38 @@ func TestAgentPublishesAndVerifiesVNextRelease(t *testing.T) {
 	}
 	if len(fx.ingest.get("directory/demo.pb")) == 0 || len(fx.ingest.get("index/demo/dev.pb")) == 0 {
 		t.Fatalf("consumer-visible vNext documents were not committed")
+	}
+}
+
+func TestScenarioCASPutPreservesVNextControlPlane(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{identity: resolution.IdentityProduction})
+	clientRoot := t.TempDir()
+	archivePath := filepath.Join(clientRoot, "staged.tar.gz")
+	if err := os.WriteFile(archivePath, fx.tarball, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractTarGz(archivePath, stage.StagingDir(clientRoot, "1.0.0"), 100); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := casput.Put(t.Context(), casput.Options{
+		Root:       clientRoot,
+		Product:    "demo",
+		Version:    "1.0.0",
+		URL:        fx.ts.URL,
+		Token:      fx.token,
+		HTTPClient: fx.ts.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Uploaded != 1 || result.StagedSHA256 == "" {
+		t.Fatalf("CAS put result=%+v", result)
+	}
+
+	status, body := fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, body)
 	}
 }
 
