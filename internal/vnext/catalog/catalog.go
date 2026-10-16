@@ -55,6 +55,36 @@ type Distribution struct {
 	Provides              []contracts.Capability `json:"provides,omitempty"`
 }
 
+// distributionIdentity is the immutable part of a Distribution. Lifecycle
+// fields deliberately stay outside the identity so candidate -> certified ->
+// superseded transitions do not rename the release they describe.
+type distributionIdentity struct {
+	Version       string                 `json:"version"`
+	Commit        string                 `json:"commit"`
+	ModulePath    string                 `json:"modulePath,omitempty"`
+	ModuleH1      string                 `json:"moduleH1,omitempty"`
+	ReleaseAssets map[string]string      `json:"releaseAssets,omitempty"`
+	Components    []Component            `json:"components"`
+	Requires      []contracts.Capability `json:"requires,omitempty"`
+	Provides      []contracts.Capability `json:"provides,omitempty"`
+}
+
+// IdentityDigest returns the deterministic content identity for a
+// distribution. State and certificationSequence are mutable Catalog
+// lifecycle metadata and therefore are not part of this digest.
+func (d Distribution) IdentityDigest() (string, error) {
+	return canonical.Digest(distributionIdentity{
+		Version:       d.Version,
+		Commit:        d.Commit,
+		ModulePath:    d.ModulePath,
+		ModuleH1:      d.ModuleH1,
+		ReleaseAssets: d.ReleaseAssets,
+		Components:    d.Components,
+		Requires:      d.Requires,
+		Provides:      d.Provides,
+	})
+}
+
 type Document struct {
 	Schema        string            `json:"schema"`
 	Sequence      int64             `json:"sequence"`

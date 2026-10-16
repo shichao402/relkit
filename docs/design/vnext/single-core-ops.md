@@ -37,3 +37,10 @@ Skill ──► 只编排上述命令，不实现第二套 schema/gates
 | 产品版本、业务构建、UI | resolution、签名、协议、updater | Operator、Token、SSH、mirror |
 | producer 制品内容 | 发布事务、directory/index | Profile 签发与升级 |
 | 检查更新时机 | facade/projection 合同 | CI adapter / fleet 登记 |
+
+## 生产控制面命令
+
+- `relkit-ops distribution create`：从官方 `relkit.release/1` manifest、完整 Release 资产和 immutable URL 生成 distribution；缺少 Registry 声明的任一资产即失败。distribution digest 只覆盖不可变身份，排除 `state` 与 `certificationSequence`。
+- `relkit-ops catalog put/transition`：先校验上述 identity digest，再执行 candidate → certified 生命周期。
+- `relkit-ops agent policy`：默认只输出计划；`--execute --backup <path>` 才原子更新已 provision 产品的 Distribution Root、Operator deployment 与 lane，并保留 backend、Token 等未知字段。远端传输、重启与健康检查仍由声明式 deploy adapter 负责。
+- `relkit-ops runtime-profile publish`：请求 agent 使用现场 Product RUP 私钥签发首个 Runtime Profile；私钥不进入 CI 或 Operator Profile。

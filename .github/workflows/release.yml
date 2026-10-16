@@ -1,6 +1,7 @@
 name: Release artifacts
 
 on:
+  pull_request:
   push:
     tags:
       - "v*"
@@ -39,8 +40,49 @@ jobs:
           python -m unittest scripts/deploy/test_relkit.py scripts/test_relkit_consume.py scripts/test_relkit_host.py
           npm --prefix bindings/ts ci
           npm --prefix bindings/ts test
-  release:
+  universal:
     needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build thin Darwin binaries
+        run: >-
+          go run ./cmd/relkit build
+          --cli --updater --ops
+          --os darwin
+          --out dist-thin
+      - name: Build universal Darwin binaries
+        run: |
+          mkdir -p dist-universal
+          lipo -create \
+            dist-thin/relkit-darwin-amd64 \
+            dist-thin/relkit-darwin-arm64 \
+            -output dist-universal/relkit-darwin-universal
+          lipo -create \
+            dist-thin/relkit-updater-darwin-amd64 \
+            dist-thin/relkit-updater-darwin-arm64 \
+            -output dist-universal/relkit-updater-darwin-universal
+          lipo -create \
+            dist-thin/relkit-ops-darwin-amd64 \
+            dist-thin/relkit-ops-darwin-arm64 \
+            -output dist-universal/relkit-ops-darwin-universal
+          for binary in dist-universal/*; do
+            lipo -archs "$binary"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relkit-darwin-universal
+          path: dist-universal/*
+          if-no-files-found: error
+          retention-days: 1
+  release:
+    if: github.event_name == 'push'
+    needs: [test, universal]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,9 +103,21 @@ jobs:
       - name: Build immutable release artifacts
         run: |
           go run ./cmd/relkit build --all --check-tag "${GITHUB_REF_NAME}" --out dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: relkit-darwin-universal
+          path: dist
       - name: Write checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS
+      - name: Validate complete vNext distribution
+        run: >-
+          go run ./cmd/relkit-ops distribution create
+          --version "${GITHUB_REF_NAME}"
+          --manifest dist/manifest.json
+          --assets dist
+          --source-base "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          --out "${RUNNER_TEMP}/distribution.json"
       - name: Publish Dec provides
         uses: shichao402/Dec/.github/actions/publish-provides@32c2705f859266e7ddacf5ea435d3e26e691ccf0
         with:

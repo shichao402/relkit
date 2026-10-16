@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -56,12 +57,15 @@ func TestGeneratePinsTrustRootAndUsesResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode()&0o111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Fatal("relkitw is not executable")
 	}
 }
 
 func TestGeneratedShellWrapperRunsOneImmutableResolution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell wrapper execution is covered on Unix runners")
+	}
 	root := t.TempDir()
 	fingerprint := "sha256:" + strings.Repeat("b", 64)
 	value := project.Document{

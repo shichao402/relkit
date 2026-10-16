@@ -162,6 +162,17 @@ func PutDistribution(options PutDistributionOptions) (*catalog.Document, error) 
 	if err := document.Load(options.Distribution, &distribution); err != nil {
 		return nil, err
 	}
+	identityDigest, err := distribution.IdentityDigest()
+	if err != nil {
+		return nil, err
+	}
+	if distribution.Digest != identityDigest {
+		return nil, fmt.Errorf(
+			"distribution digest %s does not match immutable identity %s",
+			distribution.Digest,
+			identityDigest,
+		)
+	}
 	var value catalog.Document
 	if options.CatalogPath == "" {
 		value = catalog.Document{

@@ -3,6 +3,7 @@ package ops
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -23,7 +24,7 @@ func TestGenerateAndFingerprintKeyPair(t *testing.T) {
 	}
 	if info, err := os.Stat(privatePath); err != nil {
 		t.Fatal(err)
-	} else if info.Mode().Perm()&0o077 != 0 {
+	} else if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("private key permissions are %o, expected owner-only", info.Mode().Perm())
 	}
 	if _, err := GenerateKeyPair("replacement", privatePath, publicPath); err == nil {

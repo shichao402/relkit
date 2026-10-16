@@ -749,6 +749,13 @@ func (s *Server) validateVNextStaged(
 		artifactDocument.Channel != stagedDocument.Channel {
 		return fmt.Errorf("ArtifactSet identity does not match staged release")
 	}
+	if int64(artifactDocument.ReleaseCode) != stagedDocument.Code {
+		return fmt.Errorf(
+			"ArtifactSet releaseCode %d does not match staged release code %d",
+			artifactDocument.ReleaseCode,
+			stagedDocument.Code,
+		)
+	}
 	profileDigest, err := bundle.Operator.Digest()
 	if err != nil {
 		return err

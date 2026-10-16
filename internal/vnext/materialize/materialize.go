@@ -477,6 +477,12 @@ func fetchLocators(ctx context.Context, client *http.Client, root string, compon
 }
 
 func readLocator(ctx context.Context, client *http.Client, root, locator string) ([]byte, error) {
+	// url.Parse treats a Windows drive letter as a URI scheme ("C:").
+	// Absolute filesystem locators are signed inputs, so recognize them before
+	// URI parsing on every platform.
+	if filepath.IsAbs(locator) {
+		return os.ReadFile(locator)
+	}
 	parsed, err := url.Parse(locator)
 	if err != nil {
 		return nil, err
@@ -497,7 +503,15 @@ func readLocator(ctx context.Context, client *http.Client, root, locator string)
 		}
 		return io.ReadAll(response.Body)
 	case "file":
-		return os.ReadFile(parsed.Path)
+		filePath, err := url.PathUnescape(parsed.Path)
+		if err != nil {
+			return nil, err
+		}
+		if runtime.GOOS == "windows" && len(filePath) >= 3 &&
+			filePath[0] == '/' && filePath[2] == ':' {
+			filePath = filePath[1:]
+		}
+		return os.ReadFile(filepath.FromSlash(filePath))
 	case "":
 		path := locator
 		if !filepath.IsAbs(path) {
