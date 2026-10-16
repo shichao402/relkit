@@ -181,11 +181,12 @@ func Verify(directory string, policy resolution.BundlePolicy) (*Manifest, *resol
 }
 
 type InstallOptions struct {
-	Directory   string
-	ProjectPath string
-	ProjectRoot string
-	RelkitHome  string
-	Target      string
+	Directory                string
+	ProjectPath              string
+	ProjectRoot              string
+	RelkitHome               string
+	Target                   string
+	CandidateRootFingerprint string
 }
 
 func Install(options InstallOptions) (*resolution.Document, error) {
@@ -195,7 +196,7 @@ func Install(options InstallOptions) (*resolution.Document, error) {
 	}
 	manifest, bundle, err := Verify(options.Directory, resolution.BundlePolicy{
 		DistributionRootFingerprint: product.TrustFingerprint,
-		Identity:                    resolution.IdentityProduction,
+		CandidateRootFingerprint:    options.CandidateRootFingerprint,
 	})
 	if err != nil {
 		return nil, err

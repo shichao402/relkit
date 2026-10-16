@@ -470,13 +470,14 @@ func cmdBundle(args []string) error {
 		projectRoot := flags.String("project-root", "", "project checkout root")
 		home := flags.String("home", "", "Relkit user configuration root")
 		target := flags.String("target", "", "target platform")
+		candidateRoot := flags.String("candidate-root-fingerprint", "", "authorized Candidate Root fingerprint")
 		jsonOutput := flags.Bool("json", false, "print JSON")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
 		resolved, err := offlinebundle.Install(offlinebundle.InstallOptions{
 			Directory: *directory, ProjectPath: *projectPath, ProjectRoot: *projectRoot,
-			RelkitHome: *home, Target: *target,
+			RelkitHome: *home, Target: *target, CandidateRootFingerprint: *candidateRoot,
 		})
 		if err != nil {
 			return err

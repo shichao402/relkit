@@ -658,6 +658,47 @@ func cmdDoctor(args []string) error {
 			}
 		}
 	}
+	if operatorPath == "" {
+		operatorPath = os.Getenv("RELKIT_OPERATOR_PROFILE")
+	}
+	if operatorPath == "" && productDocument != nil {
+		operatorPath = os.Getenv(operatorProfileEnvironment(productDocument.OperatorRef))
+	}
+	if productDocument != nil {
+		bootstrapPath := os.Getenv("RELKIT_OPERATOR_BOOTSTRAP")
+		if bootstrapPath == "" {
+			bootstrapPath, err = bootstrap.DefaultPath(productDocument.OperatorRef)
+			if err != nil {
+				return doctorDiagnostic("operator.bootstrap_invalid", "Operator bootstrap path could not be resolved", nil, err)
+			}
+		}
+		mapping, loadErr := bootstrap.Load(bootstrapPath)
+		if loadErr != nil && !os.IsNotExist(loadErr) {
+			return doctorDiagnostic("operator.bootstrap_invalid", "Operator bootstrap could not be read", map[string]any{"path": bootstrapPath}, loadErr)
+		}
+		if loadErr == nil {
+			if mapping.OperatorRef != productDocument.OperatorRef {
+				return doctorDiagnostic(
+					"operator.bootstrap_mismatch",
+					"Operator bootstrap does not match the project",
+					map[string]any{"path": bootstrapPath, "expected": productDocument.OperatorRef, "actual": mapping.OperatorRef},
+					nil,
+				)
+			}
+			if operatorPath == "" {
+				operatorPath = mapping.OperatorProfile
+			}
+			for _, subscription := range productDocument.RuntimeProfileSubscriptions {
+				profile := mapping.RuntimeProfiles[subscription.ProductRef]
+				if runtimeProfilePaths[subscription.ProductRef] == "" {
+					runtimeProfilePaths[subscription.ProductRef] = profile.Profile
+				}
+				if len(runtimeRootPaths[subscription.ProductRef]) == 0 {
+					runtimeRootPaths[subscription.ProductRef] = append([]string(nil), profile.Roots...)
+				}
+			}
+		}
+	}
 	if bundlePath == "" {
 		bundlePath = filepath.Join(filepath.Dir(resolutionPath), "resolution-bundle.json")
 	}
@@ -688,12 +729,6 @@ func cmdDoctor(args []string) error {
 			map[string]any{"resolutionDigest": value.Digest, "bundleDigest": verified.Digest},
 			nil,
 		)
-	}
-	if operatorPath == "" {
-		operatorPath = os.Getenv("RELKIT_OPERATOR_PROFILE")
-	}
-	if operatorPath == "" && productDocument != nil {
-		operatorPath = os.Getenv(operatorProfileEnvironment(productDocument.OperatorRef))
 	}
 	if operatorPath != "" {
 		operatorDocument, loadErr := operator.Load(operatorPath)
