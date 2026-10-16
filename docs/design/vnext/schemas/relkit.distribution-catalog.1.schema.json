@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.distribution-catalog/1",
+  "title": "relkit.distribution-catalog/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "sequence", "distributions", "signatures"],
+  "properties": {
+    "schema": { "const": "relkit.distribution-catalog/1" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "distributions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "commit", "digest", "state", "components"],
+        "properties": {
+          "version": { "type": "string" },
+          "commit": { "type": "string" },
+          "digest": { "type": "string" },
+          "modulePath": { "type": "string" },
+          "moduleH1": { "type": "string" },
+          "releaseAssets": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "state": {
+            "type": "string",
+            "enum": ["candidate", "certified", "superseded", "revoked"]
+          },
+          "certificationSequence": { "type": "integer", "minimum": 1 },
+          "components": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version", "platform", "sha256", "source"],
+              "properties": {
+                "name": { "type": "string" },
+                "version": { "type": "string" },
+                "platform": { "type": "string" },
+                "sha256": { "type": "string" },
+                "source": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind"],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": ["module", "release-asset", "bundle", "mirror"]
+                    },
+                    "url": { "type": "string" },
+                    "module": { "type": "string" },
+                    "h1": { "type": "string" },
+                    "sha256": { "type": "string" }
+                  }
+                },
+                "requires": { "$ref": "#/$defs/capabilities" },
+                "provides": { "$ref": "#/$defs/capabilities" }
+              }
+            }
+          },
+          "requires": { "$ref": "#/$defs/capabilities" },
+          "provides": { "$ref": "#/$defs/capabilities" }
+        }
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/signature" }
+    }
+  },
+  "$defs": {
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["domain", "peer"],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": ["rupSchemaSet", "publishProtocol", "updaterIpc", "artifactSet"]
+          },
+          "peer": { "type": "string", "minLength": 1 },
+          "id": { "type": "string" },
+          "min": { "type": "integer" },
+          "max": { "type": "integer" }
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyId", "algorithm", "value"],
+      "properties": {
+        "keyId": { "type": "string", "minLength": 1 },
+        "algorithm": { "const": "ed25519" },
+        "value": { "type": "string" }
+      }
+    }
+  }
+}

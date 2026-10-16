@@ -5,8 +5,10 @@
 //! handwritten DTO.
 
 mod json;
+mod runtime_bootstrap;
 
 pub use json::{check_result_from_json, check_result_to_json, JsonError};
+pub use runtime_bootstrap::{runtime_bootstrap_from_json, RuntimeBootstrap, RuntimeBootstrapError};
 
 use prost::Message;
 use std::fs;
@@ -428,7 +430,7 @@ impl Updater {
         }
     }
 
-    pub fn apply<F>(&self, plan_id: impl Into<String>, mut on_event: F) -> ApplyResult
+    pub fn apply<F>(&self, plan_id: impl Into<String>, on_event: F) -> ApplyResult
     where
         F: FnMut(&UpdaterEvent),
     {

@@ -1,8 +1,8 @@
-//	relkit-agent [flags]                         run the server
-//	relkit-agent init …                          internal: called by product relkit_host.py
-//	relkit-agent site-rebuild [-config PATH]     rebuild the static release site
-//	relkit-agent unpublish [flags]               remove one published version
-//	relkit-agent -version
+// relkit-agent [flags]                         run the server
+// relkit-agent init …                          internal: called by product relkit_host.py
+// relkit-agent site-rebuild [-config PATH]     rebuild the static release site
+// relkit-agent unpublish [flags]               remove one published version
+// relkit-agent -version
 package main
 
 import (

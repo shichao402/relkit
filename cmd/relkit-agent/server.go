@@ -5,13 +5,16 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,13 +28,23 @@ import (
 	"github.com/shichao402/relkit/internal/publishproto"
 	siterebuild "github.com/shichao402/relkit/internal/site"
 	"github.com/shichao402/relkit/internal/stage"
+	"github.com/shichao402/relkit/internal/verify"
+	"github.com/shichao402/relkit/internal/vnext/artifactset"
+	vnextproject "github.com/shichao402/relkit/internal/vnext/project"
+	vnextrelease "github.com/shichao402/relkit/internal/vnext/release"
+	vnextresolution "github.com/shichao402/relkit/internal/vnext/resolution"
+	vnextruntimeprofile "github.com/shichao402/relkit/internal/vnext/runtimeprofile"
 )
 
 const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue a product token with `relkit-agent init -product <id>` (share a family with -share-with; CI env is RELKIT_UPLOAD_TOKEN)"
 
 type ProductConfig struct {
-	Root    string `json:"root"`
-	Profile string `json:"profile,omitempty"`
+	Root                        string `json:"root"`
+	Profile                     string `json:"profile,omitempty"`
+	DistributionRootFingerprint string `json:"distributionRootFingerprint,omitempty"`
+	CandidateRootFingerprint    string `json:"candidateRootFingerprint,omitempty"`
+	OperatorDeploymentID        string `json:"operatorDeploymentId,omitempty"`
+	Lane                        string `json:"lane,omitempty"`
 }
 
 type FileConfig struct {
@@ -236,6 +249,24 @@ func LoadConfig(path string) (*Config, error) {
 			p.Profile = filepath.Join(filepath.Dir(path), p.Profile)
 		}
 		p.Profile = mustAbs(p.Profile)
+		hasVNextPolicy := p.DistributionRootFingerprint != "" || p.CandidateRootFingerprint != "" || p.OperatorDeploymentID != "" || p.Lane != ""
+		if hasVNextPolicy {
+			if p.DistributionRootFingerprint == "" || p.OperatorDeploymentID == "" || p.Lane == "" {
+				return nil, fmt.Errorf("product %q: distributionRootFingerprint, operatorDeploymentId, and lane are all required for vNext", name)
+			}
+			switch vnextresolution.Identity(p.Lane) {
+			case vnextresolution.IdentityProduction:
+				if p.CandidateRootFingerprint != "" {
+					return nil, fmt.Errorf("product %q: production lane must not configure candidateRootFingerprint", name)
+				}
+			case vnextresolution.IdentityCandidate:
+				if p.CandidateRootFingerprint == "" {
+					return nil, fmt.Errorf("product %q: candidate lane requires candidateRootFingerprint", name)
+				}
+			default:
+				return nil, fmt.Errorf("product %q: lane must be production or candidate", name)
+			}
+		}
 		cfg.Products[name] = p
 	}
 	return cfg, nil
@@ -368,6 +399,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/cas/complete", s.handleCASComplete)
 	mux.HandleFunc("/v1/cas/abort", s.handleCASAbort)
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
+	mux.HandleFunc("/v1/runtime-profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
 	mux.HandleFunc("/v1/unpublish", s.handleUnpublish)
 	return mux
@@ -617,10 +649,22 @@ func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (st
 		log.Printf("staged extract %s/%s: %v", product, version, err)
 		return "", &stagedHTTPError{http.StatusBadRequest, "extract: " + err.Error()}
 	}
-	if _, err := stage.LoadStaged(pc.Root, version); err != nil {
+	stagedDocument, err := stage.LoadStaged(pc.Root, version)
+	if err != nil {
 		_ = os.RemoveAll(dest)
 		log.Printf("staged tree %s/%s: %v", product, version, err)
 		return "", &stagedHTTPError{http.StatusBadRequest, "invalid staged tree: " + err.Error()}
+	}
+	if stagedDocument.ResolutionDigest != "" {
+		if err := s.validateVNextStaged(product, version, pc, stagedDocument); err != nil {
+			_ = os.RemoveAll(dest)
+			return "", &stagedHTTPError{http.StatusBadRequest, "invalid vNext staged tree: " + err.Error()}
+		}
+		if err := s.writeStagedSHA(product, version, sum); err != nil {
+			_ = os.RemoveAll(dest)
+			return "", &stagedHTTPError{http.StatusInternalServerError, "persist staged sha256: " + err.Error()}
+		}
+		return dest, nil
 	}
 	policyPath := stage.ReleasePolicyPath(pc.Root, version)
 	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
@@ -645,6 +689,86 @@ func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (st
 		return "", &stagedHTTPError{http.StatusInternalServerError, "persist staged sha256: " + err.Error()}
 	}
 	return dest, nil
+}
+
+func (s *Server) validateVNextStaged(
+	product string,
+	version string,
+	pc ProductConfig,
+	stagedDocument *model.StagedDocument,
+) error {
+	if pc.DistributionRootFingerprint == "" || pc.OperatorDeploymentID == "" || pc.Lane == "" {
+		return fmt.Errorf("agent product is not configured with a vNext trust/lane policy")
+	}
+	root := stage.StagingDir(pc.Root, version)
+	productDocument, err := vnextproject.Load(filepath.Join(root, vnextrelease.ProjectFile))
+	if err != nil {
+		return err
+	}
+	bundle, err := vnextresolution.LoadBundle(filepath.Join(root, vnextrelease.ResolutionBundleFile))
+	if err != nil {
+		return err
+	}
+	resolved, err := bundle.Verify(vnextresolution.BundlePolicy{
+		DistributionRootFingerprint: pc.DistributionRootFingerprint,
+		CandidateRootFingerprint:    pc.CandidateRootFingerprint,
+		OperatorDeploymentID:        pc.OperatorDeploymentID,
+		Identity:                    vnextresolution.Identity(pc.Lane),
+	})
+	if err != nil {
+		return err
+	}
+	projectDigest, err := productDocument.Digest()
+	if err != nil {
+		return err
+	}
+	if projectDigest != resolved.ProjectDigest || productDocument.Product != product {
+		return fmt.Errorf("project document does not match verified resolution or route product")
+	}
+	if stagedDocument.Product != product || stagedDocument.Version != version {
+		return fmt.Errorf("staged product/version does not match route")
+	}
+	if stagedDocument.ResolutionDigest != resolved.Digest ||
+		stagedDocument.OperatorDeploymentId != resolved.Operator.DeploymentID ||
+		stagedDocument.ResolutionIdentity != string(resolved.Identity) {
+		return fmt.Errorf("staged provenance does not match verified resolution")
+	}
+	if !slices.Contains(resolved.AllowedChannels, stagedDocument.Channel) {
+		return fmt.Errorf("resolution identity %s does not allow channel %q", resolved.Identity, stagedDocument.Channel)
+	}
+	if resolved.Identity == vnextresolution.IdentityCandidate && stagedDocument.Channel == "stable" {
+		return fmt.Errorf("candidate resolution cannot stage stable")
+	}
+	artifactDocument, err := artifactset.Load(filepath.Join(root, vnextrelease.ArtifactSetFile))
+	if err != nil {
+		return err
+	}
+	if artifactDocument.ResolutionDigest != resolved.Digest ||
+		artifactDocument.Product != product ||
+		artifactDocument.Version != version ||
+		artifactDocument.Channel != stagedDocument.Channel {
+		return fmt.Errorf("ArtifactSet identity does not match staged release")
+	}
+	profileDigest, err := bundle.Operator.Digest()
+	if err != nil {
+		return err
+	}
+	catalogDigest, err := bundle.Catalog.Digest()
+	if err != nil {
+		return err
+	}
+	watermarkPath := filepath.Join(s.cfg.StateDir, "control-plane", product+"-"+pc.Lane+".json")
+	watermarks, err := vnextresolution.LoadWatermarks(watermarkPath)
+	if err != nil {
+		return err
+	}
+	if err := watermarks.AdvanceOperator(bundle.Operator.DeploymentID, bundle.Operator.Sequence, profileDigest); err != nil {
+		return err
+	}
+	if err := watermarks.AdvanceCatalog(resolved.AuthorityFingerprint, bundle.Catalog.Sequence, catalogDigest); err != nil {
+		return err
+	}
+	return watermarks.Write(watermarkPath)
 }
 
 // parseStagedPath accepts /v1/staged/{product}/{version}[/...], including a
@@ -736,6 +860,22 @@ func sha256HexEqual(presented, stored string) bool {
 }
 
 func loadProductConfig(pc ProductConfig, version string) (*config.Config, string, error) {
+	stagedDocument, stagedErr := stage.LoadStaged(pc.Root, version)
+	if stagedErr == nil && stagedDocument.ResolutionDigest != "" {
+		productDocument, err := vnextproject.Load(filepath.Join(stage.StagingDir(pc.Root, version), vnextrelease.ProjectFile))
+		if err != nil {
+			return nil, "", err
+		}
+		profile, err := config.LoadPublishProfile(pc.Profile)
+		if err != nil {
+			return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
+		}
+		cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root)
+		if err != nil {
+			return nil, "", err
+		}
+		return cfg, "vNext project/resolution bundle + " + pc.Profile, nil
+	}
 	policyPath := stage.ReleasePolicyPath(pc.Root, version)
 	policy, err := config.LoadProductPolicy(policyPath)
 	if err != nil {
@@ -753,6 +893,263 @@ func loadProductConfig(pc ProductConfig, version string) (*config.Config, string
 		return nil, "", err
 	}
 	return cfg, "staged release-policy.json + " + pc.Profile, nil
+}
+
+func mergeVNextPublishConfig(
+	productDocument *vnextproject.Document,
+	profile *config.PublishProfile,
+	productRoot string,
+) (*config.Config, error) {
+	if productDocument == nil || profile == nil {
+		return nil, fmt.Errorf("vNext project and publish profile are required")
+	}
+	if productDocument.Product != profile.Product {
+		return nil, fmt.Errorf("publish profile product %q does not match project product %q", profile.Product, productDocument.Product)
+	}
+	if len(productDocument.Channels) == 0 {
+		return nil, fmt.Errorf("vNext publisher project must declare channels")
+	}
+	signing := map[string]any{}
+	if len(profile.Signing.Keys) > 0 {
+		keys := make([]any, 0, len(profile.Signing.Keys))
+		for _, key := range profile.Signing.Keys {
+			keys = append(keys, map[string]any{"keyId": key.KeyID, "privateKeyPath": key.PrivateKeyPath})
+		}
+		signing["keys"] = keys
+	} else {
+		signing["keyId"] = profile.Signing.KeyID
+		if profile.Signing.PrivateKeyPath != "" {
+			signing["privateKeyPath"] = profile.Signing.PrivateKeyPath
+		}
+	}
+	publicKeys := make([]any, 0, len(profile.Signing.PublicKeys))
+	for _, key := range profile.Signing.PublicKeys {
+		entry := map[string]any{"keyId": key.KeyID}
+		if key.PublicKeyBase64 != "" {
+			entry["publicKeyBase64"] = key.PublicKeyBase64
+		}
+		if key.Key != "" {
+			entry["key"] = key.Key
+		}
+		publicKeys = append(publicKeys, entry)
+	}
+	if len(publicKeys) == 0 {
+		return nil, fmt.Errorf("vNext publish profile signing.publicKeys must not be empty")
+	}
+	signing["publicKeys"] = publicKeys
+	cfg := &config.Config{
+		Root:           productRoot,
+		Product:        productDocument.Product,
+		DefaultChannel: productDocument.Channels[0],
+		Channels:       append([]string(nil), productDocument.Channels...),
+		CodeStrategy:   "explicit",
+		Signing:        signing,
+		Backends:       cloneBackendConfig(profile.Backends),
+		PublishTo:      append([]string(nil), profile.PublishTo...),
+	}
+	if profile.Directory != nil {
+		cfg.Directory = &config.DirectoryConfig{
+			PublishTo: append([]string(nil), profile.Directory.PublishTo...),
+			EntryURLs: append([]string(nil), profile.Directory.EntryURLs...),
+			Services:  append([]config.DirectoryServiceConfig(nil), profile.Directory.Services...),
+		}
+	}
+	if err := completeVNextDirectory(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// completeVNextDirectory keeps deployment URLs out of relkit.project.json.
+// Existing publish profiles only had to name the backends that receive the
+// signed directory; derive the standard consumer URLs from those backend
+// base URLs when the profile does not override them explicitly.
+func completeVNextDirectory(cfg *config.Config) error {
+	if cfg.Directory == nil {
+		return fmt.Errorf("vNext publish profile directory is required")
+	}
+	targets := append([]string(nil), cfg.Directory.PublishTo...)
+	if len(targets) == 0 {
+		targets = append(targets, cfg.PublishTo...)
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("vNext publish profile has no directory publication backends")
+	}
+	type endpoint struct {
+		name string
+		base string
+	}
+	endpoints := make([]endpoint, 0, len(targets))
+	seenBase := map[string]bool{}
+	for _, name := range targets {
+		values, ok := cfg.Backends[name]
+		if !ok {
+			return fmt.Errorf("directory backend %q is not configured", name)
+		}
+		raw, _ := values["baseUrl"].(string)
+		base, err := normalizedConsumerBaseURL(raw)
+		if err != nil {
+			return fmt.Errorf("directory backend %q baseUrl: %w", name, err)
+		}
+		if seenBase[base] {
+			continue
+		}
+		seenBase[base] = true
+		endpoints = append(endpoints, endpoint{name: name, base: base})
+	}
+	if len(cfg.Directory.EntryURLs) == 0 {
+		for _, item := range endpoints {
+			cfg.Directory.EntryURLs = append(
+				cfg.Directory.EntryURLs,
+				item.base+"directory/"+url.PathEscape(cfg.Product)+".pb",
+			)
+		}
+	}
+	if len(cfg.Directory.Services) == 0 {
+		for endpointIndex, item := range endpoints {
+			for _, channel := range cfg.Channels {
+				id := item.name + "-" + channel
+				cfg.Directory.Services = append(cfg.Directory.Services, config.DirectoryServiceConfig{
+					ID:       id,
+					Priority: int32(endpointIndex + 1),
+					IndexURL: item.base + "index/" + url.PathEscape(cfg.Product) + "/" + url.PathEscape(channel) + ".pb",
+					Channel:  channel,
+				})
+			}
+		}
+	}
+	return nil
+}
+
+func normalizedConsumerBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("must be an absolute http(s) URL, got %q", raw)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("must be http(s), got %q", raw)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("must not contain query or fragment, got %q", raw)
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/"
+	return parsed.String(), nil
+}
+
+func cloneBackendConfig(source map[string]map[string]any) map[string]map[string]any {
+	result := make(map[string]map[string]any, len(source))
+	for name, values := range source {
+		cloned := make(map[string]any, len(values))
+		for key, value := range values {
+			cloned[key] = value
+		}
+		result[name] = cloned
+	}
+	return result
+}
+
+type runtimeProfileRequest struct {
+	Product string                `json:"product"`
+	Project vnextproject.Document `json:"project"`
+	To      []string              `json:"to,omitempty"`
+	DryRun  bool                  `json:"dryRun,omitempty"`
+}
+
+// handleRuntimeProfile bootstraps a signed Runtime Profile before a
+// self-subscribing product can create its first vNext resolution. The product
+// private key remains on the agent host; the caller receives only the signed
+// public document. The product lock is shared with normal publication so the
+// directory sequence cannot race a release.
+func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+	var req runtimeProfileRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if req.Product == "" || req.Project.Product == "" {
+		http.Error(w, "product and project are required", http.StatusBadRequest)
+		return
+	}
+	if req.Project.Product != req.Product {
+		http.Error(w, "project product does not match request product", http.StatusBadRequest)
+		return
+	}
+	if err := req.Project.Validate(); err != nil {
+		http.Error(w, "invalid project: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !s.requireAuthFor(w, r, req.Product) {
+		return
+	}
+	pc, ok := s.cfg.Products[req.Product]
+	if !ok {
+		http.Error(w, "unknown product", http.StatusNotFound)
+		return
+	}
+	mu := s.productLock(req.Product)
+	if !mu.TryLock() {
+		http.Error(w, "publish already in progress for this product", http.StatusConflict)
+		return
+	}
+	defer mu.Unlock()
+
+	profile, err := config.LoadPublishProfile(pc.Profile)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.publish_profile_invalid", "error": err.Error(),
+		})
+		return
+	}
+	cfg, err := mergeVNextPublishConfig(&req.Project, profile, pc.Root)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.config_invalid", "error": err.Error(),
+		})
+		return
+	}
+	var logs []string
+	printer := func(line string) { logs = append(logs, line) }
+	preview, err := directory.Set(cfg, directory.Options{To: req.To, DryRun: true}, printer)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.directory_preflight_failed", "error": err.Error(), "log": logs,
+		})
+		return
+	}
+	result, err := vnextruntimeprofile.Publish(cfg, req.Project, vnextruntimeprofile.PublishOptions{
+		To: req.To, ProfileVersion: preview.DirectorySequence, DryRun: req.DryRun,
+	}, printer)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "runtime_profile.publish_failed", "error": err.Error(), "log": logs,
+		})
+		return
+	}
+	directorySequence := preview.DirectorySequence
+	if !req.DryRun {
+		publishedDirectory, directoryErr := directory.Set(cfg, directory.Options{
+			To: req.To, RuntimeProfile: &result.Reference,
+		}, printer)
+		if directoryErr != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"ok": false, "code": "runtime_profile.directory_commit_failed", "error": directoryErr.Error(),
+				"profile": result.Profile, "reference": result.Reference, "log": logs,
+			})
+			return
+		}
+		directorySequence = publishedDirectory.DirectorySequence
+		s.triggerSiteRebuild(req.Product, "runtime-profile")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "dryRun": req.DryRun, "profile": result.Profile,
+		"reference": result.Reference, "directorySequence": directorySequence, "log": logs,
+	})
 }
 
 type publishRequest struct {
@@ -780,6 +1177,16 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	version, ok := cleanVersion(req.Version)
 	if !ok || req.Product == "" {
 		http.Error(w, "product and version required", http.StatusBadRequest)
+		return
+	}
+	if req.AllowPartial {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":       false,
+			"code":     "release.allow_partial_retired",
+			"severity": "error",
+			"stage":    "publish",
+			"error":    "allowPartial is not permitted on the normal publish path; repair divergence explicitly",
+		})
 		return
 	}
 	if !s.requireAuthFor(w, r, req.Product) {
@@ -846,14 +1253,127 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	var logs []string
 	logs = append(logs, "publish config: "+source)
 	printer := func(line string) { logs = append(logs, line) }
+	var runtimeProfileResult *vnextruntimeprofile.PublishResult
+	if staged.ResolutionDigest != "" {
+		productDocument, projectErr := vnextproject.Load(filepath.Join(stage.StagingDir(cfg.Root, version), vnextrelease.ProjectFile))
+		if projectErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "code": "release.project_invalid", "error": projectErr.Error(), "log": logs})
+			return
+		}
+		if productDocument.RuntimeProfilePublication != nil {
+			if cfg.Directory == nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "code": "release.directory_missing", "error": "Runtime Profile publication requires directory configuration", "log": logs})
+				return
+			}
+			preview, previewErr := directory.Set(cfg, directory.Options{To: req.To, DryRun: true}, printer)
+			if previewErr != nil {
+				writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "release.directory_preflight_failed", "error": previewErr.Error(), "log": logs})
+				return
+			}
+			runtimeProfileResult, err = vnextruntimeprofile.Publish(cfg, *productDocument, vnextruntimeprofile.PublishOptions{
+				To:             req.To,
+				ProfileVersion: preview.DirectorySequence,
+				DryRun:         req.DryRun,
+			}, printer)
+			if err != nil {
+				writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "release.runtime_profile_failed", "error": err.Error(), "log": logs})
+				return
+			}
+		}
+	}
 	index, err := publish.Run(cfg, version, req.To, req.DryRun, req.AllowBackfill, req.AllowPartial, printer)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error(), "log": logs})
+		response := map[string]any{"ok": false, "error": err.Error(), "log": logs}
+		status := http.StatusBadRequest
+		var publishErr publish.Error
+		if errors.As(err, &publishErr) && publishErr.Code != "" {
+			response["code"] = publishErr.Code
+			if publishErr.Evidence != nil {
+				response["evidence"] = publishErr.Evidence
+			}
+			if publishErr.Code == "release.partial_commit" {
+				status = http.StatusConflict
+			}
+		}
+		writeJSON(w, status, response)
 		return
 	}
+	var directorySequence int64
 	if !req.DryRun && cfg.Directory != nil {
-		if _, dirErr := directory.Set(cfg, directory.Options{To: req.To}, printer); dirErr != nil {
+		directoryOptions := directory.Options{To: req.To}
+		if runtimeProfileResult != nil {
+			directoryOptions.RuntimeProfile = &runtimeProfileResult.Reference
+		}
+		directoryDocument, dirErr := directory.Set(cfg, directoryOptions, printer)
+		if dirErr != nil {
 			logs = append(logs, "directory: "+dirErr.Error())
+			resp := map[string]any{
+				"ok":       false,
+				"code":     "release.directory_partial",
+				"severity": "error",
+				"stage":    "publish",
+				"error":    "signed index committed, but directory publication failed; fix forward and verify the released state",
+				"cause":    dirErr.Error(),
+				"product":  req.Product,
+				"version":  version,
+				"log":      logs,
+			}
+			if index != nil {
+				resp["sequence"] = index.Sequence
+				resp["channel"] = index.Channel
+			}
+			writeJSON(w, http.StatusConflict, resp)
+			return
+		}
+		directorySequence = directoryDocument.DirectorySequence
+	}
+	if !req.DryRun && (cfg.Directory != nil || staged.ResolutionDigest != "") {
+		if staged.ResolutionDigest != "" && cfg.Directory == nil {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"ok":       false,
+				"code":     "release.directory_missing",
+				"severity": "error",
+				"stage":    "verify-released",
+				"error":    "vNext releases require a consumer-visible directory",
+				"product":  req.Product,
+				"version":  version,
+				"log":      logs,
+			})
+			return
+		}
+		releasedOptions := verify.ReleasedOptions{
+			Channel:                  staged.Channel,
+			To:                       req.To,
+			Version:                  version,
+			ResolutionDigest:         staged.ResolutionDigest,
+			OperatorDeploymentID:     staged.OperatorDeploymentId,
+			MinimumIndexSequence:     index.Sequence,
+			MinimumDirectorySequence: directorySequence,
+		}
+		if runtimeProfileResult != nil {
+			releasedOptions.RuntimeProfileSHA256 = runtimeProfileResult.Reference.Sha256
+			releasedOptions.RuntimeProfileDigest = runtimeProfileResult.Profile.Digest
+		}
+		findings, verifyErr := verify.RunReleased(cfg, releasedOptions, printer)
+		if verifyErr != nil || !findings.OK() {
+			cause := ""
+			if verifyErr != nil {
+				cause = verifyErr.Error()
+			} else {
+				cause = strings.Join(findings.Errors, "; ")
+			}
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"ok":       false,
+				"code":     "release.verify_failed",
+				"severity": "error",
+				"stage":    "verify-released",
+				"error":    "release commit could not be verified from consumer-visible backends; fix forward",
+				"cause":    cause,
+				"product":  req.Product,
+				"version":  version,
+				"log":      logs,
+			})
+			return
 		}
 	}
 	resp := map[string]any{

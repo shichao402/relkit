@@ -5,22 +5,38 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/inprocess"
 	"github.com/shichao402/relkit/internal/keys"
 	"github.com/shichao402/relkit/internal/makers"
+	"github.com/shichao402/relkit/internal/payload"
 	"github.com/shichao402/relkit/internal/publishproto"
 	"github.com/shichao402/relkit/internal/stage"
+	"github.com/shichao402/relkit/internal/verify"
+	"github.com/shichao402/relkit/internal/vnext/artifactset"
+	"github.com/shichao402/relkit/internal/vnext/catalog"
+	"github.com/shichao402/relkit/internal/vnext/document"
+	"github.com/shichao402/relkit/internal/vnext/operator"
+	"github.com/shichao402/relkit/internal/vnext/project"
+	vnextrelease "github.com/shichao402/relkit/internal/vnext/release"
+	"github.com/shichao402/relkit/internal/vnext/resolution"
+	"github.com/shichao402/relkit/internal/vnext/runtimeprofile"
+	"github.com/shichao402/relkit/internal/vnext/trust"
+	"github.com/shichao402/relkit/sdk"
 )
 
 func TestSiteStatusIsRedacted(t *testing.T) {
@@ -377,6 +393,13 @@ type agentFixture struct {
 	token       string
 	tarball     []byte
 	ingest      *fakeRelkitServe
+	signingSeed []byte
+
+	vNextProject          project.Document
+	vNextOperator         operator.Document
+	vNextCatalog          catalog.Document
+	vNextResolution       resolution.Document
+	vNextDistributionKeys map[string]ed25519.PublicKey
 }
 
 func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
@@ -550,6 +573,7 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 		token:       "test-token",
 		tarball:     tarball,
 		ingest:      ingest,
+		signingSeed: seed,
 	}
 }
 
@@ -561,6 +585,281 @@ type agentFixtureOpts struct {
 	patchPolicy  func(map[string]any)
 	patchProfile func(*config.PublishProfile)
 	tinyParts    bool
+}
+
+type vNextFixtureOptions struct {
+	identity           resolution.Identity
+	tamperStable       bool
+	runtimeProfile     bool
+	osArch             []string
+	selectorDimensions []string
+	artifacts          []vNextFixtureArtifact
+}
+
+type vNextFixtureArtifact struct {
+	ID        string
+	Path      string
+	Kind      artifactset.Kind
+	Platform  string
+	Selectors map[string]string
+	Relations artifactset.Relations
+	Content   []byte
+}
+
+func makeVNextAgentFixture(t *testing.T, options vNextFixtureOptions) *agentFixture {
+	t.Helper()
+	if options.identity == "" {
+		options.identity = resolution.IdentityProduction
+	}
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	fx.ts.Close()
+	if err := os.RemoveAll(stage.StagingDir(fx.productRoot, "1.0.0")); err != nil {
+		t.Fatal(err)
+	}
+
+	productionSeed := make([]byte, ed25519.SeedSize)
+	candidateSeed := make([]byte, ed25519.SeedSize)
+	for index := range productionSeed {
+		productionSeed[index] = byte(index + 31)
+		candidateSeed[index] = byte(index + 131)
+	}
+	productionPublic := ed25519.NewKeyFromSeed(productionSeed).Public().(ed25519.PublicKey)
+	candidatePublic := ed25519.NewKeyFromSeed(candidateSeed).Public().(ed25519.PublicKey)
+	productionFingerprint, err := trust.Fingerprint(productionPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateFingerprint, err := trust.Fingerprint(candidatePublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releasePublic := ed25519.NewKeyFromSeed(fx.signingSeed).Public().(ed25519.PublicKey)
+	releaseFingerprint, err := trust.Fingerprint(releasePublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	productDocument := project.Document{
+		Schema: project.Schema, Product: "demo", Channels: []string{"dev", "stable"},
+		OperatorRef: "demo-operator", TrustFingerprint: productionFingerprint,
+		Roles:              []project.Role{project.RolePublisher},
+		SelectorDimensions: append([]string(nil), options.selectorDimensions...),
+		ArtifactProducer: &project.Command{
+			Command: []string{"fixture-producer"}, ExtensionSchema: "relkit.extension/1",
+		},
+		CapabilityFingerprint: project.CapabilityFingerprint{
+			OSArch: []string{"linux-amd64"}, Topology: "producer-only",
+		},
+	}
+	if len(options.osArch) > 0 {
+		productDocument.CapabilityFingerprint.OSArch = append([]string(nil), options.osArch...)
+	}
+	if options.runtimeProfile {
+		productDocument.RuntimeProfilePublication = &project.RuntimeProfilePublication{
+			RootFingerprint: releaseFingerprint,
+			RUPSchemaSet:    "rup.v2",
+			Recovery:        map[string]any{"message": "manual install"},
+		}
+	}
+	distributionDigest := "sha256:" + strings.Repeat("d", 64)
+	distributionState := catalog.StateCertified
+	certificationSequence := int64(1)
+	if options.identity == resolution.IdentityCandidate {
+		distributionState = catalog.StateCandidate
+		certificationSequence = 0
+	}
+	distribution := catalog.Distribution{
+		Version: "1.0.0", Commit: strings.Repeat("c", 40), Digest: distributionDigest,
+		State: distributionState, CertificationSequence: certificationSequence,
+		Components: []catalog.Component{
+			{
+				Name: "cli", Version: "1.0.0", Platform: "linux-amd64",
+				SHA256: distributionDigest,
+				Source: catalog.Source{Kind: "release-asset", URL: "https://example.invalid/relkit"},
+			},
+			{
+				Name: "updater", Version: "1.0.0", Platform: "linux-amd64",
+				SHA256: distributionDigest,
+				Source: catalog.Source{Kind: "release-asset", URL: "https://example.invalid/relkit-updater"},
+			},
+			{
+				Name: "sdk-rust", Version: "1.0.0", Platform: "all",
+				SHA256: distributionDigest,
+				Source: catalog.Source{Kind: "release-asset", URL: "https://example.invalid/sdk-rust.zip"},
+			},
+		},
+	}
+	for _, platform := range options.osArch {
+		if platform == "linux-amd64" {
+			continue
+		}
+		distribution.Components = append(distribution.Components, catalog.Component{
+			Name: "cli", Version: "1.0.0", Platform: platform,
+			SHA256: distributionDigest,
+			Source: catalog.Source{Kind: "release-asset", URL: "https://example.invalid/relkit-" + platform},
+		})
+	}
+	catalogDocument := catalog.Document{
+		Schema: catalog.Schema, Sequence: 1,
+		Distributions: []catalog.Distribution{distribution},
+	}
+	operatorDocument := operator.Document{
+		Schema: operator.Schema, DeploymentID: "demo-operator",
+		ServerRelease: operator.ServerRelease{
+			Version: "1.0.0", Commit: distribution.Commit, DistributionDigest: distributionDigest,
+		},
+		SelectionPolicy: operator.SelectionExact,
+		Sequence:        1,
+	}
+	signingSeed := productionSeed
+	signingKeyID := "distribution-root"
+	if options.identity == resolution.IdentityCandidate {
+		signingSeed = candidateSeed
+		signingKeyID = "candidate-root"
+	}
+	if err := catalogDocument.Sign(signingKeyID, signingSeed); err != nil {
+		t.Fatal(err)
+	}
+	if err := operatorDocument.Sign(signingKeyID, signingSeed); err != nil {
+		t.Fatal(err)
+	}
+	request := resolution.Request{
+		Project: productDocument, Operator: operatorDocument, Catalog: catalogDocument,
+		TrustedDistributionKeys: map[string]ed25519.PublicKey{"distribution-root": productionPublic},
+		Identity:                options.identity,
+	}
+	if options.identity == resolution.IdentityCandidate {
+		request.CandidateDigest = distributionDigest
+		request.CandidateRootFingerprint = candidateFingerprint
+		request.TrustedCandidateKeys = map[string]ed25519.PublicKey{"candidate-root": candidatePublic}
+	}
+	resolved, err := resolution.Resolve(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := resolution.Bundle{
+		Schema: resolution.BundleSchema, Project: productDocument,
+		Operator: operatorDocument, Catalog: catalogDocument,
+		DistributionRoots: resolution.PublicKeys(map[string]ed25519.PublicKey{
+			"distribution-root": productionPublic,
+		}),
+		Resolution: *resolved,
+	}
+	if options.identity == resolution.IdentityCandidate {
+		bundle.CandidateRoots = resolution.PublicKeys(map[string]ed25519.PublicKey{"candidate-root": candidatePublic})
+	}
+
+	inputRoot := filepath.Join(filepath.Dir(fx.productRoot), "vnext-input")
+	if err := os.MkdirAll(inputRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	specs := options.artifacts
+	if len(specs) == 0 {
+		specs = []vNextFixtureArtifact{{
+			ID: "app", Path: "app.bin", Kind: artifactset.KindBlob,
+			Platform: "linux-amd64", Content: []byte("vnext artifact"),
+		}}
+	}
+	artifacts := artifactset.Document{
+		Schema: artifactset.Schema, ResolutionDigest: resolved.Digest,
+		Product: "demo", Version: "1.0.0", ReleaseCode: 1, Channel: "dev",
+	}
+	for _, spec := range specs {
+		artifactPath := filepath.Join(inputRoot, filepath.FromSlash(spec.Path))
+		if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(artifactPath, spec.Content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		artifactHash := sha256.Sum256(spec.Content)
+		artifacts.Artifacts = append(artifacts.Artifacts, artifactset.Artifact{
+			ID: spec.ID, Path: spec.Path, Kind: spec.Kind, Platform: spec.Platform,
+			Selectors: spec.Selectors, Relations: spec.Relations,
+			SHA256: "sha256:" + fmt.Sprintf("%x", artifactHash[:]),
+			Size:   int64(len(spec.Content)),
+		})
+	}
+	artifactSetPath := filepath.Join(inputRoot, "artifact-set.json")
+	bundlePath := filepath.Join(inputRoot, "resolution-bundle.json")
+	if err := document.Write(artifactSetPath, artifacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := document.Write(bundlePath, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vnextrelease.Stage(productDocument, *resolved, artifacts, vnextrelease.StageOptions{
+		ProjectRoot: fx.productRoot, ArtifactSetPath: artifactSetPath,
+		ResolutionBundlePath: bundlePath, CandidateRootFingerprint: request.CandidateRootFingerprint,
+		Code: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if options.tamperStable {
+		stagedPath := filepath.Join(stage.StagingDir(fx.productRoot, "1.0.0"), "staged.pb")
+		stagedBytes, err := os.ReadFile(stagedPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stagedDocument, err := rupv2.UnmarshalStaged(stagedBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stagedDocument.Channel = "stable"
+		stagedBytes, err = rupv2.MarshalStaged(stagedDocument)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(stagedPath, stagedBytes, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		artifacts.Channel = "stable"
+		if err := document.Write(filepath.Join(stage.StagingDir(fx.productRoot, "1.0.0"), vnextrelease.ArtifactSetFile), artifacts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fx.tarball, err = tarStaging(stage.StagingDir(fx.productRoot, "1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(stage.StagingDir(fx.productRoot, "1.0.0")); err != nil {
+		t.Fatal(err)
+	}
+
+	profile, err := config.LoadPublishProfile(fx.profilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.Signing.PublicKeys = []config.PublicKeyConfig{{
+		KeyID: "k1", PublicKeyBase64: base64.StdEncoding.EncodeToString(releasePublic),
+	}}
+	profile.Directory = &config.PublishDirectoryProfile{
+		PublishTo: []string{"serve"},
+		EntryURLs: []string{strings.TrimRight(fx.ingest.URL, "/") + "/directory/demo.pb"},
+		Services: []config.DirectoryServiceConfig{{
+			ID: "primary", Priority: 1,
+			IndexURL: strings.TrimRight(fx.ingest.URL, "/") + "/index/demo/dev.pb",
+			Channel:  "dev",
+		}},
+	}
+	if err := document.Write(fx.profilePath, profile); err != nil {
+		t.Fatal(err)
+	}
+	productConfig := fx.cfg.Products["demo"]
+	productConfig.DistributionRootFingerprint = productionFingerprint
+	productConfig.OperatorDeploymentID = "demo-operator"
+	productConfig.Lane = string(options.identity)
+	if options.identity == resolution.IdentityCandidate {
+		productConfig.CandidateRootFingerprint = candidateFingerprint
+	}
+	fx.cfg.Products["demo"] = productConfig
+	fx.vNextProject = productDocument
+	fx.vNextOperator = operatorDocument
+	fx.vNextCatalog = catalogDocument
+	fx.vNextResolution = *resolved
+	fx.vNextDistributionKeys = map[string]ed25519.PublicKey{"distribution-root": productionPublic}
+	fx.ts = httptest.NewServer(NewServer(fx.cfg).Handler())
+	t.Cleanup(fx.ts.Close)
+	return fx
 }
 
 func tarStaging(stagedRoot string) ([]byte, error) {
@@ -634,6 +933,86 @@ func (f *agentFixture) publish(t *testing.T, body string) (int, []byte) {
 	return resp.StatusCode, out
 }
 
+func TestMergeVNextPublishConfigDerivesStandardDirectoryURLs(t *testing.T) {
+	productDocument := project.Document{
+		Schema: project.Schema, Product: "demo", Channels: []string{"dev", "stable"},
+	}
+	profile := &config.PublishProfile{
+		Product: "demo",
+		Signing: config.PublishSigningProfile{
+			PublicKeys: []config.PublicKeyConfig{{KeyID: "k1", PublicKeyBase64: base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))}},
+		},
+		Backends: map[string]map[string]any{
+			"primary": {"type": "relkit-compatible", "baseUrl": "https://updates.example.invalid/root"},
+		},
+		PublishTo: []string{"primary"},
+		Directory: &config.PublishDirectoryProfile{
+			PublishTo: []string{"primary"},
+		},
+	}
+	cfg, err := mergeVNextPublishConfig(&productDocument, profile, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.Directory.EntryURLs, []string{"https://updates.example.invalid/root/directory/demo.pb"}; !slices.Equal(got, want) {
+		t.Fatalf("entry URLs=%v, want %v", got, want)
+	}
+	if len(cfg.Directory.Services) != 2 {
+		t.Fatalf("services=%+v", cfg.Directory.Services)
+	}
+	if cfg.Directory.Services[0].IndexURL != "https://updates.example.invalid/root/index/demo/dev.pb" ||
+		cfg.Directory.Services[1].IndexURL != "https://updates.example.invalid/root/index/demo/stable.pb" {
+		t.Fatalf("services=%+v", cfg.Directory.Services)
+	}
+}
+
+func TestAgentBootstrapsRuntimeProfileWithoutExposingPrivateKey(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{runtimeProfile: true})
+	payload, err := json.Marshal(runtimeProfileRequest{
+		Product: "demo", Project: fx.vNextProject,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, fx.ts.URL+"/v1/runtime-profile", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+fx.token)
+	req.Header.Set("Content-Type", "application/json")
+	publishproto.Apply(req.Header)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+	}
+	var result struct {
+		OK                bool                    `json:"ok"`
+		Profile           runtimeprofile.Document `json:"profile"`
+		DirectorySequence int64                   `json:"directorySequence"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || result.Profile.Product != "demo" || result.DirectorySequence < 1 {
+		t.Fatalf("result=%+v", result)
+	}
+	publicKey := ed25519.NewKeyFromSeed(fx.signingSeed).Public().(ed25519.PublicKey)
+	if err := result.Profile.Verify(map[string]ed25519.PublicKey{"k1": publicKey}); err != nil {
+		t.Fatalf("profile signature: %v", err)
+	}
+	if !fx.ingest.hasPrefix("runtime-profile/demo/") {
+		t.Fatal("Runtime Profile immutable object was not published")
+	}
+	if rawDirectory := fx.ingest.get("directory/demo.pb"); len(rawDirectory) == 0 {
+		t.Fatal("directory pointer was not published")
+	}
+	if bytes.Contains(raw, fx.signingSeed) || bytes.Contains(raw, []byte("private.pb")) {
+		t.Fatal("Runtime Profile response exposed private signing material")
+	}
+}
+
 func TestAgentRejectsReleasePolicyProductMismatch(t *testing.T) {
 	fx := newAgentFixture(t, agentFixtureOpts{
 		patchPolicy: func(policy map[string]any) {
@@ -680,6 +1059,459 @@ func TestAgentPublishStagedSHA256MatchAndMismatch(t *testing.T) {
 	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","dryRun":true,"stagedSha256":"short"}`)
 	if status != http.StatusConflict {
 		t.Fatalf("short sha status=%d body=%s", status, body)
+	}
+}
+
+func TestAgentPublishDirectoryFailureIsNotSuccess(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{
+		patchPolicy: func(policy map[string]any) {
+			policy["directory"] = map[string]any{
+				"entryUrls": []any{"https://updates.example.invalid/directory/demo.pb"},
+				"services": []any{
+					map[string]any{
+						"id":       "primary",
+						"priority": 1,
+						"indexUrl": "https://updates.example.invalid/index/demo/stable.pb",
+						"channel":  "stable",
+					},
+				},
+			}
+		},
+		patchProfile: func(profile *config.PublishProfile) {
+			profile.Directory = &config.PublishDirectoryProfile{PublishTo: []string{"serve"}}
+		},
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	fx.ingest.failPutsWithPrefix("directory/")
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0","idempotencyKey":"directory-failure"}`)
+	if status != http.StatusConflict {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["ok"] != false || response["code"] != "release.directory_partial" {
+		t.Fatalf("unexpected response: %s", body)
+	}
+	if len(fx.ingest.get("index/demo/stable.pb")) == 0 {
+		t.Fatal("test did not reach the index commit point")
+	}
+	if _, ok := fx.cfg.Products["demo"]; !ok {
+		t.Fatal("fixture lost product config")
+	}
+}
+
+func TestAgentRejectsAllowPartial(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{})
+	status, body := fx.publish(t, `{"product":"demo","version":"1.0.0","allowPartial":true}`)
+	if status != http.StatusBadRequest || !bytes.Contains(body, []byte("release.allow_partial_retired")) {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+}
+
+func TestAgentReportsPartialCommitWhenLaterBackendFails(t *testing.T) {
+	failing := startFakeRelkitServe(t, "serve-token")
+	failing.failPutsWithPrefix("index/")
+	fx := newAgentFixture(t, agentFixtureOpts{
+		patchProfile: func(profile *config.PublishProfile) {
+			profile.Backends["failing"] = failing.backendConfig()
+			profile.PublishTo = []string{"serve", "failing"}
+		},
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusConflict {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	if !strings.Contains(string(body), "release.partial_commit") {
+		t.Fatalf("missing partial-commit code: %s", body)
+	}
+	if len(fx.ingest.get("index/demo/stable.pb")) == 0 {
+		t.Fatalf("first backend did not commit before later backend failed")
+	}
+	if len(failing.get("index/demo/stable.pb")) != 0 {
+		t.Fatalf("failing backend unexpectedly committed")
+	}
+}
+
+func TestAgentTreatsWebProjectionFailureAsRebuildable(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{
+		patchPolicy: func(policy map[string]any) {
+			policy["site"] = map[string]any{"title": "Demo"}
+		},
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	fx.ingest.failPutsWithPrefix("site/")
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["ok"] != true {
+		t.Fatalf("web projection failure changed core result: %s", body)
+	}
+	logs, _ := response["log"].([]any)
+	foundWarning := false
+	for _, line := range logs {
+		if strings.Contains(fmt.Sprint(line), "web projection failed") {
+			foundWarning = true
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("publish did not report rebuildable projection warning: %s", body)
+	}
+}
+
+func TestAgentPublishesAndVerifiesVNextRelease(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{identity: resolution.IdentityProduction})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	if len(fx.ingest.get("directory/demo.pb")) == 0 || len(fx.ingest.get("index/demo/dev.pb")) == 0 {
+		t.Fatalf("consumer-visible vNext documents were not committed")
+	}
+}
+
+func TestFrozenFieldUpdaterReadsVNextPublishedRUP(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{identity: resolution.IdentityProduction})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	publicKey := ed25519.NewKeyFromSeed(fx.signingSeed).Public().(ed25519.PublicKey)
+	fieldUpdater := &inprocess.Updater{
+		Product:     "demo",
+		Channel:     "dev",
+		CurrentCode: 0,
+		EntryURLs:   []string{strings.TrimRight(fx.ingest.URL, "/") + "/directory/demo.pb"},
+		TrustedKeys: sdk.TrustedKeys{"k1": publicKey},
+		StateStore:  sdk.NewMemoryStateStore(&sdk.UpdateState{}),
+	}
+	result := fieldUpdater.CheckForce(t.Context(), true)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	if result.Available == nil || result.Available.Target.GetVersion() != "1.0.0" ||
+		result.Available.Artifact.GetId() != "app" {
+		t.Fatalf("field updater result=%+v", result)
+	}
+}
+
+func TestVNextVerifyReleasedReadsConsumerVisibleDocuments(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{identity: resolution.IdentityProduction})
+	publishVNextFixture(t, fx)
+	publicKey := ed25519.NewKeyFromSeed(fx.signingSeed).Public().(ed25519.PublicKey)
+	findings, err := verify.RunReleasedHTTP(t.Context(), verify.ReleasedHTTPOptions{
+		Product: "demo", Channel: "dev", Version: "1.0.0",
+		ConsumerBaseURL: fx.ingest.URL,
+		TrustedProductRoots: map[string]ed25519.PublicKey{
+			"k1": publicKey,
+		},
+		ResolutionDigest:     fx.vNextResolution.Digest,
+		OperatorDeploymentID: fx.vNextResolution.Operator.DeploymentID,
+		ResolutionIdentity:   string(fx.vNextResolution.Identity),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findings.OK() {
+		t.Fatalf("findings=%+v", findings)
+	}
+}
+
+func TestScenarioS1MultiPlatformAsymmetryAndApplySelection(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{
+		identity:           resolution.IdentityProduction,
+		osArch:             []string{"windows-amd64", "darwin-arm64"},
+		selectorDimensions: []string{"os", "arch"},
+		artifacts: []vNextFixtureArtifact{
+			{
+				ID: "windows-installer", Path: "demo-setup.exe", Kind: artifactset.KindInstaller,
+				Platform: "windows-amd64", Selectors: map[string]string{"os": "windows", "arch": "amd64"},
+				Content: []byte("windows installer"),
+			},
+			{
+				ID: "windows-payload", Path: "demo-payload.zip", Kind: artifactset.KindPayload,
+				Platform: "windows-amd64", Selectors: map[string]string{"os": "windows", "arch": "amd64"},
+				Relations: artifactset.Relations{PayloadOf: "windows-installer"},
+				Content:   payloadFixture(t, "demo.exe", "windows payload"),
+			},
+			{
+				ID: "macos-installer", Path: "demo.dmg", Kind: artifactset.KindInstaller,
+				Platform: "darwin-arm64", Selectors: map[string]string{"os": "darwin", "arch": "arm64"},
+				Content: []byte("macos installer"),
+			},
+		},
+	})
+	publishVNextFixture(t, fx)
+	assertPublishedArtifact(t, fx, map[string]string{
+		"os": "windows", "arch": "amd64", "apply": "relkit-payload",
+	}, "windows-payload")
+	assertPublishedArtifact(t, fx, map[string]string{
+		"os": "windows", "arch": "amd64",
+	}, "windows-installer")
+	assertPublishedArtifact(t, fx, map[string]string{
+		"os": "darwin", "arch": "arm64", "apply": "relkit-payload",
+	}, "macos-installer")
+}
+
+func TestScenarioS2ManagedProfileFeedsManagerResolution(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{
+		identity: resolution.IdentityProduction, runtimeProfile: true,
+	})
+	publishVNextFixture(t, fx)
+	directoryEnvelope, err := rupv2.UnmarshalEnvelope(fx.ingest.get("directory/demo.pb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directoryDocument, err := rupv2.UnmarshalDirectory(directoryEnvelope.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := directoryDocument.GetRuntimeProfile()
+	if reference == nil || reference.GetSha256() == "" {
+		t.Fatal("managed product directory did not pin a Runtime Profile")
+	}
+	profileBytes := fx.ingest.get("runtime-profile/demo/" + reference.GetSha256() + ".json")
+	var profile runtimeprofile.Document
+	if err := document.Decode(profileBytes, &profile); err != nil {
+		t.Fatal(err)
+	}
+	runtimePublic := ed25519.NewKeyFromSeed(fx.signingSeed).Public().(ed25519.PublicKey)
+	runtimeFingerprint, err := trust.Fingerprint(runtimePublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := project.Document{
+		Schema: project.Schema, Product: "manager", Channels: []string{"dev", "stable"},
+		OperatorRef: fx.vNextProject.OperatorRef, TrustFingerprint: fx.vNextProject.TrustFingerprint,
+		Roles: []project.Role{project.RoleUpdaterHost, project.RoleSubscriber},
+		RuntimeProfileSubscriptions: []project.Subscription{{
+			ProductRef: "demo", RootFingerprint: runtimeFingerprint,
+		}},
+		CapabilityFingerprint: project.CapabilityFingerprint{
+			OSArch: []string{"linux-amd64"}, Facades: []string{"rust"}, Topology: "manager",
+			Subscriptions: []string{"demo"},
+		},
+	}
+	resolved, err := resolution.Resolve(resolution.Request{
+		Project: manager, Operator: fx.vNextOperator, Catalog: fx.vNextCatalog,
+		TrustedDistributionKeys: fx.vNextDistributionKeys,
+		RuntimeProfiles:         map[string]runtimeprofile.Document{"demo": profile},
+		TrustedRuntimeRoots: map[string]map[string]ed25519.PublicKey{
+			"demo": {"k1": runtimePublic},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.RuntimeProfileDigests["demo"] != profile.Digest {
+		t.Fatalf("manager resolved profile %q, want %q", resolved.RuntimeProfileDigests["demo"], profile.Digest)
+	}
+}
+
+func TestScenarioS3ComponentAudienceSelection(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{
+		identity:           resolution.IdentityProduction,
+		selectorDimensions: []string{"component", "audience"},
+		artifacts: []vNextFixtureArtifact{
+			{
+				ID: "server-runtime", Path: "server-runtime.zip", Kind: artifactset.KindBlob,
+				Platform: "linux-amd64", Selectors: map[string]string{"component": "server", "audience": "runtime"},
+				Content: []byte("server runtime"),
+			},
+			{
+				ID: "server-user", Path: "server-user.zip", Kind: artifactset.KindBlob,
+				Platform: "linux-amd64", Selectors: map[string]string{"component": "server", "audience": "user"},
+				Content: []byte("server user"),
+			},
+			{
+				ID: "console-runtime", Path: "console-runtime.zip", Kind: artifactset.KindBlob,
+				Platform: "linux-amd64", Selectors: map[string]string{"component": "console", "audience": "runtime"},
+				Content: []byte("console runtime"),
+			},
+			{
+				ID: "console-user", Path: "console-user.zip", Kind: artifactset.KindBlob,
+				Platform: "linux-amd64", Selectors: map[string]string{"component": "console", "audience": "user"},
+				Content: []byte("console user"),
+			},
+		},
+	})
+	publishVNextFixture(t, fx)
+	for _, test := range []struct {
+		component string
+		audience  string
+		want      string
+	}{
+		{component: "server", audience: "runtime", want: "server-runtime"},
+		{component: "server", audience: "user", want: "server-user"},
+		{component: "console", audience: "runtime", want: "console-runtime"},
+		{component: "console", audience: "user", want: "console-user"},
+	} {
+		assertPublishedArtifact(t, fx, map[string]string{
+			"component": test.component, "audience": test.audience, "apply": "relkit-payload",
+		}, test.want)
+	}
+}
+
+func publishVNextFixture(t *testing.T, fx *agentFixture) {
+	t.Helper()
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+}
+
+func assertPublishedArtifact(t *testing.T, fx *agentFixture, clientSelectors map[string]string, want string) {
+	t.Helper()
+	publicKey := ed25519.NewKeyFromSeed(fx.signingSeed).Public().(ed25519.PublicKey)
+	fieldUpdater := &inprocess.Updater{
+		Product:         "demo",
+		Channel:         "dev",
+		CurrentCode:     0,
+		EntryURLs:       []string{strings.TrimRight(fx.ingest.URL, "/") + "/directory/demo.pb"},
+		TrustedKeys:     sdk.TrustedKeys{"k1": publicKey},
+		ClientSelectors: clientSelectors,
+		StateStore:      sdk.NewMemoryStateStore(&sdk.UpdateState{}),
+	}
+	result := fieldUpdater.CheckForce(t.Context(), true)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	if result.Available == nil || result.Available.Artifact.GetId() != want {
+		t.Fatalf("selectors=%v selected %+v, want %s", clientSelectors, result.Available, want)
+	}
+}
+
+func payloadFixture(t *testing.T, name, content string) []byte {
+	t.Helper()
+	tree := t.TempDir()
+	path := filepath.Join(tree, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "payload.zip")
+	if _, err := payload.Build(out, payload.BuildOptions{Tree: tree}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestAgentDoesNotReturnSuccessWhenReleasedVerificationFails(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{identity: resolution.IdentityProduction})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	fx.ingest.corruptGetsWithPrefix("index/")
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusConflict || !strings.Contains(string(body), "release.verify_failed") {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+}
+
+func TestAgentCandidateUsesIndependentRootAndCannotStageStable(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{
+		identity: resolution.IdentityCandidate, tamperStable: true,
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "does not allow channel") {
+		t.Fatalf("candidate stable upload status=%d body=%s", status, body)
+	}
+}
+
+func TestAgentAcceptsAuthorizedCandidateOnDevLane(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{identity: resolution.IdentityCandidate})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("candidate staged status=%d body=%s", status, body)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("candidate publish status=%d body=%s", status, body)
+	}
+	if len(fx.ingest.get("index/demo/stable.pb")) != 0 {
+		t.Fatal("candidate lane wrote stable index")
+	}
+}
+
+func TestAgentPublishesRuntimeProfileBeforeDirectoryCommit(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{
+		identity: resolution.IdentityProduction, runtimeProfile: true,
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	if !fx.ingest.hasPrefix("runtime-profile/demo/") {
+		t.Fatal("Runtime Profile was not published")
+	}
+	directoryBytes := fx.ingest.get("directory/demo.pb")
+	directoryEnvelope, err := rupv2.UnmarshalEnvelope(directoryBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directoryDocument, err := rupv2.UnmarshalDirectory(directoryEnvelope.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directoryDocument.RuntimeProfile == nil || directoryDocument.RuntimeProfile.Sha256 == "" {
+		t.Fatalf("directory does not pin Runtime Profile: %+v", directoryDocument)
+	}
+}
+
+func TestAgentRuntimeProfileFailurePreventsIndexCommit(t *testing.T) {
+	fx := makeVNextAgentFixture(t, vNextFixtureOptions{
+		identity: resolution.IdentityProduction, runtimeProfile: true,
+	})
+	status, body := fx.putStaged(t, "demo", "1.0.0")
+	if status != http.StatusCreated {
+		t.Fatalf("staged status=%d body=%s", status, body)
+	}
+	fx.ingest.failPutsWithPrefix("runtime-profile/")
+	status, body = fx.publish(t, `{"product":"demo","version":"1.0.0"}`)
+	if status != http.StatusConflict || !strings.Contains(string(body), "release.runtime_profile_failed") {
+		t.Fatalf("publish status=%d body=%s", status, body)
+	}
+	if len(fx.ingest.get("index/demo/dev.pb")) != 0 {
+		t.Fatal("index committed after Runtime Profile failure")
 	}
 }
 

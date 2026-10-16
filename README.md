@@ -1,178 +1,156 @@
-# relkit
+# Relkit
 
-RUP（Release & Update Protocol）的 Go 实现仓库：发布 CLI + 自托管分发服务，同一模块、多套单二进制。
+Relkit 是一套稳定、可声明、可验证的发布与更新能力。宿主描述产品能力组合，
+Relkit 不识别 Loom、Launcher、SvnMergeTool、Dec 或任何仓库身份。
 
-| 二进制 | 路径 | 作用 |
-|---|---|---|
-| `relkit` | `cmd/relkit` | stage / 签名 / 上传 / 提交 |
-| `relkit-agent` | `cmd/relkit-agent` | CI 交 staged 树；本机持钥写入数据面 |
-| `relkit-store` | `cmd/relkit-store` | 存储面：Range 下载 + CAS 能力上传 + 孤儿 GC（ADR 0016） |
-| `relkit-console` | `cmd/relkit-console` | 管理面：操作面板、账户、下载统计（ADR 0006 / 0016） |
+版本跟随目标 Operator 的部署事实：
 
-当前版本以根目录 [`VERSION.json`](VERSION.json) 为 SSOT（`relkit.version/1`）。GitHub Release tag 必须是 `v` + `number`（`x.y.z`）。本仓 `python scripts/deploy/relkit.py build|upgrade` 读该文件，不要另写版本号。RUP 线格式是 **protobuf v2**。
+- 固定自建服务使用 `exact`，客户端与服务端选择同一精确 distribution；
+- 滚动服务使用 `latest-compatible`，只选择已认证且合同匹配的 distribution；
+- 一次构建生成一份 immutable resolution，所有平台、阶段和发布证据共用其 digest；
+- candidate 使用独立身份、Catalog 与权限，不能污染 stable。
 
-| 标识 | 层 |
-|---|---|
-| `relkit.version/1` | 项目版本文件（`VERSION.json`） |
-| `rup.v2` | 线格式（index / manifest / envelope 等） |
-| `relkit.updater.v1` | 本机 IPC（宿主 ↔ `relkit-updater`） |
+使用者验收入口是
+[`docs/design/vnext/USER-ACCEPTANCE.md`](docs/design/vnext/USER-ACCEPTANCE.md)。
 
-曾用过其它语言做过原型；发布工具正式实现就是本仓库的 Go CLI。见 [`docs/adr/0001-go-only-publisher.md`](docs/adr/0001-go-only-publisher.md)。  
-CLI 与 serve 合并决策见 [`docs/adr/0002-one-repo-cli-and-serve.md`](docs/adr/0002-one-repo-cli-and-serve.md)。  
-Protobuf 线格式见 [`docs/adr/0003-protobuf-v2-wire-format.md`](docs/adr/0003-protobuf-v2-wire-format.md)；结构 SSOT 在本仓 [`proto/`](proto/)。  
-项目版本 SSOT 见 [`docs/adr/0004-project-version-ssot.md`](docs/adr/0004-project-version-ssot.md)：`VERSION.json` + `relkit version …`。  
-操作面板一次性引导凭据见 [`docs/adr/0006-admin-panel-bootstrap.md`](docs/adr/0006-admin-panel-bootstrap.md)。
+## 产品边界
 
-## 产品开箱
+- `relkit`：resolve、doctor、组件物化、ArtifactSet、发布事务、RUP 与 updater。
+- `relkit-ops`：Operator Profile、Catalog、离线 bundle、升级、凭据轮换与 fleet 认证。
+- `relkit-agent` / `relkit-store` / `relkit-console`：服务端发布、存储与管理面。
+- `relkit-updater`：统一更新状态机；Go、Dart、Rust facade 共用同一 IPC 合同。
+- `relkit-ops` Skill：只解释结构化证据和编排命令，不实现第二套门禁或步骤账本。
 
-给另一个产品仓接入时，复制 `scripts/host/`，跑 `python scripts/host/relkit_host.py`。Skill：[`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md)。空机装 systemd / 换二进制才用本仓 [`scripts/deploy/README.md`](scripts/deploy/README.md) 与 [`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md)。
+机器、Token、mirror 凭据和部署参数属于 Operator；产品版本、业务构建、制品内容和
+UI 属于宿主。产品仓不得保存 Relkit 版本、服务 URL、Token、SSH 或私钥。
 
-## 安装
+## 宿主接入
 
-主仓是 [github.com/shichao402/relkit](https://github.com/shichao402/relkit)。Go 模块名是逻辑路径 `github.com/shichao402/relkit`，**没有** vanity 解析，不要 `go get` / `go install` 该模块。
-
-本仓库开发者从 [Releases](https://github.com/shichao402/relkit/releases) 取二进制，或在本仓用 `python scripts/deploy/relkit.py build`。
-
-宿主产品仓使用 `relkit.consume/2` lock 钉住 Release、commit、附件 URL、SHA-256 以及 `scripts/host/` 树哈希，再由 `python scripts/host/relkit_host.py install` 安装 SDK、CLI 与 updater。消费端不 clone 本仓、不安装 Go，也不从源码构建。
-lock 示例见 [`scripts/relkit.lock.example.json`](scripts/relkit.lock.example.json)。
-
-## relkit（发布 CLI）
+宿主只提交：
 
 ```text
-relkit init
-relkit keygen
-relkit version   # get|set|bump|code|path —— 项目版本 SSOT
-relkit stage
-relkit inspect
-relkit simulate
-relkit verify
-relkit publish
-relkit backends
+relkit.project.json
+relkitw
+relkitw.cmd
+<宿主自己的 artifact producer 与产品代码>
 ```
 
-已实现后端：`s3-compatible` · `relkit-compatible`
-
-### 快速开始
+Operator 先 provision bootstrap，或向完全离线 CI 提供签名 distribution bundle。
+随后宿主统一执行：
 
 ```bash
-relkit init --product demoapp
-relkit keygen --key-id k1 --out keys --update-config
-relkit version set 1.0.0+100
-relkit stage --install dist/demoapp-win-x64.zip kind=archive,os=windows,arch=x64
-relkit simulate --with-staged 1.0.0+100 --from all
-relkit publish --dry-run
-relkit publish
-relkit verify --deep
+./relkitw inspect --json
+./relkitw doctor
+./relkitw artifacts produce \
+  --version <product-version> \
+  --channel <dev|stable> \
+  --target <os-arch>
 ```
 
-`stage` / `publish` 省略版本参数时读 `VERSION.json`；默认 `codeStrategy` 为 `version-build`（code = `+build`）。
-临时发布树统一位于 `.relkit/cache/staged/<version>/`；消费附件缓存位于
-`.relkit/cache/artifacts/`。产品仓在 `.relkit/` 下只应提交
-`onboarding.json`，`.relkit/cache/` 必须忽略。
+`relkitw` 验证 Catalog、Operator Profile、Runtime Profile 与 resolution，再按摘要把
+CLI、updater、SDK 和 projection 物化到 `.relkit/components/`。宿主不 clone Relkit，
+不从 PATH 猜 CLI，也不维护 consume lock、`scripts/host` 或 onboarding 状态。
 
-### 更新日志（changelog）
+项目声明合同见
+[`docs/adr/0020-vnext-catalog-operator-resolution.md`](docs/adr/0020-vnext-catalog-operator-resolution.md)；
+三个匿名组合场景见
+[`docs/design/vnext/representative-scenarios.md`](docs/design/vnext/representative-scenarios.md)。
 
-在 `relkit.json` 可选配置：
+## 构建与发布
 
-```json
-"changelog": {
-  "file": "Documents/changelog/CHANGELOG.md",
-  "urlTemplate": "https://git.example.com/org/repo/blob/main/CHANGELOG.md#{anchor}"
-}
+每个平台 producer 只生成 `relkit.artifact-set/1`。跨平台 Job 通过
+`relkit artifacts merge` 合并；product、version、channel 与 resolution digest
+任一不一致都会失败。
+
+产品 CI 到 merged ArtifactSet 为止，不持发布 endpoint、上传 Token 或签名私钥。
+独立 Operator Job 执行同一 resolution 下的：
+
+```text
+stage → simulate → fake verify → publish → verify released
 ```
 
-- `stage`：未传 `--notes` / `--notes-file` 时，从 `file` 抽取当前版本小节（Markdown）写入 `notes`；`urlTemplate`（或 `--notes-url`）生成 `notesUrl`
-- `publish`：最新版本保留内联 `notes`；更早版本清空 `notes`、只留 `notesUrl`
-- 占位符：`{version}` / `{version_slug}`（`+`→`-`）/ `{anchor}`（`v`+slug）
-- Dart SDK：`UpdateAvailable.releaseNotesMarkdown` / `releaseNotesUrl` / `priorReleaseNotes`
+artifact、manifest、index、directory、Runtime Profile 或多 backend 一致性任一关键
+步骤失败，事务不得报告成功。网页等非关键投影可独立重建。
 
-### 产品页与固定下载地址
+Runtime Profile 让管理器订阅另一个产品，或让产品自订阅，而不抄 URL、公钥与恢复
+入口。首次发布可由 Operator 用 `relkit-ops runtime-profile create` 建立签名 Profile。
 
-产品团队可在 `relkit.json` 维护给人看的文案：
+## SDK 与组件
 
-```json
-"site": {
-  "title": "Demo App",
-  "description": "一句话说明这个产品是什么、给谁用。",
-  "homepage": "https://git.example.com/org/demoapp"
-}
+distribution 由声明式 registry 生成和验证。常用物化路径：
+
+```text
+.relkit/components/sdk/go
+.relkit/components/sdk/dart
+.relkit/components/sdk/rust
+.relkit/components/bindings/ts
+.relkit/components/bin/relkit-updater[.exe]
 ```
 
-发布完成后，relkit 还会写两类**不属于 RUP 信任链**的网页辅助指针：
+Go 宿主使用生成的 `.relkit/components/sdk/go/relkit.mod`；Rust 与 TypeScript 使用
+物化 path dependency。项目的长期依赖文件不钉 Relkit 历史版本。
 
-- 每个 channel 发布都覆盖 `site/<product>.json`，由 `relkit-store` 产品门户读取。
-- 每个 channel 发布只覆盖自己那份 `latest/<product>/<channel>.json`，在发布时固化本版各 artifact 的 ID、selectors 与 URL。dev 发布不影响 stable 的指针。
-- `relkit-agent site-rebuild` 从所有已注册产品的 `site/` 与 `latest/` 指针静态重建完整目录站，dump 先落 agent state 目录的 `site/dump/`，再按 agent 顶层 `site.sinks[]`（`makers` / `backend` / `directory`，ADR 0015）分发。渲染产物从不作为下一次重建的输入。
+## Operator 运维
 
-因此 `relkit-store` 可按 channel 提供 `/-/latest/<product>/<channel>/<artifact-id>` 这种长期有效地址，例如 `/-/latest/demoapp/stable/windows`。请求只读取已发布的 latest 指针并跳转，不实时扫描 index / manifest。
-
-## relkit-store（存储面）与 relkit-console（管理面）
+只读诊断：
 
 ```bash
-relkit-store init -dir /srv/releases -out /etc/relkit-store
-relkit-store -config /etc/relkit-store/relkit-store.json
-relkit-console -config /etc/relkit-store/relkit-store.json -admin-state <dir>/.relkit-serve-admin.json
+relkit-ops status --inventory <inventory> --json
+relkit-ops plan --inventory <inventory> --to latest --out upgrade.json --json
 ```
 
-Linux + systemd：
+明确执行：
 
 ```bash
-sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-store-linux-amd64
+relkit-ops upgrade <operator> \
+  --inventory <inventory> --plan upgrade.json --execute --json
+relkit-ops rotate <credential> \
+  --inventory <inventory> --execute --json
 ```
 
-已有实例升级：`python scripts/deploy/relkit.py upgrade --host <Host> --plan` 然后 `--apply`。细节见 [`scripts/deploy/README.md`](scripts/deploy/README.md)。产品 token 用产品仓 `relkit_host.py serve`。设计说明见 [`cmd/relkit-store/README.md`](cmd/relkit-store/README.md) 与 [`cmd/relkit-console/README.md`](cmd/relkit-console/README.md)。
+升级只暴露完整旧 Profile 或完整新 Profile。轮换必须完成 mint、secret store 更新、
+reload/restart、健康与写权限验证、旧凭据吊销后才可激活。
 
-## 设计与规范来源
+空机部署和服务二进制升级见
+[`scripts/deploy/README.md`](scripts/deploy/README.md) 与
+[`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md)；
+日常 Operator 编排见
+[`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md)。
 
-| 内容 | 路径 |
-|---|---|
-| 协议规范 | [`SPEC.md`](SPEC.md) |
-| 发布工具设计 | [`CLI.md`](CLI.md) |
-| Protobuf 结构 SSOT | [`proto/`](proto/)（Go / Dart：改完跑 `scripts/gen-proto.ps1`；Node：`cd sdk/node && npm run generate`；Rust：构建时用 vendored protoc 生成） |
-| 一致性夹具 | [`conformance/`](conformance/) |
-| 发布侧运维 | 产品仓 `python scripts/host/relkit_host.py` · [`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md) |
-| 发布机 agent | [`cmd/relkit-agent/README.md`](cmd/relkit-agent/README.md)、[`docs/design/publish-agent.md`](docs/design/publish-agent.md) |
-| 宿主接入（两轨 + InstallSpec） | skill SSOT [`DecAssets/skills/relkit-ops/host-update.md`](DecAssets/skills/relkit-ops/host-update.md)；本仓指针 [`docs/guide/host-update.md`](docs/guide/host-update.md)；协议 [ADR 0013](docs/adr/0013-internal-update-payload.md) / [ADR 0014](docs/adr/0014-placement-and-version-library.md) |
-| 装机 / 换二进制 | [`scripts/deploy/README.md`](scripts/deploy/README.md) · [`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md) |
+## 协议与设计
 
-## 客户端 SDK
+- [`SPEC.md`](SPEC.md)：RUP 规范。
+- [`proto/`](proto/)：protobuf 结构 SSOT。
+- [`docs/adr/0019-vnext-breaking-and-protocol-contracts.md`](docs/adr/0019-vnext-breaking-and-protocol-contracts.md)：
+  断代与稳定协议合同。
+- [`docs/adr/0020-vnext-catalog-operator-resolution.md`](docs/adr/0020-vnext-catalog-operator-resolution.md)：
+  Catalog、Operator 与 resolution。
+- [`docs/adr/0021-vnext-artifact-runtime-registry.md`](docs/adr/0021-vnext-artifact-runtime-registry.md)：
+  ArtifactSet、Runtime Profile 与 registry。
+- [`docs/adr/0022-vnext-certification-ops-skill.md`](docs/adr/0022-vnext-certification-ops-skill.md)：
+  认证、ops 与 Skill。
 
-目录约定见 [`sdk/README.md`](sdk/README.md)：
+RUP Schema Set、Publish Protocol、Updater IPC 和 ArtifactSet 各自按合同窗口兼容；
+不承诺任意 Relkit release 组件混搭。v0.5 及更早控制面已冻结，只接受安全与正确性
+最小修复。
 
-| | |
-|--|--|
-| Go | `relkit-sdk-go.zip` 附件装到 `third_party/relkit`（`go list -deps` 算出的可编译子集），配 `replace github.com/shichao402/relkit => ./third_party/relkit` · [`sdk/README.md`](sdk/README.md) |
-| Dart | `sdk/dart`（package `rup_client`）· [`sdk/dart/README.md`](sdk/dart/README.md) |
-| Node | `sdk/node`（package `rup-client`）· [`sdk/node/README.md`](sdk/node/README.md) |
-| Rust | `sdk/rust`（crate `relkit-updater`，供 Tauri 壳调用 sidecar）· [`sdk/rust/README.md`](sdk/rust/README.md) |
+## 开发与验证
 
-```go
-import "github.com/shichao402/relkit/sdk"
+版本 SSOT 是 [`VERSION.json`](VERSION.json)。生成正式资产：
 
-u := &sdk.Updater{
-    Product: "myapp", Channel: "stable", CurrentCode: 100,
-    IndexURLs: []string{"https://cdn.example.com/index/myapp/stable.pb"},
-    TrustedKeys: sdk.TrustedKeys{"k1": pub},
-    ClientSelectors: map[string]string{"os": "windows", "arch": "x64"},
-}
-result := u.Check(ctx)
+```bash
+python3 scripts/deploy/relkit.py build \
+  --cli --updater --dart-sdk --go-sdk --rust-sdk --bindings-ts
 ```
 
-Dart：`rup_client`（git `path: sdk/dart`）。
-Node：`rup-client`（`sdk/node`）。
-
-## 开发与测试
+主要验证：
 
 ```bash
 go test ./...
 cargo test --manifest-path sdk/rust/Cargo.toml
-cd sdk/node && npm test
+cd sdk/dart && dart test
+cd bindings/ts && npm test
 ```
 
-覆盖：
-
-- `chain` / `selectors` / `envelope` 的 conformance 夹具回归
-- `s3-compatible` / `relkit-compatible` 端到端发布与校验（`.pb`）
-- `relkit-store` 的 Range / PUT / GC / 配置加载；`relkit-console` 的面板与操作鉴权
-- `sdk` 客户端 Check/Download（Go 与 Node）
-- `version` 项目 VERSION.json SSOT（get/set/bump/code）
+`internal/vnext` 覆盖合同、签名、resolution、物化、ArtifactSet、Runtime Profile、
+发布事务、Operator 原子升级与认证；`conformance/` 覆盖协议和旧客户端窗口。

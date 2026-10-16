@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file rup/v2/objects.proto.
  */
 export const file_rup_v2_objects: GenFile = /*@__PURE__*/
-  fileDesc("ChRydXAvdjIvb2JqZWN0cy5wcm90bxIGcnVwLnYyIiYKCFNlbGVjdG9yEgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCSInCglNZXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJIjcKCURpZ2VzdFJlZhIOCgZzaGEyNTYYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgR1cmxzGAMgAygJIqoBCgtWZXJzaW9uTm9kZRIPCgd2ZXJzaW9uGAEgASgJEgwKBGNvZGUYAiABKAMSEAoIbWluX2Zyb20YAyABKAMSDgoGeWFua2VkGAQgASgIEiMKCG1hbmlmZXN0GAUgASgLMhEucnVwLnYyLkRpZ2VzdFJlZhITCgtyZWxlYXNlZF9hdBgGIAEoCRINCgVub3RlcxgHIAEoCRIRCglub3Rlc191cmwYCCABKAkizgEKBUluZGV4Eg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEg8KB2NoYW5uZWwYAyABKAkSEAoIc2VxdWVuY2UYBCABKAMSFAoMZ2VuZXJhdGVkX2F0GAUgASgJEhUKDW1pbl9zdXBwb3J0ZWQYBiABKAMSGQoRaGFzX21pbl9zdXBwb3J0ZWQYByABKAgSEgoKZXhwaXJlc19hdBgIIAEoCRIlCgh2ZXJzaW9ucxgJIAMoCzITLnJ1cC52Mi5WZXJzaW9uTm9kZSK+AQoIQXJ0aWZhY3QSCgoCaWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSDAoEc2l6ZRgDIAEoAxIOCgZzaGEyNTYYBCABKAkSIgoEa2luZBgFIAEoDjIULnJ1cC52Mi5BcnRpZmFjdEtpbmQSIwoJc2VsZWN0b3JzGAYgAygLMhAucnVwLnYyLlNlbGVjdG9yEgwKBHVybHMYByADKAkSHwoEbWV0YRgIIAMoCzIRLnJ1cC52Mi5NZXRhRW50cnkikwEKCE1hbmlmZXN0Eg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEg8KB3ZlcnNpb24YAyABKAkSDAoEY29kZRgEIAEoAxITCgtyZWxlYXNlZF9hdBgFIAEoCRINCgVub3RlcxgGIAEoCRIjCglhcnRpZmFjdHMYByADKAsyEC5ydXAudjIuQXJ0aWZhY3QiywEKDlN0YWdlZEFydGlmYWN0EgoKAmlkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEgwKBHNpemUYAyABKAMSDgoGc2hhMjU2GAQgASgJEiIKBGtpbmQYBSABKA4yFC5ydXAudjIuQXJ0aWZhY3RLaW5kEiMKCXNlbGVjdG9ycxgGIAMoCzIQLnJ1cC52Mi5TZWxlY3RvchIfCgRtZXRhGAcgAygLMhEucnVwLnYyLk1ldGFFbnRyeRITCgtzb3VyY2VfcGF0aBgIIAEoCSLMAQoGU3RhZ2VkEg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEg8KB3ZlcnNpb24YAyABKAkSDAoEY29kZRgEIAEoAxIQCghtaW5fZnJvbRgFIAEoAxIPCgdjaGFubmVsGAYgASgJEhIKCmNyZWF0ZWRfYXQYByABKAkSDQoFbm90ZXMYCCABKAkSKQoJYXJ0aWZhY3RzGAkgAygLMhYucnVwLnYyLlN0YWdlZEFydGlmYWN0EhEKCW5vdGVzX3VybBgKIAEoCSKPAQoMRmFsbGJhY2tSdWxlEhAKCG1pbl9jb2RlGAEgASgDEhAKCG1heF9jb2RlGAIgASgDEhIKCm1hbnVhbF91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCRIRCgltYW5kYXRvcnkYBSABKAgSIwoJc2VsZWN0b3JzGAYgAygLMhAucnVwLnYyLlNlbGVjdG9yIngKCEZhbGxiYWNrEg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEhAKCHNlcXVlbmNlGAMgASgDEhQKDGdlbmVyYXRlZF9hdBgEIAEoCRIjCgVydWxlcxgFIAMoCzIULnJ1cC52Mi5GYWxsYmFja1J1bGUiagoQRGlyZWN0b3J5U2VydmljZRIKCgJpZBgBIAEoCRIQCghwcmlvcml0eRgCIAEoBRIRCglpbmRleF91cmwYAyABKAkSFAoMZmFsbGJhY2tfdXJsGAQgASgJEg8KB2NoYW5uZWwYBSABKAkijgEKD1VwZGF0ZURpcmVjdG9yeRIOCgZzY2hlbWEYASABKAkSDwoHcHJvZHVjdBgCIAEoCRIaChJkaXJlY3Rvcnlfc2VxdWVuY2UYAyABKAMSEgoKdXBkYXRlZF9hdBgEIAEoCRIqCghzZXJ2aWNlcxgFIAMoCzIYLnJ1cC52Mi5EaXJlY3RvcnlTZXJ2aWNlKrIBCgxBcnRpZmFjdEtpbmQSHQoZQVJUSUZBQ1RfS0lORF9VTlNQRUNJRklFRBAAEhkKFUFSVElGQUNUX0tJTkRfQVJDSElWRRABEhsKF0FSVElGQUNUX0tJTkRfSU5TVEFMTEVSEAISGAoUQVJUSUZBQ1RfS0lORF9CSU5BUlkQAxIWChJBUlRJRkFDVF9LSU5EX0JMT0IQBBIZChVBUlRJRkFDVF9LSU5EX1BBWUxPQUQQBUIpWidnby5maXJveWFuZy5jb20vcmVsa2l0L2FwaS9ydXAvdjI7cnVwdjJiBnByb3RvMw");
+  fileDesc("ChRydXAvdjIvb2JqZWN0cy5wcm90bxIGcnVwLnYyIiYKCFNlbGVjdG9yEgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCSInCglNZXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJIjcKCURpZ2VzdFJlZhIOCgZzaGEyNTYYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgR1cmxzGAMgAygJIoICCgtWZXJzaW9uTm9kZRIPCgd2ZXJzaW9uGAEgASgJEgwKBGNvZGUYAiABKAMSEAoIbWluX2Zyb20YAyABKAMSDgoGeWFua2VkGAQgASgIEiMKCG1hbmlmZXN0GAUgASgLMhEucnVwLnYyLkRpZ2VzdFJlZhITCgtyZWxlYXNlZF9hdBgGIAEoCRINCgVub3RlcxgHIAEoCRIRCglub3Rlc191cmwYCCABKAkSGQoRcmVzb2x1dGlvbl9kaWdlc3QYCSABKAkSHgoWb3BlcmF0b3JfZGVwbG95bWVudF9pZBgKIAEoCRIbChNyZXNvbHV0aW9uX2lkZW50aXR5GAsgASgJIs4BCgVJbmRleBIOCgZzY2hlbWEYASABKAkSDwoHcHJvZHVjdBgCIAEoCRIPCgdjaGFubmVsGAMgASgJEhAKCHNlcXVlbmNlGAQgASgDEhQKDGdlbmVyYXRlZF9hdBgFIAEoCRIVCg1taW5fc3VwcG9ydGVkGAYgASgDEhkKEWhhc19taW5fc3VwcG9ydGVkGAcgASgIEhIKCmV4cGlyZXNfYXQYCCABKAkSJQoIdmVyc2lvbnMYCSADKAsyEy5ydXAudjIuVmVyc2lvbk5vZGUivgEKCEFydGlmYWN0EgoKAmlkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEgwKBHNpemUYAyABKAMSDgoGc2hhMjU2GAQgASgJEiIKBGtpbmQYBSABKA4yFC5ydXAudjIuQXJ0aWZhY3RLaW5kEiMKCXNlbGVjdG9ycxgGIAMoCzIQLnJ1cC52Mi5TZWxlY3RvchIMCgR1cmxzGAcgAygJEh8KBG1ldGEYCCADKAsyES5ydXAudjIuTWV0YUVudHJ5IusBCghNYW5pZmVzdBIOCgZzY2hlbWEYASABKAkSDwoHcHJvZHVjdBgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJEgwKBGNvZGUYBCABKAMSEwoLcmVsZWFzZWRfYXQYBSABKAkSDQoFbm90ZXMYBiABKAkSIwoJYXJ0aWZhY3RzGAcgAygLMhAucnVwLnYyLkFydGlmYWN0EhkKEXJlc29sdXRpb25fZGlnZXN0GAggASgJEh4KFm9wZXJhdG9yX2RlcGxveW1lbnRfaWQYCSABKAkSGwoTcmVzb2x1dGlvbl9pZGVudGl0eRgKIAEoCSLLAQoOU3RhZ2VkQXJ0aWZhY3QSCgoCaWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSDAoEc2l6ZRgDIAEoAxIOCgZzaGEyNTYYBCABKAkSIgoEa2luZBgFIAEoDjIULnJ1cC52Mi5BcnRpZmFjdEtpbmQSIwoJc2VsZWN0b3JzGAYgAygLMhAucnVwLnYyLlNlbGVjdG9yEh8KBG1ldGEYByADKAsyES5ydXAudjIuTWV0YUVudHJ5EhMKC3NvdXJjZV9wYXRoGAggASgJIqQCCgZTdGFnZWQSDgoGc2NoZW1hGAEgASgJEg8KB3Byb2R1Y3QYAiABKAkSDwoHdmVyc2lvbhgDIAEoCRIMCgRjb2RlGAQgASgDEhAKCG1pbl9mcm9tGAUgASgDEg8KB2NoYW5uZWwYBiABKAkSEgoKY3JlYXRlZF9hdBgHIAEoCRINCgVub3RlcxgIIAEoCRIpCglhcnRpZmFjdHMYCSADKAsyFi5ydXAudjIuU3RhZ2VkQXJ0aWZhY3QSEQoJbm90ZXNfdXJsGAogASgJEhkKEXJlc29sdXRpb25fZGlnZXN0GAsgASgJEh4KFm9wZXJhdG9yX2RlcGxveW1lbnRfaWQYDCABKAkSGwoTcmVzb2x1dGlvbl9pZGVudGl0eRgNIAEoCSKPAQoMRmFsbGJhY2tSdWxlEhAKCG1pbl9jb2RlGAEgASgDEhAKCG1heF9jb2RlGAIgASgDEhIKCm1hbnVhbF91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCRIRCgltYW5kYXRvcnkYBSABKAgSIwoJc2VsZWN0b3JzGAYgAygLMhAucnVwLnYyLlNlbGVjdG9yIngKCEZhbGxiYWNrEg4KBnNjaGVtYRgBIAEoCRIPCgdwcm9kdWN0GAIgASgJEhAKCHNlcXVlbmNlGAMgASgDEhQKDGdlbmVyYXRlZF9hdBgEIAEoCRIjCgVydWxlcxgFIAMoCzIULnJ1cC52Mi5GYWxsYmFja1J1bGUiagoQRGlyZWN0b3J5U2VydmljZRIKCgJpZBgBIAEoCRIQCghwcmlvcml0eRgCIAEoBRIRCglpbmRleF91cmwYAyABKAkSFAoMZmFsbGJhY2tfdXJsGAQgASgJEg8KB2NoYW5uZWwYBSABKAkiugEKD1VwZGF0ZURpcmVjdG9yeRIOCgZzY2hlbWEYASABKAkSDwoHcHJvZHVjdBgCIAEoCRIaChJkaXJlY3Rvcnlfc2VxdWVuY2UYAyABKAMSEgoKdXBkYXRlZF9hdBgEIAEoCRIqCghzZXJ2aWNlcxgFIAMoCzIYLnJ1cC52Mi5EaXJlY3RvcnlTZXJ2aWNlEioKD3J1bnRpbWVfcHJvZmlsZRgGIAEoCzIRLnJ1cC52Mi5EaWdlc3RSZWYqsgEKDEFydGlmYWN0S2luZBIdChlBUlRJRkFDVF9LSU5EX1VOU1BFQ0lGSUVEEAASGQoVQVJUSUZBQ1RfS0lORF9BUkNISVZFEAESGwoXQVJUSUZBQ1RfS0lORF9JTlNUQUxMRVIQAhIYChRBUlRJRkFDVF9LSU5EX0JJTkFSWRADEhYKEkFSVElGQUNUX0tJTkRfQkxPQhAEEhkKFUFSVElGQUNUX0tJTkRfUEFZTE9BRBAFQi9aLWdpdGh1Yi5jb20vc2hpY2hhbzQwMi9yZWxraXQvYXBpL3J1cC92MjtydXB2MmIGcHJvdG8z");
 
 /**
  * Selector is one key/value match constraint.
@@ -145,6 +145,23 @@ export type VersionNode = Message<"rup.v2.VersionNode"> & {
    * @generated from field: string notes_url = 8;
    */
   notesUrl: string;
+
+  /**
+   * vNext provenance. Older field clients ignore these additive fields.
+   *
+   * @generated from field: string resolution_digest = 9;
+   */
+  resolutionDigest: string;
+
+  /**
+   * @generated from field: string operator_deployment_id = 10;
+   */
+  operatorDeploymentId: string;
+
+  /**
+   * @generated from field: string resolution_identity = 11;
+   */
+  resolutionIdentity: string;
 };
 
 /**
@@ -323,6 +340,23 @@ export type Manifest = Message<"rup.v2.Manifest"> & {
    * @generated from field: repeated rup.v2.Artifact artifacts = 7;
    */
   artifacts: Artifact[];
+
+  /**
+   * Immutable build-control provenance copied from Staged.
+   *
+   * @generated from field: string resolution_digest = 8;
+   */
+  resolutionDigest: string;
+
+  /**
+   * @generated from field: string operator_deployment_id = 9;
+   */
+  operatorDeploymentId: string;
+
+  /**
+   * @generated from field: string resolution_identity = 10;
+   */
+  resolutionIdentity: string;
 };
 
 /**
@@ -447,6 +481,23 @@ export type Staged = Message<"rup.v2.Staged"> & {
    * @generated from field: string notes_url = 10;
    */
   notesUrl: string;
+
+  /**
+   * Immutable vNext resolution used by produce/stage/simulate/publish.
+   *
+   * @generated from field: string resolution_digest = 11;
+   */
+  resolutionDigest: string;
+
+  /**
+   * @generated from field: string operator_deployment_id = 12;
+   */
+  operatorDeploymentId: string;
+
+  /**
+   * @generated from field: string resolution_identity = 13;
+   */
+  resolutionIdentity: string;
 };
 
 /**
@@ -648,6 +699,14 @@ export type UpdateDirectory = Message<"rup.v2.UpdateDirectory"> & {
    * @generated from field: repeated rup.v2.DirectoryService services = 5;
    */
   services: DirectoryService[];
+
+  /**
+   * Optional signed vNext cross-product bootstrap profile. Field clients that
+   * do not subscribe to other products safely ignore this additive field.
+   *
+   * @generated from field: rup.v2.DigestRef runtime_profile = 6;
+   */
+  runtimeProfile?: DigestRef | undefined;
 };
 
 /**

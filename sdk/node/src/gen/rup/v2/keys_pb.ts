@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file rup/v2/keys.proto.
  */
 export const file_rup_v2_keys: GenFile = /*@__PURE__*/
-  fileDesc("ChFydXAvdjIva2V5cy5wcm90bxIGcnVwLnYyIlQKEVB1YmxpY0tleURvY3VtZW50Eg4KBnNjaGVtYRgBIAEoCRIOCgZrZXlfaWQYAiABKAkSCwoDYWxnGAMgASgJEhIKCnB1YmxpY19rZXkYBCABKAwiTwoSUHJpdmF0ZUtleURvY3VtZW50Eg4KBnNjaGVtYRgBIAEoCRIOCgZrZXlfaWQYAiABKAkSCwoDYWxnGAMgASgJEgwKBHNlZWQYBCABKAxCKVonZ28uZmlyb3lhbmcuY29tL3JlbGtpdC9hcGkvcnVwL3YyO3J1cHYyYgZwcm90bzM");
+  fileDesc("ChFydXAvdjIva2V5cy5wcm90bxIGcnVwLnYyIlQKEVB1YmxpY0tleURvY3VtZW50Eg4KBnNjaGVtYRgBIAEoCRIOCgZrZXlfaWQYAiABKAkSCwoDYWxnGAMgASgJEhIKCnB1YmxpY19rZXkYBCABKAwiTwoSUHJpdmF0ZUtleURvY3VtZW50Eg4KBnNjaGVtYRgBIAEoCRIOCgZrZXlfaWQYAiABKAkSCwoDYWxnGAMgASgJEgwKBHNlZWQYBCABKAxCL1otZ2l0aHViLmNvbS9zaGljaGFvNDAyL3JlbGtpdC9hcGkvcnVwL3YyO3J1cHYyYgZwcm90bzM");
 
 /**
  * PublicKeyDocument is the on-disk / embeddable public key record.

@@ -1,11 +1,13 @@
 # ADR 0017: 消费编排收进 CLI，模块源码通道取代 scripts/host
 
-- 状态：Proposed
+- 状态：Proposed（**控制面将被 [ADR 0019](0019-vnext-breaking-and-protocol-contracts.md) 废止**；Go module + sumdb 传输经验由 0019/0020 保留）
 - 日期：2026-09-27
-- 更新：2026-09-28（决策 7 updater 改走 module 通道；决策 4 兜底从 COS 改 CNB 附件，再改 GitHub 单源——`.cnb.yml` 发布面删除，CNB 定位收缩为每日同步镜像；内外网 goproxy 统一入口 `mirrors.tencent.com/go/` 实测定稿，v0.4.24 已发并端到端验证）
+- 更新：2026-09-28（决策 7 updater 改走 module 通道；决策 4 兜底从 COS 改 CNB 附件，再改 GitHub 单源——`.cnb.yml` 发布面删除，CNB 定位收缩为每日同步镜像；内外网 goproxy 统一入口 `mirrors.tencent.com/go/` 实测定稿，v0.4.24 已发并端到端验证）；2026-10-16（vNext：consume/3、follow-latest、host/onboarding 控制面改由 ADR 0019–0022 承接）
 - 取代：[ADR 0011](0011-immutable-release-consume.md) 决策 1 中「scripts/host Release 附件」部分、决策 3、决策 4、决策 6；决策 2 的 lock schema 由 `relkit.consume/2` 演进为 `relkit.consume/3`。决策 5（consume/1 删除）保持历史事实。
 - 修订：[ADR 0010](0010-single-updater-engine.md) 决策 7「consume 同一 SHA 产出 facade 与二进制」改述为「同一 commit」；[ADR 0012](0012-single-component-registry.md) 的注册表载体由 `facets.py` 改为 Go。另：`scripts/deploy` 发布层自始未入任何 ADR，本 ADR 一并收编其 `build` 面。
-- 关联：[ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md)、[ADR 0009](0009-publisher-protocol-negotiation.md)
+- 关联：[ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md)、[ADR 0009](0009-publisher-protocol-negotiation.md)、[ADR 0019](0019-vnext-breaking-and-protocol-contracts.md)
+
+> **vNext 说明**：本 ADR 在 v0.5 仍描述现行 consume/CLI 控制面。vNext 切换后，产品仓入口改为 `relkit.project/1` + Operator Profile + `relkit.resolution/1`；本文件保留为历史与 module 传输依据，不再作为长期控制面 SSOT。详见 [design/vnext/USER-ACCEPTANCE.md](../design/vnext/USER-ACCEPTANCE.md)。
 
 ## 背景
 

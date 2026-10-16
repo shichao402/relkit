@@ -1,0 +1,103 @@
+{
+  "schema": "relkit.component-registry/1",
+  "components": [
+    {
+      "name": "store",
+      "role": "infrastructure-binary",
+      "transport": "release-asset",
+      "targets": ["linux-amd64", "linux-arm64"],
+      "provides": [
+        {"domain": "publishProtocol", "peer": "cli", "min": 2, "max": 3}
+      ]
+    },
+    {
+      "name": "console",
+      "role": "infrastructure-binary",
+      "transport": "release-asset",
+      "targets": ["linux-amd64", "linux-arm64"]
+    },
+    {
+      "name": "agent",
+      "role": "infrastructure-binary",
+      "transport": "release-asset",
+      "targets": ["linux-amd64", "linux-arm64"],
+      "provides": [
+        {"domain": "publishProtocol", "peer": "cli", "min": 2, "max": 3}
+      ]
+    },
+    {
+      "name": "ops",
+      "role": "infrastructure-binary",
+      "transport": "release-asset",
+      "targets": ["linux-amd64", "linux-arm64", "windows-amd64", "darwin-amd64", "darwin-arm64", "darwin-universal"]
+    },
+    {
+      "name": "cli",
+      "role": "product-binary",
+      "transport": "release-asset",
+      "targets": ["linux-amd64", "linux-arm64", "windows-amd64", "darwin-amd64", "darwin-arm64", "darwin-universal"],
+      "destination": ".relkit/components/bin",
+      "default": true,
+      "requires": [
+        {"domain": "publishProtocol", "peer": "agent", "min": 2, "max": 3}
+      ],
+      "provides": [
+        {"domain": "artifactSet", "peer": "producer", "id": "relkit.artifact-set/1"}
+      ]
+    },
+    {
+      "name": "updater",
+      "role": "product-binary",
+      "transport": "release-asset",
+      "targets": ["linux-amd64", "linux-arm64", "windows-amd64", "darwin-amd64", "darwin-arm64", "darwin-universal"],
+      "destination": ".relkit/components/bin",
+      "default": true,
+      "requires": [
+        {"domain": "rupSchemaSet", "peer": "directory", "id": "rup.v2"}
+      ],
+      "provides": [
+        {"domain": "updaterIpc", "peer": "facade", "min": 3, "max": 3}
+      ]
+    },
+    {
+      "name": "sdk-dart",
+      "role": "facade",
+      "transport": "release-asset",
+      "targets": ["all"],
+      "destination": ".relkit/components/sdk/dart",
+      "requires": [
+        {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
+      ]
+    },
+    {
+      "name": "sdk-go",
+      "role": "facade",
+      "transport": "release-asset",
+      "targets": ["all"],
+      "destination": ".relkit/components/sdk/go",
+      "requires": [
+        {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
+      ]
+    },
+    {
+      "name": "sdk-rust",
+      "role": "facade",
+      "transport": "release-asset",
+      "targets": ["all"],
+      "destination": ".relkit/components/sdk/rust",
+      "requires": [
+        {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
+      ]
+    },
+    {
+      "name": "bindings-ts",
+      "role": "projection",
+      "transport": "release-asset",
+      "targets": ["all"],
+      "destination": ".relkit/components/bindings/ts",
+      "requires": [
+        {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
+      ]
+    }
+  ]
+}

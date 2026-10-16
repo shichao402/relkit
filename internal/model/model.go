@@ -430,12 +430,15 @@ func NewManifestFromStaged(staged *StagedDocument, urlsByArtifactID map[string][
 	}
 
 	manifest := &ManifestDocument{
-		Schema:     SchemaManifest,
-		Product:    staged.Product,
-		Version:    staged.Version,
-		Code:       staged.Code,
-		ReleasedAt: nonEmptyOr(releasedAt, UTCNow()),
-		Artifacts:  artifacts,
+		Schema:               SchemaManifest,
+		Product:              staged.Product,
+		Version:              staged.Version,
+		Code:                 staged.Code,
+		ReleasedAt:           nonEmptyOr(releasedAt, UTCNow()),
+		Artifacts:            artifacts,
+		ResolutionDigest:     staged.ResolutionDigest,
+		OperatorDeploymentId: staged.OperatorDeploymentId,
+		ResolutionIdentity:   staged.ResolutionIdentity,
 	}
 	if staged.Notes != "" {
 		manifest.Notes = staged.Notes
@@ -445,10 +448,13 @@ func NewManifestFromStaged(staged *StagedDocument, urlsByArtifactID map[string][
 
 func NewIndexNode(staged *StagedDocument, manifestDigest string, manifestSize int64, manifestURLs []string, releasedAt string) *VersionNode {
 	node := &VersionNode{
-		Version:    staged.Version,
-		Code:       staged.Code,
-		MinFrom:    staged.MinFrom,
-		ReleasedAt: nonEmptyOr(releasedAt, UTCNow()),
+		Version:              staged.Version,
+		Code:                 staged.Code,
+		MinFrom:              staged.MinFrom,
+		ReleasedAt:           nonEmptyOr(releasedAt, UTCNow()),
+		ResolutionDigest:     staged.ResolutionDigest,
+		OperatorDeploymentId: staged.OperatorDeploymentId,
+		ResolutionIdentity:   staged.ResolutionIdentity,
 		Manifest: &ManifestRef{
 			Sha256: manifestDigest,
 			Size:   manifestSize,

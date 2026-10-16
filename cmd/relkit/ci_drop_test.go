@@ -151,7 +151,7 @@ func TestDropManifestName(t *testing.T) {
 func TestZipDirRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	writePayloadTree(t, root, map[string]string{
-		"versions/0.2.0+165/app.exe": "binary-ish",
+		"versions/0.2.0+165/app.exe":         "binary-ish",
 		"versions/0.2.0+165/data/config.ini": "config",
 	})
 	zipPath := filepath.Join(t.TempDir(), "payload.zip")
@@ -171,7 +171,7 @@ func TestZipDirRoundTrip(t *testing.T) {
 		t.Fatalf("expected 2 written, got %d", written)
 	}
 	for relPath, content := range map[string]string{
-		"versions/0.2.0+165/app.exe":       "binary-ish",
+		"versions/0.2.0+165/app.exe":         "binary-ish",
 		"versions/0.2.0+165/data/config.ini": "config",
 	} {
 		data, err := os.ReadFile(filepath.Join(dest, filepath.FromSlash(relPath)))
@@ -414,8 +414,8 @@ func TestAssembleFromDropEndToEnd(t *testing.T) {
 
 	// Windows platform job: install + payload tree, pushed via uploadArtifacts.
 	writePayloadTree(t, root, map[string]string{
-		"dist/SvnAutoMerge_windows_0.2.0+165_setup.exe": "setup-bytes",
-		".release/versioned/versions/" + version + "/app.exe": "app-bytes",
+		"dist/SvnAutoMerge_windows_0.2.0+165_setup.exe":               "setup-bytes",
+		".release/versioned/versions/" + version + "/app.exe":         "app-bytes",
 		".release/versioned/versions/" + version + "/data/config.ini": "config",
 	})
 	windowsManifest := partialManifest(t, version, "windows", true)
@@ -496,11 +496,11 @@ func TestAssembleFromDropEndToEnd(t *testing.T) {
 		t.Fatalf("payload tree not materialized: %v", err)
 	}
 	expectedCleanup := map[string]bool{
-		"bk-77--release-artifacts-windows.json":     true,
-		"bk-77--release-artifacts-macos.json":       true,
-		"bk-77--SvnAutoMerge_windows_0.2.0+165_setup.exe": true,
+		"bk-77--release-artifacts-windows.json":             true,
+		"bk-77--release-artifacts-macos.json":               true,
+		"bk-77--SvnAutoMerge_windows_0.2.0+165_setup.exe":   true,
 		"bk-77--SvnAutoMerge_windows_0.2.0+165_payload.zip": true,
-		"bk-77--SvnAutoMerge_macos_0.2.0+165.dmg":   true,
+		"bk-77--SvnAutoMerge_macos_0.2.0+165.dmg":           true,
 	}
 	for _, name := range cleanup {
 		if !expectedCleanup[name] {

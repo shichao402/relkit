@@ -2,9 +2,11 @@
 package directory
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
@@ -33,9 +35,10 @@ type ServiceInput struct {
 }
 
 type Options struct {
-	Services []ServiceInput
-	To       []string
-	DryRun   bool
+	Services       []ServiceInput
+	To             []string
+	DryRun         bool
+	RuntimeProfile *model.ManifestRef
 }
 
 // Set replaces the product directory document: read current directory_sequence
@@ -115,6 +118,7 @@ func Set(cfg *config.Config, opts Options, printer Printer) (*model.UpdateDirect
 		DirectorySequence: int64(baseSequence + 1),
 		UpdatedAt:         model.UTCNow(),
 		Services:          docServices,
+		RuntimeProfile:    cloneDigestRef(opts.RuntimeProfile),
 	}
 
 	printer(fmt.Sprintf("directory %s sequence %d (%d service(s))", cfg.Product, doc.DirectorySequence, len(doc.Services)))
@@ -144,14 +148,31 @@ func Set(cfg *config.Config, opts Options, printer Printer) (*model.UpdateDirect
 		return nil, err
 	}
 
+	var committed []string
 	for _, backend := range opened {
 		if _, err := backend.PutPointer(envelopeBytes, key); err != nil {
-			return nil, Error{Message: fmt.Sprintf("backend %q failed to write %s: %v", backend.Name(), key, err)}
+			code := "release.directory_write_failed"
+			if len(committed) > 0 {
+				code = "release.directory_partial"
+			}
+			return nil, Error{Message: fmt.Sprintf("%s: backend %q failed to write %s after commits to [%s]: %v", code, backend.Name(), key, strings.Join(committed, ", "), err)}
 		}
+		committed = append(committed, backend.Name())
 		printer(fmt.Sprintf("  %-12s %s", backend.Name(), key))
 	}
 	printer(fmt.Sprintf("published directory for %s at sequence %d", cfg.Product, doc.DirectorySequence))
 	return doc, nil
+}
+
+func cloneDigestRef(value *model.ManifestRef) *model.ManifestRef {
+	if value == nil {
+		return nil
+	}
+	return &model.ManifestRef{
+		Sha256: value.Sha256,
+		Size:   value.Size,
+		Urls:   append([]string(nil), value.Urls...),
+	}
 }
 
 func servicesFromConfig(cfg *config.Config) []ServiceInput {
@@ -233,12 +254,16 @@ func checkClientsCanVerifyDirectory(cfg *config.Config, env *model.Envelope) err
 
 func readBaseSequence(opened []backends.Backend, key, product string, trusted map[string]ed25519.PublicKey, printer Printer) (int, error) {
 	base := 0
+	rawByBackend := make(map[string][]byte, len(opened))
+	sequences := make(map[string]int64, len(opened))
 	for _, backend := range opened {
 		raw, err := backend.Get(key)
 		if err != nil {
 			return 0, Error{Message: fmt.Sprintf("could not read directory from backend %q: %v", backend.Name(), err)}
 		}
+		rawByBackend[backend.Name()] = raw
 		if raw == nil {
+			sequences[backend.Name()] = 0
 			printer(fmt.Sprintf("  %-12s no existing directory", backend.Name()))
 			continue
 		}
@@ -253,9 +278,29 @@ func readBaseSequence(opened []backends.Backend, key, product string, trusted ma
 		if doc.Product != product {
 			return 0, Error{Message: fmt.Sprintf("directory on backend %q is for product %q, expected %q", backend.Name(), doc.Product, product)}
 		}
+		sequences[backend.Name()] = doc.DirectorySequence
 		printer(fmt.Sprintf("  %-12s sequence %d, %d service(s)", backend.Name(), doc.DirectorySequence, len(doc.Services)))
 		if int(doc.DirectorySequence) > base {
 			base = int(doc.DirectorySequence)
+		}
+	}
+	if len(opened) > 1 {
+		first := rawByBackend[opened[0].Name()]
+		for _, backend := range opened[1:] {
+			if bytes.Equal(first, rawByBackend[backend.Name()]) {
+				continue
+			}
+			var states []string
+			for _, candidate := range opened {
+				sequence := sequences[candidate.Name()]
+				if rawByBackend[candidate.Name()] == nil {
+					states = append(states, candidate.Name()+"=missing")
+				} else {
+					states = append(states, fmt.Sprintf("%s=%d", candidate.Name(), sequence))
+				}
+			}
+			slices.Sort(states)
+			return 0, Error{Message: fmt.Sprintf("backends disagree on the current directory (%s); repair the divergence before publishing", strings.Join(states, ", "))}
 		}
 	}
 	return base, nil

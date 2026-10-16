@@ -67,7 +67,10 @@ func cmdBuild(args []string) error {
 		}
 	}
 
-	outPath := filepath.Join(root, filepath.FromSlash(outDir))
+	outPath := filepath.FromSlash(outDir)
+	if !filepath.IsAbs(outPath) {
+		outPath = filepath.Join(root, outPath)
+	}
 	if !filepath.IsAbs(outPath) {
 		abs, err := filepath.Abs(outPath)
 		if err != nil {

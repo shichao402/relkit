@@ -76,13 +76,22 @@ type PublishProfile struct {
 }
 
 type PublishSigningProfile struct {
+	KeyID          string              `json:"keyId,omitempty"`
+	PrivateKeyEnv  string              `json:"privateKeyEnv,omitempty"`
+	PrivateKeyPath string              `json:"privateKeyPath,omitempty"`
+	Keys           []PublishSigningKey `json:"keys,omitempty"`
+	PublicKeys     []PublicKeyConfig   `json:"publicKeys,omitempty"`
+}
+
+type PublishSigningKey struct {
 	KeyID          string `json:"keyId"`
-	PrivateKeyEnv  string `json:"privateKeyEnv,omitempty"`
-	PrivateKeyPath string `json:"privateKeyPath,omitempty"`
+	PrivateKeyPath string `json:"privateKeyPath"`
 }
 
 type PublishDirectoryProfile struct {
-	PublishTo []string `json:"publishTo,omitempty"`
+	PublishTo []string                 `json:"publishTo,omitempty"`
+	EntryURLs []string                 `json:"entryUrls,omitempty"`
+	Services  []DirectoryServiceConfig `json:"services,omitempty"`
 }
 
 // TrustedPublicKeys returns the verification keys clients embed. On a publish
@@ -203,6 +212,18 @@ func ExtractPublishProfile(cfg *Config) (*PublishProfile, error) {
 	profile.Signing.KeyID, _ = cfg.Signing["keyId"].(string)
 	profile.Signing.PrivateKeyEnv, _ = cfg.Signing["privateKeyEnv"].(string)
 	profile.Signing.PrivateKeyPath, _ = cfg.Signing["privateKeyPath"].(string)
+	if rawKeys, ok := cfg.Signing["keys"].([]any); ok {
+		for _, raw := range rawKeys {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			key := PublishSigningKey{}
+			key.KeyID, _ = entry["keyId"].(string)
+			key.PrivateKeyPath, _ = entry["privateKeyPath"].(string)
+			profile.Signing.Keys = append(profile.Signing.Keys, key)
+		}
+	}
 	if cfg.Directory != nil && len(cfg.Directory.PublishTo) > 0 {
 		profile.Directory = &PublishDirectoryProfile{PublishTo: append([]string(nil), cfg.Directory.PublishTo...)}
 	}
@@ -232,8 +253,26 @@ func MergeProductPolicy(policy *ProductPolicy, profile *PublishProfile, productR
 	if policy.Product != profile.Product {
 		return nil, Error{Message: fmt.Sprintf("publish profile product %q does not match policy product %q", profile.Product, policy.Product)}
 	}
-	if policy.Signing.KeyID != profile.Signing.KeyID {
+	if len(profile.Signing.Keys) == 0 && policy.Signing.KeyID != profile.Signing.KeyID {
 		return nil, Error{Message: fmt.Sprintf("publish profile signing.keyId %q does not match policy signing.keyId %q", profile.Signing.KeyID, policy.Signing.KeyID)}
+	}
+	if len(profile.Signing.Keys) > 0 {
+		trusted := map[string]bool{}
+		for _, key := range policy.Signing.PublicKeys {
+			trusted[key.KeyID] = true
+		}
+		hasPrimary := false
+		for _, key := range profile.Signing.Keys {
+			if key.KeyID == policy.Signing.KeyID {
+				hasPrimary = true
+			}
+			if !trusted[key.KeyID] {
+				return nil, Error{Message: fmt.Sprintf("publish signer %q is not present in product policy signing.publicKeys", key.KeyID)}
+			}
+		}
+		if !hasPrimary {
+			return nil, Error{Message: fmt.Sprintf("publish profile signing.keys does not contain policy primary key %q", policy.Signing.KeyID)}
+		}
 	}
 
 	cfg := &Config{
@@ -272,6 +311,17 @@ func MergeProductPolicy(policy *ProductPolicy, profile *PublishProfile, productR
 	}
 	if profile.Signing.PrivateKeyPath != "" {
 		cfg.Signing["privateKeyPath"] = profile.Signing.PrivateKeyPath
+	}
+	if len(profile.Signing.Keys) > 0 {
+		keys := make([]any, 0, len(profile.Signing.Keys))
+		for _, key := range profile.Signing.Keys {
+			keys = append(keys, map[string]any{
+				"keyId":          key.KeyID,
+				"privateKeyPath": key.PrivateKeyPath,
+			})
+		}
+		delete(cfg.Signing, "keyId")
+		cfg.Signing["keys"] = keys
 	}
 	if policy.Directory != nil || profile.Directory != nil {
 		cfg.Directory = &DirectoryConfig{}
@@ -360,8 +410,51 @@ func validatePublishProfile(profile *PublishProfile) error {
 	if err := model.CheckIdentifier(profile.Product, "product"); err != nil {
 		return err
 	}
-	if err := model.CheckIdentifier(profile.Signing.KeyID, "signing.keyId"); err != nil {
-		return err
+	if len(profile.Signing.Keys) == 0 {
+		if err := model.CheckIdentifier(profile.Signing.KeyID, "signing.keyId"); err != nil {
+			return err
+		}
+	} else {
+		if profile.Signing.KeyID != "" || profile.Signing.PrivateKeyPath != "" || profile.Signing.PrivateKeyEnv != "" {
+			return Error{Message: "signing.keys cannot be combined with signing.keyId/privateKeyPath/privateKeyEnv"}
+		}
+		seen := map[string]bool{}
+		for index, key := range profile.Signing.Keys {
+			if err := model.CheckIdentifier(key.KeyID, fmt.Sprintf("signing.keys[%d].keyId", index)); err != nil {
+				return err
+			}
+			if strings.TrimSpace(key.PrivateKeyPath) == "" {
+				return Error{Message: fmt.Sprintf("signing.keys[%d].privateKeyPath is required", index)}
+			}
+			if seen[key.KeyID] {
+				return Error{Message: fmt.Sprintf("signing.keys contains duplicate keyId %q", key.KeyID)}
+			}
+			seen[key.KeyID] = true
+		}
+	}
+	publicKeyIDs := map[string]bool{}
+	for index, key := range profile.Signing.PublicKeys {
+		if key.KeyID == "" || (key.PublicKeyBase64 == "" && key.Key == "") {
+			return Error{Message: fmt.Sprintf("signing.publicKeys[%d] requires keyId and publicKeyBase64 (or legacy key)", index)}
+		}
+		if publicKeyIDs[key.KeyID] {
+			return Error{Message: fmt.Sprintf("signing.publicKeys contains duplicate keyId %q", key.KeyID)}
+		}
+		publicKeyIDs[key.KeyID] = true
+		encoded := key.PublicKeyBase64
+		if encoded == "" {
+			encoded = key.Key
+		}
+		if _, err := keys.DecodePublicKey(encoded, fmt.Sprintf("signing.publicKeys[%s]", key.KeyID)); err != nil {
+			return err
+		}
+	}
+	if len(profile.Signing.Keys) > 0 && len(profile.Signing.PublicKeys) > 0 {
+		for _, signer := range profile.Signing.Keys {
+			if !publicKeyIDs[signer.KeyID] {
+				return Error{Message: fmt.Sprintf("signer %q is missing from signing.publicKeys", signer.KeyID)}
+			}
+		}
 	}
 	if len(profile.Backends) == 0 {
 		return Error{Message: "at least one backend must be configured"}
