@@ -59,6 +59,10 @@ type TransitionCatalogOptions struct {
 	TrustKeyPaths           []string
 	Authority               CatalogAuthority
 	CertificationReportPath string
+	ImpactPath              string
+	FleetPath               string
+	ProductionEscapeDigest  string
+	ProductionEscapeCommit  string
 }
 
 func TransitionCatalog(options TransitionCatalogOptions) (*catalog.Document, error) {
@@ -79,17 +83,45 @@ func TransitionCatalog(options TransitionCatalogOptions) (*catalog.Document, err
 	if options.Output == "" {
 		return nil, fmt.Errorf("catalog output path is required")
 	}
+	var certifiedImpact *Impact
 	if options.State == catalog.StateCertified {
 		if options.CertificationReportPath == "" {
 			return nil, fmt.Errorf("candidate certification report is required before certified transition")
+		}
+		if options.ImpactPath == "" {
+			return nil, fmt.Errorf("candidate impact manifest is required before certified transition")
+		}
+		if options.FleetPath == "" {
+			return nil, fmt.Errorf("fleet registration is required before certified transition")
+		}
+		if options.ProductionEscapeCommit == "" {
+			return nil, fmt.Errorf("audited production escape source commit is required before certified transition")
 		}
 		var report CertificationReport
 		if err := document.Load(options.CertificationReportPath, &report); err != nil {
 			return nil, err
 		}
-		if err := report.ValidateFor(options.Distribution); err != nil {
+		impact, err := LoadImpact(options.ImpactPath)
+		if err != nil {
 			return nil, err
 		}
+		if impact.CandidateDigest != options.Distribution {
+			return nil, fmt.Errorf("impact manifest does not match candidate %s", options.Distribution)
+		}
+		if options.ProductionEscapeCommit != impact.CandidateCommit {
+			return nil, fmt.Errorf("catalog transition source commit does not match the certified candidate")
+		}
+		if err := impact.ValidateAgainstCatalog(*value); err != nil {
+			return nil, fmt.Errorf("impact manifest: %w", err)
+		}
+		fleet, err := LoadFleet(options.FleetPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := report.ValidateForImpactAndFleet(*impact, *fleet, options.ProductionEscapeDigest); err != nil {
+			return nil, err
+		}
+		certifiedImpact = impact
 	}
 	found := false
 	for index := range value.Distributions {
@@ -102,6 +134,15 @@ func TransitionCatalog(options TransitionCatalogOptions) (*catalog.Document, err
 		}
 		if err := catalog.ValidateTransition(distribution.State, options.State); err != nil {
 			return nil, err
+		}
+		if options.State == catalog.StateCertified {
+			if distribution.Commit != certifiedImpact.CandidateCommit {
+				return nil, fmt.Errorf(
+					"candidate commit %s does not match certified impact commit %s",
+					distribution.Commit,
+					certifiedImpact.CandidateCommit,
+				)
+			}
 		}
 		distribution.State = options.State
 		found = true

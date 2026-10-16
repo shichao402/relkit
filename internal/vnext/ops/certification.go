@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -21,9 +22,9 @@ import (
 
 const (
 	FleetSchema               = "relkit.ops-fleet/1"
-	ImpactSchema              = "relkit.impact/1"
-	CertificationInputSchema  = "relkit.ops-certification-input/1"
-	CertificationReportSchema = "relkit.certification-report/1"
+	ImpactSchema              = "relkit.impact/2"
+	CertificationInputSchema  = "relkit.ops-certification-input/2"
+	CertificationReportSchema = "relkit.certification-report/2"
 )
 
 type Risk string
@@ -38,6 +39,8 @@ const (
 type Impact struct {
 	Schema                   string                 `json:"schema"`
 	CandidateDigest          string                 `json:"candidateDigest"`
+	CandidateCommit          string                 `json:"candidateCommit"`
+	ProductionEscapeDigest   string                 `json:"productionEscapeDigest"`
 	Risk                     Risk                   `json:"risk"`
 	AffectedCapabilities     []contracts.Capability `json:"affectedCapabilities,omitempty"`
 	AffectedComponents       []string               `json:"affectedComponents,omitempty"`
@@ -45,6 +48,7 @@ type Impact struct {
 	CandidateProfilePath     string                 `json:"candidateProfilePath"`
 	CandidateCatalogPath     string                 `json:"candidateCatalogPath"`
 	CandidateRootFingerprint string                 `json:"candidateRootFingerprint"`
+	baseDirectory            string                 `json:"-"`
 }
 
 type GenerateImpactOptions struct {
@@ -55,6 +59,7 @@ type GenerateImpactOptions struct {
 	CandidateDigest          string
 	CandidateProfilePath     string
 	CandidateRootFingerprint string
+	ProductionEscapeDigest   string
 	Risk                     Risk
 }
 
@@ -113,11 +118,13 @@ func GenerateImpact(options GenerateImpactOptions) (*Impact, error) {
 	affectedComponents := changedComponents(baseline, candidate)
 	affectedCapabilities, newCapabilities := changedCapabilities(baseline, candidate)
 	impact := &Impact{
-		Schema: ImpactSchema, CandidateDigest: candidate.Digest, Risk: options.Risk,
+		Schema: ImpactSchema, CandidateDigest: candidate.Digest, CandidateCommit: candidate.Commit,
+		Risk:                 options.Risk,
 		AffectedCapabilities: affectedCapabilities, AffectedComponents: affectedComponents,
 		NewCapabilities: newCapabilities, CandidateProfilePath: options.CandidateProfilePath,
 		CandidateCatalogPath:     options.CandidateCatalogPath,
 		CandidateRootFingerprint: options.CandidateRootFingerprint,
+		ProductionEscapeDigest:   options.ProductionEscapeDigest,
 	}
 	if err := impact.Validate(); err != nil {
 		return nil, err
@@ -130,17 +137,22 @@ func LoadImpact(path string) (*Impact, error) {
 	if err := document.Load(path, &value); err != nil {
 		return nil, err
 	}
-	base := filepath.Dir(path)
-	if value.CandidateProfilePath != "" && !filepath.IsAbs(value.CandidateProfilePath) {
-		value.CandidateProfilePath = filepath.Join(base, value.CandidateProfilePath)
+	base, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, err
 	}
-	if value.CandidateCatalogPath != "" && !filepath.IsAbs(value.CandidateCatalogPath) {
-		value.CandidateCatalogPath = filepath.Join(base, value.CandidateCatalogPath)
-	}
+	value.baseDirectory = base
 	if err := value.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &value, nil
+}
+
+func (i Impact) resolveReference(path string) string {
+	if path == "" || filepath.IsAbs(path) || i.baseDirectory == "" {
+		return path
+	}
+	return filepath.Join(i.baseDirectory, filepath.FromSlash(path))
 }
 
 func (i Impact) Validate() error {
@@ -150,10 +162,22 @@ func (i Impact) Validate() error {
 	if err := canonical.ValidateDigest(i.CandidateDigest); err != nil {
 		return fmt.Errorf("candidateDigest: %w", err)
 	}
+	if !escapeCommitPattern.MatchString(i.CandidateCommit) {
+		return fmt.Errorf("candidateCommit must be a full lowercase 40-character Git commit")
+	}
+	if err := canonical.ValidateDigest(i.ProductionEscapeDigest); err != nil {
+		return fmt.Errorf("productionEscapeDigest: %w", err)
+	}
 	switch i.Risk {
 	case RiskDocumentation, RiskSingleCapability, RiskContract, RiskCrossCutting:
 	default:
 		return fmt.Errorf("unknown risk %q", i.Risk)
+	}
+	if i.Risk == RiskDocumentation &&
+		(len(i.AffectedCapabilities) != 0 ||
+			len(i.AffectedComponents) != 0 ||
+			len(i.NewCapabilities) != 0) {
+		return fmt.Errorf("documentation risk cannot contain runtime or contract changes")
 	}
 	if err := (contracts.Vector{Requires: i.AffectedCapabilities, Provides: i.NewCapabilities}).Validate(); err != nil {
 		return err
@@ -165,6 +189,41 @@ func (i Impact) Validate() error {
 		if err := canonical.ValidateDigest(i.CandidateRootFingerprint); err != nil {
 			return fmt.Errorf("candidateRootFingerprint: %w", err)
 		}
+	}
+	return nil
+}
+
+func (i Impact) ValidateAgainstCatalog(value catalog.Document) error {
+	if err := i.Validate(); err != nil {
+		return err
+	}
+	candidate, err := findDistribution(value, i.CandidateDigest)
+	if err != nil {
+		return err
+	}
+	if candidate.Commit != i.CandidateCommit {
+		return fmt.Errorf(
+			"impact candidateCommit %s does not match catalog candidate %s",
+			i.CandidateCommit,
+			candidate.Commit,
+		)
+	}
+	if candidate.State != catalog.StateCandidate {
+		return fmt.Errorf("impact target %s is not a candidate distribution", candidate.Digest)
+	}
+	production, err := value.Production()
+	if err != nil {
+		return err
+	}
+	if len(production) == 0 {
+		return fmt.Errorf("catalog has no certified baseline for impact validation")
+	}
+	affectedComponents := changedComponents(production[0], candidate)
+	affectedCapabilities, newCapabilities := changedCapabilities(production[0], candidate)
+	if !slices.Equal(i.AffectedComponents, affectedComponents) ||
+		!slices.Equal(i.AffectedCapabilities, affectedCapabilities) ||
+		!slices.Equal(i.NewCapabilities, newCapabilities) {
+		return fmt.Errorf("impact changes do not match the candidate and certified catalog distributions")
 	}
 	return nil
 }
@@ -188,8 +247,9 @@ type FleetHost struct {
 }
 
 type Fleet struct {
-	Schema string      `json:"schema"`
-	Hosts  []FleetHost `json:"hosts"`
+	Schema       string      `json:"schema"`
+	Hosts        []FleetHost `json:"hosts"`
+	sourceDigest string      `json:"-"`
 }
 
 func LoadFleet(path string) (*Fleet, error) {
@@ -197,7 +257,15 @@ func LoadFleet(path string) (*Fleet, error) {
 	if err := document.Load(path, &value); err != nil {
 		return nil, err
 	}
-	base := filepath.Dir(path)
+	digest, err := canonical.Digest(value)
+	if err != nil {
+		return nil, err
+	}
+	value.sourceDigest = digest
+	base, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
 	for index := range value.Hosts {
 		host := &value.Hosts[index]
 		if !filepath.IsAbs(host.ProjectPath) {
@@ -214,6 +282,13 @@ func LoadFleet(path string) (*Fleet, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &value, nil
+}
+
+func (f Fleet) digest() (string, error) {
+	if f.sourceDigest != "" {
+		return f.sourceDigest, nil
+	}
+	return canonical.Digest(f)
 }
 
 func (f Fleet) Validate() error {
@@ -374,6 +449,8 @@ func componentUsed(fingerprint project.CapabilityFingerprint, component string) 
 type CertificationInput struct {
 	Schema                   string `json:"schema"`
 	CandidateDigest          string `json:"candidateDigest"`
+	CandidateCommit          string `json:"candidateCommit"`
+	ProductionEscapeDigest   string `json:"productionEscapeDigest"`
 	CandidateProfilePath     string `json:"candidateProfilePath"`
 	CandidateCatalogPath     string `json:"candidateCatalogPath"`
 	CandidateRootFingerprint string `json:"candidateRootFingerprint"`
@@ -393,16 +470,28 @@ type CertificationResult struct {
 	Message        string         `json:"message,omitempty"`
 }
 
+type CertificationSelection struct {
+	HostID        string   `json:"hostId"`
+	ProjectDigest string   `json:"projectDigest"`
+	Cohort        string   `json:"cohort"`
+	Reason        string   `json:"reason"`
+	RequiredCI    []string `json:"requiredCi"`
+}
+
 type CertificationReport struct {
-	Schema          string                `json:"schema"`
-	CandidateDigest string                `json:"candidateDigest"`
-	ImpactDigest    string                `json:"impactDigest"`
-	Full            bool                  `json:"full"`
-	Passed          bool                  `json:"passed"`
-	StartedAt       string                `json:"startedAt"`
-	FinishedAt      string                `json:"finishedAt"`
-	SelectedHosts   []string              `json:"selectedHosts"`
-	Results         []CertificationResult `json:"results"`
+	Schema                 string                   `json:"schema"`
+	CandidateDigest        string                   `json:"candidateDigest"`
+	CandidateCommit        string                   `json:"candidateCommit"`
+	ImpactDigest           string                   `json:"impactDigest"`
+	ProductionEscapeDigest string                   `json:"productionEscapeDigest"`
+	FleetDigest            string                   `json:"fleetDigest"`
+	Full                   bool                     `json:"full"`
+	Passed                 bool                     `json:"passed"`
+	StartedAt              string                   `json:"startedAt"`
+	FinishedAt             string                   `json:"finishedAt"`
+	SelectedHosts          []string                 `json:"selectedHosts"`
+	Selections             []CertificationSelection `json:"selections"`
+	Results                []CertificationResult    `json:"results"`
 }
 
 func RunCertification(ctx context.Context, fleet Fleet, impact Impact, full bool) (*CertificationReport, error) {
@@ -414,13 +503,30 @@ func RunCertification(ctx context.Context, fleet Fleet, impact Impact, full bool
 	if err != nil {
 		return nil, err
 	}
+	fleetDigest, err := fleet.digest()
+	if err != nil {
+		return nil, err
+	}
 	report := &CertificationReport{
-		Schema: CertificationReportSchema, CandidateDigest: impact.CandidateDigest,
-		ImpactDigest: impactDigest, Full: full, Passed: true,
-		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Schema:                 CertificationReportSchema,
+		CandidateDigest:        impact.CandidateDigest,
+		CandidateCommit:        impact.CandidateCommit,
+		ImpactDigest:           impactDigest,
+		ProductionEscapeDigest: impact.ProductionEscapeDigest,
+		FleetDigest:            fleetDigest,
+		Full:                   full,
+		Passed:                 true,
+		StartedAt:              time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	for _, item := range selected {
 		report.SelectedHosts = append(report.SelectedHosts, item.Host.ID)
+		report.Selections = append(report.Selections, CertificationSelection{
+			HostID:        item.Host.ID,
+			ProjectDigest: item.ProjectDigest,
+			Cohort:        item.Cohort,
+			Reason:        item.Reason,
+			RequiredCI:    append([]string(nil), item.Host.RequiredCI...),
+		})
 		for _, name := range item.Host.RequiredCI {
 			adapter, ok := item.Host.CIAdapters[name]
 			if !ok {
@@ -435,8 +541,10 @@ func RunCertification(ctx context.Context, fleet Fleet, impact Impact, full bool
 			var output StepResult
 			runErr := extension.Run(ctx, adapter, CertificationInput{
 				Schema: CertificationInputSchema, CandidateDigest: impact.CandidateDigest,
-				CandidateProfilePath:     impact.CandidateProfilePath,
-				CandidateCatalogPath:     impact.CandidateCatalogPath,
+				CandidateCommit:          impact.CandidateCommit,
+				ProductionEscapeDigest:   impact.ProductionEscapeDigest,
+				CandidateProfilePath:     impact.resolveReference(impact.CandidateProfilePath),
+				CandidateCatalogPath:     impact.resolveReference(impact.CandidateCatalogPath),
 				CandidateRootFingerprint: impact.CandidateRootFingerprint,
 				HostID:                   item.Host.ID, ProjectPath: item.Host.ProjectPath,
 				ProjectDigest: item.ProjectDigest, Cohort: item.Cohort, Reason: item.Reason,
@@ -480,15 +588,137 @@ func (r CertificationReport) ValidateFor(candidateDigest string) error {
 	if r.Schema != CertificationReportSchema || r.CandidateDigest != candidateDigest {
 		return fmt.Errorf("certification report does not match candidate %s", candidateDigest)
 	}
+	if !escapeCommitPattern.MatchString(r.CandidateCommit) {
+		return fmt.Errorf("certification report candidateCommit is invalid")
+	}
+	if err := canonical.ValidateDigest(r.ImpactDigest); err != nil {
+		return fmt.Errorf("certification report impactDigest: %w", err)
+	}
 	if !r.Passed {
 		return fmt.Errorf("candidate certification did not pass")
 	}
-	if len(r.Results) == 0 {
-		return fmt.Errorf("certification report has no verified result")
+	if err := canonical.ValidateDigest(r.ProductionEscapeDigest); err != nil {
+		return fmt.Errorf("certification report productionEscapeDigest: %w", err)
+	}
+	if err := canonical.ValidateDigest(r.FleetDigest); err != nil {
+		return fmt.Errorf("certification report fleetDigest: %w", err)
 	}
 	for _, result := range r.Results {
 		if result.Status != "passed" {
 			return fmt.Errorf("certification result %s/%s is %s", result.HostID, result.CI, result.Status)
+		}
+	}
+	return nil
+}
+
+func (r CertificationReport) ValidateForImpact(impact Impact, currentProductionEscapeDigest string) error {
+	if err := impact.Validate(); err != nil {
+		return fmt.Errorf("impact: %w", err)
+	}
+	if err := r.ValidateFor(impact.CandidateDigest); err != nil {
+		return err
+	}
+	impactDigest, err := canonical.Digest(impact)
+	if err != nil {
+		return err
+	}
+	if r.ImpactDigest != impactDigest {
+		return fmt.Errorf("certification report impactDigest does not match the supplied impact manifest")
+	}
+	if r.CandidateCommit != impact.CandidateCommit {
+		return fmt.Errorf("certification report candidateCommit does not match the supplied impact manifest")
+	}
+	if r.ProductionEscapeDigest != impact.ProductionEscapeDigest {
+		return fmt.Errorf("certification report productionEscapeDigest does not match the supplied impact manifest")
+	}
+	if err := canonical.ValidateDigest(currentProductionEscapeDigest); err != nil {
+		return fmt.Errorf("current production escape digest: %w", err)
+	}
+	if currentProductionEscapeDigest != impact.ProductionEscapeDigest {
+		return fmt.Errorf("production escape coverage changed after candidate certification")
+	}
+	if impact.Risk != RiskDocumentation && len(r.Results) == 0 {
+		return fmt.Errorf("certification report has no verified result")
+	}
+	return nil
+}
+
+func (r CertificationReport) ValidateForImpactAndFleet(
+	impact Impact,
+	fleet Fleet,
+	currentProductionEscapeDigest string,
+) error {
+	if err := r.ValidateForImpact(impact, currentProductionEscapeDigest); err != nil {
+		return err
+	}
+	selected, err := SelectFleet(fleet, impact, r.Full)
+	if err != nil {
+		return err
+	}
+	fleetDigest, err := fleet.digest()
+	if err != nil {
+		return err
+	}
+	if r.FleetDigest != fleetDigest {
+		return fmt.Errorf("certification report fleetDigest does not match the supplied fleet")
+	}
+	expectedHosts := make([]string, 0, len(selected))
+	type check struct {
+		host string
+		ci   string
+	}
+	expectedChecks := []check{}
+	for _, item := range selected {
+		expectedHosts = append(expectedHosts, item.Host.ID)
+		for _, ci := range item.Host.RequiredCI {
+			expectedChecks = append(expectedChecks, check{host: item.Host.ID, ci: ci})
+		}
+	}
+	if !slices.Equal(r.SelectedHosts, expectedHosts) {
+		return fmt.Errorf(
+			"certification selectedHosts do not match fleet selection: got=%v want=%v",
+			r.SelectedHosts,
+			expectedHosts,
+		)
+	}
+	if len(r.Selections) != len(selected) {
+		return fmt.Errorf(
+			"certification selections do not exactly cover selected hosts: got=%d want=%d",
+			len(r.Selections),
+			len(selected),
+		)
+	}
+	for index, item := range selected {
+		selection := r.Selections[index]
+		if selection.HostID != item.Host.ID ||
+			selection.ProjectDigest != item.ProjectDigest ||
+			selection.Cohort != item.Cohort ||
+			selection.Reason != item.Reason ||
+			!slices.Equal(selection.RequiredCI, item.Host.RequiredCI) {
+			return fmt.Errorf(
+				"certification selection[%d] does not match current fleet/project state",
+				index,
+			)
+		}
+	}
+	if len(r.Results) != len(expectedChecks) {
+		return fmt.Errorf(
+			"certification results do not cover every selected host CI: got=%d want=%d",
+			len(r.Results),
+			len(expectedChecks),
+		)
+	}
+	for index, expected := range expectedChecks {
+		result := r.Results[index]
+		if result.HostID != expected.host || result.CI != expected.ci {
+			return fmt.Errorf(
+				"certification result[%d] is %s/%s, expected %s/%s",
+				index,
+				result.HostID,
+				result.CI,
+				expected.host,
+				expected.ci,
+			)
 		}
 	}
 	return nil

@@ -14,8 +14,10 @@ import (
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/keys"
 	"github.com/shichao402/relkit/internal/vnext/bootstrap"
+	"github.com/shichao402/relkit/internal/vnext/canonical"
 	"github.com/shichao402/relkit/internal/vnext/catalog"
 	"github.com/shichao402/relkit/internal/vnext/contracts"
+	"github.com/shichao402/relkit/internal/vnext/document"
 	"github.com/shichao402/relkit/internal/vnext/extension"
 	"github.com/shichao402/relkit/internal/vnext/operator"
 	"github.com/shichao402/relkit/internal/vnext/project"
@@ -266,11 +268,51 @@ func TestCatalogTransitionIncrementsCertificationSequence(t *testing.T) {
 		t.Fatal(err)
 	}
 	reportPath := filepath.Join(fixture.root, "certification.json")
-	if err := writeJSON(reportPath, CertificationReport{
-		Schema: CertificationReportSchema, CandidateDigest: fixture.newDistribution.Digest,
-		ImpactDigest: "sha256:" + strings.Repeat("9", 64), Passed: true,
-		Results: []CertificationResult{{HostID: "canary", CI: "gha", Status: "passed"}},
-	}); err != nil {
+	impactPath := filepath.Join(fixture.root, "impact.json")
+	fleetPath := filepath.Join(fixture.root, "fleet.json")
+	productionEscapeDigest := "sha256:" + strings.Repeat("8", 64)
+	impact := Impact{
+		Schema:                   ImpactSchema,
+		CandidateDigest:          fixture.newDistribution.Digest,
+		CandidateCommit:          fixture.newDistribution.Commit,
+		ProductionEscapeDigest:   productionEscapeDigest,
+		Risk:                     RiskCrossCutting,
+		AffectedComponents:       changedComponents(candidate.Distributions[0], candidate.Distributions[1]),
+		CandidateProfilePath:     "candidate-operator.json",
+		CandidateCatalogPath:     "candidate-catalog.json",
+		CandidateRootFingerprint: "sha256:" + strings.Repeat("a", 64),
+	}
+	tamperedImpact := impact
+	tamperedImpact.AffectedComponents = nil
+	if err := tamperedImpact.ValidateAgainstCatalog(candidate); err == nil ||
+		!strings.Contains(err.Error(), "do not match") {
+		t.Fatalf("tampered impact result=%v", err)
+	}
+	if err := writeJSON(impactPath, impact); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := writeFleetProject(t, fixture.root, "canary", nil)
+	fleet := Fleet{
+		Schema: FleetSchema,
+		Hosts: []FleetHost{{
+			ID:          "canary",
+			Active:      true,
+			ProjectPath: projectPath,
+			Canary:      CanaryFixed,
+			RequiredCI:  []string{"gha"},
+			CIAdapters: map[string]extension.Spec{
+				"gha": adapterSpec(extension.KindCIAdapter, CertificationInputSchema),
+			},
+		}},
+	}
+	if err := writeJSON(fleetPath, fleet); err != nil {
+		t.Fatal(err)
+	}
+	report, err := RunCertification(context.Background(), fleet, impact, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(reportPath, report); err != nil {
 		t.Fatal(err)
 	}
 	value, err := TransitionCatalog(TransitionCatalogOptions{
@@ -278,6 +320,10 @@ func TestCatalogTransitionIncrementsCertificationSequence(t *testing.T) {
 		State: catalog.StateCertified, KeyPath: fixture.privateKeyPath,
 		TrustKeyPaths: []string{fixture.publicKeyPath}, Authority: AuthorityProduction,
 		CertificationReportPath: reportPath,
+		ImpactPath:              impactPath,
+		FleetPath:               fleetPath,
+		ProductionEscapeDigest:  productionEscapeDigest,
+		ProductionEscapeCommit:  impact.CandidateCommit,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -392,6 +438,7 @@ func TestGenerateImpactUsesIndependentCandidateAuthorityAndDiffsContracts(t *tes
 		CandidateDigest:          candidateDigest,
 		CandidateProfilePath:     candidateProfilePath,
 		CandidateRootFingerprint: candidateFingerprint,
+		ProductionEscapeDigest:   "sha256:" + strings.Repeat("8", 64),
 		Risk:                     RiskContract,
 	}
 	impact, err := GenerateImpact(options)
@@ -404,6 +451,12 @@ func TestGenerateImpactUsesIndependentCandidateAuthorityAndDiffsContracts(t *tes
 	if len(impact.AffectedCapabilities) != 2 || len(impact.NewCapabilities) != 1 ||
 		impact.NewCapabilities[0].Domain != contracts.DomainArtifactSet {
 		t.Fatalf("affected=%+v new=%+v", impact.AffectedCapabilities, impact.NewCapabilities)
+	}
+	documentation := options
+	documentation.Risk = RiskDocumentation
+	if _, err := GenerateImpact(documentation); err == nil ||
+		!strings.Contains(err.Error(), "documentation risk") {
+		t.Fatalf("documentation impact accepted runtime changes: %v", err)
 	}
 
 	profile.ServerRelease.DistributionDigest = productionDigest
@@ -486,6 +539,226 @@ func TestCertificationRequiresEveryDeclaredCIPath(t *testing.T) {
 	}
 	if !report.Passed || len(report.Results) != 2 {
 		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestCertificationReportBindsImpactAndCurrentEscapeCoverage(t *testing.T) {
+	capability := contracts.Capability{
+		Domain: contracts.DomainPublishProtocol,
+		Peer:   "agent",
+		Min:    3,
+		Max:    3,
+	}
+	impact := testImpact(RiskContract, capability)
+	impactDigest, err := canonical.Digest(impact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := CertificationReport{
+		Schema:                 CertificationReportSchema,
+		CandidateDigest:        impact.CandidateDigest,
+		CandidateCommit:        impact.CandidateCommit,
+		ImpactDigest:           impactDigest,
+		ProductionEscapeDigest: impact.ProductionEscapeDigest,
+		FleetDigest:            "sha256:" + strings.Repeat("9", 64),
+		Passed:                 true,
+		Results: []CertificationResult{{
+			HostID: "canary", CI: "gha", Status: "passed",
+		}},
+	}
+	if err := report.ValidateForImpact(impact, impact.ProductionEscapeDigest); err != nil {
+		t.Fatal(err)
+	}
+	if err := report.ValidateForImpact(
+		impact,
+		"sha256:"+strings.Repeat("f", 64),
+	); err == nil || !strings.Contains(err.Error(), "coverage changed") {
+		t.Fatalf("coverage drift result=%v", err)
+	}
+	report.ImpactDigest = "sha256:" + strings.Repeat("0", 64)
+	if err := report.ValidateForImpact(
+		impact,
+		impact.ProductionEscapeDigest,
+	); err == nil || !strings.Contains(err.Error(), "impactDigest") {
+		t.Fatalf("impact drift result=%v", err)
+	}
+}
+
+func TestCertificationReportMustExactlyCoverFleetSelection(t *testing.T) {
+	capability := contracts.Capability{
+		Domain: contracts.DomainPublishProtocol,
+		Peer:   "agent",
+		Min:    3,
+		Max:    3,
+	}
+	impact := testImpact(RiskContract, capability)
+	impactDigest, err := canonical.Digest(impact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath := writeFleetProject(t, t.TempDir(), "host", []contracts.Capability{capability})
+	fleet := Fleet{
+		Schema: FleetSchema,
+		Hosts: []FleetHost{{
+			ID:          "host",
+			Active:      true,
+			ProjectPath: projectPath,
+			Canary:      CanaryFixed,
+			RequiredCI:  []string{"linux", "windows"},
+			CIAdapters:  map[string]extension.Spec{},
+		}},
+	}
+	fleetDigest, err := fleet.digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := SelectFleet(fleet, impact, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := CertificationReport{
+		Schema:                 CertificationReportSchema,
+		CandidateDigest:        impact.CandidateDigest,
+		CandidateCommit:        impact.CandidateCommit,
+		ImpactDigest:           impactDigest,
+		ProductionEscapeDigest: impact.ProductionEscapeDigest,
+		FleetDigest:            fleetDigest,
+		Passed:                 true,
+		SelectedHosts:          []string{"host"},
+		Selections: []CertificationSelection{{
+			HostID:        "host",
+			ProjectDigest: selected[0].ProjectDigest,
+			Cohort:        selected[0].Cohort,
+			Reason:        selected[0].Reason,
+			RequiredCI:    []string{"linux", "windows"},
+		}},
+		Results: []CertificationResult{{
+			HostID: "host", CI: "linux", Status: "passed",
+		}},
+	}
+	if err := report.ValidateForImpactAndFleet(
+		impact,
+		fleet,
+		impact.ProductionEscapeDigest,
+	); err == nil || !strings.Contains(err.Error(), "every selected host CI") {
+		t.Fatalf("cropped report result=%v", err)
+	}
+	report.Results = append(report.Results, CertificationResult{
+		HostID: "host", CI: "windows", Status: "passed",
+	})
+	if err := report.ValidateForImpactAndFleet(
+		impact,
+		fleet,
+		impact.ProductionEscapeDigest,
+	); err != nil {
+		t.Fatal(err)
+	}
+	replacement := fleet
+	replacement.Hosts = append([]FleetHost(nil), fleet.Hosts...)
+	replacement.Hosts[0].Active = false
+	if err := report.ValidateForImpactAndFleet(
+		impact,
+		replacement,
+		impact.ProductionEscapeDigest,
+	); err == nil || !strings.Contains(err.Error(), "fleetDigest") {
+		t.Fatalf("replacement fleet result=%v", err)
+	}
+	var changedProject project.Document
+	if err := document.Load(projectPath, &changedProject); err != nil {
+		t.Fatal(err)
+	}
+	changedProject.Product = "changed-host"
+	if err := writeJSON(projectPath, changedProject); err != nil {
+		t.Fatal(err)
+	}
+	if err := report.ValidateForImpactAndFleet(
+		impact,
+		fleet,
+		impact.ProductionEscapeDigest,
+	); err == nil || !strings.Contains(err.Error(), "current fleet/project state") {
+		t.Fatalf("changed project result=%v", err)
+	}
+}
+
+func TestDocumentationCertificationAcceptsNoSelectedHost(t *testing.T) {
+	impact := testImpact(RiskDocumentation, contracts.Capability{})
+	impact.AffectedCapabilities = nil
+	impactDigest, err := canonical.Digest(impact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fleet := Fleet{Schema: FleetSchema}
+	fleetDigest, err := fleet.digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := CertificationReport{
+		Schema:                 CertificationReportSchema,
+		CandidateDigest:        impact.CandidateDigest,
+		CandidateCommit:        impact.CandidateCommit,
+		ImpactDigest:           impactDigest,
+		ProductionEscapeDigest: impact.ProductionEscapeDigest,
+		FleetDigest:            fleetDigest,
+		Passed:                 true,
+	}
+	if err := report.ValidateForImpactAndFleet(
+		impact,
+		fleet,
+		impact.ProductionEscapeDigest,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestImpactDigestSurvivesArtifactRelocation(t *testing.T) {
+	capability := contracts.Capability{
+		Domain: contracts.DomainPublishProtocol,
+		Peer:   "agent",
+		Min:    3,
+		Max:    3,
+	}
+	impact := testImpact(RiskContract, capability)
+	firstDirectory := filepath.Join(t.TempDir(), "first")
+	secondDirectory := filepath.Join(t.TempDir(), "second")
+	for _, directory := range []string{firstDirectory, secondDirectory} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstPath := filepath.Join(firstDirectory, "impact.json")
+	secondPath := filepath.Join(secondDirectory, "impact.json")
+	if err := writeJSON(firstPath, impact); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := LoadImpact(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadImpact(secondPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDigest, err := canonical.Digest(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDigest, err := canonical.Digest(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstDigest != secondDigest {
+		t.Fatalf("relocated impact digest changed: %s != %s", firstDigest, secondDigest)
+	}
+	if first.resolveReference(first.CandidateCatalogPath) ==
+		second.resolveReference(second.CandidateCatalogPath) {
+		t.Fatal("runtime references did not follow the relocated impact directory")
 	}
 }
 
@@ -668,7 +941,9 @@ func writeFleetProject(t *testing.T, root, name string, required []contracts.Cap
 func testImpact(risk Risk, capability contracts.Capability) Impact {
 	return Impact{
 		Schema: ImpactSchema, CandidateDigest: "sha256:" + strings.Repeat("c", 64),
-		Risk: risk, AffectedCapabilities: []contracts.Capability{capability},
+		CandidateCommit:        strings.Repeat("e", 40),
+		ProductionEscapeDigest: "sha256:" + strings.Repeat("d", 64),
+		Risk:                   risk, AffectedCapabilities: []contracts.Capability{capability},
 		CandidateProfilePath:     "candidate-operator.json",
 		CandidateCatalogPath:     "candidate-catalog.json",
 		CandidateRootFingerprint: "sha256:" + strings.Repeat("b", 64),
