@@ -646,7 +646,10 @@ func verifyReleasedVNext(
 		if loadErr != nil {
 			return loadErr
 		}
-		productRootPaths = mapping.ProductRoots[productDocument.Product]
+		productRootPaths = releaseProductRootPaths(mapping, productDocument)
+	}
+	if len(productRootPaths) == 0 {
+		return fmt.Errorf("no Product RUP Root was provisioned for %s", productDocument.Product)
 	}
 	productRoots, err := loadDistributionKeys(productRootPaths)
 	if err != nil {
@@ -696,6 +699,18 @@ func verifyReleasedVNext(
 		return exitCodeError{code: 1}
 	}
 	fmt.Printf("released verification passed for %s at resolution %s\n", options.Version, resolved.Digest)
+	return nil
+}
+
+func releaseProductRootPaths(mapping *vnextbootstrap.Document, productDocument *project.Document) []string {
+	if roots := mapping.ProductRoots[productDocument.Product]; len(roots) > 0 {
+		return append([]string(nil), roots...)
+	}
+	if productDocument.RuntimeProfilePublication != nil {
+		if runtimeProfile, ok := mapping.RuntimeProfiles[productDocument.Product]; ok {
+			return append([]string(nil), runtimeProfile.Roots...)
+		}
+	}
 	return nil
 }
 
