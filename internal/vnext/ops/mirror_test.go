@@ -18,12 +18,14 @@ import (
 func TestMirrorDistributionUploadsContentAddressedAssetsAndIsIdempotent(t *testing.T) {
 	first := []byte("first immutable component")
 	second := []byte("second immutable component")
+	metadata := []byte("release metadata")
 	firstDigest := testMirrorDigest(first)
 	secondDigest := testMirrorDigest(second)
+	metadataDigest := testMirrorDigest(metadata)
 
 	var mutex sync.Mutex
 	stored := map[string][]byte{}
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/source/"):
 			switch request.URL.Path {
@@ -31,6 +33,8 @@ func TestMirrorDistributionUploadsContentAddressedAssetsAndIsIdempotent(t *testi
 				_, _ = writer.Write(first)
 			case "/source/second":
 				_, _ = writer.Write(second)
+			case "/source/manifest.json":
+				_, _ = writer.Write(metadata)
 			default:
 				http.NotFound(writer, request)
 			}
@@ -75,19 +79,28 @@ func TestMirrorDistributionUploadsContentAddressedAssetsAndIsIdempotent(t *testi
 	defer server.Close()
 
 	distribution := mirrorFixtureDistribution(t, server.URL, firstDigest, secondDigest)
+	distribution.ReleaseAssets = map[string]string{
+		"first": firstDigest, "second": secondDigest, "manifest.json": metadataDigest,
+	}
+	var err error
+	distribution.Digest, err = distribution.IdentityDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(t.TempDir(), "distribution.json")
 	if err := document.Write(path, distribution); err != nil {
 		t.Fatal(err)
 	}
 	options := MirrorDistributionOptions{
 		DistributionPath: path, MirrorRoot: server.URL + "/mirror",
-		Username: "writer", Password: "secret",
+		ReleaseAssetsBase: server.URL + "/source",
+		Username:          "writer", Password: "secret", HTTPClient: server.Client(),
 	}
 	result, err := MirrorDistribution(t.Context(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Schema != "relkit.ops-mirror-result/1" || len(result.Assets) != 2 {
+	if result.Schema != "relkit.ops-mirror-result/1" || len(result.Assets) != 3 {
 		t.Fatalf("result=%+v", result)
 	}
 	for _, asset := range result.Assets {
@@ -107,6 +120,28 @@ func TestMirrorDistributionUploadsContentAddressedAssetsAndIsIdempotent(t *testi
 		if asset.Status != "present" {
 			t.Fatalf("repeated sync status=%q", asset.Status)
 		}
+	}
+}
+
+func TestMirrorDistributionRequiresBaseForCompleteReleaseAssets(t *testing.T) {
+	content := []byte("component")
+	distribution := mirrorFixtureDistribution(t, "https://source.invalid", testMirrorDigest(content), "")
+	distribution.ReleaseAssets = map[string]string{"manifest.json": testMirrorDigest([]byte("metadata"))}
+	var err error
+	distribution.Digest, err = distribution.IdentityDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "distribution.json")
+	if err := document.Write(path, distribution); err != nil {
+		t.Fatal(err)
+	}
+	_, err = MirrorDistribution(t.Context(), MirrorDistributionOptions{
+		DistributionPath: path, MirrorRoot: "https://mirror.invalid/relkit",
+		Username: "writer", Password: "secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "release assets base") {
+		t.Fatalf("expected missing release assets base rejection, got %v", err)
 	}
 }
 

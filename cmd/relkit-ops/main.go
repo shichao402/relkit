@@ -133,6 +133,7 @@ func cmdDistribution(ctx context.Context, args []string) error {
 		flags.SetOutput(os.Stderr)
 		distribution := flags.String("distribution", "", "immutable distribution row JSON")
 		mirrorRoot := flags.String("mirror-root", "", "content-addressed mirror root")
+		releaseAssetsBase := flags.String("release-assets-base", "", "immutable HTTPS base URL for every releaseAssets file")
 		usernameEnv := flags.String("username-env", "MIRRORS_USERNAME", "environment variable containing upload username")
 		passwordEnv := flags.String("password-env", "MIRRORS_PASSWORD", "environment variable containing upload password")
 		jsonOutput := flags.Bool("json", false, "print JSON")
@@ -140,10 +141,11 @@ func cmdDistribution(ctx context.Context, args []string) error {
 			return err
 		}
 		result, err := ops.MirrorDistribution(ctx, ops.MirrorDistributionOptions{
-			DistributionPath: *distribution,
-			MirrorRoot:       *mirrorRoot,
-			Username:         os.Getenv(*usernameEnv),
-			Password:         os.Getenv(*passwordEnv),
+			DistributionPath:  *distribution,
+			MirrorRoot:        *mirrorRoot,
+			ReleaseAssetsBase: *releaseAssetsBase,
+			Username:          os.Getenv(*usernameEnv),
+			Password:          os.Getenv(*passwordEnv),
 		})
 		if err != nil {
 			return err

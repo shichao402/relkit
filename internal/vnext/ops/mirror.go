@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,11 +22,12 @@ import (
 const maxMirrorAssetSize int64 = 16 << 30
 
 type MirrorDistributionOptions struct {
-	DistributionPath string
-	MirrorRoot       string
-	Username         string
-	Password         string
-	HTTPClient       *http.Client
+	DistributionPath  string
+	MirrorRoot        string
+	ReleaseAssetsBase string
+	Username          string
+	Password          string
+	HTTPClient        *http.Client
 }
 
 type MirroredAsset struct {
@@ -44,9 +46,9 @@ type MirrorDistributionResult struct {
 	Assets             []MirroredAsset `json:"assets"`
 }
 
-// MirrorDistribution copies every release-asset component in one immutable
-// distribution into a content-addressed mirror. Selection remains controlled
-// by the signed Catalog and Operator Profile; the mirror is only a byte supply.
+// MirrorDistribution copies every release asset in one immutable distribution
+// into a content-addressed mirror. Selection remains controlled by the signed
+// Catalog and Operator Profile; the mirror is only a byte supply.
 func MirrorDistribution(ctx context.Context, options MirrorDistributionOptions) (*MirrorDistributionResult, error) {
 	var distribution catalog.Distribution
 	if err := jsonio.LoadPath(options.DistributionPath, &distribution); err != nil {
@@ -92,6 +94,23 @@ func MirrorDistribution(ctx context.Context, options MirrorDistributionOptions) 
 			sources[component.SHA256] = component.Source.URL
 		}
 	}
+	if len(distribution.ReleaseAssets) > 0 {
+		base, err := validateReleaseAssetsBase(options.ReleaseAssetsBase)
+		if err != nil {
+			return nil, err
+		}
+		for name, digest := range distribution.ReleaseAssets {
+			if name == "" || name != path.Base(name) || strings.Contains(name, `\`) {
+				return nil, fmt.Errorf("release asset name %q is not a safe file name", name)
+			}
+			if err := canonical.ValidateDigest(digest); err != nil {
+				return nil, fmt.Errorf("release asset %s digest: %w", name, err)
+			}
+			if _, exists := sources[digest]; !exists {
+				sources[digest] = base + "/" + url.PathEscape(name)
+			}
+		}
+	}
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("distribution has no release-asset components")
 	}
@@ -121,6 +140,16 @@ func MirrorDistribution(ctx context.Context, options MirrorDistributionOptions) 
 		result.Assets = append(result.Assets, *asset)
 	}
 	return result, nil
+}
+
+func validateReleaseAssetsBase(raw string) (string, error) {
+	value := strings.TrimRight(strings.TrimSpace(raw), "/")
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("release assets base must be an HTTPS URL without credentials, query, or fragment")
+	}
+	return value, nil
 }
 
 func validateMirrorRoot(raw string) (string, error) {

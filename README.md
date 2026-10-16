@@ -113,12 +113,14 @@ relkit-ops rotate <credential> \
 ```bash
 relkit-ops distribution mirror \
   --distribution relkit-distribution.json \
+  --release-assets-base https://github.com/example/relkit/releases/download/v1.2.3 \
   --mirror-root https://mirror.example/relkit \
   --json
 ```
 
 命令从 `MIRRORS_USERNAME` / `MIRRORS_PASSWORD` 读取写凭据，逐项校验上游
-SHA-256，上传到 `blobs/<sha256>`，并在上传后读回校验。产品 Job 与持 Token 的
+SHA-256，将 distribution 声明的全部组件及 Release 附件上传到
+`blobs/<sha256>`，并在上传后读回校验。产品 Job 与持 Token 的
 Operator Job 之间使用 `relkit-ops artifact-set push|pull` 传递不可变 ArtifactSet；
 产品 Job 不接触 `RELKIT_UPLOAD_TOKEN`。
 

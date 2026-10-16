@@ -63,11 +63,13 @@ Operator 将 Release 组件同步到内容寻址 mirror 时使用 core 命令，
 ```text
 relkit-ops distribution mirror \
   --distribution <relkit-distribution.json> \
+  --release-assets-base <immutable-release-download-base> \
   --mirror-root <operator-mirror-root> --json
 ```
 
 写凭据只从 `MIRRORS_USERNAME` / `MIRRORS_PASSWORD`（或显式改名后的 env 引用）
-读取。命令必须逐项校验上游摘要、写入 `blobs/<sha256>` 并读回校验；409 仅在
+读取。命令必须同步 distribution 的全部 component 和 `releaseAssets`，逐项校验
+上游摘要、写入 `blobs/<sha256>` 并读回校验；409 仅在
 读回字节摘要相同后视为幂等成功。Operator Profile 的 `sources.mirrors` 必须指向
 同一 root；不得在产品仓保存 mirror 地址或凭据。
 

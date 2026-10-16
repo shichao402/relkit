@@ -40,6 +40,7 @@ Skill ──► 只编排上述命令，不实现第二套 schema/gates
 ## 生产控制面命令
 
 - `relkit-ops distribution create`：从官方 `relkit.release/1` manifest、完整 Release 资产和 immutable URL 生成 distribution；缺少 Registry 声明的任一资产即失败。distribution digest 只覆盖不可变身份，排除 `state` 与 `certificationSequence`。
+- `relkit-ops distribution mirror`：按 distribution 摘要同步全部 component 与 `releaseAssets` 到 Operator 内容寻址 mirror，并逐项读回校验；mirror 只是字节供给，不参与版本选择。
 - `relkit-ops catalog put/transition`：先校验上述 identity digest，再执行 candidate → certified 生命周期。
 - `relkit-ops agent policy`：默认只输出计划；`--execute --backup <path>` 才原子更新已 provision 产品的 Distribution Root、Operator deployment 与 lane，并保留 backend、Token 等未知字段。远端传输、重启与健康检查仍由声明式 deploy adapter 负责。
 - `relkit-ops runtime-profile publish`：请求 agent 使用现场 Product RUP 私钥签发首个 Runtime Profile；私钥不进入 CI 或 Operator Profile。
