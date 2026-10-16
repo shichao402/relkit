@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shichao402/relkit/internal/build"
+	"github.com/shichao402/relkit/internal/publishproto"
 	"github.com/shichao402/relkit/internal/registry"
 )
 
@@ -166,6 +167,9 @@ func cmdBuild(args []string) error {
 	protocol, _ := contract["protocol"].(map[string]any)
 	if protocol == nil {
 		return fmt.Errorf("scripts/host/release-contract.json protocol must be an object")
+	}
+	if intOf(protocol["min"]) != publishproto.Min || intOf(protocol["max"]) != publishproto.Max {
+		return fmt.Errorf("scripts/host/release-contract.json protocol does not match internal/publishproto")
 	}
 
 	type builtArtifact struct {

@@ -56,6 +56,14 @@ class SsotTests(unittest.TestCase):
         out = ops.parse_ssot_document(text)
         self.assertEqual(out["tag"], "v" + out["number"])
 
+    def test_publish_protocol_contract_matches_code(self):
+        minimum, maximum = deploy_cli.publish_protocol_window()
+        self.assertEqual((minimum, maximum), (2, 3))
+        self.assertEqual(
+            deploy_cli.host_release_contract()["protocol"],
+            {"min": minimum, "max": maximum},
+        )
+
 
 class RedactTests(unittest.TestCase):
     def test_redacts_token_fields_and_signature_urls(self):

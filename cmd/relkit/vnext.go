@@ -570,7 +570,10 @@ func loadRuntimeProfileInputs(
 func cmdDoctor(args []string) error {
 	resolutionPath := selectedResolutionPath()
 	bundlePath := ""
-	projectPath := ""
+	projectPath := os.Getenv("RELKIT_PROJECT")
+	if projectPath == "" && os.Getenv("RELKIT_CORE") != "" {
+		projectPath = defaultProjectPath
+	}
 	operatorPath := ""
 	candidateRootFingerprint := ""
 	runtimeProfilePaths := map[string]string{}

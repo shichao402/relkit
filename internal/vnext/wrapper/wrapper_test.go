@@ -44,7 +44,7 @@ func TestGeneratePinsTrustRootAndUsesResolution(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(data)
-		for _, required := range []string{fingerprint, "resolution.json", "materialize", "doctor"} {
+		for _, required := range []string{fingerprint, "resolution.json", "materialize", "doctor", "RELKIT_PROJECT"} {
 			if !strings.Contains(text, required) {
 				t.Fatalf("%s does not contain %q", filepath.Base(path), required)
 			}

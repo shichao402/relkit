@@ -27,7 +27,7 @@
         "relkit_consume.py",
         "relkit_host.py"
       ],
-      "expectTreeSha256": "c9e9869d4e6aaed1284f41f533663904d96da796e1ed047ed62b1b90a0918fae"
+      "expectTreeSha256": "4d7cd9673035a57687250d99b6cf0f2c6bcee653f5b763dbe6268ce6d675956b"
     },
     {
       "name": "bindings-ts-listed-files",

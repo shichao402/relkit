@@ -25,6 +25,7 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 	t.Setenv("RELKIT_DISTRIBUTION_CATALOG", "")
 	t.Setenv("RELKIT_DISTRIBUTION_ROOT", "")
 	t.Setenv("RELKIT_OPERATOR_BOOTSTRAP", "")
+	t.Setenv("RELKIT_PROJECT", "")
 	root := t.TempDir()
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
@@ -196,5 +197,9 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 	}
 	if err := cmdDoctor([]string{"--project", projectPath, "--resolution", autoOutput}); err != nil {
 		t.Fatalf("doctor through logical Operator bootstrap: %v", err)
+	}
+	t.Setenv("RELKIT_PROJECT", projectPath)
+	if err := cmdDoctor([]string{"--resolution", autoOutput}); err != nil {
+		t.Fatalf("doctor through wrapper-provided project context: %v", err)
 	}
 }
