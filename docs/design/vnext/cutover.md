@@ -32,6 +32,8 @@ commit 上复现，核对现有 ADR/合同，并横向检查代表性能力组�
 1. 发布完整 immutable candidate distribution，签发独立 Candidate Catalog/Profile。
 2. 为目标认证域生成 candidate resolution 与**完整**离线 bundle；bundle 必须包含
    distribution 的全部 component 和 release assets。
+   生成的 Runtime Bootstrap、resolution 与 bundle manifest 必须以落盘字节送入公开
+   SDK/wrapper 验证；控制面内部类型测试或手写 fixture 不能替代这一步。
 3. Agent 先切 candidate policy：`plan → execute + 唯一备份 → restart/reload → health`。
    只升级 agent/store 二进制不等于切换 lane；只改 policy 不重启也不算生效。
 4. 宿主 dev CI 使用同一 candidate resolution 生成、合并并发布 ArtifactSet。
@@ -39,6 +41,8 @@ commit 上复现，核对现有 ADR/合同，并横向检查代表性能力组�
    - immutable resolution
    - Candidate Root（仅 candidate）
    - 与 `runtimeProfilePublication.rootFingerprint` 匹配的 Product RUP Root
+   - 正式场景证据必须从 bundle 安装后的 bootstrap 发现 Product Root；显式
+     `--product-root` 只用于诊断，不能代替这条链路
 6. 在干净 Candidate commit 上执行 impact、目标域 fleet certification 与 production
    escape audit。
 7. 用同一 fleet/report 把该域的 Catalog 条目从 candidate 晋升为 certified。
@@ -49,9 +53,13 @@ commit 上复现，核对现有 ADR/合同，并横向检查代表性能力组�
    只接受 `vX.Y.Z`，不能让 control-plane tag 冒充产品版本。
 10. 原子切换 Agent production policy，移除 Candidate Root，并保留可直接恢复的旧配置。
 11. stable CI 必须使用 production bundle；打 tag 或启动 workflow 只表示开始发布，
-    不等于 certified 或 stable 成功。CI 与资产读回通过后，再做真实更新、回滚和安全验收。
+    不等于 certified 或 stable 成功。CI 与资产读回通过后，必须从 production bundle
+    签发的 Runtime Bootstrap 启动真实 updater，执行 `check → download → apply → --version`，
+    再做回滚和安全验收。
 
 Catalog、Profile、resolution、bundle 和 Agent policy 是一组事务证据，不能只替换其中一项。
+已经推送但失败或取消的 dev/stable tag 不移动、不覆写；修复后提升产品版本并创建新 tag，
+使失败输入和后续 fix-forward 都可追溯。
 
 ## 已提交但立即读回失败
 
@@ -78,6 +86,8 @@ resolution 和 Product RUP Root 做有界重试的 `verify released`：
 - 解析测试必须覆盖根路径、有 path prefix、带/不带尾斜杠
 - Candidate Root 证明 resolution 的候选授权；Product RUP Root 验证产品更新数据，
   两者不能互换
+- `trustedKeys[].key` 等跨语言字节字段必须使用 Schema 规定的 canonical 编码；至少一条
+  门禁要把正式生成 JSON 交给公开 SDK，而不是分别测试生成器与手写 fixture
 - 本机残留环境变量或旧 bootstrap mapping 可以产生“authority/policy 不匹配”，
   诊断时先显式传入当前 resolution 和 root，不先归咎远端 Agent
 
@@ -106,7 +116,8 @@ resolution 和 Product RUP Root 做有界重试的 `verify released`：
 
 1. stable CI 与发布资产成功
 2. 消费者入口 `verify released` 通过
-3. 真实已安装客户端完成检查/下载/应用或可证明的不适用项
+3. 公开 SDK 能解析实际签发的 Runtime Bootstrap，真实已安装客户端完成
+   检查/下载/应用并报告目标版本，或有可证明的不适用项
 4. Agent、Catalog、Profile、bundle URL/SHA 与 resolution provenance 可追溯
 5. 回滚快照存在且恢复流程已验证
 6. 日志、仓库和 release asset 不含 Token、私钥或带签名查询串

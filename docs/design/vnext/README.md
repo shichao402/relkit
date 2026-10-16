@@ -30,6 +30,7 @@
 2. core / ops / wrapper：完成，并有合同与负面 conformance。  
 3. 代表性迁移：Loom、Loom-Launcher、SvnMergeTool、Dec 共用同一 candidate
    distribution 验证；仓库身份不进入合同。
-4. 生产切换：按 Operator 认证域独立推进。2026-10-17 首窗口仅覆盖公网 Dec，
-   内网三宿主延期且不复用公网认证。
+4. 生产切换：按 Operator 认证域独立推进。2026-10-17 公网
+   `firoyang-public` + Dec 已以 Relkit v0.6.16 / Dec v1.13.139 完成真实
+   `check → download → apply`；内网三宿主延期且不复用公网认证。
 5. 最终状态以 [USER-ACCEPTANCE.md](USER-ACCEPTANCE.md) 的真实证据为准。
