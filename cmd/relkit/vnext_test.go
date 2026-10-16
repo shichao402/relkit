@@ -16,6 +16,7 @@ import (
 	"github.com/shichao402/relkit/internal/vnext/operator"
 	"github.com/shichao402/relkit/internal/vnext/project"
 	"github.com/shichao402/relkit/internal/vnext/resolution"
+	"github.com/shichao402/relkit/internal/vnext/runtimeprofile"
 	"github.com/shichao402/relkit/internal/vnext/trust"
 )
 
@@ -52,11 +53,15 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 		Channels:         []string{"dev", "stable"},
 		OperatorRef:      "prod",
 		TrustFingerprint: fingerprint,
-		Roles:            []project.Role{project.RoleUpdaterHost},
+		Roles:            []project.Role{project.RoleUpdaterHost, project.RoleSubscriber},
+		RuntimeProfileSubscriptions: []project.Subscription{
+			{ProductRef: "demo", RootFingerprint: fingerprint},
+		},
 		CapabilityFingerprint: project.CapabilityFingerprint{
-			OSArch:   []string{"darwin-arm64"},
-			Facades:  []string{"rust"},
-			Topology: "self-update",
+			OSArch:        []string{"darwin-arm64"},
+			Facades:       []string{"rust"},
+			Subscriptions: []string{"demo"},
+			Topology:      "self-update",
 			RequiredContracts: []contracts.Capability{
 				{Domain: contracts.DomainPublishProtocol, Peer: "agent", Min: 3, Max: 3},
 			},
@@ -117,6 +122,23 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 	if err := document.Write(catalogPath, catalogDocument); err != nil {
 		t.Fatal(err)
 	}
+	runtimeDocument := runtimeprofile.Document{
+		Schema:          runtimeprofile.Schema,
+		Product:         "demo",
+		ProfileVersion:  1,
+		AllowedChannels: []string{"dev", "stable"},
+		DirectoryBootstrap: runtimeprofile.DirectoryBootstrap{
+			EntryURLs: []string{"https://updates.example.invalid/directory/demo.pb"},
+		},
+		RUPSchemaSet: "rup.v2",
+	}
+	if err := runtimeDocument.Sign(keyID, seed); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(root, "runtime-profile.json")
+	if err := document.Write(runtimePath, runtimeDocument); err != nil {
+		t.Fatal(err)
+	}
 
 	outputPath := filepath.Join(root, ".relkit", "resolution.json")
 	if err := cmdResolve([]string{
@@ -124,6 +146,8 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 		"--operator", operatorPath,
 		"--catalog", catalogPath,
 		"--trust-key", publicPath,
+		"--runtime-profile", "demo=" + runtimePath,
+		"--runtime-profile-root", "demo=" + publicPath,
 		"--out", outputPath,
 	}); err != nil {
 		t.Fatal(err)
@@ -146,6 +170,9 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 		OperatorProfile:   operatorPath,
 		Catalog:           catalogPath,
 		DistributionRoots: []string{publicPath},
+		RuntimeProfiles: map[string]bootstrap.RuntimeProfile{
+			"demo": {Profile: runtimePath, Roots: []string{publicPath}},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -163,5 +190,11 @@ func TestResolveCommandWritesImmutableResolution(t *testing.T) {
 	}
 	if automatic.Digest != value.Digest {
 		t.Fatalf("bootstrap resolution %s differs from explicit resolution %s", automatic.Digest, value.Digest)
+	}
+	if err := os.RemoveAll(filepath.Join(filepath.Dir(autoOutput), "control-plane")); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdDoctor([]string{"--project", projectPath, "--resolution", autoOutput}); err != nil {
+		t.Fatalf("doctor through logical Operator bootstrap: %v", err)
 	}
 }

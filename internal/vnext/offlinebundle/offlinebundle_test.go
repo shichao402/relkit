@@ -77,6 +77,69 @@ func TestCompleteBundleVerifiesInstallsAndMaterializesOffline(t *testing.T) {
 	}
 }
 
+func TestCandidateBundleInstallRequiresExplicitCandidateRoot(t *testing.T) {
+	fixture := newBundleFixture(t)
+	publicKey := ed25519.NewKeyFromSeed(fixture.seed).Public().(ed25519.PublicKey)
+	candidateFingerprint := fixture.project.TrustFingerprint
+
+	fixture.bundle.Catalog.Distributions[0].State = catalog.StateCandidate
+	fixture.bundle.Catalog.Signatures = nil
+	if err := fixture.bundle.Catalog.Sign("candidate", fixture.seed); err != nil {
+		t.Fatal(err)
+	}
+	fixture.bundle.Operator.Signatures = nil
+	if err := fixture.bundle.Operator.Sign("candidate", fixture.seed); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolution.Resolve(resolution.Request{
+		Project:                  fixture.project,
+		Operator:                 fixture.bundle.Operator,
+		Catalog:                  fixture.bundle.Catalog,
+		TrustedCandidateKeys:     map[string]ed25519.PublicKey{"candidate": publicKey},
+		CandidateRootFingerprint: candidateFingerprint,
+		Identity:                 resolution.IdentityCandidate,
+		CandidateDigest:          fixture.bundle.Catalog.Distributions[0].Digest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.bundle.CandidateRoots = resolution.PublicKeys(map[string]ed25519.PublicKey{"candidate": publicKey})
+	fixture.bundle.Resolution = *resolved
+
+	output := filepath.Join(fixture.root, "candidate-bundle")
+	if _, err := Create(CreateOptions{
+		ResolutionBundle: fixture.bundle,
+		Policy: resolution.BundlePolicy{
+			DistributionRootFingerprint: fixture.project.TrustFingerprint,
+			CandidateRootFingerprint:    candidateFingerprint,
+			OperatorDeploymentID:        fixture.operator.DeploymentID,
+			Identity:                    resolution.IdentityCandidate,
+		},
+		Assets: fixture.assets, OutputDirectory: output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := filepath.Join(fixture.root, "candidate-checkout")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(projectRoot, "relkit.project.json")
+	if err := document.Write(projectPath, fixture.project); err != nil {
+		t.Fatal(err)
+	}
+	options := InstallOptions{
+		Directory: output, ProjectPath: projectPath, ProjectRoot: projectRoot,
+		RelkitHome: filepath.Join(fixture.root, "candidate-home"), Target: "linux-amd64",
+	}
+	if _, err := Install(options); err == nil || !strings.Contains(err.Error(), "Candidate Root fingerprint") {
+		t.Fatalf("candidate install without explicit root = %v", err)
+	}
+	options.CandidateRootFingerprint = candidateFingerprint
+	if _, err := Install(options); err != nil {
+		t.Fatalf("candidate install: %v", err)
+	}
+}
+
 func TestBundleRejectsMissingAndTamperedAssets(t *testing.T) {
 	fixture := newBundleFixture(t)
 	missing := map[string]string{}
@@ -120,6 +183,7 @@ func TestBundleRejectsMissingAndTamperedAssets(t *testing.T) {
 
 type bundleFixture struct {
 	root     string
+	seed     []byte
 	project  project.Document
 	operator operator.Document
 	bundle   resolution.Bundle
@@ -203,7 +267,7 @@ func newBundleFixture(t *testing.T) bundleFixture {
 		Resolution: *resolved,
 	}
 	return bundleFixture{
-		root: root, project: product, operator: operatorDocument, bundle: bundle,
+		root: root, seed: seed, project: product, operator: operatorDocument, bundle: bundle,
 		assets: map[string]string{
 			cliDigest: cliPath, updaterDigest: updaterPath, archiveDigest: archivePath,
 		},
