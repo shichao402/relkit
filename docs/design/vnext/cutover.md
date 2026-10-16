@@ -3,6 +3,9 @@
 配套 [ADR 0022](../../adr/0022-vnext-certification-ops-skill.md) §8。使用者摘要见
 [USER-ACCEPTANCE.md](USER-ACCEPTANCE.md) §I。
 
+本文是 Candidate → Production 的唯一逐步 runbook；Skill 只编排这里对应的结构化命令，
+不得复制另一套顺序或完成账本。
+
 ## 两层切换不能混为一谈
 
 1. **架构迁移验收**：用代表性宿主证明合同、能力组合和 S1–S3。四仓只是迁移样本。
@@ -11,6 +14,11 @@
 第一层通过不要求所有生产环境同夜切换。公网、内网、特殊构建环境若属于不同 Operator
 或责任边界，可以分窗口推进；延期域保持原状态，不阻塞其他域，也不能借用其他域的
 认证报告。
+
+每个生产认证域独立持有 Catalog 快照、Operator Profile / `deploymentId`、fleet 与
+`requiredCi`、candidate/production policy、bundle URL/SHA、回滚备份及健康证据。
+“当前只验证公网 GHA”是某次窗口的范围事实，不是永久 fleet 定义；以后纳入内网蓝盾或
+其他 Operator 时新增该域登记并重新认证，不改 Relkit core。
 
 ## 证据新鲜度
 

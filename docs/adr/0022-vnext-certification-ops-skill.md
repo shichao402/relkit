@@ -71,6 +71,8 @@ relkit-ops upgrade <operator> --to <certified-version|latest>
 - 每项能力单独测输入/输出/错误/状态迁移
 - 对共享状态的能力做组合测试（两两、已知冲突、非法组合）；不做无关笛卡尔积
 - 触及发布事务/签名/resolution/updater 状态机的三项以上组合，由端到端场景覆盖
+- 重点交互矩阵与保证边界见
+  [`representative-scenarios.md`](../design/vnext/representative-scenarios.md#组合测试重点非穷举)
 
 #### 6.3 三个匿名代表性场景（distribution 级长期 mandatory）
 
@@ -85,11 +87,14 @@ relkit-ops upgrade <operator> --to <certified-version|latest>
 例如只承载 S3 产品的公网域不需要借用内网 S1/S2 仓库作为现场门禁，但不能跳过
 distribution 级 S1/S2 conformance。
 
-#### 6.4 impact / cohort / canary
+#### 6.4 认证域登记不是全世界宿主清单
 
 - `fleet` 不是服务器集群，也不是 Relkit 已知的所有客户仓库；它是**一个认证域内**
-  受版本控制的私有认证登记，列出 mandatory 场景/真实 canary、project digest 与
+  受版本控制的私有认证登记，列出 mandatory 场景/真实 canary、project 来源与
   `requiredCi`
+- 登记载体是 `relkit.ops-fleet/1`：每项包含稳定 `id`、`active`、`projectPath`、
+  `canary`（none/fixed/rotating）、`mandatoryCapabilities`、`requiredCi` 与对应
+  `ciAdapters`；认证时重新计算 project digest 与整份 fleet digest，报告不能替换条目
 - 认证域由待晋升的 Catalog、目标 Operator/发布责任边界和 fleet 共同确定；公网与内网
   不共享“已认证”结论
 - 只组合现有能力的新宿主不会自动进入永久 fleet；真实首用者只在引入新能力时临时 mandatory
@@ -99,6 +104,13 @@ distribution 级 S1/S2 conformance。
 - 按 project capability fingerprint 选 cohort  
 - 每 cohort：固定 canary + 轮换样本  
 - 首个使用**新能力**的真实宿主临时 mandatory canary；稳定后不永久绑定  
+
+fleet 是某次认证域的**当前声明快照**，不是未来所有 Operator、CI 系统或用户仓的闭集。
+扩展到新 Operator 或新 CI 路径时更新该域登记并重新认证，不修改 core。必须区分：
+
+- 尚未纳入该认证域的环境可以延期，其 Catalog 保持未晋升
+- 已在 fleet 的 active 条目若缺任一 `requiredCi`，结果必须是 `skipped-unverified`
+  并阻止 certified，不能再解释为“本轮不测”
 
 #### 6.5 反向 candidate CI
 

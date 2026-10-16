@@ -43,6 +43,21 @@
 
 新增能力时必须：定义合同 → 独立测试 → 声明交互面 → 组合测试 → 至少一个端到端 → 首宿主临时 canary。
 
+## 组合测试重点（非穷举）
+
+组合测试只覆盖共享状态和真实交互，不跑无关能力的全笛卡尔积。当前至少包括：
+
+- 多平台 × installer/payload 不对称，证明缺少 payload 是显式能力而非偶然漏产物
+- `in-place` / `library` × 多版本库存、切换、回滚，证明状态机与保留策略一致
+- 管理器自更新 × 单/多产品订阅，证明不同产品的 root、Profile 和 active version 不串线
+- component × audience × selector，证明可选组件不会改变同版本其他受众的制品集合
+- candidate × production lane，证明身份、Catalog、凭据、namespace 与 stable 写权限隔离
+- facade/projection × updater IPC 窗口，证明各语言只消费同一 sidecar 合同
+- 公网、mirror、完全离线供给 × 同一 resolution，证明供给方式不改变选版与摘要
+
+新增能力先声明它读写的共享状态，再把受影响交互加入本清单和自动化；不能只让首个宿主
+端到端变绿，也不因为一个新维度出现就重跑所有无关组合。
+
 ## 保证边界
 
 S1–S3 全绿不是“任何项目、任何环境都不会出问题”的证明。可承诺的是：
