@@ -1,0 +1,32 @@
+{
+  "schema": "relkit.production-escape/1",
+  "code": "candidate_trust.bootstrap_fallback_lost",
+  "category": "generic",
+  "stage": "bootstrap",
+  "capability": "candidate-trust-bootstrap",
+  "crossComponent": true,
+  "symptom": "An installed Candidate bundle lost its authorized root on the next wrapper invocation, and operator hosts outside product targets failed when no selected CLI was materialized.",
+  "whyGateMissed": "Installation, wrapper trust injection, and host-platform fallback were tested as separate happy paths without carrying persisted Candidate trust across the boundary.",
+  "earliestDetection": "Install a Candidate bundle, persist its authorized root, then invoke the generated wrapper on a host without a target CLI and require trusted bootstrap fallback.",
+  "evidence": [
+    {
+      "path": "internal/vnext/offlinebundle/offlinebundle_test.go",
+      "symbol": "TestCandidateBundleInstallRequiresExplicitCandidateRoot",
+      "kind": "scenario"
+    },
+    {
+      "path": "internal/vnext/wrapper/wrapper_test.go",
+      "symbol": "TestGeneratedShellWrapperRunsOneImmutableResolution",
+      "kind": "scenario",
+      "platforms": [
+        "darwin",
+        "linux"
+      ]
+    }
+  ],
+  "fix": {
+    "pr": 38,
+    "commit": "263f70fe01613e31944eb15b00a2131046d5b385",
+    "release": "v0.6.7"
+  }
+}

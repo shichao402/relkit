@@ -1,0 +1,31 @@
+{
+  "schema": "relkit.production-escape/1",
+  "code": "windows_wrapper.path_exit_corruption",
+  "category": "generic",
+  "stage": "wrapper-execution",
+  "capability": "windows-wrapper-execution",
+  "crossComponent": true,
+  "symptom": "The Windows wrapper could pass a project root with a stray quote and could report success after a materialize command failed.",
+  "whyGateMissed": "String-shape checks did not execute the generated cmd script with a spaced path, and same-line percent expansion captured errorlevel before the command ran.",
+  "earliestDetection": "Execute the generated Windows wrapper from a path containing spaces, inject a materialize failure, and assert both a nonzero exit and an unquoted project root.",
+  "evidence": [
+    {
+      "path": "internal/vnext/wrapper/wrapper_test.go",
+      "symbol": "TestGeneratedWindowsWrapperRunsAndPropagatesMaterializeFailure",
+      "kind": "scenario",
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "path": "internal/vnext/wrapper/wrapper_test.go",
+      "symbol": "TestGeneratedWindowsWrapperUsesSafeRootAndHardFailures",
+      "kind": "unit"
+    }
+  ],
+  "fix": {
+    "pr": 37,
+    "commit": "2b1406088764fb88aa89d0d43259908c99543e0b",
+    "release": "v0.6.5"
+  }
+}

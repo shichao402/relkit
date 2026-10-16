@@ -28,7 +28,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|impact|certify|bootstrap|bundle|distribution|catalog|operator|runtime-profile|artifact-set|agent|key> [flags]")
+		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|impact|certify|bootstrap|bundle|distribution|catalog|operator|runtime-profile|artifact-set|agent|key|escape> [flags]")
 	}
 	switch args[0] {
 	case "status":
@@ -61,9 +61,51 @@ func run(ctx context.Context, args []string) error {
 		return cmdAgent(args[1:])
 	case "key":
 		return cmdKey(args[1:])
+	case "escape":
+		return cmdEscape(args[1:])
 	default:
 		return fmt.Errorf("unknown relkit-ops command %q", args[0])
 	}
+}
+
+func cmdEscape(args []string) error {
+	if len(args) == 0 || args[0] != "audit" {
+		return fmt.Errorf("escape requires audit")
+	}
+	flags := flag.NewFlagSet("escape audit", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	registry := flags.String("registry", "conformance/production-escapes", "production escape registry directory")
+	repoRoot := flags.String("repo-root", ".", "repository root containing regression evidence")
+	baselineRef := flags.String("baseline-ref", "", "Git ref whose registered escape codes must remain present")
+	release := flags.String("release", "", "release tag requiring every covered escape to be closed")
+	execute := flags.Bool("execute", false, "execute every referenced regression test")
+	jsonOutput := flags.Bool("json", false, "print JSON")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	report, auditErr := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
+		Registry:    *registry,
+		RepoRoot:    *repoRoot,
+		BaselineRef: *baselineRef,
+		Release:     *release,
+		Execute:     *execute,
+	})
+	if *jsonOutput {
+		if err := printJSON(report); err != nil {
+			return err
+		}
+	} else if report.OK {
+		fmt.Printf(
+			"production escape registry (%s): covered=%d open=%d closed=%d evidence=%d executed=%d deferred=%d\n",
+			report.Mode, report.Covered, report.Open, report.Closed,
+			report.Evidence, report.Executed, report.Deferred,
+		)
+	} else {
+		for _, finding := range report.Findings {
+			fmt.Fprintf(os.Stderr, "%s: %s: %s\n", finding.Code, finding.Path, finding.Message)
+		}
+	}
+	return auditErr
 }
 
 func cmdAgent(args []string) error {
@@ -358,6 +400,8 @@ func cmdImpact(args []string) error {
 	candidateRoot := flags.String("candidate-root-fingerprint", "", "Candidate Root fingerprint")
 	risk := flags.String("risk", "", "documentation, single-capability, contract, or cross-cutting")
 	output := flags.String("out", "", "immutable impact manifest")
+	escapeRegistry := flags.String("escape-registry", "conformance/production-escapes", "production escape registry")
+	repoRoot := flags.String("repo-root", ".", "repository root containing production escape evidence")
 	var productionTrust stringList
 	var candidateTrust stringList
 	flags.Var(&productionTrust, "production-trust-key", "Distribution Root public key (repeatable)")
@@ -366,14 +410,30 @@ func cmdImpact(args []string) error {
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
+	escapeReport, err := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
+		Registry:         *escapeRegistry,
+		RepoRoot:         *repoRoot,
+		RequireGitSource: true,
+	})
+	if err != nil {
+		return fmt.Errorf("production escape coverage: %w", err)
+	}
 	impact, err := ops.GenerateImpact(ops.GenerateImpactOptions{
 		ProductionCatalogPath: *productionCatalog, CandidateCatalogPath: *candidateCatalog,
 		ProductionTrustKeyPaths: productionTrust, CandidateTrustKeyPaths: candidateTrust,
 		CandidateDigest: *candidateDigest, CandidateProfilePath: *candidateProfile,
 		CandidateRootFingerprint: *candidateRoot, Risk: ops.Risk(*risk),
+		ProductionEscapeDigest: escapeReport.CoverageDigest,
 	})
 	if err != nil {
 		return err
+	}
+	if escapeReport.SourceCommit != impact.CandidateCommit {
+		return fmt.Errorf(
+			"candidate distribution commit %s does not match production escape source %s",
+			impact.CandidateCommit,
+			escapeReport.SourceCommit,
+		)
 	}
 	if *output != "" {
 		if err := document.WriteNew(*output, impact); err != nil {
@@ -395,6 +455,8 @@ func cmdCertify(ctx context.Context, args []string) error {
 	impactPath := flags.String("impact", "", "candidate impact manifest")
 	output := flags.String("out", "", "immutable certification report")
 	full := flags.Bool("full", false, "select every active registered host")
+	escapeRegistry := flags.String("escape-registry", "conformance/production-escapes", "production escape registry")
+	repoRoot := flags.String("repo-root", ".", "repository root containing production escape evidence")
 	jsonOutput := flags.Bool("json", false, "print JSON")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -409,6 +471,29 @@ func cmdCertify(ctx context.Context, args []string) error {
 	impact, err := ops.LoadImpact(*impactPath)
 	if err != nil {
 		return err
+	}
+	escapeReport, err := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
+		Registry:         *escapeRegistry,
+		RepoRoot:         *repoRoot,
+		Execute:          true,
+		RequireGitSource: true,
+	})
+	if err != nil {
+		return fmt.Errorf("production escape regressions: %w", err)
+	}
+	if escapeReport.CoverageDigest != impact.ProductionEscapeDigest {
+		return fmt.Errorf(
+			"production escape coverage changed after impact generation: impact=%s current=%s",
+			impact.ProductionEscapeDigest,
+			escapeReport.CoverageDigest,
+		)
+	}
+	if escapeReport.SourceCommit != impact.CandidateCommit {
+		return fmt.Errorf(
+			"candidate commit changed after impact generation: impact=%s current=%s",
+			impact.CandidateCommit,
+			escapeReport.SourceCommit,
+		)
 	}
 	report, err := ops.RunCertification(ctx, *fleet, *impact, *full)
 	if err != nil {
@@ -794,7 +879,11 @@ func cmdCatalog(args []string) error {
 		key := flags.String("key", "", "private key document")
 		digest := flags.String("distribution", "", "immutable distribution digest")
 		state := flags.String("state", "", "candidate, certified, superseded, or revoked")
-		certificationReport := flags.String("certification-report", "", "passing relkit.certification-report/1")
+		certificationReport := flags.String("certification-report", "", "passing relkit.certification-report/2")
+		impactPath := flags.String("impact", "", "relkit.impact/2 manifest bound to the certification report")
+		fleetPath := flags.String("fleet", "", "fleet registration used to select certification hosts")
+		escapeRegistry := flags.String("escape-registry", "conformance/production-escapes", "production escape registry")
+		repoRoot := flags.String("repo-root", ".", "repository root containing production escape evidence")
 		authority := flags.String("authority", string(ops.AuthorityProduction), "production or candidate")
 		var trust stringList
 		flags.Var(&trust, "trust-key", "trusted public key document (repeatable)")
@@ -802,10 +891,28 @@ func cmdCatalog(args []string) error {
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
+		productionEscapeDigest := ""
+		productionEscapeCommit := ""
+		if catalog.State(*state) == catalog.StateCertified {
+			escapeReport, err := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
+				Registry:         *escapeRegistry,
+				RepoRoot:         *repoRoot,
+				RequireGitSource: true,
+			})
+			if err != nil {
+				return fmt.Errorf("production escape coverage: %w", err)
+			}
+			productionEscapeDigest = escapeReport.CoverageDigest
+			productionEscapeCommit = escapeReport.SourceCommit
+		}
 		value, err := ops.TransitionCatalog(ops.TransitionCatalogOptions{
 			Input: *input, Output: *output, Distribution: *digest, State: catalog.State(*state),
 			KeyPath: *key, TrustKeyPaths: trust, Authority: ops.CatalogAuthority(*authority),
 			CertificationReportPath: *certificationReport,
+			ImpactPath:              *impactPath,
+			FleetPath:               *fleetPath,
+			ProductionEscapeDigest:  productionEscapeDigest,
+			ProductionEscapeCommit:  productionEscapeCommit,
 		})
 		if err != nil {
 			return err

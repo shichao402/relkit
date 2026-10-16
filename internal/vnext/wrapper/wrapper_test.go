@@ -91,7 +91,7 @@ func TestGeneratedShellWrapperRunsOneImmutableResolution(t *testing.T) {
 	bootstrap := filepath.Join(root, "fake-bootstrap")
 	script := `#!/bin/sh
 set -eu
-printf '%s|%s|%s|%s\n' "$1" "${RELKIT_EXPECTED_ROOT_FINGERPRINT:-}" "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" "$*" >> "$WRAPPER_LOG"
+printf '%s|%s|%s|%s|%s\n' "$1" "${RELKIT_EXPECTED_ROOT_FINGERPRINT:-}" "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" "${RELKIT_PROJECT:-}" "$*" >> "$WRAPPER_LOG"
 command_name="$1"
 shift
 case "$command_name" in
@@ -111,12 +111,12 @@ case "$command_name" in
     else
       cat > "$WRAPPER_ROOT/.relkit/components/bin/relkit" <<'SELECTED'
 #!/bin/sh
-printf 'selected|%s|%s\n' "$PWD" "$*" >> "$WRAPPER_LOG"
+printf 'selected|%s|%s|%s\n' "$PWD" "${RELKIT_PROJECT:-}" "$*" >> "$WRAPPER_LOG"
 SELECTED
       chmod +x "$WRAPPER_ROOT/.relkit/components/bin/relkit"
     fi
     ;;
-  probe) printf 'bootstrap|%s|%s\n' "$PWD" "$*" >> "$WRAPPER_LOG" ;;
+  probe) printf 'bootstrap|%s|%s|%s\n' "$PWD" "${RELKIT_PROJECT:-}" "$*" >> "$WRAPPER_LOG" ;;
   *) exit 91 ;;
 esac
 `
@@ -172,11 +172,11 @@ esac
 	if !strings.Contains(logText, ".relkit/candidate/resolution.json --candidate "+candidate) {
 		t.Fatalf("candidate did not use an isolated immutable resolution:\n%s", logText)
 	}
-	if !strings.Contains(logText, "selected|"+root+"|probe two") {
-		t.Fatalf("selected CLI did not run from project root with original args:\n%s", logText)
+	if !strings.Contains(logText, "selected|"+root+"|"+projectPath+"|probe two") {
+		t.Fatalf("selected CLI did not preserve project context, project root, and original args:\n%s", logText)
 	}
-	if !strings.Contains(logText, "bootstrap|"+root+"|two") {
-		t.Fatalf("bootstrap CLI did not cover an operator host outside the product targets:\n%s", logText)
+	if !strings.Contains(logText, "bootstrap|"+root+"|"+projectPath+"|two") {
+		t.Fatalf("bootstrap CLI did not preserve project context outside the product targets:\n%s", logText)
 	}
 }
 
@@ -190,6 +190,9 @@ func TestGeneratedWindowsWrapperUsesSafeRootAndHardFailures(t *testing.T) {
 	}
 	if !strings.Contains(script, `candidate-root-fingerprint`) {
 		t.Fatal("Windows wrapper does not load the installed Candidate Root")
+	}
+	if !strings.Contains(script, `set "RELKIT_PROJECT=%PROJECT%"`) {
+		t.Fatal("Windows wrapper does not preserve project context for selected CLIs")
 	}
 	if !strings.Contains(script, `set "SELECTED=%BOOTSTRAP%"`) {
 		t.Fatal("Windows wrapper does not support an operator host outside the product targets")
@@ -305,6 +308,7 @@ func main() {
 		copySelf(filepath.Join(root, ".relkit", "components", "bin", "relkit.exe"))
 	case "probe":
 		appendLog("selected=" + fmt.Sprint(os.Args[1:]))
+		appendLog("selected-project=" + os.Getenv("RELKIT_PROJECT"))
 	default:
 		os.Exit(91)
 	}
@@ -359,5 +363,8 @@ func main() {
 	}
 	if !strings.Contains(string(logData), "selected=[probe two]") {
 		t.Fatalf("selected CLI did not receive original arguments:\n%s", logData)
+	}
+	if !strings.Contains(string(logData), "selected-project="+projectPath) {
+		t.Fatalf("selected CLI lost project context %q:\n%s", projectPath, logData)
 	}
 }

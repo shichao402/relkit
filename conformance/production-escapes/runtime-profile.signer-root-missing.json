@@ -1,0 +1,23 @@
+{
+  "schema": "relkit.production-escape/1",
+  "code": "runtime_profile.signer_root_missing",
+  "category": "agent",
+  "stage": "publish-config",
+  "capability": "runtime-profile-signing",
+  "crossComponent": false,
+  "symptom": "Runtime Profile bootstrap failed when a product publish profile configured a private signer without duplicating its public key.",
+  "whyGateMissed": "The agent built Runtime Profile trust roots only from optional publicKeys and did not derive the public half of configured private signers.",
+  "earliestDetection": "Merge the publish profile in an agent unit test and verify that every configured private signer contributes the matching trusted public root.",
+  "evidence": [
+    {
+      "path": "cmd/relkit-agent/server_test.go",
+      "symbol": "TestMergeVNextPublishConfigDerivesStandardDirectoryURLs",
+      "kind": "unit"
+    }
+  ],
+  "fix": {
+    "pr": 34,
+    "commit": "b7c7e39c46757ff31f2105bd413c6b6ec85001cc",
+    "release": "v0.6.2"
+  }
+}
