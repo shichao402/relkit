@@ -66,7 +66,7 @@ CLI、updater、SDK 和 projection 物化到 `.relkit/components/`。宿主不 c
 独立 Operator Job 执行同一 resolution 下的：
 
 ```text
-stage → simulate → fake verify → publish → verify released
+stage → release plan → release execute → verify released
 ```
 
 artifact、manifest、index、directory、Runtime Profile 或多 backend 一致性任一关键
@@ -107,6 +107,22 @@ relkit-ops upgrade <operator> \
 relkit-ops rotate <credential> \
   --inventory <inventory> --execute --json
 ```
+
+将正式 Release 的组件同步到 Operator 声明的内容寻址 mirror：
+
+```bash
+relkit-ops distribution mirror \
+  --distribution relkit-distribution.json \
+  --release-assets-base https://github.com/example/relkit/releases/download/v1.2.3 \
+  --mirror-root https://mirror.example/relkit \
+  --json
+```
+
+命令从 `MIRRORS_USERNAME` / `MIRRORS_PASSWORD` 读取写凭据，逐项校验上游
+SHA-256，将 distribution 声明的全部组件及 Release 附件上传到
+`blobs/<sha256>`，并在上传后读回校验。产品 Job 与持 Token 的
+Operator Job 之间使用 `relkit-ops artifact-set push|pull` 传递不可变 ArtifactSet；
+产品 Job 不接触 `RELKIT_UPLOAD_TOKEN`。
 
 升级只暴露完整旧 Profile 或完整新 Profile。轮换必须完成 mint、secret store 更新、
 reload/restart、健康与写权限验证、旧凭据吊销后才可激活。

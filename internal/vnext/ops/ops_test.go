@@ -72,6 +72,9 @@ func TestUpgradePlanAndApply(t *testing.T) {
 	if profile.ServerRelease.Version != "2.0.0" || profile.Sequence != 2 {
 		t.Fatalf("profile=%+v", profile)
 	}
+	if len(profile.Sources.Mirrors) != 1 || profile.Sources.Mirrors[0] != fixture.inventory.Mirrors[0] {
+		t.Fatalf("profile mirrors=%v, want %v", profile.Sources.Mirrors, fixture.inventory.Mirrors)
+	}
 	active, err := operator.Load(fixture.inventory.ActiveProfilePath)
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +144,31 @@ func TestUpgradeRejectsStalePlan(t *testing.T) {
 	if _, err := ApplyUpgrade(context.Background(), fixture.inventory, *plan); err == nil ||
 		!strings.Contains(err.Error(), "changed after the plan") {
 		t.Fatalf("unexpected stale-plan result: %v", err)
+	}
+}
+
+func TestUpgradeRejectsTamperedMirrorPlan(t *testing.T) {
+	fixture := newOpsFixture(t)
+	plan, err := PlanUpgrade(fixture.inventory, "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Mirrors = []string{"https://attacker.invalid/relkit"}
+	if _, err := ApplyUpgrade(context.Background(), fixture.inventory, *plan); err == nil ||
+		!strings.Contains(err.Error(), "mirrors changed") {
+		t.Fatalf("unexpected mirror-plan result: %v", err)
+	}
+}
+
+func TestInventoryRejectsDuplicateMirrors(t *testing.T) {
+	fixture := newOpsFixture(t)
+	fixture.inventory.Mirrors = append(fixture.inventory.Mirrors, fixture.inventory.Mirrors[0])
+	if err := fixture.inventory.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("unexpected duplicate-mirror result: %v", err)
+	}
+	fixture.inventory.Mirrors = []string{"https://writer:secret@mirror.invalid/relkit"}
+	if err := fixture.inventory.Validate(); err == nil || !strings.Contains(err.Error(), "without credentials") {
+		t.Fatalf("unexpected credentialed-mirror result: %v", err)
 	}
 }
 
@@ -558,7 +586,7 @@ func newOpsFixture(t *testing.T) opsFixture {
 		SigningKeyPath:    privateKeyPath,
 		StateDirectory:    filepath.Join(root, "state"),
 		Services:          []string{"agent", "store"},
-		Mirrors:           []string{"mirror-a"},
+		Mirrors:           []string{"https://mirror.invalid/relkit"},
 		Upgrade:           upgrade,
 		Rotate:            map[string]RotateAdapters{"upload": rotate},
 	}

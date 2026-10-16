@@ -70,6 +70,14 @@ func TestArtifactSetPushPullIsDigestProtected(t *testing.T) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			if r.ContentLength < 1 {
+				http.Error(w, "content length required", http.StatusLengthRequired)
+				return
+			}
+			if r.Header.Get("If-None-Match") != "*" || r.Header.Get("X-BKREPO-EXPIRES") != "0" {
+				http.Error(w, "immutable upload headers required", http.StatusBadRequest)
+				return
+			}
 			stored, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusCreated)
 		case http.MethodGet:

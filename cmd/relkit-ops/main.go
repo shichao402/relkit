@@ -48,7 +48,7 @@ func run(ctx context.Context, args []string) error {
 	case "bundle":
 		return cmdBundle(args[1:])
 	case "distribution":
-		return cmdDistribution(args[1:])
+		return cmdDistribution(ctx, args[1:])
 	case "catalog":
 		return cmdCatalog(args[1:])
 	case "operator":
@@ -99,33 +99,66 @@ func cmdAgent(args []string) error {
 	return nil
 }
 
-func cmdDistribution(args []string) error {
-	if len(args) == 0 || args[0] != "create" {
-		return fmt.Errorf("distribution requires create")
+func cmdDistribution(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("distribution requires create or mirror")
 	}
-	flags := flag.NewFlagSet("distribution create", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	version := flags.String("version", "", "immutable release version, for example v0.6.1")
-	manifest := flags.String("manifest", "", "relkit.release/1 manifest")
-	assets := flags.String("assets", "", "directory containing downloaded release assets")
-	sourceBase := flags.String("source-base", "", "immutable release asset URL prefix")
-	output := flags.String("out", "", "new distribution row JSON")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
+	switch args[0] {
+	case "create":
+		flags := flag.NewFlagSet("distribution create", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		version := flags.String("version", "", "immutable release version, for example v0.6.1")
+		manifest := flags.String("manifest", "", "relkit.release/1 manifest")
+		assets := flags.String("assets", "", "directory containing downloaded release assets")
+		sourceBase := flags.String("source-base", "", "immutable release asset URL prefix")
+		output := flags.String("out", "", "new distribution row JSON")
+		jsonOutput := flags.Bool("json", false, "print JSON")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		value, err := ops.BuildDistribution(ops.BuildDistributionOptions{
+			Version: *version, ManifestPath: *manifest, Assets: *assets,
+			SourceBase: *sourceBase, Output: *output,
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(value)
+		}
+		fmt.Printf("created distribution %s (%s) -> %s\n", value.Version, value.Digest, *output)
+		return nil
+	case "mirror":
+		flags := flag.NewFlagSet("distribution mirror", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		distribution := flags.String("distribution", "", "immutable distribution row JSON")
+		mirrorRoot := flags.String("mirror-root", "", "content-addressed mirror root")
+		releaseAssetsBase := flags.String("release-assets-base", "", "immutable HTTPS base URL for every releaseAssets file")
+		usernameEnv := flags.String("username-env", "MIRRORS_USERNAME", "environment variable containing upload username")
+		passwordEnv := flags.String("password-env", "MIRRORS_PASSWORD", "environment variable containing upload password")
+		jsonOutput := flags.Bool("json", false, "print JSON")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := ops.MirrorDistribution(ctx, ops.MirrorDistributionOptions{
+			DistributionPath:  *distribution,
+			MirrorRoot:        *mirrorRoot,
+			ReleaseAssetsBase: *releaseAssetsBase,
+			Username:          os.Getenv(*usernameEnv),
+			Password:          os.Getenv(*passwordEnv),
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(result)
+		}
+		fmt.Printf("mirrored distribution %s (%s): %d assets -> %s\n",
+			result.Version, result.DistributionDigest, len(result.Assets), result.MirrorRoot)
+		return nil
+	default:
+		return fmt.Errorf("unknown distribution command %q", args[0])
 	}
-	value, err := ops.BuildDistribution(ops.BuildDistributionOptions{
-		Version: *version, ManifestPath: *manifest, Assets: *assets,
-		SourceBase: *sourceBase, Output: *output,
-	})
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return printJSON(value)
-	}
-	fmt.Printf("created distribution %s (%s) -> %s\n", value.Version, value.Digest, *output)
-	return nil
 }
 
 func cmdArtifactSet(ctx context.Context, args []string) error {

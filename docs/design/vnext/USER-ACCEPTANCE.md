@@ -92,7 +92,7 @@
 
 | # | 类型 | 产品侧承诺 | 验收证据 | 状态 |
 | --- | --- | --- | --- | --- |
-| E1 | **阻断** | stage→simulate→fake→publish 同一 channel/版本/resolution | 中途改 latest 被拒 | 通过 |
+| E1 | **阻断** | stage→release plan→execute→verify 同一 channel/版本/resolution | 中途改 latest 被拒 | 通过 |
 | E2 | **阻断** | artifact/manifest/index/directory/Runtime Profile **任一关键失败 → 整体不得成功** | 注入 directory 失败：最终非 ok | 通过 |
 | E3 | | 多 backend 必须内容一致，不能只比 sequence 大小 | 不一致 backend 演示失败 | 通过 |
 | E4 | | 部分提交 → 明确 partial-commit + 修复路径 | 错误 code + repair 文档 | 通过 |

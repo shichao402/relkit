@@ -279,10 +279,13 @@ func Install(options InstallOptions) (*resolution.Document, error) {
 		return nil, fmt.Errorf("offline install requires an explicit target")
 	}
 	var cliDigest string
+	var opsDigest string
 	for _, component := range distribution.Components {
 		if component.Name == "cli" && component.Platform == target {
 			cliDigest = component.SHA256
-			break
+		}
+		if component.Name == "ops" && component.Platform == target {
+			opsDigest = component.SHA256
 		}
 	}
 	if cliDigest == "" {
@@ -299,6 +302,20 @@ func Install(options InstallOptions) (*resolution.Document, error) {
 		0o755,
 	); err != nil {
 		return nil, err
+	}
+	if opsDigest != "" {
+		opsName := "relkit-ops"
+		if strings.HasPrefix(target, "windows-") {
+			opsName += ".exe"
+		}
+		if err := copyBlobAtomic(
+			BlobPath(options.Directory, opsDigest),
+			filepath.Join(root, ".relkit", "bootstrap", opsName),
+			opsDigest,
+			0o755,
+		); err != nil {
+			return nil, err
+		}
 	}
 	if err := writeImmutableEqual(filepath.Join(root, ".relkit", "resolution-bundle.json"), *bundle); err != nil {
 		return nil, err

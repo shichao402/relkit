@@ -132,7 +132,7 @@ browse 的 `catalog.json` 不在此信任链（ADR 0019）。
 
 规则：
 
-1. 默认不提交；同一次 install/build/drop/stage/simulate/publish 只使用这一份
+1. 默认不提交；同一次 install/build/drop/stage/release plan/execute/verify 只使用这一份
 2. CI 多 Job 传递同一文件；build 中途不得重新读 catalog/Operator/profile
 3. 多平台 drop **共用一个矩阵 resolution**
 4. staged document 与 agent publish request 携带 resolution digest；agent 校验身份、Operator、channel、candidate/production 作用域

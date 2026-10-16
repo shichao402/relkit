@@ -27,7 +27,9 @@ vNext 不读取旧 `/1`、`/2`，保留有效语义：
 1. core 把 resolution digest、product version、channel、target、输出目录传给 producer
 2. producer **只返回候选制品**；不得写 staged / index / manifest、签名或 backend
 3. merge 拒绝 resolution、版本、releaseCode、selector、payload 关系不一致的 drop
-4. `stage → simulate → fake → publish` 使用同一 channel 与同一 resolution
+4. `stage → release plan → release execute → verify released` 使用同一 channel
+   与同一 resolution；vNext 的 ArtifactSet、签名 resolution bundle 与 agent 事务门禁
+   已取代依赖旧 `relkit.json` 的 legacy `simulate` / `fake`
 5. 输出必须符合 resolution 声明的 RUP Schema Set
 6. 平台不对称合法：例如 Windows 有 installer+payload，macOS 仅 installer；不得强迫全平台同构
 7. 产品元数据（如版本树所需 JSON）由宿主 producer 声明字段，**不进入 core 特判**
