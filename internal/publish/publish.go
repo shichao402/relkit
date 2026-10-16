@@ -21,7 +21,9 @@ import (
 )
 
 type Error struct {
-	Message string
+	Message  string
+	Code     string
+	Evidence map[string]any
 }
 
 func (e Error) Error() string {
@@ -33,6 +35,12 @@ type Printer func(string)
 func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBackfill bool, allowPartial bool, printer Printer) (*model.IndexDocument, error) {
 	if printer == nil {
 		printer = func(string) {}
+	}
+	if allowPartial {
+		return nil, Error{
+			Code:    "release.allow_partial_retired",
+			Message: "allowPartial is retired: repair backend divergence explicitly; the normal publish path never accepts a partial release",
+		}
 	}
 
 	staged, err := stage.LoadStaged(cfg.Root, version)
@@ -152,7 +160,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 				printer("  " + casKey + "  <- cas (skip PUT when size matches)")
 			}
 		}
-	printer("  " + model.ManifestKey(cfg.Product, version))
+		printer("  " + model.ManifestKey(cfg.Product, version))
 		printer("  " + model.IndexKey(cfg.Product, channel) + "  <- pointer, written last")
 		if hasSiteCopy(cfg) {
 			printer("  " + webmeta.SiteKey(cfg.Product) + "  <- site copy")
@@ -289,12 +297,26 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	// path only reads a pointer; it never scans index/manifest to calculate one.
 	webFailures, err := writeWebPointers(cfg, staged, manifest, index, committed, printer)
 	if err != nil {
-		return nil, err
+		printer("  warning: web projections were not rebuilt: " + err.Error())
+	} else {
+		for _, failure := range webFailures {
+			printer("  warning: web projection failed: " + failure)
+		}
 	}
-	failures = append(failures, webFailures...)
 	failures = append(failures, replicaFailures...)
-	if len(failures) > 0 && !allowPartial {
-		return nil, Error{Message: fmt.Sprintf("pointer write failed on %s (index committed on: %s). The signed release may already be live while a site/latest data pointer is stale; re-run with --allow-backfill to finish, and use --allow-partial only to accept the divergence.", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", ")))}
+	if len(failures) > 0 {
+		code := "release.index_write_failed"
+		if len(written) > 0 {
+			code = "release.partial_commit"
+		}
+		return nil, Error{
+			Code:    code,
+			Message: fmt.Sprintf("release pointer write failed on %s (index committed on: %s); repair the backend set before retrying", strings.Join(failures, ", "), chooseNone(strings.Join(written, ", "))),
+			Evidence: map[string]any{
+				"failedBackends":    append([]string(nil), failures...),
+				"committedBackends": append([]string(nil), written...),
+			},
+		}
 	}
 
 	sweepOrphanCAS(cfg, index, pruned, staged, committed, printer)
@@ -575,17 +597,20 @@ func readExistingIndexes(openedBackends []backends.Backend, cfg *config.Config, 
 		return model.EmptyIndex(cfg.Product, channel), 0, rawByBackend, nil
 	}
 
-	var distinct [][]byte
-	for _, raw := range rawByBackend {
-		if raw != nil {
-			distinct = append(distinct, raw)
-		}
-	}
-	for i := 1; i < len(distinct); i++ {
-		if !bytes.Equal(distinct[0], distinct[i]) {
+	if len(openedBackends) > 1 {
+		first := rawByBackend[openedBackends[0].Name()]
+		for _, backend := range openedBackends[1:] {
+			if bytes.Equal(first, rawByBackend[backend.Name()]) {
+				continue
+			}
 			var sequences []string
-			for name, index := range parsed {
-				sequences = append(sequences, fmt.Sprintf("%s=%d", name, index.Sequence))
+			for _, candidate := range openedBackends {
+				index := parsed[candidate.Name()]
+				if index == nil {
+					sequences = append(sequences, candidate.Name()+"=missing")
+				} else {
+					sequences = append(sequences, fmt.Sprintf("%s=%d", candidate.Name(), index.Sequence))
+				}
 			}
 			slices.Sort(sequences)
 			return nil, 0, nil, Error{Message: fmt.Sprintf("backends disagree on the current index (%s); run 'relkit verify' and resolve the divergence before publishing", strings.Join(sequences, ", "))}

@@ -17,10 +17,12 @@ import (
 )
 
 type fakeRelkitServe struct {
-	token   string
-	mu      sync.Mutex
-	objects map[string][]byte
-	URL     string
+	token            string
+	mu               sync.Mutex
+	objects          map[string][]byte
+	failPutPrefix    string
+	corruptGetPrefix string
+	URL              string
 }
 
 func startFakeRelkitServe(t *testing.T, token string) *fakeRelkitServe {
@@ -45,6 +47,29 @@ func (f *fakeRelkitServe) get(key string) []byte {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.objects[key]
+}
+
+func (f *fakeRelkitServe) hasPrefix(prefix string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for key := range f.objects {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeRelkitServe) failPutsWithPrefix(prefix string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPutPrefix = prefix
+}
+
+func (f *fakeRelkitServe) corruptGetsWithPrefix(prefix string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.corruptGetPrefix = prefix
 }
 
 func (f *fakeRelkitServe) serve(w http.ResponseWriter, r *http.Request) {
@@ -82,11 +107,15 @@ func (f *fakeRelkitServe) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet:
 		key := strings.TrimPrefix(r.URL.Path, "/")
 		f.mu.Lock()
-		data := f.objects[key]
+		data := append([]byte(nil), f.objects[key]...)
+		corrupt := f.corruptGetPrefix != "" && strings.HasPrefix(key, f.corruptGetPrefix)
 		f.mu.Unlock()
 		if data == nil {
 			http.NotFound(w, r)
 			return
+		}
+		if corrupt {
+			data = append(data, 0xff)
 		}
 		w.Write(data)
 	case r.Method == http.MethodDelete:
@@ -101,6 +130,13 @@ func (f *fakeRelkitServe) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPut:
 		key := strings.TrimPrefix(r.URL.Path, "/")
+		f.mu.Lock()
+		failPut := f.failPutPrefix != "" && strings.HasPrefix(key, f.failPutPrefix)
+		f.mu.Unlock()
+		if failPut {
+			http.Error(w, "injected put failure", http.StatusInternalServerError)
+			return
+		}
 		if src := r.Header.Get("X-Relkit-Copy-Source"); src != "" {
 			if !f.bearerOK(r) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)

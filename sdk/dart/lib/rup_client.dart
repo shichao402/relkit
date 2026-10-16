@@ -32,6 +32,7 @@ export 'src/gen/rup/v2/objects.pbenum.dart' show ArtifactKind;
 export 'src/models.dart';
 export 'src/preference.dart';
 export 'src/release_notes.dart';
+export 'src/runtime_bootstrap.dart';
 export 'src/runtime_config.dart';
 export 'src/selectors.dart';
 export 'src/state.dart';

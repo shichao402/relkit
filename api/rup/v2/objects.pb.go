@@ -249,17 +249,21 @@ func (x *DigestRef) GetUrls() []string {
 
 // VersionNode is one release in an Index chain.
 type VersionNode struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Version       string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"` // display only; never compare
-	Code          int64                  `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
-	MinFrom       int64                  `protobuf:"varint,3,opt,name=min_from,json=minFrom,proto3" json:"min_from,omitempty"` // default 0
-	Yanked        bool                   `protobuf:"varint,4,opt,name=yanked,proto3" json:"yanked,omitempty"`
-	Manifest      *DigestRef             `protobuf:"bytes,5,opt,name=manifest,proto3" json:"manifest,omitempty"`
-	ReleasedAt    string                 `protobuf:"bytes,6,opt,name=released_at,json=releasedAt,proto3" json:"released_at,omitempty"` // RFC 3339 UTC
-	Notes         string                 `protobuf:"bytes,7,opt,name=notes,proto3" json:"notes,omitempty"`
-	NotesUrl      string                 `protobuf:"bytes,8,opt,name=notes_url,json=notesUrl,proto3" json:"notes_url,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Version    string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"` // display only; never compare
+	Code       int64                  `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
+	MinFrom    int64                  `protobuf:"varint,3,opt,name=min_from,json=minFrom,proto3" json:"min_from,omitempty"` // default 0
+	Yanked     bool                   `protobuf:"varint,4,opt,name=yanked,proto3" json:"yanked,omitempty"`
+	Manifest   *DigestRef             `protobuf:"bytes,5,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	ReleasedAt string                 `protobuf:"bytes,6,opt,name=released_at,json=releasedAt,proto3" json:"released_at,omitempty"` // RFC 3339 UTC
+	Notes      string                 `protobuf:"bytes,7,opt,name=notes,proto3" json:"notes,omitempty"`
+	NotesUrl   string                 `protobuf:"bytes,8,opt,name=notes_url,json=notesUrl,proto3" json:"notes_url,omitempty"`
+	// vNext provenance. Older field clients ignore these additive fields.
+	ResolutionDigest     string `protobuf:"bytes,9,opt,name=resolution_digest,json=resolutionDigest,proto3" json:"resolution_digest,omitempty"`
+	OperatorDeploymentId string `protobuf:"bytes,10,opt,name=operator_deployment_id,json=operatorDeploymentId,proto3" json:"operator_deployment_id,omitempty"`
+	ResolutionIdentity   string `protobuf:"bytes,11,opt,name=resolution_identity,json=resolutionIdentity,proto3" json:"resolution_identity,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *VersionNode) Reset() {
@@ -344,6 +348,27 @@ func (x *VersionNode) GetNotes() string {
 func (x *VersionNode) GetNotesUrl() string {
 	if x != nil {
 		return x.NotesUrl
+	}
+	return ""
+}
+
+func (x *VersionNode) GetResolutionDigest() string {
+	if x != nil {
+		return x.ResolutionDigest
+	}
+	return ""
+}
+
+func (x *VersionNode) GetOperatorDeploymentId() string {
+	if x != nil {
+		return x.OperatorDeploymentId
+	}
+	return ""
+}
+
+func (x *VersionNode) GetResolutionIdentity() string {
+	if x != nil {
+		return x.ResolutionIdentity
 	}
 	return ""
 }
@@ -560,16 +585,20 @@ func (x *Artifact) GetMeta() []*MetaEntry {
 
 // Manifest describes all artifacts for one version (schema rup.manifest/3).
 type Manifest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.manifest/3"
-	Product       string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
-	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
-	Code          int64                  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`
-	ReleasedAt    string                 `protobuf:"bytes,5,opt,name=released_at,json=releasedAt,proto3" json:"released_at,omitempty"`
-	Notes         string                 `protobuf:"bytes,6,opt,name=notes,proto3" json:"notes,omitempty"`
-	Artifacts     []*Artifact            `protobuf:"bytes,7,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Schema     string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "rup.manifest/3"
+	Product    string                 `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
+	Version    string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Code       int64                  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`
+	ReleasedAt string                 `protobuf:"bytes,5,opt,name=released_at,json=releasedAt,proto3" json:"released_at,omitempty"`
+	Notes      string                 `protobuf:"bytes,6,opt,name=notes,proto3" json:"notes,omitempty"`
+	Artifacts  []*Artifact            `protobuf:"bytes,7,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	// Immutable build-control provenance copied from Staged.
+	ResolutionDigest     string `protobuf:"bytes,8,opt,name=resolution_digest,json=resolutionDigest,proto3" json:"resolution_digest,omitempty"`
+	OperatorDeploymentId string `protobuf:"bytes,9,opt,name=operator_deployment_id,json=operatorDeploymentId,proto3" json:"operator_deployment_id,omitempty"`
+	ResolutionIdentity   string `protobuf:"bytes,10,opt,name=resolution_identity,json=resolutionIdentity,proto3" json:"resolution_identity,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Manifest) Reset() {
@@ -649,6 +678,27 @@ func (x *Manifest) GetArtifacts() []*Artifact {
 		return x.Artifacts
 	}
 	return nil
+}
+
+func (x *Manifest) GetResolutionDigest() string {
+	if x != nil {
+		return x.ResolutionDigest
+	}
+	return ""
+}
+
+func (x *Manifest) GetOperatorDeploymentId() string {
+	if x != nil {
+		return x.OperatorDeploymentId
+	}
+	return ""
+}
+
+func (x *Manifest) GetResolutionIdentity() string {
+	if x != nil {
+		return x.ResolutionIdentity
+	}
+	return ""
 }
 
 // StagedArtifact is local-only; never published with urls.
@@ -765,9 +815,13 @@ type Staged struct {
 	Notes     string                 `protobuf:"bytes,8,opt,name=notes,proto3" json:"notes,omitempty"`
 	Artifacts []*StagedArtifact      `protobuf:"bytes,9,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
 	// Optional absolute http(s) URL for release notes (copied onto VersionNode.notes_url).
-	NotesUrl      string `protobuf:"bytes,10,opt,name=notes_url,json=notesUrl,proto3" json:"notes_url,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	NotesUrl string `protobuf:"bytes,10,opt,name=notes_url,json=notesUrl,proto3" json:"notes_url,omitempty"`
+	// Immutable vNext resolution used by produce/stage/simulate/publish.
+	ResolutionDigest     string `protobuf:"bytes,11,opt,name=resolution_digest,json=resolutionDigest,proto3" json:"resolution_digest,omitempty"`
+	OperatorDeploymentId string `protobuf:"bytes,12,opt,name=operator_deployment_id,json=operatorDeploymentId,proto3" json:"operator_deployment_id,omitempty"`
+	ResolutionIdentity   string `protobuf:"bytes,13,opt,name=resolution_identity,json=resolutionIdentity,proto3" json:"resolution_identity,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Staged) Reset() {
@@ -866,6 +920,27 @@ func (x *Staged) GetArtifacts() []*StagedArtifact {
 func (x *Staged) GetNotesUrl() string {
 	if x != nil {
 		return x.NotesUrl
+	}
+	return ""
+}
+
+func (x *Staged) GetResolutionDigest() string {
+	if x != nil {
+		return x.ResolutionDigest
+	}
+	return ""
+}
+
+func (x *Staged) GetOperatorDeploymentId() string {
+	if x != nil {
+		return x.OperatorDeploymentId
+	}
+	return ""
+}
+
+func (x *Staged) GetResolutionIdentity() string {
+	if x != nil {
+		return x.ResolutionIdentity
 	}
 	return ""
 }
@@ -1124,8 +1199,11 @@ type UpdateDirectory struct {
 	DirectorySequence int64                  `protobuf:"varint,3,opt,name=directory_sequence,json=directorySequence,proto3" json:"directory_sequence,omitempty"` // >= 1; anti-rollback for the directory doc
 	UpdatedAt         string                 `protobuf:"bytes,4,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`                          // optional RFC 3339 UTC
 	Services          []*DirectoryService    `protobuf:"bytes,5,rep,name=services,proto3" json:"services,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Optional signed vNext cross-product bootstrap profile. Field clients that
+	// do not subscribe to other products safely ignore this additive field.
+	RuntimeProfile *DigestRef `protobuf:"bytes,6,opt,name=runtime_profile,json=runtimeProfile,proto3" json:"runtime_profile,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *UpdateDirectory) Reset() {
@@ -1193,6 +1271,13 @@ func (x *UpdateDirectory) GetServices() []*DirectoryService {
 	return nil
 }
 
+func (x *UpdateDirectory) GetRuntimeProfile() *DigestRef {
+	if x != nil {
+		return x.RuntimeProfile
+	}
+	return nil
+}
+
 var File_rup_v2_objects_proto protoreflect.FileDescriptor
 
 const file_rup_v2_objects_proto_rawDesc = "" +
@@ -1207,7 +1292,7 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\tDigestRef\x12\x16\n" +
 	"\x06sha256\x18\x01 \x01(\tR\x06sha256\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x12\n" +
-	"\x04urls\x18\x03 \x03(\tR\x04urls\"\xf1\x01\n" +
+	"\x04urls\x18\x03 \x03(\tR\x04urls\"\x85\x03\n" +
 	"\vVersionNode\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\x03R\x04code\x12\x19\n" +
@@ -1217,7 +1302,11 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\vreleased_at\x18\x06 \x01(\tR\n" +
 	"releasedAt\x12\x14\n" +
 	"\x05notes\x18\a \x01(\tR\x05notes\x12\x1b\n" +
-	"\tnotes_url\x18\b \x01(\tR\bnotesUrl\"\xb3\x02\n" +
+	"\tnotes_url\x18\b \x01(\tR\bnotesUrl\x12+\n" +
+	"\x11resolution_digest\x18\t \x01(\tR\x10resolutionDigest\x124\n" +
+	"\x16operator_deployment_id\x18\n" +
+	" \x01(\tR\x14operatorDeploymentId\x12/\n" +
+	"\x13resolution_identity\x18\v \x01(\tR\x12resolutionIdentity\"\xb3\x02\n" +
 	"\x05Index\x12\x16\n" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
 	"\aproduct\x18\x02 \x01(\tR\aproduct\x12\x18\n" +
@@ -1237,7 +1326,7 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\x04kind\x18\x05 \x01(\x0e2\x14.rup.v2.ArtifactKindR\x04kind\x12.\n" +
 	"\tselectors\x18\x06 \x03(\v2\x10.rup.v2.SelectorR\tselectors\x12\x12\n" +
 	"\x04urls\x18\a \x03(\tR\x04urls\x12%\n" +
-	"\x04meta\x18\b \x03(\v2\x11.rup.v2.MetaEntryR\x04meta\"\xd1\x01\n" +
+	"\x04meta\x18\b \x03(\v2\x11.rup.v2.MetaEntryR\x04meta\"\xe5\x02\n" +
 	"\bManifest\x12\x16\n" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
 	"\aproduct\x18\x02 \x01(\tR\aproduct\x12\x18\n" +
@@ -1246,7 +1335,11 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\vreleased_at\x18\x05 \x01(\tR\n" +
 	"releasedAt\x12\x14\n" +
 	"\x05notes\x18\x06 \x01(\tR\x05notes\x12.\n" +
-	"\tartifacts\x18\a \x03(\v2\x10.rup.v2.ArtifactR\tartifacts\"\x8a\x02\n" +
+	"\tartifacts\x18\a \x03(\v2\x10.rup.v2.ArtifactR\tartifacts\x12+\n" +
+	"\x11resolution_digest\x18\b \x01(\tR\x10resolutionDigest\x124\n" +
+	"\x16operator_deployment_id\x18\t \x01(\tR\x14operatorDeploymentId\x12/\n" +
+	"\x13resolution_identity\x18\n" +
+	" \x01(\tR\x12resolutionIdentity\"\x8a\x02\n" +
 	"\x0eStagedArtifact\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x12\n" +
@@ -1256,7 +1349,7 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\tselectors\x18\x06 \x03(\v2\x10.rup.v2.SelectorR\tselectors\x12%\n" +
 	"\x04meta\x18\a \x03(\v2\x11.rup.v2.MetaEntryR\x04meta\x12\x1f\n" +
 	"\vsource_path\x18\b \x01(\tR\n" +
-	"sourcePath\"\xa5\x02\n" +
+	"sourcePath\"\xb9\x03\n" +
 	"\x06Staged\x12\x16\n" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
 	"\aproduct\x18\x02 \x01(\tR\aproduct\x12\x18\n" +
@@ -1269,7 +1362,10 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\x05notes\x18\b \x01(\tR\x05notes\x124\n" +
 	"\tartifacts\x18\t \x03(\v2\x16.rup.v2.StagedArtifactR\tartifacts\x12\x1b\n" +
 	"\tnotes_url\x18\n" +
-	" \x01(\tR\bnotesUrl\"\xcb\x01\n" +
+	" \x01(\tR\bnotesUrl\x12+\n" +
+	"\x11resolution_digest\x18\v \x01(\tR\x10resolutionDigest\x124\n" +
+	"\x16operator_deployment_id\x18\f \x01(\tR\x14operatorDeploymentId\x12/\n" +
+	"\x13resolution_identity\x18\r \x01(\tR\x12resolutionIdentity\"\xcb\x01\n" +
 	"\fFallbackRule\x12\x19\n" +
 	"\bmin_code\x18\x01 \x01(\x03R\aminCode\x12\x19\n" +
 	"\bmax_code\x18\x02 \x01(\x03R\amaxCode\x12\x1d\n" +
@@ -1289,14 +1385,15 @@ const file_rup_v2_objects_proto_rawDesc = "" +
 	"\bpriority\x18\x02 \x01(\x05R\bpriority\x12\x1b\n" +
 	"\tindex_url\x18\x03 \x01(\tR\bindexUrl\x12!\n" +
 	"\ffallback_url\x18\x04 \x01(\tR\vfallbackUrl\x12\x18\n" +
-	"\achannel\x18\x05 \x01(\tR\achannel\"\xc7\x01\n" +
+	"\achannel\x18\x05 \x01(\tR\achannel\"\x83\x02\n" +
 	"\x0fUpdateDirectory\x12\x16\n" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
 	"\aproduct\x18\x02 \x01(\tR\aproduct\x12-\n" +
 	"\x12directory_sequence\x18\x03 \x01(\x03R\x11directorySequence\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x04 \x01(\tR\tupdatedAt\x124\n" +
-	"\bservices\x18\x05 \x03(\v2\x18.rup.v2.DirectoryServiceR\bservices*\xb2\x01\n" +
+	"\bservices\x18\x05 \x03(\v2\x18.rup.v2.DirectoryServiceR\bservices\x12:\n" +
+	"\x0fruntime_profile\x18\x06 \x01(\v2\x11.rup.v2.DigestRefR\x0eruntimeProfile*\xb2\x01\n" +
 	"\fArtifactKind\x12\x1d\n" +
 	"\x19ARTIFACT_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ARTIFACT_KIND_ARCHIVE\x10\x01\x12\x1b\n" +
@@ -1351,11 +1448,12 @@ var file_rup_v2_objects_proto_depIdxs = []int32{
 	1,  // 10: rup.v2.FallbackRule.selectors:type_name -> rup.v2.Selector
 	10, // 11: rup.v2.Fallback.rules:type_name -> rup.v2.FallbackRule
 	12, // 12: rup.v2.UpdateDirectory.services:type_name -> rup.v2.DirectoryService
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	3,  // 13: rup.v2.UpdateDirectory.runtime_profile:type_name -> rup.v2.DigestRef
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_rup_v2_objects_proto_init() }

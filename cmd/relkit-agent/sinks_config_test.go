@@ -20,10 +20,10 @@ func writeAgentConfig(t *testing.T, site map[string]any) string {
 	t.Helper()
 	dir := t.TempDir()
 	raw := map[string]any{
-		"addr":      "127.0.0.1:8787",
-		"stateDir":  filepath.Join(dir, "state"),
-		"products":  map[string]any{"demo": map[string]any{"root": dir}},
-		"site":      site,
+		"addr":     "127.0.0.1:8787",
+		"stateDir": filepath.Join(dir, "state"),
+		"products": map[string]any{"demo": map[string]any{"root": dir}},
+		"site":     site,
 	}
 	data, _ := json.Marshal(raw)
 	path := filepath.Join(dir, "relkit-agent.json")

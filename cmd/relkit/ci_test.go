@@ -109,10 +109,10 @@ func TestLoadReleaseArtifactsManifestRejectsSchema1(t *testing.T) {
 	// "fully structured, no special cases" decision: /2 is the only accepted
 	// release manifest schema, and /1 manifests fail fast with a schema hint.
 	doc := map[string]any{
-		"schema":  "relkit.release-artifacts/1",
-		"version": "1.0.0",
-		"install": map[string]string{"path": "dist/app-setup.exe", "kind": "installer", "selectors": "os=windows,arch=amd64"},
-		"payload": map[string]string{"path": "dist/payload/app/", "selectors": "os=windows,arch=amd64"},
+		"schema":   "relkit.release-artifacts/1",
+		"version":  "1.0.0",
+		"install":  map[string]string{"path": "dist/app-setup.exe", "kind": "installer", "selectors": "os=windows,arch=amd64"},
+		"payload":  map[string]string{"path": "dist/payload/app/", "selectors": "os=windows,arch=amd64"},
 		"archives": []map[string]string{},
 	}
 	writeManifest(t, root, doc,
@@ -284,8 +284,8 @@ func TestLoadReleaseArtifactsManifestSchema2CronkitShape(t *testing.T) {
 func TestLoadReleaseArtifactsManifestRejectsUnknownSchema(t *testing.T) {
 	root := t.TempDir()
 	doc := map[string]any{
-		"schema":  "relkit.release-artifacts/3",
-		"version": "1.0.0",
+		"schema":   "relkit.release-artifacts/3",
+		"version":  "1.0.0",
 		"archives": []map[string]string{},
 	}
 	writeManifest(t, root, doc, map[string]string{}, nil)

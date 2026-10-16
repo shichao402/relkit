@@ -1,10 +1,14 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	rupv2 "github.com/shichao402/relkit/api/rup/v2"
+	"github.com/shichao402/relkit/internal/keys"
 )
 
 func TestLoadRetainVersions(t *testing.T) {
@@ -153,6 +157,35 @@ func TestLoadSignersIgnoresEnvironmentVariable(t *testing.T) {
 	}
 	if strings.Contains(msg, "RELKIT_PRIVATE_KEY") {
 		t.Fatalf("error still points at the env var: %q", msg)
+	}
+}
+
+func TestLoadSignersSupportsRotationWindow(t *testing.T) {
+	root := t.TempDir()
+	var entries []any
+	for index, keyID := range []string{"old", "new"} {
+		seed := make([]byte, ed25519.SeedSize)
+		for offset := range seed {
+			seed[offset] = byte(index*40 + offset + 1)
+		}
+		value := keys.PrivateKeyDocument(keyID, seed)
+		data, err := rupv2.MarshalPrivateKey(&value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, keyID+".private.pb")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, map[string]any{"keyId": keyID, "privateKeyPath": path})
+	}
+	cfg := &Config{Root: root, Signing: map[string]any{"keys": entries}}
+	signers, err := cfg.LoadSigners()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(signers) != 2 || signers[0].KeyID != "old" || signers[1].KeyID != "new" {
+		t.Fatalf("unexpected signers: %#v", signers)
 	}
 }
 

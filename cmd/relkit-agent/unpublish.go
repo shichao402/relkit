@@ -17,10 +17,10 @@ import (
 // uploads, so a concurrent publish for the same product is rejected with 409
 // instead of racing the index rewrite.
 type unpublishRequest struct {
-	Product string `json:"product"`
-	Version string `json:"version"`
+	Product string   `json:"product"`
+	Version string   `json:"version"`
 	To      []string `json:"to"`
-	DryRun  bool   `json:"dryRun"`
+	DryRun  bool     `json:"dryRun"`
 }
 
 // loadUnpublishConfig builds a publish config for a version whose staged tree

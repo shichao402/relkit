@@ -52,7 +52,8 @@
         "build.rs",
         "proto/updater/v1/updater.proto",
         "src/json.rs",
-        "src/lib.rs"
+        "src/lib.rs",
+        "src/runtime_bootstrap.rs"
       ]
     },
     {
@@ -77,6 +78,7 @@
         "sdk/keys.go",
         "sdk/policy.go",
         "sdk/preference.go",
+        "sdk/runtime_bootstrap.go",
         "sdk/state.go",
         "sdk/updaterfacade/facade.go",
         "sdk/updaterfacade/ipc.go"

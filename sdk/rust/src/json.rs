@@ -17,8 +17,7 @@ impl std::fmt::Display for JsonError {
 impl std::error::Error for JsonError {}
 
 pub fn check_result_to_json(result: &CheckResult) -> Result<String, JsonError> {
-    let mut value =
-        serde_json::to_value(result).map_err(|error| JsonError(error.to_string()))?;
+    let mut value = serde_json::to_value(result).map_err(|error| JsonError(error.to_string()))?;
     normalize_utc_timestamps(&mut value);
     serde_json::to_string(&value).map_err(|error| JsonError(error.to_string()))
 }
@@ -60,7 +59,11 @@ fn normalize_utc_timestamps(value: &mut serde_json::Value) {
     }
 }
 
-fn first_difference(input: &serde_json::Value, canonical: &serde_json::Value, path: &str) -> String {
+fn first_difference(
+    input: &serde_json::Value,
+    canonical: &serde_json::Value,
+    path: &str,
+) -> String {
     match (input, canonical) {
         (serde_json::Value::Object(left), serde_json::Value::Object(right)) => {
             for (key, value) in right {
@@ -151,32 +154,49 @@ mod tests {
     #[test]
     fn five_variants_round_trip() {
         let variants = [
-            (CheckResult {
-                kind: Some(check_result::Kind::UpToDate(UpToDate::default())),
-            }, include_str!("../../../conformance/updater/check-result-up-to-date.json")),
-            (empty_notes_available(), include_str!("../../../conformance/updater/check-result-empty-notes.json")),
-            (CheckResult {
-                kind: Some(check_result::Kind::FallbackRequired(FallbackRequired::default())),
-            }, include_str!("../../../conformance/updater/check-result-fallback-required.json")),
-            (CheckResult {
-                kind: Some(check_result::Kind::Throttled(Throttled {
-                    next_allowed_at: Some(pbjson_types::Timestamp {
-                        seconds: 1_786_943_706,
-                        nanos: 123_000_000,
-                    }),
-                })),
-            }, include_str!("../../../conformance/updater/check-result-throttled.json")),
-            (CheckResult {
-                kind: Some(check_result::Kind::Failed(Failed {
-                    error: Some(Error {
-                        code: ErrorCode::Network as i32,
-                        retryable: true,
-                        message: "offline".into(),
-                        attempts: Vec::new(),
-                        recovery: None,
-                    }),
-                })),
-            }, include_str!("../../../conformance/updater/check-result-failed.json")),
+            (
+                CheckResult {
+                    kind: Some(check_result::Kind::UpToDate(UpToDate::default())),
+                },
+                include_str!("../../../conformance/updater/check-result-up-to-date.json"),
+            ),
+            (
+                empty_notes_available(),
+                include_str!("../../../conformance/updater/check-result-empty-notes.json"),
+            ),
+            (
+                CheckResult {
+                    kind: Some(check_result::Kind::FallbackRequired(
+                        FallbackRequired::default(),
+                    )),
+                },
+                include_str!("../../../conformance/updater/check-result-fallback-required.json"),
+            ),
+            (
+                CheckResult {
+                    kind: Some(check_result::Kind::Throttled(Throttled {
+                        next_allowed_at: Some(pbjson_types::Timestamp {
+                            seconds: 1_786_943_706,
+                            nanos: 123_000_000,
+                        }),
+                    })),
+                },
+                include_str!("../../../conformance/updater/check-result-throttled.json"),
+            ),
+            (
+                CheckResult {
+                    kind: Some(check_result::Kind::Failed(Failed {
+                        error: Some(Error {
+                            code: ErrorCode::Network as i32,
+                            retryable: true,
+                            message: "offline".into(),
+                            attempts: Vec::new(),
+                            recovery: None,
+                        }),
+                    })),
+                },
+                include_str!("../../../conformance/updater/check-result-failed.json"),
+            ),
         ];
         for (result, fixture) in variants {
             let json = check_result_to_json(&result).unwrap();
@@ -189,7 +209,10 @@ mod tests {
     fn missing_release_notes_markdown_is_rejected() {
         let mut value: serde_json::Value =
             serde_json::from_str(&check_result_to_json(&empty_notes_available()).unwrap()).unwrap();
-        value["updateAvailable"].as_object_mut().unwrap().remove("releaseNotesMarkdown");
+        value["updateAvailable"]
+            .as_object_mut()
+            .unwrap()
+            .remove("releaseNotesMarkdown");
         let error = check_result_from_json(&value.to_string()).unwrap_err();
         assert!(error.0.contains("releaseNotesMarkdown"), "{}", error.0);
     }
@@ -198,7 +221,10 @@ mod tests {
     fn missing_mandatory_is_rejected() {
         let mut value: serde_json::Value =
             serde_json::from_str(&check_result_to_json(&empty_notes_available()).unwrap()).unwrap();
-        value["updateAvailable"].as_object_mut().unwrap().remove("mandatory");
+        value["updateAvailable"]
+            .as_object_mut()
+            .unwrap()
+            .remove("mandatory");
         let error = check_result_from_json(&value.to_string()).unwrap_err();
         assert!(error.0.contains("mandatory"), "{}", error.0);
     }

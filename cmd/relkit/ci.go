@@ -94,10 +94,10 @@ type ciUploadOptions struct {
 // removed with it, so downstream staging logic never branches on schema and
 // no string parsing survives loadReleaseArtifactsManifest.
 type ciReleaseArtifacts struct {
-	Schema   string           `json:"schema"`
-	Version  string           `json:"version"`
+	Schema   string            `json:"schema"`
+	Version  string            `json:"version"`
 	Groups   []ciSelectorGroup `json:"selectorGroups"`
-	Archives []ciArchiveRef   `json:"archives"`
+	Archives []ciArchiveRef    `json:"archives"`
 }
 
 // ciSelectorGroup is one selector profile: a full-install artifact plus its
@@ -113,17 +113,17 @@ type ciSelectorGroup struct {
 // (installer/binary/blob); Filename is the download-side archive name and
 // only the manifest /2 path sets it explicitly.
 type ciArtifactRef struct {
-	Path     string            `json:"path"`
-	Kind     string            `json:"kind"`
-	Filename string            `json:"filename,omitempty"`
+	Path      string            `json:"path"`
+	Kind      string            `json:"kind"`
+	Filename  string            `json:"filename,omitempty"`
 	Selectors map[string]string `json:"selectors,omitempty"`
 }
 
 // ciPayloadRef names one payload-track directory. Payloads are always kind
 // payload with apply=relkit-payload, so only path and selectors remain.
 type ciPayloadRef struct {
-	Path     string            `json:"path"`
-	Filename string            `json:"filename,omitempty"`
+	Path      string            `json:"path"`
+	Filename  string            `json:"filename,omitempty"`
 	Selectors map[string]string `json:"selectors,omitempty"`
 }
 
@@ -369,10 +369,10 @@ func loadReleaseArtifactsManifest(root, manifestPath, expectedVersion string) (*
 		return nil, fmt.Errorf("release manifest missing after packScript: %s", manifestPath)
 	}
 	var raw struct {
-		Schema         string             `json:"schema"`
-		Version        string             `json:"version"`
-		SelectorGroups []json.RawMessage  `json:"selectorGroups"`
-		Archives       []ciArchiveRef     `json:"archives"`
+		Schema         string            `json:"schema"`
+		Version        string            `json:"version"`
+		SelectorGroups []json.RawMessage `json:"selectorGroups"`
+		Archives       []ciArchiveRef    `json:"archives"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("release manifest is not readable JSON: %v", err)

@@ -65,9 +65,9 @@ func cmdConsumeUpgrade(args []string) error {
 			hostless = false
 		}
 		follow := &consume.Lock{
-			Schema: consume.SchemaV3,
+			Schema:  consume.SchemaV3,
 			Release: consume.LatestKeyword,
-			Commit: "",
+			Commit:  "",
 			Source: &consume.SourceBlock{
 				Module:  "github.com/shichao402/relkit",
 				Version: consume.LatestKeyword,

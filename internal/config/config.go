@@ -472,15 +472,54 @@ func (c *Config) BackendConfig(name string) (map[string]any, error) {
 }
 
 func (c *Config) LoadSigners() ([]envelope.Signer, error) {
-	keyID, _ := c.Signing["keyId"].(string)
+	if rawKeys, exists := c.Signing["keys"]; exists {
+		if c.Signing["keyId"] != nil || c.Signing["privateKeyPath"] != nil {
+			return nil, Error{Message: "signing.keys cannot be combined with legacy signing.keyId/privateKeyPath"}
+		}
+		keysList, ok := rawKeys.([]any)
+		if !ok || len(keysList) == 0 {
+			return nil, Error{Message: "signing.keys must be a non-empty array"}
+		}
+		signers := make([]envelope.Signer, 0, len(keysList))
+		seen := map[string]bool{}
+		for index, raw := range keysList {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				return nil, Error{Message: fmt.Sprintf("signing.keys[%d] must be an object", index)}
+			}
+			signer, err := c.loadSigner(entry, fmt.Sprintf("signing.keys[%d]", index))
+			if err != nil {
+				return nil, err
+			}
+			if seen[signer.KeyID] {
+				return nil, Error{Message: fmt.Sprintf("signing.keys contains duplicate keyId %q", signer.KeyID)}
+			}
+			seen[signer.KeyID] = true
+			signers = append(signers, signer)
+		}
+		return signers, nil
+	}
+	return c.loadLegacySigner()
+}
+
+func (c *Config) loadLegacySigner() ([]envelope.Signer, error) {
+	signer, err := c.loadSigner(c.Signing, "signing")
+	if err != nil {
+		return nil, err
+	}
+	return []envelope.Signer{signer}, nil
+}
+
+func (c *Config) loadSigner(value map[string]any, field string) (envelope.Signer, error) {
+	keyID, _ := value["keyId"].(string)
 	if keyID == "" {
-		return nil, Error{Message: "signing.keyId is required in order to publish"}
+		return envelope.Signer{}, Error{Message: field + ".keyId is required in order to publish"}
 	}
 
-	if rawPath, ok := c.Signing["privateKeyPath"]; ok && rawPath != nil {
+	if rawPath, ok := value["privateKeyPath"]; ok && rawPath != nil {
 		keyPath, ok := rawPath.(string)
 		if !ok {
-			return nil, Error{Message: "signing.privateKeyPath must be a string or null"}
+			return envelope.Signer{}, Error{Message: field + ".privateKeyPath must be a string or null"}
 		}
 		resolved := keyPath
 		if !filepath.IsAbs(resolved) {
@@ -488,24 +527,27 @@ func (c *Config) LoadSigners() ([]envelope.Signer, error) {
 		}
 		info, err := os.Stat(resolved)
 		if err != nil || info.IsDir() {
-			return nil, Error{Message: fmt.Sprintf("signing.privateKeyPath not found: %s", resolved)}
+			return envelope.Signer{}, Error{Message: fmt.Sprintf("%s.privateKeyPath not found: %s", field, resolved)}
 		}
 		data, err := os.ReadFile(resolved)
 		if err != nil {
-			return nil, err
+			return envelope.Signer{}, err
 		}
 		document, err := rupv2.UnmarshalPrivateKey(data)
 		if err != nil {
-			return nil, err
+			return envelope.Signer{}, err
 		}
 		seed, err := keys.LoadPrivateSeed(*document, resolved)
 		if err != nil {
-			return nil, err
+			return envelope.Signer{}, err
 		}
-		return []envelope.Signer{{KeyID: keyID, Seed: seed}}, nil
+		if document.KeyId != "" && document.KeyId != keyID {
+			return envelope.Signer{}, Error{Message: fmt.Sprintf("%s.keyId %q does not match key document %q", field, keyID, document.KeyId)}
+		}
+		return envelope.Signer{KeyID: keyID, Seed: seed}, nil
 	}
 
-	return nil, Error{Message: "no private key available: set signing.privateKeyPath to this product's key file"}
+	return envelope.Signer{}, Error{Message: "no private key available: set " + field + ".privateKeyPath to this product's key file"}
 }
 
 func (c *Config) TrustedPublicKeys() (map[string]ed25519.PublicKey, error) {

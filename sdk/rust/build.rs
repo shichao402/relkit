@@ -30,8 +30,8 @@ fn main() {
     std::env::set_var("PROTOC", protoc);
 
     let includes: Vec<PathBuf> = vec![proto_root.to_path_buf(), well_known];
-    let descriptor_path = PathBuf::from(std::env::var_os("OUT_DIR").unwrap())
-        .join("updater_descriptor.bin");
+    let descriptor_path =
+        PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("updater_descriptor.bin");
     prost_build::Config::new()
         .file_descriptor_set_path(&descriptor_path)
         .compile_well_known_types()

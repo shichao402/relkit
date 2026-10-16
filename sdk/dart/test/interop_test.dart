@@ -85,11 +85,15 @@ void main() {
         '${relative.replaceAll('/', Platform.pathSeparator)}';
 
     /// Runs relkit, failing loudly with its output when it exits non-zero.
-    void relkit(List<String> args) {
-      final result = Process.runSync(
+    Future<void> relkit(List<String> args) async {
+      final result = await Process.run(
         'relkit',
         args,
         workingDirectory: project.path,
+        environment: {
+          ...Platform.environment,
+          'RELKIT_DART_TEST_TOKEN': 'test-token',
+        },
         stdoutEncoding: utf8,
         stderrEncoding: utf8,
       );
@@ -106,9 +110,54 @@ void main() {
       // has to be right at publish time rather than patched in afterwards.
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       baseUrl = 'http://127.0.0.1:${server.port}/';
+      final published = <String, List<int>>{};
+      server.listen((request) async {
+        final key = Uri.decodeComponent(
+          request.uri.path.startsWith('/')
+              ? request.uri.path.substring(1)
+              : request.uri.path,
+        );
+        if (request.method == 'POST') {
+          request.response.statusCode = HttpStatus.notFound;
+        } else if (request.method == 'PUT') {
+          final source = request.headers.value('X-Relkit-Copy-Source');
+          final bytes = source == null
+              ? await request.fold<List<int>>(
+                  <int>[],
+                  (all, chunk) => all..addAll(chunk),
+                )
+              : published[source];
+          if (bytes == null) {
+            request.response.statusCode = HttpStatus.notFound;
+          } else {
+            published[key] = bytes;
+            request.response.statusCode = HttpStatus.created;
+          }
+        } else if (request.method == 'HEAD') {
+          final bytes = published[key];
+          if (bytes == null) {
+            request.response.statusCode = HttpStatus.notFound;
+          } else {
+            request.response.contentLength = bytes.length;
+          }
+        } else if (request.method == 'DELETE') {
+          published.remove(key);
+          request.response.statusCode = HttpStatus.noContent;
+        } else {
+          final bytes = published[key];
+          if (bytes == null) {
+            request.response.statusCode = HttpStatus.notFound;
+          } else {
+            request.response.headers.contentType = ContentType.binary;
+            request.response.contentLength = bytes.length;
+            request.response.add(bytes);
+          }
+        }
+        await request.response.close();
+      });
 
-      relkit(['init', '--product', 'demo']);
-      relkit([
+      await relkit(['init', '--product', 'demo']);
+      await relkit([
         'keygen',
         '--key-id',
         'release-2026',
@@ -120,11 +169,13 @@ void main() {
       final configFile = File(at('relkit.json'));
       final config =
           json.decode(configFile.readAsStringSync()) as Map<String, dynamic>;
+      config['codeStrategy'] = 'explicit';
       (config['backends'] as Map)['local'] = {
-        'type': 'local',
+        'type': 'relkit-compatible',
         'baseUrl': baseUrl,
-        'outputDir': 'dist/publish',
+        'tokenEnv': 'RELKIT_DART_TEST_TOKEN',
       };
+      config['publishTo'] = ['local'];
       (config['signing'] as Map)['privateKeyPath'] =
           'keys/release-2026.private.pb';
       configFile.writeAsStringSync(json.encode(config));
@@ -133,51 +184,36 @@ void main() {
 
       File(at('dist/demo-1.0.0-win-x64.zip'))
           .writeAsStringSync('release one payload' * 200);
-      relkit([
+      await relkit([
         'stage',
         '1.0.0',
         '--code',
         '100',
-        '--add',
+        '--install',
         'dist/demo-1.0.0-win-x64.zip',
         'os=windows,arch=x64',
       ]);
-      relkit(['publish', '1.0.0']);
+      await relkit(['publish', '1.0.0']);
 
       File(at('dist/demo-1.5.0-win-x64.zip'))
           .writeAsStringSync('release two payload' * 300);
-      relkit([
+      await relkit([
         'stage',
         '1.5.0',
         '--code',
         '150',
         '--min-from',
         '100',
-        '--add',
+        '--install',
         'dist/demo-1.5.0-win-x64.zip',
         'os=windows,arch=x64',
       ]);
-      relkit(['publish', '1.5.0']);
+      await relkit(['publish', '1.5.0']);
 
-      if (!File(at('dist/publish/index/demo/stable.pb')).existsSync()) {
-        fail('relkit did not produce dist/publish/index/demo/stable.pb. '
+      if (!published.containsKey('index/demo/stable.pb')) {
+        fail('relkit did not publish index/demo/stable.pb. '
             'Install a protobuf-v2 relkit build to run interop_test.dart.');
       }
-
-      final published = Directory(at('dist/publish'));
-      server.listen((request) async {
-        final relative = Uri.decodeComponent(request.uri.path)
-            .replaceAll('/', Platform.pathSeparator);
-        final file = File('${published.path}$relative');
-        if (!file.existsSync()) {
-          request.response.statusCode = HttpStatus.notFound;
-          await request.response.close();
-          return;
-        }
-        request.response.headers.contentType = ContentType.binary;
-        await request.response.addStream(file.openRead());
-        await request.response.close();
-      });
     });
 
     tearDownAll(() async {

@@ -126,6 +126,14 @@ var Components = []Component{
 		Probe:        ProbeFiles,
 	},
 	{
+		Name:         "ops",
+		Role:         RoleHostBinary,
+		BuildFlag:    "ops",
+		GoPackage:    "./cmd/relkit-ops",
+		BinaryPrefix: "relkit-ops",
+		Probe:        ProbeFiles,
+	},
+	{
 		Name:           "cli",
 		Role:           RoleProductBinary,
 		BuildFlag:      "cli",

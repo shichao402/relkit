@@ -243,6 +243,9 @@ class VersionNode extends $pb.GeneratedMessage {
     $core.String? releasedAt,
     $core.String? notes,
     $core.String? notesUrl,
+    $core.String? resolutionDigest,
+    $core.String? operatorDeploymentId,
+    $core.String? resolutionIdentity,
   }) {
     final result = VersionNode._();
     if (version != null) result.version = version;
@@ -253,6 +256,11 @@ class VersionNode extends $pb.GeneratedMessage {
     if (releasedAt != null) result.releasedAt = releasedAt;
     if (notes != null) result.notes = notes;
     if (notesUrl != null) result.notesUrl = notesUrl;
+    if (resolutionDigest != null) result.resolutionDigest = resolutionDigest;
+    if (operatorDeploymentId != null)
+      result.operatorDeploymentId = operatorDeploymentId;
+    if (resolutionIdentity != null)
+      result.resolutionIdentity = resolutionIdentity;
     return result;
   }
 
@@ -278,6 +286,9 @@ class VersionNode extends $pb.GeneratedMessage {
     ..aOS(6, _omitFieldNames ? '' : 'releasedAt')
     ..aOS(7, _omitFieldNames ? '' : 'notes')
     ..aOS(8, _omitFieldNames ? '' : 'notesUrl')
+    ..aOS(9, _omitFieldNames ? '' : 'resolutionDigest')
+    ..aOS(10, _omitFieldNames ? '' : 'operatorDeploymentId')
+    ..aOS(11, _omitFieldNames ? '' : 'resolutionIdentity')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -375,6 +386,34 @@ class VersionNode extends $pb.GeneratedMessage {
   $core.bool hasNotesUrl() => $_has(7);
   @$pb.TagNumber(8)
   void clearNotesUrl() => $_clearField(8);
+
+  /// vNext provenance. Older field clients ignore these additive fields.
+  @$pb.TagNumber(9)
+  $core.String get resolutionDigest => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set resolutionDigest($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasResolutionDigest() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearResolutionDigest() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.String get operatorDeploymentId => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set operatorDeploymentId($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasOperatorDeploymentId() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearOperatorDeploymentId() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $core.String get resolutionIdentity => $_getSZ(10);
+  @$pb.TagNumber(11)
+  set resolutionIdentity($core.String value) => $_setString(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasResolutionIdentity() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearResolutionIdentity() => $_clearField(11);
 }
 
 /// Index is the signed channel pointer (schema rup.index/2).
@@ -659,6 +698,9 @@ class Manifest extends $pb.GeneratedMessage {
     $core.String? releasedAt,
     $core.String? notes,
     $core.Iterable<Artifact>? artifacts,
+    $core.String? resolutionDigest,
+    $core.String? operatorDeploymentId,
+    $core.String? resolutionIdentity,
   }) {
     final result = Manifest._();
     if (schema != null) result.schema = schema;
@@ -668,6 +710,11 @@ class Manifest extends $pb.GeneratedMessage {
     if (releasedAt != null) result.releasedAt = releasedAt;
     if (notes != null) result.notes = notes;
     if (artifacts != null) result.artifacts.addAll(artifacts);
+    if (resolutionDigest != null) result.resolutionDigest = resolutionDigest;
+    if (operatorDeploymentId != null)
+      result.operatorDeploymentId = operatorDeploymentId;
+    if (resolutionIdentity != null)
+      result.resolutionIdentity = resolutionIdentity;
     return result;
   }
 
@@ -692,6 +739,9 @@ class Manifest extends $pb.GeneratedMessage {
     ..aOS(6, _omitFieldNames ? '' : 'notes')
     ..pPM<Artifact>(7, _omitFieldNames ? '' : 'artifacts',
         subBuilder: Artifact.$_createMessage)
+    ..aOS(8, _omitFieldNames ? '' : 'resolutionDigest')
+    ..aOS(9, _omitFieldNames ? '' : 'operatorDeploymentId')
+    ..aOS(10, _omitFieldNames ? '' : 'resolutionIdentity')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -770,6 +820,34 @@ class Manifest extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(7)
   $pb.PbList<Artifact> get artifacts => $_getList(6);
+
+  /// Immutable build-control provenance copied from Staged.
+  @$pb.TagNumber(8)
+  $core.String get resolutionDigest => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set resolutionDigest($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasResolutionDigest() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearResolutionDigest() => $_clearField(8);
+
+  @$pb.TagNumber(9)
+  $core.String get operatorDeploymentId => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set operatorDeploymentId($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasOperatorDeploymentId() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearOperatorDeploymentId() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.String get resolutionIdentity => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set resolutionIdentity($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasResolutionIdentity() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearResolutionIdentity() => $_clearField(10);
 }
 
 /// StagedArtifact is local-only; never published with urls.
@@ -918,6 +996,9 @@ class Staged extends $pb.GeneratedMessage {
     $core.String? notes,
     $core.Iterable<StagedArtifact>? artifacts,
     $core.String? notesUrl,
+    $core.String? resolutionDigest,
+    $core.String? operatorDeploymentId,
+    $core.String? resolutionIdentity,
   }) {
     final result = Staged._();
     if (schema != null) result.schema = schema;
@@ -930,6 +1011,11 @@ class Staged extends $pb.GeneratedMessage {
     if (notes != null) result.notes = notes;
     if (artifacts != null) result.artifacts.addAll(artifacts);
     if (notesUrl != null) result.notesUrl = notesUrl;
+    if (resolutionDigest != null) result.resolutionDigest = resolutionDigest;
+    if (operatorDeploymentId != null)
+      result.operatorDeploymentId = operatorDeploymentId;
+    if (resolutionIdentity != null)
+      result.resolutionIdentity = resolutionIdentity;
     return result;
   }
 
@@ -957,6 +1043,9 @@ class Staged extends $pb.GeneratedMessage {
     ..pPM<StagedArtifact>(9, _omitFieldNames ? '' : 'artifacts',
         subBuilder: StagedArtifact.$_createMessage)
     ..aOS(10, _omitFieldNames ? '' : 'notesUrl')
+    ..aOS(11, _omitFieldNames ? '' : 'resolutionDigest')
+    ..aOS(12, _omitFieldNames ? '' : 'operatorDeploymentId')
+    ..aOS(13, _omitFieldNames ? '' : 'resolutionIdentity')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1063,6 +1152,34 @@ class Staged extends $pb.GeneratedMessage {
   $core.bool hasNotesUrl() => $_has(9);
   @$pb.TagNumber(10)
   void clearNotesUrl() => $_clearField(10);
+
+  /// Immutable vNext resolution used by produce/stage/simulate/publish.
+  @$pb.TagNumber(11)
+  $core.String get resolutionDigest => $_getSZ(10);
+  @$pb.TagNumber(11)
+  set resolutionDigest($core.String value) => $_setString(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasResolutionDigest() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearResolutionDigest() => $_clearField(11);
+
+  @$pb.TagNumber(12)
+  $core.String get operatorDeploymentId => $_getSZ(11);
+  @$pb.TagNumber(12)
+  set operatorDeploymentId($core.String value) => $_setString(11, value);
+  @$pb.TagNumber(12)
+  $core.bool hasOperatorDeploymentId() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearOperatorDeploymentId() => $_clearField(12);
+
+  @$pb.TagNumber(13)
+  $core.String get resolutionIdentity => $_getSZ(12);
+  @$pb.TagNumber(13)
+  set resolutionIdentity($core.String value) => $_setString(12, value);
+  @$pb.TagNumber(13)
+  $core.bool hasResolutionIdentity() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearResolutionIdentity() => $_clearField(13);
 }
 
 /// FallbackRule matches a client code range and urges a manual update.
@@ -1398,6 +1515,7 @@ class UpdateDirectory extends $pb.GeneratedMessage {
     $fixnum.Int64? directorySequence,
     $core.String? updatedAt,
     $core.Iterable<DirectoryService>? services,
+    DigestRef? runtimeProfile,
   }) {
     final result = UpdateDirectory._();
     if (schema != null) result.schema = schema;
@@ -1405,6 +1523,7 @@ class UpdateDirectory extends $pb.GeneratedMessage {
     if (directorySequence != null) result.directorySequence = directorySequence;
     if (updatedAt != null) result.updatedAt = updatedAt;
     if (services != null) result.services.addAll(services);
+    if (runtimeProfile != null) result.runtimeProfile = runtimeProfile;
     return result;
   }
 
@@ -1427,6 +1546,8 @@ class UpdateDirectory extends $pb.GeneratedMessage {
     ..aOS(4, _omitFieldNames ? '' : 'updatedAt')
     ..pPM<DirectoryService>(5, _omitFieldNames ? '' : 'services',
         subBuilder: DirectoryService.$_createMessage)
+    ..aOM<DigestRef>(6, _omitFieldNames ? '' : 'runtimeProfile',
+        subBuilder: DigestRef.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1489,6 +1610,19 @@ class UpdateDirectory extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(5)
   $pb.PbList<DirectoryService> get services => $_getList(4);
+
+  /// Optional signed vNext cross-product bootstrap profile. Field clients that
+  /// do not subscribe to other products safely ignore this additive field.
+  @$pb.TagNumber(6)
+  DigestRef get runtimeProfile => $_getN(5);
+  @$pb.TagNumber(6)
+  set runtimeProfile(DigestRef value) => $_setField(6, value);
+  @$pb.TagNumber(6)
+  $core.bool hasRuntimeProfile() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearRuntimeProfile() => $_clearField(6);
+  @$pb.TagNumber(6)
+  DigestRef ensureRuntimeProfile() => $_ensure(5);
 }
 
 const $core.bool _omitFieldNames =

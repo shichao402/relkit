@@ -2,6 +2,7 @@ package verify
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"fmt"
 	"slices"
 	"strconv"
@@ -14,6 +15,8 @@ import (
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/httpx"
 	"github.com/shichao402/relkit/internal/model"
+	vnextdocument "github.com/shichao402/relkit/internal/vnext/document"
+	"github.com/shichao402/relkit/internal/vnext/runtimeprofile"
 )
 
 type Error struct {
@@ -47,6 +50,233 @@ func (f *Findings) OK() bool {
 }
 
 type Printer func(string)
+
+type ReleasedOptions struct {
+	Channel                  string
+	To                       []string
+	Deep                     bool
+	Version                  string
+	ResolutionDigest         string
+	OperatorDeploymentID     string
+	MinimumIndexSequence     int64
+	MinimumDirectorySequence int64
+	RuntimeProfileSHA256     string
+	RuntimeProfileDigest     string
+}
+
+// RunReleased re-reads the committed release from consumer-visible backend
+// pointers. It is intentionally independent from the publish write path.
+func RunReleased(cfg *config.Config, options ReleasedOptions, printer Printer) (*Findings, error) {
+	findings, err := Run(cfg, options.Channel, options.To, options.Deep, printer)
+	if err != nil {
+		return nil, err
+	}
+	if options.Version == "" {
+		return nil, Error{Message: "released verification requires an expected version"}
+	}
+	channel, err := cfg.ChannelOrDefault(options.Channel)
+	if err != nil {
+		return nil, err
+	}
+	trusted, err := cfg.TrustedPublicKeys()
+	if err != nil {
+		return nil, err
+	}
+	targetNames := append([]string(nil), options.To...)
+	if len(targetNames) == 0 {
+		targetNames = append(targetNames, cfg.PublishTo...)
+	}
+	for _, name := range targetNames {
+		backend, err := backends.Create(name, cfg, cfg.Root)
+		if err != nil {
+			return nil, err
+		}
+		raw, getErr := backend.Get(model.IndexKey(cfg.Product, channel))
+		if getErr != nil || raw == nil {
+			findings.Error(fmt.Sprintf("released index is unavailable on %s", name))
+			continue
+		}
+		env, openErr := rupv2.UnmarshalEnvelope(raw)
+		if openErr != nil {
+			findings.Error(fmt.Sprintf("released index on %s is invalid: %v", name, openErr))
+			continue
+		}
+		index, openErr := envelope.OpenEnvelope(env, trusted)
+		if openErr != nil {
+			findings.Error(fmt.Sprintf("released index on %s is untrusted: %v", name, openErr))
+			continue
+		}
+		if index.Sequence < options.MinimumIndexSequence {
+			findings.Error(fmt.Sprintf("released index sequence on %s is %d, below required %d", name, index.Sequence, options.MinimumIndexSequence))
+		}
+		var selected *model.VersionNode
+		for _, node := range index.Versions {
+			if node != nil && node.Version == options.Version {
+				selected = node
+				break
+			}
+		}
+		if selected == nil {
+			findings.Error(fmt.Sprintf("version %s is absent from released index on %s", options.Version, name))
+			continue
+		}
+		checkProvenance(
+			"index",
+			name,
+			selected.ResolutionDigest,
+			selected.OperatorDeploymentId,
+			selected.ResolutionIdentity,
+			options,
+			findings,
+		)
+		manifestRaw, getErr := backend.Get(model.ManifestKey(cfg.Product, options.Version))
+		if getErr != nil || manifestRaw == nil {
+			findings.Error(fmt.Sprintf("released manifest %s is unavailable on %s", options.Version, name))
+			continue
+		}
+		manifest, parseErr := rupv2.UnmarshalManifest(manifestRaw)
+		if parseErr != nil {
+			findings.Error(fmt.Sprintf("released manifest %s on %s is invalid: %v", options.Version, name, parseErr))
+			continue
+		}
+		checkProvenance(
+			"manifest",
+			name,
+			manifest.ResolutionDigest,
+			manifest.OperatorDeploymentId,
+			manifest.ResolutionIdentity,
+			options,
+			findings,
+		)
+	}
+	verifyReleasedDirectory(cfg, options, trusted, findings, printer)
+	if findings.OK() {
+		printer(fmt.Sprintf("released verification passed for %s at resolution %s", options.Version, options.ResolutionDigest))
+	}
+	return findings, nil
+}
+
+func checkProvenance(
+	documentName string,
+	backendName string,
+	resolutionDigest string,
+	deploymentID string,
+	identity string,
+	options ReleasedOptions,
+	findings *Findings,
+) {
+	if options.ResolutionDigest != "" && resolutionDigest != options.ResolutionDigest {
+		findings.Error(fmt.Sprintf("%s provenance on %s has resolution %q, expected %q", documentName, backendName, resolutionDigest, options.ResolutionDigest))
+	}
+	if options.OperatorDeploymentID != "" && deploymentID != options.OperatorDeploymentID {
+		findings.Error(fmt.Sprintf("%s provenance on %s has Operator %q, expected %q", documentName, backendName, deploymentID, options.OperatorDeploymentID))
+	}
+	if options.ResolutionDigest != "" && identity == "" {
+		findings.Error(fmt.Sprintf("%s provenance on %s has no resolution identity", documentName, backendName))
+	}
+}
+
+func verifyReleasedDirectory(
+	cfg *config.Config,
+	options ReleasedOptions,
+	trusted map[string]ed25519.PublicKey,
+	findings *Findings,
+	printer Printer,
+) {
+	if cfg.Directory == nil {
+		findings.Error("released verification requires directory publication configuration")
+		return
+	}
+	names := append([]string(nil), cfg.Directory.PublishTo...)
+	if len(names) == 0 {
+		names = append(names, options.To...)
+	}
+	if len(names) == 0 {
+		names = append(names, cfg.PublishTo...)
+	}
+	key := model.DirectoryKey(cfg.Product)
+	var reference []byte
+	for _, name := range names {
+		backend, err := backends.Create(name, cfg, cfg.Root)
+		if err != nil {
+			findings.Error(fmt.Sprintf("directory backend %s: %v", name, err))
+			continue
+		}
+		raw, err := backend.Get(key)
+		if err != nil || raw == nil {
+			findings.Error(fmt.Sprintf("released directory is unavailable on %s", name))
+			continue
+		}
+		if reference == nil {
+			reference = append([]byte(nil), raw...)
+		} else if !bytes.Equal(reference, raw) {
+			findings.Error(fmt.Sprintf("released directory is not byte-identical on backend %s", name))
+		}
+		env, err := rupv2.UnmarshalEnvelope(raw)
+		if err != nil {
+			findings.Error(fmt.Sprintf("released directory on %s is invalid: %v", name, err))
+			continue
+		}
+		value, err := envelope.OpenDirectoryEnvelope(env, trusted)
+		if err != nil {
+			findings.Error(fmt.Sprintf("released directory on %s is untrusted: %v", name, err))
+			continue
+		}
+		if value.Product != cfg.Product {
+			findings.Error(fmt.Sprintf("released directory on %s has product %q", name, value.Product))
+		}
+		if value.DirectorySequence < options.MinimumDirectorySequence {
+			findings.Error(fmt.Sprintf("released directory sequence on %s is %d, below required %d", name, value.DirectorySequence, options.MinimumDirectorySequence))
+		}
+		if options.RuntimeProfileSHA256 != "" {
+			if value.RuntimeProfile == nil {
+				findings.Error(fmt.Sprintf("released directory on %s has no Runtime Profile", name))
+			} else {
+				verifyRuntimeProfileReference(cfg.Product, backend, value.RuntimeProfile, options, trusted, findings)
+			}
+		}
+		printer(fmt.Sprintf("    directory on %-12s sequence %d", name, value.DirectorySequence))
+	}
+}
+
+func verifyRuntimeProfileReference(
+	product string,
+	backend backends.Backend,
+	reference *model.ManifestRef,
+	options ReleasedOptions,
+	trusted map[string]ed25519.PublicKey,
+	findings *Findings,
+) {
+	if reference.Sha256 != options.RuntimeProfileSHA256 {
+		findings.Error(fmt.Sprintf("Runtime Profile reference on %s has sha256 %s, expected %s", backend.Name(), reference.Sha256, options.RuntimeProfileSHA256))
+		return
+	}
+	key := fmt.Sprintf("runtime-profile/%s/%s.json", product, reference.Sha256)
+	if expectedURL := backend.URLFor(key); expectedURL != nil && !containsURL(reference.Urls, *expectedURL) {
+		findings.Error(fmt.Sprintf("Runtime Profile reference does not list %s URL %s", backend.Name(), *expectedURL))
+	}
+	raw, err := backend.Get(key)
+	if err != nil || raw == nil {
+		findings.Error(fmt.Sprintf("Runtime Profile is unavailable on %s at %s", backend.Name(), key))
+		return
+	}
+	if digest := model.Sha256Bytes(raw); digest != reference.Sha256 || int64(len(raw)) != reference.Size {
+		findings.Error(fmt.Sprintf("Runtime Profile bytes on %s do not match directory reference", backend.Name()))
+		return
+	}
+	var profile runtimeprofile.Document
+	if err := vnextdocument.Decode(raw, &profile); err != nil {
+		findings.Error(fmt.Sprintf("Runtime Profile on %s is invalid JSON: %v", backend.Name(), err))
+		return
+	}
+	if err := profile.Verify(trusted); err != nil {
+		findings.Error(fmt.Sprintf("Runtime Profile on %s is untrusted: %v", backend.Name(), err))
+		return
+	}
+	if options.RuntimeProfileDigest != "" && profile.Digest != options.RuntimeProfileDigest {
+		findings.Error(fmt.Sprintf("Runtime Profile on %s has digest %s, expected %s", backend.Name(), profile.Digest, options.RuntimeProfileDigest))
+	}
+}
 
 func Run(cfg *config.Config, channel string, to []string, deep bool, printer Printer) (*Findings, error) {
 	if printer == nil {

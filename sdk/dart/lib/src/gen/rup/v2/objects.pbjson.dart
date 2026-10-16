@@ -95,6 +95,27 @@ const VersionNode$json = {
     {'1': 'released_at', '3': 6, '4': 1, '5': 9, '10': 'releasedAt'},
     {'1': 'notes', '3': 7, '4': 1, '5': 9, '10': 'notes'},
     {'1': 'notes_url', '3': 8, '4': 1, '5': 9, '10': 'notesUrl'},
+    {
+      '1': 'resolution_digest',
+      '3': 9,
+      '4': 1,
+      '5': 9,
+      '10': 'resolutionDigest'
+    },
+    {
+      '1': 'operator_deployment_id',
+      '3': 10,
+      '4': 1,
+      '5': 9,
+      '10': 'operatorDeploymentId'
+    },
+    {
+      '1': 'resolution_identity',
+      '3': 11,
+      '4': 1,
+      '5': 9,
+      '10': 'resolutionIdentity'
+    },
   ],
 };
 
@@ -104,7 +125,10 @@ final $typed_data.Uint8List versionNodeDescriptor = $convert.base64Decode(
     'NvZGUSGQoIbWluX2Zyb20YAyABKANSB21pbkZyb20SFgoGeWFua2VkGAQgASgIUgZ5YW5rZWQS'
     'LQoIbWFuaWZlc3QYBSABKAsyES5ydXAudjIuRGlnZXN0UmVmUghtYW5pZmVzdBIfCgtyZWxlYX'
     'NlZF9hdBgGIAEoCVIKcmVsZWFzZWRBdBIUCgVub3RlcxgHIAEoCVIFbm90ZXMSGwoJbm90ZXNf'
-    'dXJsGAggASgJUghub3Rlc1VybA==');
+    'dXJsGAggASgJUghub3Rlc1VybBIrChFyZXNvbHV0aW9uX2RpZ2VzdBgJIAEoCVIQcmVzb2x1dG'
+    'lvbkRpZ2VzdBI0ChZvcGVyYXRvcl9kZXBsb3ltZW50X2lkGAogASgJUhRvcGVyYXRvckRlcGxv'
+    'eW1lbnRJZBIvChNyZXNvbHV0aW9uX2lkZW50aXR5GAsgASgJUhJyZXNvbHV0aW9uSWRlbnRpdH'
+    'k=');
 
 @$core.Deprecated('Use indexDescriptor instead')
 const Index$json = {
@@ -200,6 +224,27 @@ const Manifest$json = {
       '6': '.rup.v2.Artifact',
       '10': 'artifacts'
     },
+    {
+      '1': 'resolution_digest',
+      '3': 8,
+      '4': 1,
+      '5': 9,
+      '10': 'resolutionDigest'
+    },
+    {
+      '1': 'operator_deployment_id',
+      '3': 9,
+      '4': 1,
+      '5': 9,
+      '10': 'operatorDeploymentId'
+    },
+    {
+      '1': 'resolution_identity',
+      '3': 10,
+      '4': 1,
+      '5': 9,
+      '10': 'resolutionIdentity'
+    },
   ],
 };
 
@@ -208,7 +253,10 @@ final $typed_data.Uint8List manifestDescriptor = $convert.base64Decode(
     'CghNYW5pZmVzdBIWCgZzY2hlbWEYASABKAlSBnNjaGVtYRIYCgdwcm9kdWN0GAIgASgJUgdwcm'
     '9kdWN0EhgKB3ZlcnNpb24YAyABKAlSB3ZlcnNpb24SEgoEY29kZRgEIAEoA1IEY29kZRIfCgty'
     'ZWxlYXNlZF9hdBgFIAEoCVIKcmVsZWFzZWRBdBIUCgVub3RlcxgGIAEoCVIFbm90ZXMSLgoJYX'
-    'J0aWZhY3RzGAcgAygLMhAucnVwLnYyLkFydGlmYWN0UglhcnRpZmFjdHM=');
+    'J0aWZhY3RzGAcgAygLMhAucnVwLnYyLkFydGlmYWN0UglhcnRpZmFjdHMSKwoRcmVzb2x1dGlv'
+    'bl9kaWdlc3QYCCABKAlSEHJlc29sdXRpb25EaWdlc3QSNAoWb3BlcmF0b3JfZGVwbG95bWVudF'
+    '9pZBgJIAEoCVIUb3BlcmF0b3JEZXBsb3ltZW50SWQSLwoTcmVzb2x1dGlvbl9pZGVudGl0eRgK'
+    'IAEoCVIScmVzb2x1dGlvbklkZW50aXR5');
 
 @$core.Deprecated('Use stagedArtifactDescriptor instead')
 const StagedArtifact$json = {
@@ -275,6 +323,27 @@ const Staged$json = {
       '10': 'artifacts'
     },
     {'1': 'notes_url', '3': 10, '4': 1, '5': 9, '10': 'notesUrl'},
+    {
+      '1': 'resolution_digest',
+      '3': 11,
+      '4': 1,
+      '5': 9,
+      '10': 'resolutionDigest'
+    },
+    {
+      '1': 'operator_deployment_id',
+      '3': 12,
+      '4': 1,
+      '5': 9,
+      '10': 'operatorDeploymentId'
+    },
+    {
+      '1': 'resolution_identity',
+      '3': 13,
+      '4': 1,
+      '5': 9,
+      '10': 'resolutionIdentity'
+    },
   ],
 };
 
@@ -285,7 +354,9 @@ final $typed_data.Uint8List stagedDescriptor = $convert.base64Decode(
     'X2Zyb20YBSABKANSB21pbkZyb20SGAoHY2hhbm5lbBgGIAEoCVIHY2hhbm5lbBIdCgpjcmVhdG'
     'VkX2F0GAcgASgJUgljcmVhdGVkQXQSFAoFbm90ZXMYCCABKAlSBW5vdGVzEjQKCWFydGlmYWN0'
     'cxgJIAMoCzIWLnJ1cC52Mi5TdGFnZWRBcnRpZmFjdFIJYXJ0aWZhY3RzEhsKCW5vdGVzX3VybB'
-    'gKIAEoCVIIbm90ZXNVcmw=');
+    'gKIAEoCVIIbm90ZXNVcmwSKwoRcmVzb2x1dGlvbl9kaWdlc3QYCyABKAlSEHJlc29sdXRpb25E'
+    'aWdlc3QSNAoWb3BlcmF0b3JfZGVwbG95bWVudF9pZBgMIAEoCVIUb3BlcmF0b3JEZXBsb3ltZW'
+    '50SWQSLwoTcmVzb2x1dGlvbl9pZGVudGl0eRgNIAEoCVIScmVzb2x1dGlvbklkZW50aXR5');
 
 @$core.Deprecated('Use fallbackRuleDescriptor instead')
 const FallbackRule$json = {
@@ -380,6 +451,14 @@ const UpdateDirectory$json = {
       '6': '.rup.v2.DirectoryService',
       '10': 'services'
     },
+    {
+      '1': 'runtime_profile',
+      '3': 6,
+      '4': 1,
+      '5': 11,
+      '6': '.rup.v2.DigestRef',
+      '10': 'runtimeProfile'
+    },
   ],
 };
 
@@ -388,4 +467,5 @@ final $typed_data.Uint8List updateDirectoryDescriptor = $convert.base64Decode(
     'Cg9VcGRhdGVEaXJlY3RvcnkSFgoGc2NoZW1hGAEgASgJUgZzY2hlbWESGAoHcHJvZHVjdBgCIA'
     'EoCVIHcHJvZHVjdBItChJkaXJlY3Rvcnlfc2VxdWVuY2UYAyABKANSEWRpcmVjdG9yeVNlcXVl'
     'bmNlEh0KCnVwZGF0ZWRfYXQYBCABKAlSCXVwZGF0ZWRBdBI0CghzZXJ2aWNlcxgFIAMoCzIYLn'
-    'J1cC52Mi5EaXJlY3RvcnlTZXJ2aWNlUghzZXJ2aWNlcw==');
+    'J1cC52Mi5EaXJlY3RvcnlTZXJ2aWNlUghzZXJ2aWNlcxI6Cg9ydW50aW1lX3Byb2ZpbGUYBiAB'
+    'KAsyES5ydXAudjIuRGlnZXN0UmVmUg5ydW50aW1lUHJvZmlsZQ==');
