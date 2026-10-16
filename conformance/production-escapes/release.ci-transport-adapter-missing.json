@@ -1,0 +1,22 @@
+{
+  "schema": "relkit.production-escape/1",
+  "code": "release.ci_transport_adapter_missing",
+  "category": "generic",
+  "stage": "publish",
+  "capability": "signed-operator-release",
+  "crossComponent": false,
+  "symptom": "A host candidate build and signed resolution succeeded, but vNext release always dialed the signed Operator endpoint and could not use the restricted loopback tunnel required by the CI network boundary.",
+  "whyGateMissed": "The release path verified signed Operator identity but had no regression case for preserving that identity while routing the protocol through an Operator-owned CI transport adapter.",
+  "earliestDetection": "Exercise vNext release transport selection with an execute-mode CI override and require loopback-only routing while remote, credential-bearing, and non-CI overrides fail closed.",
+  "evidence": [
+    {
+      "path": "cmd/relkit/release_transport_test.go",
+      "symbol": "TestVNextAgentTransportURLAllowsOnlyCILoopback",
+      "kind": "unit"
+    }
+  ],
+  "tracking": {
+    "kind": "issue",
+    "number": 48
+  }
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,7 +160,10 @@ func releaseVNext(
 	if !hasPublishContract(resolved.Contracts) {
 		return fmt.Errorf("selected distribution does not provide the publishProtocol/agent contract")
 	}
-	agentURL := strings.TrimSpace(bundle.Operator.Endpoints["agent"])
+	agentURL, err := vNextAgentTransportURL(bundle.Operator.Endpoints["agent"], execute)
+	if err != nil {
+		return err
+	}
 	secretRef := bundle.Operator.SecretRefs["agentBearer"]
 	if secretRef == "" {
 		secretRef = bundle.Operator.SecretRefs["upload"]
@@ -209,6 +214,40 @@ func hasPublishContract(values []contracts.Capability) bool {
 		}
 	}
 	return false
+}
+
+// vNextAgentTransportURL preserves the signed Operator endpoint as the
+// authority while allowing a CI adapter to carry the same protocol through a
+// local tunnel. The credential may only be redirected to a loopback listener:
+// arbitrary endpoint overrides would let a compromised build exfiltrate the
+// product-scoped Agent token.
+func vNextAgentTransportURL(signedURL string, execute bool) (string, error) {
+	signedURL = strings.TrimSpace(signedURL)
+	if !execute {
+		return signedURL, nil
+	}
+	override := strings.TrimSpace(os.Getenv("RELKIT_AGENT_TRANSPORT_URL"))
+	if override == "" {
+		return signedURL, nil
+	}
+	if os.Getenv("RELKIT_RELEASE_VIA_CI") != "1" {
+		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL requires RELKIT_RELEASE_VIA_CI=1")
+	}
+	parsed, err := url.ParseRequestURI(override)
+	if err != nil || parsed.Host == "" {
+		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must be an absolute HTTP(S) loopback URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must use http or https")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must not contain credentials, query, or fragment")
+	}
+	host := net.ParseIP(parsed.Hostname())
+	if host == nil || !host.IsLoopback() {
+		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must target a loopback IP")
+	}
+	return override, nil
 }
 
 func operatorSecret(reference string, required bool) (string, error) {

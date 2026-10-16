@@ -505,6 +505,7 @@ func cmdVerifyReleased(args []string, configPath string) error {
 	resolutionPath := strings.TrimSpace(os.Getenv("RELKIT_RESOLUTION"))
 	projectPath := defaultProjectPath
 	consumerURL := ""
+	directoryURL := ""
 	var productRootPaths []string
 	for i := 0; i < len(args); i++ {
 		switch arg := args[i]; {
@@ -531,6 +532,9 @@ func cmdVerifyReleased(args []string, configPath string) error {
 		case arg == "--consumer":
 			i++
 			consumerURL = mustValue(args, i, "--consumer")
+		case arg == "--directory":
+			i++
+			directoryURL = mustValue(args, i, "--directory")
 		case arg == "--resolution-digest":
 			i++
 			options.ResolutionDigest = mustValue(args, i, "--resolution-digest")
@@ -576,7 +580,9 @@ func cmdVerifyReleased(args []string, configPath string) error {
 		return fmt.Errorf("verify released requires --resolution or --resolution-digest")
 	}
 	if resolutionPath != "" {
-		return verifyReleasedVNext(projectPath, resolutionPath, consumerURL, productRootPaths, options)
+		return verifyReleasedVNext(
+			projectPath, resolutionPath, consumerURL, directoryURL, productRootPaths, options,
+		)
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -595,7 +601,7 @@ func cmdVerifyReleased(args []string, configPath string) error {
 }
 
 func verifyReleasedVNext(
-	projectPath, resolutionPath, consumerURL string,
+	projectPath, resolutionPath, consumerURL, directoryURL string,
 	productRootPaths []string,
 	options verify.ReleasedOptions,
 ) error {
@@ -664,9 +670,12 @@ func verifyReleasedVNext(
 	if consumerURL == "" {
 		consumerURL = bundle.Operator.Endpoints["consumer"]
 	}
+	if directoryURL == "" {
+		directoryURL = bundle.Operator.Endpoints["directory"]
+	}
 	findings, err := verify.RunReleasedHTTP(context.Background(), verify.ReleasedHTTPOptions{
 		Product: productDocument.Product, Channel: options.Channel, Version: options.Version,
-		ConsumerBaseURL: consumerURL, DirectoryURL: bundle.Operator.Endpoints["directory"],
+		ConsumerBaseURL: consumerURL, DirectoryURL: directoryURL,
 		TrustedProductRoots: productRoots, ResolutionDigest: resolved.Digest,
 		OperatorDeploymentID: resolved.Operator.DeploymentID,
 		ResolutionIdentity:   string(resolved.Identity),
