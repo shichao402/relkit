@@ -132,6 +132,7 @@ Bootstrap 启动真实 updater，至少执行一次 `check → download → appl
 | 生成的 Runtime Bootstrap key 是数字数组，但公开 SDK 只接受 base64 | 生成器→公开 SDK conformance | Schema 固定 canonical base64；实际生成 JSON 必须被公开 Go SDK 解析并完成签名/fingerprint 校验 |
 | dev/stable CI 全绿，却未执行真实 updater apply | 最终产品验收 | CI 后从签发 bootstrap 对所有 runtime component 执行 `check → download → apply → --version` |
 | 已推送的 dev tag 失败后想原地补跑 | immutable release 输入 | 不移动、不覆写旧 tag；修复后提升产品版本并创建新 tag |
+| 提供方仓 `dec pull` 读到作者 home/vault 旧 Skill，误判 registry 发布失败 | Dec 资产发布读回 | 比对 registry commit/tree 与 `DecAssets` blob；用独立 consumer 验 ref，不提交 self-pull 回退 |
 | 复杂问题全部抛给使用者 | Skill questions | 先取证并采用安全默认，只展示可观察结果与回滚 |
 
 ## 状态
