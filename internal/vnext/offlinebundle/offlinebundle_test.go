@@ -138,6 +138,13 @@ func TestCandidateBundleInstallRequiresExplicitCandidateRoot(t *testing.T) {
 	if _, err := Install(options); err != nil {
 		t.Fatalf("candidate install: %v", err)
 	}
+	pinnedRoot, err := os.ReadFile(filepath.Join(projectRoot, ".relkit", "candidate-root-fingerprint"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(pinnedRoot) != candidateFingerprint+"\n" {
+		t.Fatalf("pinned Candidate Root = %q", pinnedRoot)
+	}
 }
 
 func TestBundleRejectsMissingAndTamperedAssets(t *testing.T) {

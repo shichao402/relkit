@@ -44,7 +44,7 @@ func TestGeneratePinsTrustRootAndUsesResolution(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(data)
-		for _, required := range []string{fingerprint, "resolution.json", "materialize", "doctor", "RELKIT_PROJECT"} {
+		for _, required := range []string{fingerprint, "resolution.json", "materialize", "doctor", "RELKIT_PROJECT", "candidate-root-fingerprint"} {
 			if !strings.Contains(text, required) {
 				t.Fatalf("%s does not contain %q", filepath.Base(path), required)
 			}
@@ -91,7 +91,7 @@ func TestGeneratedShellWrapperRunsOneImmutableResolution(t *testing.T) {
 	bootstrap := filepath.Join(root, "fake-bootstrap")
 	script := `#!/bin/sh
 set -eu
-printf '%s|%s|%s\n' "$1" "${RELKIT_EXPECTED_ROOT_FINGERPRINT:-}" "$*" >> "$WRAPPER_LOG"
+printf '%s|%s|%s|%s\n' "$1" "${RELKIT_EXPECTED_ROOT_FINGERPRINT:-}" "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" "$*" >> "$WRAPPER_LOG"
 command_name="$1"
 shift
 case "$command_name" in
@@ -106,16 +106,32 @@ case "$command_name" in
   doctor) ;;
   materialize)
     mkdir -p "$WRAPPER_ROOT/.relkit/components/bin"
-    cat > "$WRAPPER_ROOT/.relkit/components/bin/relkit" <<'SELECTED'
+    if [ "${SKIP_SELECTED:-0}" = "1" ]; then
+      rm -f "$WRAPPER_ROOT/.relkit/components/bin/relkit"
+    else
+      cat > "$WRAPPER_ROOT/.relkit/components/bin/relkit" <<'SELECTED'
 #!/bin/sh
 printf 'selected|%s|%s\n' "$PWD" "$*" >> "$WRAPPER_LOG"
 SELECTED
-    chmod +x "$WRAPPER_ROOT/.relkit/components/bin/relkit"
+      chmod +x "$WRAPPER_ROOT/.relkit/components/bin/relkit"
+    fi
     ;;
+  probe) printf 'bootstrap|%s|%s\n' "$PWD" "$*" >> "$WRAPPER_LOG" ;;
   *) exit 91 ;;
 esac
 `
 	if err := os.WriteFile(bootstrap, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	candidateRoot := "sha256:" + strings.Repeat("d", 64)
+	if err := os.MkdirAll(filepath.Join(root, ".relkit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(root, ".relkit", "candidate-root-fingerprint"),
+		[]byte(candidateRoot+"\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	run := func(extra ...string) {
@@ -126,6 +142,7 @@ esac
 			"RELKIT_BOOTSTRAP_CLI="+bootstrap,
 			"WRAPPER_LOG="+logPath,
 			"WRAPPER_ROOT="+root,
+			"RELKIT_CANDIDATE_ROOT_FINGERPRINT=",
 		)
 		command.Env = append(command.Env, extra...)
 		if output, err := command.CombinedOutput(); err != nil {
@@ -137,6 +154,7 @@ esac
 	run("RELKIT_REFRESH_RESOLUTION=1")
 	candidate := "sha256:" + strings.Repeat("c", 64)
 	run("RELKIT_CANDIDATE_DIGEST=" + candidate)
+	run("SKIP_SELECTED=1")
 	logData, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
@@ -145,14 +163,20 @@ esac
 	if got := strings.Count(logText, "resolve|"+fingerprint); got != 3 {
 		t.Fatalf("resolve calls = %d, want initial + explicit refresh + candidate\n%s", got, logText)
 	}
-	if got := strings.Count(logText, "doctor|"+fingerprint); got != 4 {
-		t.Fatalf("doctor calls = %d, want 4\n%s", got, logText)
+	if got := strings.Count(logText, "doctor|"+fingerprint); got != 5 {
+		t.Fatalf("doctor calls = %d, want 5\n%s", got, logText)
+	}
+	if !strings.Contains(logText, "doctor|"+fingerprint+"|"+candidateRoot) {
+		t.Fatalf("wrapper did not load the installed Candidate Root:\n%s", logText)
 	}
 	if !strings.Contains(logText, ".relkit/candidate/resolution.json --candidate "+candidate) {
 		t.Fatalf("candidate did not use an isolated immutable resolution:\n%s", logText)
 	}
 	if !strings.Contains(logText, "selected|"+root+"|probe two") {
 		t.Fatalf("selected CLI did not run from project root with original args:\n%s", logText)
+	}
+	if !strings.Contains(logText, "bootstrap|"+root+"|two") {
+		t.Fatalf("bootstrap CLI did not cover an operator host outside the product targets:\n%s", logText)
 	}
 }
 
@@ -163,6 +187,12 @@ func TestGeneratedWindowsWrapperUsesSafeRootAndHardFailures(t *testing.T) {
 	}
 	if !strings.Contains(script, `--project-root "%PROJECT_ROOT%"`) {
 		t.Fatal("Windows wrapper does not pass the safe project root")
+	}
+	if !strings.Contains(script, `candidate-root-fingerprint`) {
+		t.Fatal("Windows wrapper does not load the installed Candidate Root")
+	}
+	if !strings.Contains(script, `set "SELECTED=%BOOTSTRAP%"`) {
+		t.Fatal("Windows wrapper does not support an operator host outside the product targets")
 	}
 	if strings.Contains(script, `|| exit /b %errorlevel%`) {
 		t.Fatal("Windows wrapper expands a stale errorlevel on the same command line")
