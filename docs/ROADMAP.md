@@ -2,11 +2,16 @@
 
 尚未排期的意向，不等于已接受的 ADR。落地前再写决策。
 
-## vNext 断代重构（架构已闭合，待 ADR Accepted 后实现）
+## vNext 断代重构（已实现，按认证域进入生产）
 
 - **审查入口（产品/宿主视角）**：[design/vnext/USER-ACCEPTANCE.md](design/vnext/USER-ACCEPTANCE.md)
 - **ADR**：[0019](adr/0019-vnext-breaking-and-protocol-contracts.md) 断代与协议 · [0020](adr/0020-vnext-catalog-operator-resolution.md) Catalog/Operator/Resolution · [0021](adr/0021-vnext-artifact-runtime-registry.md) ArtifactSet/Runtime Profile · [0022](adr/0022-vnext-certification-ops-skill.md) 认证/ops/Skill
-- **原则**：四份 ADR Accepted 后再改代码与宿主；不先修单仓倒推 Relkit。使用者验收以 USER-ACCEPTANCE 证据为准，ADR 正文不算「通过」。
+- **状态**：core / wrapper / ops、合同与组合 conformance、四宿主迁移样本均已落地；
+  生产按 Operator 认证域独立推进。首个公网 Dec 窗口见
+  [切换手册](design/vnext/cutover.md) 与
+  [推进记录](design/vnext/first-production-rollout.md)。
+- **原则**：不先修单仓倒推 Relkit；仓库身份不进入 core。使用者验收以
+  USER-ACCEPTANCE 的运行证据为准，ADR 正文不算“通过”。
 
 内容寻址只保留发布侧去重：stage 之后往 COS/ingest 推产物时，blob 已存在则
 不重复上传。客户端不再规划把已装路径伪装成 `destPath` 来跳过整 artifact；

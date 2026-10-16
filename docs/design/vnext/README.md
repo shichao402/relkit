@@ -9,6 +9,9 @@
 | --- | --- |
 | [USER-ACCEPTANCE.md](USER-ACCEPTANCE.md) | **唯一推荐审查入口**：检查项、产品侧承诺、证据、一票否决 |
 | [representative-scenarios.md](representative-scenarios.md) | 能力维度与三个匿名场景；四仓仅作样本映射 |
+| [cutover.md](cutover.md) | Candidate→Production 顺序、认证域隔离、提交待确认与回滚 |
+| [first-production-rollout.md](first-production-rollout.md) | 首次真实生产推进的事实、设计结论与通用缺口 |
+| [single-core-ops.md](single-core-ops.md) | core / wrapper / ops / Skill 职责与生产控制面命令 |
 | [schemas/](schemas/) | `project` / `operator-profile` / `resolution` / `artifact-set` / `runtime-profile` / `extension` 草案 |
 | [contract-vectors.md](contract-vectors.md) | 四类协议合同的 requires/provides 向量 |
 
@@ -26,5 +29,7 @@
 1. 架构决策：完成，ADR 0019–0022 Accepted。  
 2. core / ops / wrapper：完成，并有合同与负面 conformance。  
 3. 代表性迁移：Loom、Loom-Launcher、SvnMergeTool、Dec 共用同一 candidate
-   distribution 验证。  
-4. 最终状态以 [USER-ACCEPTANCE.md](USER-ACCEPTANCE.md) 的真实证据为准。
+   distribution 验证；仓库身份不进入合同。
+4. 生产切换：按 Operator 认证域独立推进。2026-10-17 首窗口仅覆盖公网 Dec，
+   内网三宿主延期且不复用公网认证。
+5. 最终状态以 [USER-ACCEPTANCE.md](USER-ACCEPTANCE.md) 的真实证据为准。

@@ -46,5 +46,6 @@
 ## 演进规则
 
 - 扩大 `max` 或新增 optional capability：minor，跑受影响 cohort  
-- 提高 `min` 或删除行为：major，全部已登记活跃宿主 + 旧客户端 conformance  
+- 提高 `min` 或删除行为：major，distribution 级 S1–S3 + 该认证域 fleet 全部 mandatory
+  条目 + 旧客户端 conformance
 - 禁止用「某个宿主需要」作为扩大全局行为的理由；先改合同再改实现  

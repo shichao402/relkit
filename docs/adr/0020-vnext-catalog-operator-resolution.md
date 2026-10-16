@@ -60,6 +60,15 @@ Operator Profile 是服务器现场权威，由 relkit-ops 从实际部署生成
 
 无作用域裸 `latest` 不存在。运维命令 `relkit-ops upgrade <operator> --to latest` 中的 latest 仅表示“选最新 certified release 作为服务器升级目标”；升级完成后 Profile 仍记录精确 server version 与合同向量。
 
+也不存在 `fleet-latest` 这类全局产品版本。所有版本选择都以目标 Operator 为作用域：
+
+- 固定自建部署的 `exact` 是部署事实；连接该部署的项目自然得到同一精确 distribution，
+  不是各项目分别维护 pin
+- `latest-compatible` 是 `latest-compatible(operator)`，不是“全世界最新”
+- 若 Operator 要求客户端与服务整套同版，结果等于服务器版本；若公开了兼容窗口，
+  resolver 可以选择更新但合同相交的完整客户端 distribution
+- 无论哪种策略，解析结果都立即冻结为 immutable resolution；`latest` 不能在流水线中再次求值
+
 #### 发现与多环境
 
 - `operatorRef` 解析为逻辑名 → relkit-ops / CI 注入的已签名 Profile 路径或 URL（带 trustFingerprint 校验）
@@ -81,10 +90,10 @@ Schema 草案：[`../design/vnext/schemas/relkit.operator-profile.1.schema.json`
 
 | 根 | 签发对象 | 默认 |
 | --- | --- | --- |
-| **Distribution Root** | certified/candidate catalog、Operator Profile | 与 product RUP key **分离** |
+| **Distribution Root** | production-authority Catalog（含其生命周期状态）、production Operator Profile | 与 product RUP key **分离** |
 | **Product RUP Root** | directory/index/manifest/fallback | 每产品独立 |
 | **Runtime Profile Root** | runtime-profile | 默认复用对应 product 的 RUP root |
-| **Candidate Identity** | 仅 candidate namespace | 不能写 production certified 指针 |
+| **Candidate Root / Identity** | candidate-only Catalog/Profile/resolution bundle | 不能签 certified 或写 production 指针 |
 
 闭合默认：
 
@@ -111,6 +120,16 @@ candidate → certified → superseded
 - “最新”按 SemVer precedence；pre-release 不进 production latest
 - certification sequence 用于同版本索引、防回滚与审计
 - Catalog 是对 immutable GitHub Release / module / mirror 资产的**签名索引**，不替代内容地址
+
+`certified` 是**某个已签名 Catalog 快照中的状态**，不是 distribution 脱离部署环境后的
+全局属性。生产晋升以 `Catalog + Operator Profile + certification fleet/report` 共同形成
+认证域：
+
+- 公网与内网、不同 Operator 或不同发布责任边界可以持有不同 Catalog 快照
+- 同一 immutable distribution 可以先在公网 Catalog certified，而在内网 Catalog 仍是
+  candidate 或尚未出现
+- 一个认证域的报告不得用于晋升另一个认证域；后者必须使用自己的 fleet、CI 路径和现场证据
+- 产品仓只看目标 Operator 注入的签名快照，不能因为其他环境已 certified 就越域采用
 
 #### 物理载体（闭合默认）
 

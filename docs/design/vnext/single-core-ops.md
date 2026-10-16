@@ -37,6 +37,22 @@ Skill ──► 只编排上述命令，不实现第二套 schema/gates
 | producer 制品内容 | 发布事务、directory/index | Profile 签发与升级 |
 | 检查更新时机 | facade/projection 合同 | CI adapter / fleet 登记 |
 
+## Skill 与用户交互
+
+Skill 不能把内部架构问题转交给产品使用者逐项拍板。默认流程是：
+
+1. `inspect/status/doctor` 先读取现场事实
+2. core/ops 用安全、简单、可验证的默认值闭合信任根、Profile、Catalog 和发布事务
+3. 只询问会改变产品行为或风险归属的真实业务选择
+4. 对用户展示“将连哪个 Operator、用哪个 distribution、影响哪些产品、如何回滚”，
+   不要求用户先理解 `fleet`、root 层级或 schema 字段
+
+`fleet` 在用户界面应解释为“本认证域用于升级回归的场景/canary 登记”，不是服务器集群；
+`pin` 应解释为“目标 Operator 的固定部署事实”，不是项目自行选择旧版本。
+
+删除 onboarding 步骤账本后，门禁仍由结构化 core/ops 命令执行；减少问题数量不能变成
+绕过验证或让 Skill 自己记一份“已完成”。
+
 ## 生产控制面命令
 
 - `relkit-ops distribution create`：从官方 `relkit.release/1` manifest、完整 Release 资产和 immutable URL 生成 distribution；缺少 Registry 声明的任一资产即失败。distribution digest 只覆盖不可变身份，排除 `state` 与 `certificationSequence`。
