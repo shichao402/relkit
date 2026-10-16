@@ -17,6 +17,11 @@ description: >
 所有字段、错误码和后置条件以对应二进制当前 `--help` 与 JSON 输出为准。禁止在
 Skill 中复制一份校验逻辑，禁止手改签名文档绕过失败。
 
+先运行结构化命令取得现场事实，只向用户确认会改变产品行为或风险归属的真实选择。
+不要要求用户先理解或逐项拍板 root、fleet、Profile、Catalog 字段；将其翻译成
+“目标 Operator、最终 distribution、受影响产品、回滚点”后再展示。安全且可机械验证的
+内部默认由 core/ops 闭合。
+
 ## 宿主接入
 
 1. 审查宿主只提交：
@@ -122,6 +127,18 @@ relkitw verify released --version <version> --channel <channel>
 关键 artifact/manifest/index/directory/Runtime Profile 任一步失败都不得报告成功；
 网页投影失败可告警并重建。
 
+`release --execute` 报错时不能直接假设“没有发布”。若日志显示已上传或可能已提交，
+先用同一 version/channel、immutable resolution 和匹配
+`runtimeProfilePublication.rootFingerprint` 的 Product RUP Root 从消费者入口执行
+有界重试的 `verify released`：
+
+- 验证通过：保留原发布，不重发同一 immutable version。
+- 明确未提交：才允许重试 execute。
+- 部分提交：按 `partial-commit` / fix-forward 处理，不覆盖历史。
+
+Candidate verify 必须显式授权 Candidate Root；production verify 不得继续携带 Candidate
+Root。Candidate Root 与 Product RUP Root 职责不同，禁止用其中一个替代另一个。
+
 Candidate resolution 使用独立 Candidate Root 和 agent candidate lane，只能发非
 stable 渠道。生产与 candidate 凭据、Catalog 和写权限不得共用。
 
@@ -129,6 +146,11 @@ stable 渠道。生产与 candidate 凭据、Catalog 和写权限不得共用。
 
 先创建仓库外的不可复用工作目录（CI 使用 `${RUNNER_TEMP}`）；impact、report、Catalog/Profile
 快照不得写回源码 checkout，否则 clean-source 门禁必须失败。
+
+先明确**认证域**：待晋升 Catalog、目标 Operator/发布责任边界与一份 fleet 共同定义。
+fleet 是该域内的匿名场景、固定 canary、临时首用者及 `requiredCi` 登记，不是服务器集群，
+也不是所有 Relkit 使用者仓库。公网与内网若是不同 Operator/责任边界，使用不同 Catalog
+快照和 fleet；一个域的 report 不能晋升另一个域。
 
 1. 用 production Catalog、candidate Catalog/Profile 和两套公开根生成 impact：
 
@@ -148,12 +170,14 @@ relkit-ops certify \
   --out <outside-repo-work-dir>/certification.json --json
 ```
 
+- 每个完整 distribution 先通过可移植的 S1–S3；目标认证域再执行与其产品相关的场景和 canary。
 - 普通能力/合同变更：受影响 cohort 的固定 canary + 轮换样本。
 - 新能力：首个声明该能力的宿主临时 mandatory。
 - 签名、resolution、发布事务、协议、registry、IPC 等横切变更：`--full`，
-  所有已登记活跃宿主。
+  该认证域 fleet 的全部 mandatory 条目；不是未来所有客户仓库。
 - 只有 Catalog 重算确认无组件或合同变化时才可使用 `documentation`；它默认可零宿主。
-- 某宿主声明的内网/外网 CI 任一路缺失，结果必须为 `skipped-unverified`，不能认证。
+- 某域声明的内网/外网 CI 任一路缺失，结果必须为 `skipped-unverified`，不能认证。
+  不属于该域的环境可以延期，但必须明确“未在该环境晋升”，不得复用其他域报告。
 
 `impact` 固定 Candidate commit，以及包含测试源码摘要的 regression coverage digest；
 `certify` 必须从同一干净 commit 重审、执行当前平台适用的回归并要求 digest 未漂移，

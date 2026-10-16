@@ -72,7 +72,7 @@ relkit-ops upgrade <operator> --to <certified-version|latest>
 - 对共享状态的能力做组合测试（两两、已知冲突、非法组合）；不做无关笛卡尔积
 - 触及发布事务/签名/resolution/updater 状态机的三项以上组合，由端到端场景覆盖
 
-#### 6.3 三个匿名代表性场景（长期 mandatory）
+#### 6.3 三个匿名代表性场景（distribution 级长期 mandatory）
 
 见 [`../design/vnext/representative-scenarios.md`](../design/vnext/representative-scenarios.md)：
 
@@ -80,10 +80,21 @@ relkit-ops upgrade <operator> --to <certified-version|latest>
 2. 管理器与被管理产品  
 3. 可选择的产品套件  
 
-仓库名不得写入场景合同。
+完整 Relkit distribution 在进入任何生产认证域前必须通过可移植的 S1–S3；仓库名不得
+写入场景合同。单个 Operator 认证域只登记其实际提供产品涉及的场景和真实 canary：
+例如只承载 S3 产品的公网域不需要借用内网 S1/S2 仓库作为现场门禁，但不能跳过
+distribution 级 S1/S2 conformance。
 
 #### 6.4 impact / cohort / canary
 
+- `fleet` 不是服务器集群，也不是 Relkit 已知的所有客户仓库；它是**一个认证域内**
+  受版本控制的私有认证登记，列出 mandatory 场景/真实 canary、project digest 与
+  `requiredCi`
+- 认证域由待晋升的 Catalog、目标 Operator/发布责任边界和 fleet 共同确定；公网与内网
+  不共享“已认证”结论
+- 只组合现有能力的新宿主不会自动进入永久 fleet；真实首用者只在引入新能力时临时 mandatory
+- 与该域产品相关的匿名场景可作为稳定 fleet 条目；真实仓用于发现未声明依赖和现场差异，
+  不成为 core 合同身份
 - candidate 生成 impact manifest  
 - 按 project capability fingerprint 选 cohort  
 - 每 cohort：固定 canary + 轮换样本  
@@ -100,9 +111,15 @@ relkit-ops upgrade <operator> --to <certified-version|latest>
 | 文档/非运行时 | conformance 子集 | 无 |
 | 单能力实现 | 该能力 + 声明的组合 | patch：1 个宿主 CI 周期 |
 | 普通 contract bump | 受影响 cohort | minor：受影响 canary 全部绿 + 1 周期 |
-| 横切（签名、resolution、发布事务、协议、registry、IPC） | **全部已登记活跃宿主** | major：全部绿 + 延长窗口 |
+| 横切（签名、resolution、发布事务、协议、registry、IPC） | **该认证域 fleet 的全部 mandatory 条目** | major：全部绿 + 延长窗口 |
 
-- 内网蓝盾与外网 GHA：**凡声明为该 Operator/宿主认证路径的，都必须通过**才可 certified；缺一不可把缺口标为 `skipped-unverified`
+- “全量”不等于未来上百个使用者仓库全部进入中央门禁；它表示当前认证域中正式登记的
+  匿名场景、固定 canary 与本次临时 mandatory 首用者全部执行。更广宿主通过反向
+  candidate CI 和周期抽样提供信号
+- 内网蓝盾与外网 GHA：**凡被同一认证域声明为该 Operator/宿主的 required CI 路径，
+  都必须通过**才可 certified；缺一不可把缺口标为 `skipped-unverified`
+- 不在本次认证域中的环境可以延期，但结论必须写成“未在该环境晋升”，不能把公网通过
+  表述成内网也通过；后续不得复用公网 report 越域签发内网 Catalog
 - candidate override 凭据与生产隔离；每次注入留审计；超时/重试策略写在 ops，失败 fail closed
 - 夜间/周期全量用于发现 impact 漏判
 
@@ -181,13 +198,17 @@ vNext 首次切换：
 
 1. 冻结 v0.5 控制面新特性（正确性最小修复除外，ADR 0019）
 2. 实现 contracts、wrapper、resolver、conformance
-3. 四仓建立 vNext 分支，删除旧 config/lock/wrapper/host/onboarding
-4. 为真实 Operator 生成 Profile
-5. 同一 candidate distribution 验证四仓
-6. dev 发布证明旧 field 客户端仍可读 RUP
-7. 升级 Operator 并签发新 Profile
-8. Loom 与 Launcher 同一窗口；SvnMergeTool、Dec 可并行
-9. stable 单独窗口
+3. 代表性宿主建立 vNext 分支，删除旧 config/lock/wrapper/host/onboarding
+4. 为每个真实 Operator 生成独立 Profile、Catalog 与 fleet
+5. 同一 candidate distribution 通过合同、组合、S1–S3 与迁移样本验证
+6. 每个认证域分别以 dev 发布证明真实发布链和旧 field 客户端仍可读 RUP
+7. 在该认证域内完成 impact → fleet certification → Catalog 晋升
+8. 原子切换该 Operator 的 production Profile/policy；强耦合产品在同一窗口，独立域可分批
+9. 每个认证域单独进入 stable 窗口
+
+架构迁移样本通过不等于所有生产环境必须同夜切换。公网、内网或特殊构建环境若属于
+不同认证域，可以分别推进；延期域保持旧 production/candidate 状态，不阻塞已闭合域，
+也不能借用已闭合域的认证结果。
 
 回滚：
 

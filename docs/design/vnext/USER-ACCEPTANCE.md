@@ -33,6 +33,36 @@
 
 ---
 
+## 2026-10-17 公网生产窗口（进行中）
+
+本窗口只验收 `firoyang-public` Operator + Dec；Loom、Loom-Launcher、SvnMergeTool
+属于独立内网认证域，因现场特殊而延期。公网通过不代表内网通过，内网 Catalog 不自动晋升。
+
+已取得的真实证据：
+
+- Relkit v0.6.14：commit `391998d0025867df1b0f5a2e58d211b9e8bbaa3a`，distribution
+  `sha256:2fb5b73a7a6b04acfd286bc7cd61331920958a210bb2ffc070b36bcfb66b9051`；
+  公网 agent/store 已升级并保留服务器回滚快照。
+- Dec `dev/v1.13.134` 的 [GitHub Actions](https://github.com/shichao402/Dec/actions/runs/38954988609)
+  完成测试、五平台 ArtifactSet 与合并。最终 Job 在提交后的立即读回失败，但随后用同一
+  candidate resolution 从消费者入口执行 `verify released` 已通过；因此没有盲目重发。
+- 公网 Dec-only full certification 绑定同一 Candidate commit、impact、fleet digest 与
+  `local-go` / `local-client` 两条 required CI，结果 `passed=true`。
+- production Catalog 已将 v0.6.14 晋升为 certified（sequence 5）；Dec production
+  resolution 为 `sha256:7976c53799ae3cbf567d9c3116eecb13bc94f15deb078a49ecc1361d47bcec56`。
+- 完整 production bundle 已通过 `relkit-ops bundle verify`，并发布为不可变资产；
+  SHA-256 为 `1af72822a15151c2248107917f585a920039c7b03c7fdb98992cef54d63637d8`。
+
+仍未完成，因此本节不能标为生产通过：
+
+1. 公网 Agent 从 candidate policy 原子切换到 production policy
+2. Dec stable CI 与消费者可见发布
+3. 真实更新/回滚与凭据不泄漏复核
+
+生产顺序与“提交状态待确认”处理见 [cutover.md](cutover.md)。
+
+---
+
 ## A. 接入体验（宿主视角）
 
 | # | 类型 | 产品侧承诺 | 你应看到的证据（实现后） | 状态 |
@@ -118,8 +148,8 @@
 | --- | --- | --- | --- | --- |
 | G1 | **阻断** | candidate 独立身份与权限；**不能**发到 stable / 改 production certified | 权限拒绝演示 | 通过 |
 | G2 | | 独立能力 + 组合 + S1–S3 有明确覆盖 | CI 矩阵可见 | 通过 |
-| G3 | | 普通改动只跑受影响 canary；横切才全量已登记宿主 | impact manifest + 选仓记录 | 通过 |
-| G4 | | 新能力首宿主临时 canary，稳定后不永久绑仓 | 登记策略文档 | 通过 |
+| G3 | | 普通改动只跑受影响 canary；横切才全量执行该认证域 fleet 的 mandatory 条目，不把所有用户仓永久纳入中央门禁 | impact manifest + 选仓记录 | 通过 |
+| G4 | | 新能力首宿主临时 canary，稳定后不永久绑仓 | [ADR 0022 §6.4 认证域登记](../../adr/0022-vnext-certification-ops-skill.md#64-认证域登记不是全世界宿主清单) | 通过 |
 | G5 | | 失败能归因：core 破坏 / 声明错误 / 宿主未声明依赖 / 环境 | 诊断 `code` 分类 | 通过 |
 
 ---
