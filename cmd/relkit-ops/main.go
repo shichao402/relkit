@@ -504,11 +504,18 @@ func cmdCertify(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	if *jsonOutput {
-		return printJSON(report)
+	return emitCertificationReport(report, *jsonOutput)
+}
+
+func emitCertificationReport(report *ops.CertificationReport, jsonOutput bool) error {
+	if jsonOutput {
+		if err := printJSON(report); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("candidate %s: passed=%t, hosts=%d, checks=%d\n",
+			report.CandidateDigest, report.Passed, len(report.SelectedHosts), len(report.Results))
 	}
-	fmt.Printf("candidate %s: passed=%t, hosts=%d, checks=%d\n",
-		report.CandidateDigest, report.Passed, len(report.SelectedHosts), len(report.Results))
 	if !report.Passed {
 		return fmt.Errorf("candidate certification did not pass")
 	}
