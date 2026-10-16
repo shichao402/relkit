@@ -64,4 +64,8 @@ func TestProfileRejectsDuplicateSources(t *testing.T) {
 	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("unexpected duplicate-source result: %v", err)
 	}
+	value.Sources.Mirrors = []string{"https://writer:secret@mirror.invalid/relkit"}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "without credentials") {
+		t.Fatalf("unexpected credentialed-source result: %v", err)
+	}
 }

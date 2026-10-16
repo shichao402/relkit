@@ -46,6 +46,9 @@ func TestBuildDistributionCreatesCompleteDeterministicIdentity(t *testing.T) {
 	if !foundUniversal || !foundAgent {
 		t.Fatalf("complete distribution is missing universal updater or agent: %+v", value.Components)
 	}
+	if _, exists := value.ReleaseAssets["SHA256SUMS"]; exists {
+		t.Fatal("distribution identity must not include its enclosing checksum manifest")
+	}
 	if _, err := os.Stat(options.Output); err != nil {
 		t.Fatal(err)
 	}

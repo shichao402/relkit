@@ -5,6 +5,7 @@ package operator
 import (
 	"crypto/ed25519"
 	"fmt"
+	"net/url"
 
 	"github.com/shichao402/relkit/internal/vnext/canonical"
 	"github.com/shichao402/relkit/internal/vnext/contracts"
@@ -107,7 +108,7 @@ func (d Document) Validate() error {
 			return fmt.Errorf("secretRefs must contain non-empty names and references")
 		}
 	}
-	if err := validateSources("sources.mirrors", d.Sources.Mirrors); err != nil {
+	if err := validateMirrorSources(d.Sources.Mirrors); err != nil {
 		return err
 	}
 	if err := validateSources("sources.bundles", d.Sources.Bundles); err != nil {
@@ -115,6 +116,20 @@ func (d Document) Validate() error {
 	}
 	if err := trust.ValidateSignatures(d.Signatures); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateMirrorSources(values []string) error {
+	if err := validateSources("sources.mirrors", values); err != nil {
+		return err
+	}
+	for _, value := range values {
+		parsed, err := url.Parse(value)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("sources.mirrors entry must be an HTTP(S) URL without credentials, query, or fragment")
+		}
 	}
 	return nil
 }

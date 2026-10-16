@@ -66,7 +66,7 @@ CLI、updater、SDK 和 projection 物化到 `.relkit/components/`。宿主不 c
 独立 Operator Job 执行同一 resolution 下的：
 
 ```text
-stage → simulate → fake verify → publish → verify released
+stage → release plan → release execute → verify released
 ```
 
 artifact、manifest、index、directory、Runtime Profile 或多 backend 一致性任一关键

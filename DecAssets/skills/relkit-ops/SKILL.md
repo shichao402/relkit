@@ -48,7 +48,7 @@ relkit-ops bootstrap provision --inventory <operator-inventory> --json
 relkit-ops bundle create \
   --project relkit.project.json \
   --resolution-bundle <resolution-bundle.json> \
-  --asset <sha256:path> --out <bundle-dir>
+  --asset <sha256:...=path> --out <bundle-dir>
 relkit-ops bundle verify --project relkit.project.json --bundle <bundle-dir> --json
 relkit-ops bundle install \
   --project relkit.project.json --project-root . \

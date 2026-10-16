@@ -166,6 +166,10 @@ func TestInventoryRejectsDuplicateMirrors(t *testing.T) {
 	if err := fixture.inventory.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("unexpected duplicate-mirror result: %v", err)
 	}
+	fixture.inventory.Mirrors = []string{"https://writer:secret@mirror.invalid/relkit"}
+	if err := fixture.inventory.Validate(); err == nil || !strings.Contains(err.Error(), "without credentials") {
+		t.Fatalf("unexpected credentialed-mirror result: %v", err)
+	}
 }
 
 func TestRotateRequiresEveryPostconditionBeforeProfileActivation(t *testing.T) {

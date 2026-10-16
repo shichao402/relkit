@@ -160,7 +160,7 @@ func BuildDistribution(options BuildDistributionOptions) (*catalog.Distribution,
 		}
 	}
 
-	for _, metadata := range []string{"manifest.json", "SHA256SUMS"} {
+	for _, metadata := range []string{"manifest.json"} {
 		path := filepath.Join(assetsRoot, metadata)
 		if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
 			digest, digestErr := fileDigest(path)

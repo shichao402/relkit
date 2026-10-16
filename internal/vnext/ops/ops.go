@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,6 +147,13 @@ func (i Inventory) Validate() error {
 	}
 	if err := validateUniqueEntries("mirrors", i.Mirrors); err != nil {
 		return err
+	}
+	for _, mirror := range i.Mirrors {
+		parsed, err := url.Parse(mirror)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("mirrors entry must be an HTTP(S) URL without credentials, query, or fragment")
+		}
 	}
 	for product, profile := range i.RuntimeProfiles {
 		if product == "" || profile.Profile == "" || len(profile.Roots) == 0 {
