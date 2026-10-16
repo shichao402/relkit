@@ -65,6 +65,13 @@ Operator Profile 是服务器现场权威，由 relkit-ops 从实际部署生成
 - `operatorRef` 解析为逻辑名 → relkit-ops / CI 注入的已签名 Profile 路径或 URL（带 trustFingerprint 校验）
 - **一份 Profile = 一个 deployment**。dev/stable、内网/公网、多机若部署事实不同，则多份 Profile、多个 `deploymentId`
 - project 只引用逻辑 Operator；具体 deployment 由 CI/环境选择注入，不把机器地址写入产品仓
+- 签名 endpoint 是服务身份与默认路由的权威事实；受限网络中的 CI adapter
+  可以建立本机隧道，但不得重写 Profile 或 resolution。写路径仅在
+  `RELKIT_RELEASE_VIA_CI=1` 的 execute 模式接受独立的
+  `RELKIT_AGENT_TRANSPORT_URL`，且目标必须是 loopback IP；它不复用旧控制面的
+  `RELKIT_AGENT_URL`，因此不会把签名 endpoint 与兼容配置混为一谈，产品 Token 也不会被
+  环境变量导向任意远端。发布后只读验证可显式传入 `--consumer` 与 `--directory` 的
+  隧道路由，验证结果仍绑定原 resolution digest、deployment identity 与产品签名根
 
 Schema 草案：[`../design/vnext/schemas/relkit.operator-profile.1.schema.json`](../design/vnext/schemas/relkit.operator-profile.1.schema.json)
 
