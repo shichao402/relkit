@@ -18,5 +18,10 @@
   "tracking": {
     "kind": "issue",
     "number": 48
+  },
+  "fix": {
+    "pr": 49,
+    "commit": "19bef1050320327817b1409f77af1b2553d73fee",
+    "release": "v0.6.13"
   }
 }
