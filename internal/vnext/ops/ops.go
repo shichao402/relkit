@@ -141,6 +141,12 @@ func (i Inventory) Validate() error {
 	if len(i.TrustKeyPaths) == 0 {
 		return fmt.Errorf("trustKeyPaths must not be empty")
 	}
+	if err := validateUniqueEntries("services", i.Services); err != nil {
+		return err
+	}
+	if err := validateUniqueEntries("mirrors", i.Mirrors); err != nil {
+		return err
+	}
 	for product, profile := range i.RuntimeProfiles {
 		if product == "" || profile.Profile == "" || len(profile.Roots) == 0 {
 			return fmt.Errorf("runtimeProfiles entries require product, profile, and roots")
@@ -171,6 +177,17 @@ func (i Inventory) Validate() error {
 		if err := validateRotateAdapters(name, workflow); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateUniqueEntries(field string, values []string) error {
+	seen := map[string]bool{}
+	for _, value := range values {
+		if value == "" || seen[value] {
+			return fmt.Errorf("%s contains an empty or duplicate entry", field)
+		}
+		seen[value] = true
 	}
 	return nil
 }

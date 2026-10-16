@@ -160,6 +160,14 @@ func TestUpgradeRejectsTamperedMirrorPlan(t *testing.T) {
 	}
 }
 
+func TestInventoryRejectsDuplicateMirrors(t *testing.T) {
+	fixture := newOpsFixture(t)
+	fixture.inventory.Mirrors = append(fixture.inventory.Mirrors, fixture.inventory.Mirrors[0])
+	if err := fixture.inventory.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("unexpected duplicate-mirror result: %v", err)
+	}
+}
+
 func TestRotateRequiresEveryPostconditionBeforeProfileActivation(t *testing.T) {
 	phases := []string{"mint", "update-secret-store", "check-service-read", "reload", "health-and-write", "revoke-old"}
 	for _, failedPhase := range phases {

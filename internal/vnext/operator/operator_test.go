@@ -57,3 +57,11 @@ func TestProfileDigestIncludesSignature(t *testing.T) {
 		t.Fatalf("unexpected digest %q", digest)
 	}
 }
+
+func TestProfileRejectsDuplicateSources(t *testing.T) {
+	value, _ := signedProfile(t, SelectionLatestCompatible)
+	value.Sources.Mirrors = []string{"https://mirror.invalid/relkit", "https://mirror.invalid/relkit"}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("unexpected duplicate-source result: %v", err)
+	}
+}

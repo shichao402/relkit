@@ -107,8 +107,25 @@ func (d Document) Validate() error {
 			return fmt.Errorf("secretRefs must contain non-empty names and references")
 		}
 	}
+	if err := validateSources("sources.mirrors", d.Sources.Mirrors); err != nil {
+		return err
+	}
+	if err := validateSources("sources.bundles", d.Sources.Bundles); err != nil {
+		return err
+	}
 	if err := trust.ValidateSignatures(d.Signatures); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateSources(field string, values []string) error {
+	seen := map[string]bool{}
+	for _, value := range values {
+		if value == "" || seen[value] {
+			return fmt.Errorf("%s contains an empty or duplicate entry", field)
+		}
+		seen[value] = true
 	}
 	return nil
 }
