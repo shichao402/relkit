@@ -836,9 +836,6 @@ func makeVNextAgentFixture(t *testing.T, options vNextFixtureOptions) *agentFixt
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile.Signing.PublicKeys = []config.PublicKeyConfig{{
-		KeyID: "k1", PublicKeyBase64: base64.StdEncoding.EncodeToString(releasePublic),
-	}}
 	profile.Directory = &config.PublishDirectoryProfile{
 		PublishTo: []string{"serve"},
 		EntryURLs: []string{strings.TrimRight(fx.ingest.URL, "/") + "/directory/demo.pb"},
@@ -941,13 +938,26 @@ func (f *agentFixture) publish(t *testing.T, body string) (int, []byte) {
 }
 
 func TestMergeVNextPublishConfigDerivesStandardDirectoryURLs(t *testing.T) {
+	root := t.TempDir()
+	seed, err := keys.GenerateSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateDocument := keys.PrivateKeyDocument("k1", seed)
+	privateBytes, err := rupv2.MarshalPrivateKey(&privateDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "private.pb"), privateBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	productDocument := project.Document{
 		Schema: project.Schema, Product: "demo", Channels: []string{"dev", "stable"},
 	}
 	profile := &config.PublishProfile{
 		Product: "demo",
 		Signing: config.PublishSigningProfile{
-			PublicKeys: []config.PublicKeyConfig{{KeyID: "k1", PublicKeyBase64: base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))}},
+			KeyID: "k1", PrivateKeyPath: "private.pb",
 		},
 		Backends: map[string]map[string]any{
 			"primary": {"type": "relkit-compatible", "baseUrl": "https://updates.example.invalid/root"},
@@ -957,9 +967,17 @@ func TestMergeVNextPublishConfigDerivesStandardDirectoryURLs(t *testing.T) {
 			PublishTo: []string{"primary"},
 		},
 	}
-	cfg, err := mergeVNextPublishConfig(&productDocument, profile, t.TempDir())
+	cfg, err := mergeVNextPublishConfig(&productDocument, profile, root)
 	if err != nil {
 		t.Fatal(err)
+	}
+	trusted, err := cfg.TrustedPublicKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPublic := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	if !slices.Equal(trusted["k1"], wantPublic) {
+		t.Fatal("derived public key does not match the configured private signer")
 	}
 	if got, want := cfg.Directory.EntryURLs, []string{"https://updates.example.invalid/root/directory/demo.pb"}; !slices.Equal(got, want) {
 		t.Fatalf("entry URLs=%v, want %v", got, want)

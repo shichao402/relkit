@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -940,10 +941,9 @@ func mergeVNextPublishConfig(
 		}
 		publicKeys = append(publicKeys, entry)
 	}
-	if len(publicKeys) == 0 {
-		return nil, fmt.Errorf("vNext publish profile signing.publicKeys must not be empty")
+	if len(publicKeys) > 0 {
+		signing["publicKeys"] = publicKeys
 	}
-	signing["publicKeys"] = publicKeys
 	cfg := &config.Config{
 		Root:           productRoot,
 		Product:        productDocument.Product,
@@ -954,6 +954,34 @@ func mergeVNextPublishConfig(
 		Backends:       cloneBackendConfig(profile.Backends),
 		PublishTo:      append([]string(nil), profile.PublishTo...),
 	}
+	signers, err := cfg.LoadSigners()
+	if err != nil {
+		return nil, fmt.Errorf("vNext publish signer: %w", err)
+	}
+	trusted := map[string][]byte{}
+	if len(publicKeys) > 0 {
+		configured, err := cfg.TrustedPublicKeys()
+		if err != nil {
+			return nil, err
+		}
+		for keyID, publicKey := range configured {
+			trusted[keyID] = publicKey
+		}
+	}
+	for _, signer := range signers {
+		publicKey := signer.PublicKey()
+		if configured, ok := trusted[signer.KeyID]; ok {
+			if !slices.Equal(configured, publicKey) {
+				return nil, fmt.Errorf("vNext publish public key %q does not match its private signer", signer.KeyID)
+			}
+			continue
+		}
+		publicKeys = append(publicKeys, map[string]any{
+			"keyId":           signer.KeyID,
+			"publicKeyBase64": base64.StdEncoding.EncodeToString(publicKey),
+		})
+	}
+	signing["publicKeys"] = publicKeys
 	if profile.Directory != nil {
 		cfg.Directory = &config.DirectoryConfig{
 			PublishTo: append([]string(nil), profile.Directory.PublishTo...),
