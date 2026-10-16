@@ -117,7 +117,11 @@ relkit-ops artifact-set pull \
 relkitw stage --artifact-set <new-dir/artifact-set.json>
 relkitw release --version <version>
 relkitw release --version <version> --execute
-relkitw verify released --version <version> --channel <channel>
+relkitw verify released \
+  --resolution <immutable-resolution.json> \
+  --version <version> --channel <channel> \
+  --product-root <product-rup-root.pb> \
+  [--consumer <loopback-url>] [--directory <loopback-url>]
 ```
 
 同一次发布只生成一次 immutable resolution，跨 Job 传递原文件。不得中途再次解析
@@ -197,6 +201,24 @@ relkit-ops catalog transition \
 ```
 
 Candidate authority 本身不能签 certified Catalog。
+
+## Agent policy 切换
+
+二进制升级与 lane 切换是两件事。每个 deployment 都必须先只读计划，再用本次唯一的
+回滚路径原子执行：
+
+```text
+relkit-ops agent policy \
+  --config <relkit-agent.json> --policy <candidate-or-production-policy.json> --json
+relkit-ops agent policy \
+  --config <relkit-agent.json> --policy <candidate-or-production-policy.json> \
+  --backup <unique-utc-backup.json> --execute --json
+```
+
+随后由 deploy adapter 执行 `restart/reload → GET /-/health`；任一步失败都恢复该备份、
+再次重启并复验。公网与内网使用不同 policy、`deploymentId` 和证据，不能越域复用。
+切 production 时，production bundle 和 policy 都不得继续携带 Candidate Root；CI 移除
+`RELKIT_CANDIDATE_ROOT_FINGERPRINT` 后才可触发 stable。
 
 ## Operator 升级
 
