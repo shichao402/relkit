@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+6
+
+- 第六版：from 0.1.0+5 → to 0.1.0+6 真实升级 e2e（baseline +5 制品已确认在 CDN 服务器；本轮验证 blob 安装链完整升级路径）。
+
 ## 0.1.0+5
 
 - 第五版：control-plane 换根（relkit-distribution-2027）+ relkit v0.6.17 控制面后重跑 dev 渠道发布与 e2e（from 0.1.0+4 → 0.1.0+5，library 安装切换按 active 指针）。
