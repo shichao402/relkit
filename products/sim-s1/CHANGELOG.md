@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+5
+
+- 第五版：+4 发布后 dev 渠道全量 verify 通过（0.1.0+3 脏节点已 unpublish），重验 from 0.1.0+4 → 0.1.0+5 真实升级路径。
+
 ## 0.1.0+4
 
 - 第四版：启用真实 from→to 升级 e2e（baseline 从 CDN 拉取 0.1.0+3，check → download → apply → 重启断言）。
