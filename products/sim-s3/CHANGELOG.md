@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+5
+
+- 第五版：control-plane 换根（relkit-distribution-2027）+ relkit v0.6.17 控制面后重跑 dev 渠道发布与 e2e（from 0.1.0+4 → 0.1.0+5，组件套件 payload 链）。
+
 ## 0.1.0+4
 
 - 第四版：from→to 升级 e2e（baseline 0.1.0+3，组件套件 payload 升级链 +4）。
