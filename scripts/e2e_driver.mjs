@@ -37,19 +37,32 @@ function readActive() {
   }
 }
 
-function waitActiveVersion(expected, timeoutMs = 30000) {
+// 两段式 apply 的安装完成判定:
+//  - library placement: 轮询 active.json 指针到 expect 且 executable 就位。
+//  - in-place placement: 无指针，worker 完成后顶层 exe 被替换，轮询其 --version。
+function waitInstalled(expected, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
-  let last = null;
+  let lastActive = null;
+  let lastLine = "";
   while (Date.now() < deadline) {
-    const a = readActive();
-    last = a;
-    if (a && a.version === expected) {
-      const exeAbs = path.join(installRoot, a.executable ?? "");
-      if (a.executable && existsSync(exeAbs)) return a;
+    if (spec.placement === "in-place") {
+      const out = runExe(["--version"]);
+      lastLine = (out.stdout ?? "").trim() || (out.stderr ?? "").trim();
+      if (out.status === 0 && lastLine.includes(expected)) return { exeAt: spec.exe(installRoot), line: lastLine };
+    } else {
+      const a = readActive();
+      lastActive = a;
+      if (a && a.version === expected) {
+        const exeAbs = path.join(installRoot, a.executable ?? "");
+        if (a.executable && existsSync(exeAbs)) return { exeAt: exeAbs, line: null };
+      }
     }
     sleepSync(500);
   }
-  fail(`等待 active.json 指向 ${expected} 超时: ${JSON.stringify(last)}`);
+  if (spec.placement === "in-place") {
+    fail(`等待顶层 exe 升级到 ${expected} 超时: "${lastLine}"`);
+  }
+  fail(`等待 active.json 指向 ${expected} 超时: ${JSON.stringify(lastActive)}`);
 }
 
 function runVersionAt(exePath) {
@@ -85,19 +98,23 @@ const PRODUCT_DIRS = {
   "sim-s1": {
     exe: (root) => path.join(root, "sim-s1.exe"),
     defaultExeName: "sim-s1.exe",
+    placement: "library",
   },
   "sim-s2-manager": {
     exe: (root) => path.join(root, "sim-s2-manager.exe"),
     defaultExeName: "sim-s2-manager.exe",
+    placement: "in-place",
   },
   "sim-s2-managed": {
     exe: (root) => path.join(root, "sim-s2-managed.js"),
     node: true,
     defaultExeName: "sim-s2-managed.js",
+    placement: "library",
   },
   "sim-s3": {
     exe: (root) => path.join(root, `${component}.exe`),
     defaultExeName: "sim-server.exe",
+    placement: "library",
   },
 };
 
@@ -184,20 +201,23 @@ for (let round = 1; round <= rounds; round++) {
       fail(`round ${round} apply 退出 ${apply.status}: ${apply.stderr}`);
     }
     process.stdout.write((apply.stdout ?? "").trim() + "\n");
-    // 两段式 apply: accepted ≠ 安装完成，轮询 active.json 到 expect 版本。
-    const active = waitActiveVersion(expectVersion);
-    const exeAt = path.join(installRoot, active.executable ?? path.join(`versions/${expectVersion}`, spec.defaultExeName ?? "sim-s1.exe"));
-    const vout = runVersionAt(exeAt);
+    // 两段式 apply: accepted ≠ 安装完成，按 placement 轮询安装结果。
+    const installed = waitInstalled(expectVersion);
+    const vout = installed.line !== null
+      ? { status: 0, stdout: installed.line, stderr: "" }
+      : runVersionAt(installed.exeAt);
     if (vout.status !== 0) {
-      fail(`round ${round} after-apply: ${exeAt} --version 退出 ${vout.status}: ${vout.stderr}`);
+      fail(`round ${round} after-apply: ${installed.exeAt} --version 退出 ${vout.status}: ${vout.stderr}`);
     }
     const vline = (vout.stdout ?? "").trim();
     if (!vline.includes(expectVersion)) {
       fail(`round ${round} after-apply: 期望版本含 "${expectVersion}"，实际 "${vline}"`);
     }
-    process.stdout.write(`[ok] round ${round} after-apply (active=${active.version}): ${vline}\n`);
-    // 模拟重启: 后续轮次从 active 指针的新 exe 运行（真实客户端升级后重启即切到新版本）。
-    activeExeOverride = exeAt;
+    process.stdout.write(`[ok] round ${round} after-apply (${spec.placement}): ${vline}\n`);
+    // 模拟重启: library placement 下后续轮次从 active 指针的新 exe 运行。
+    if (spec.placement === "library") {
+      activeExeOverride = installed.exeAt;
+    }
     if (product === "sim-s2-manager") {
       assertManagedVersion(expectVersion, `round ${round} after-apply`);
     }
