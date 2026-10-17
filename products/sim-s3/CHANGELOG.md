@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+9
+
+- 第九版：e2e driver 修正——sim-s3 placement 应为 in-place（与 main.go 硬编码 InstallSpec 一致，apply 后顶层 exe 直接升级），此前按 library 轮询 active.json 永远超时。
+
 ## 0.1.0+8
 
 - 第八版：修复后真实升级验证——e2e from 0.1.0+7（新 codeOf，code=7）→ to 0.1.0+8，验证 build 号 code 空间下的完整 check→download→apply 升级链。

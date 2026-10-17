@@ -114,7 +114,9 @@ const PRODUCT_DIRS = {
   "sim-s3": {
     exe: (root) => path.join(root, `${component}.exe`),
     defaultExeName: "sim-server.exe",
-    placement: "library",
+    // s3 的 InstallSpec 硬编码 PLACEMENT_IN_PLACE（app/cmd/sim-suite/main.go
+    // suiteRuntime），apply 完成后顶层 exe 被替换，无 active.json 指针。
+    placement: "in-place",
   },
 };
 
