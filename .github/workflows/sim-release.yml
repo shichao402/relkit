@@ -59,6 +59,8 @@ jobs:
       baseline_version: ${{ steps.meta.outputs.baseline_version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Resolve product version channel
         id: meta
         shell: bash
