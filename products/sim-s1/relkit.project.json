@@ -1,7 +1,10 @@
 {
   "schema": "relkit.project/1",
   "product": "sim-s1",
-  "channels": ["dev", "stable"],
+  "channels": [
+    "dev",
+    "stable"
+  ],
   "versionPolicy": {
     "schema": "relkit.version-policy/1",
     "targets": {
@@ -20,12 +23,22 @@
       }
     }
   },
-  "selectorDimensions": ["os", "arch"],
+  "selectorDimensions": [
+    "os",
+    "arch"
+  ],
   "operatorRef": "firoyang-public",
-  "trustFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
-  "roles": ["publisher", "updater-host", "subscriber"],
+  "trustFingerprint": "sha256:8bcb6c24c9ce672f315f96eff446d9cee7edd2c6f3bfa113a3d4927f00199598",
+  "roles": [
+    "publisher",
+    "updater-host",
+    "subscriber"
+  ],
   "artifactProducer": {
-    "command": ["node", "../../scripts/producer.mjs"],
+    "command": [
+      "node",
+      "../../scripts/producer.mjs"
+    ],
     "extensionSchema": "relkit.extension/1",
     "timeoutSeconds": 5400,
     "envAllowlist": [
@@ -44,13 +57,17 @@
       "PUB_HOSTED_URL",
       "FLUTTER_STORAGE_BASE_URL"
     ],
-    "permissions": ["read-workspace", "write-out-dir", "exec-self"]
+    "permissions": [
+      "read-workspace",
+      "write-out-dir",
+      "exec-self"
+    ]
   },
   "runtimeProfilePublication": {
-    "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+    "rootFingerprint": "sha256:83f8a6f2bb0c1a3c961124bc86828980ffe426c2f9bc2f5680749c637325c503",
     "rupSchemaSet": "rup.v2",
     "recovery": {
-      "message": "sim-s1 自动更新不可用。本产品为 relkit S1 模拟消费者，仅用于更新合同验证。",
+      "message": "SIM auto-update unavailable. This product is a relkit simulated consumer used for update contract validation only.",
       "links": [
         {
           "label": "relkit",
@@ -62,15 +79,22 @@
   "runtimeProfileSubscriptions": [
     {
       "productRef": "sim-s1",
-      "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER"
+      "rootFingerprint": "sha256:83f8a6f2bb0c1a3c961124bc86828980ffe426c2f9bc2f5680749c637325c503"
     }
   ],
   "capabilityFingerprint": {
-    "osArch": ["windows-amd64", "darwin-universal"],
-    "facades": ["dart"],
+    "osArch": [
+      "windows-amd64",
+      "darwin-universal"
+    ],
+    "facades": [
+      "dart"
+    ],
     "projections": [],
     "topology": "cross-platform-updater-host",
-    "subscriptions": ["sim-s1"],
+    "subscriptions": [
+      "sim-s1"
+    ],
     "requiredContracts": [
       {
         "domain": "publishProtocol",

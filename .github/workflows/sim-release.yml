@@ -1,0 +1,454 @@
+# sim-hosts 发布链：produce → merge → stage → release --execute → verify → e2e
+# 复刻 Dec release.yml 的 Operator 分工：产品流水线只生产/合并 ArtifactSet；
+# 发布 transaction 由 Operator（RELKIT_UPLOAD_TOKEN + RELKIT_RELEASE_VIA_CI）执行。
+# 四产品共用 workflow，product 矩阵展开；sim-s1 双平台、其余 windows。
+
+name: Sim release
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "product to release"
+        type: choice
+        options:
+          - sim-s1
+          - sim-s2-manager
+          - sim-s2-managed
+          - sim-s3
+        default: sim-s1
+      channel:
+        description: "RUP channel"
+        type: choice
+        options:
+          - dev
+          - stable
+        default: dev
+      version:
+        description: "version to release (e.g. 0.1.0+2)"
+        required: true
+  push:
+    branches:
+      - sim-hosts
+    paths:
+      - "products/**"
+      - "scripts/**"
+
+concurrency:
+  group: sim-${{ github.event.inputs.product || 'all' }}-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RELKIT_CANDIDATE_ROOT_FINGERPRINT: ${{ vars.RELKIT_CANDIDATE_ROOT_FINGERPRINT }}
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      product: ${{ steps.meta.outputs.product }}
+      version: ${{ steps.meta.outputs.version }}
+      channel: ${{ steps.meta.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve product version channel
+        id: meta
+        shell: bash
+        env:
+          INPUT_PRODUCT: ${{ github.event.inputs.product }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+        run: |
+          set -euo pipefail
+          PRODUCT="${INPUT_PRODUCT:-sim-s1}"
+          CHANNEL="${INPUT_CHANNEL:-dev}"
+          VERSION="${INPUT_VERSION:-}"
+          if [ -z "$VERSION" ]; then
+            # push 触发时无 version 输入：从产品 CHANGELOG 最新小节推导。
+            CHANGELOG="products/$PRODUCT/CHANGELOG.md"
+            if [ ! -f "$CHANGELOG" ]; then
+              echo "no workflow_dispatch version and no $CHANGELOG for push trigger" >&2
+              exit 1
+            fi
+            VERSION=$(grep -E '^## ' "$CHANGELOG" | head -1 | sed -E 's/^## +//; s/ +$//')
+            echo "derived version from CHANGELOG: $VERSION"
+          fi
+          case "$VERSION" in
+            *+*) ;;
+            *) echo "version 必须带 +build (e.g. 0.1.0+2)，got $VERSION"; exit 1 ;;
+          esac
+          echo "product=$PRODUCT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "product=$PRODUCT version=$VERSION channel=$CHANNEL"
+
+  build:
+    name: ArtifactSet (${{ matrix.target }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-amd64
+            runner: windows-latest
+            host_target: windows-amd64
+          - target: darwin-universal
+            runner: macos-15
+            host_target: darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      # 仅当产品需要当前平台时才构建（sim-s1 双平台，其余仅 windows）
+      - name: Check target applicability
+        id: applicable
+        shell: bash
+        env:
+          PRODUCT: ${{ needs.prepare.outputs.product }}
+          MATRIX_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case "$PRODUCT" in
+            sim-s1) ;;
+            *)
+              if [ "$MATRIX_TARGET" != "windows-amd64" ]; then
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+          esac
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        if: steps.applicable.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Dart
+        if: steps.applicable.outputs.skip != 'true' && needs.prepare.outputs.product == 'sim-s1'
+        uses: dart-lang/setup-dart@v1
+
+      - name: Setup Rust
+        if: steps.applicable.outputs.skip != 'true' && needs.prepare.outputs.product == 'sim-s2-manager'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Go
+        if: steps.applicable.outputs.skip != 'true' && needs.prepare.outputs.product == 'sim-s3'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+
+      - name: Setup MSVC build tools
+        if: steps.applicable.outputs.skip != 'true' && runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+
+      - name: Install signed Operator bundle (Unix)
+        if: steps.applicable.outputs.skip != 'true' && runner.os != 'Windows'
+        env:
+          OPS_URL: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_URL || vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_SHA256 || vars.RELKIT_OPS_LINUX_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          if [ "$RUNNER_OS" = macOS ]; then HASH="$(shasum -a 256 "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')"; else HASH="$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')"; fi
+          test "$HASH" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
+          if [ "$RUNNER_OS" = macOS ]; then HASH="$(shasum -a 256 "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; else HASH="$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; fi
+          test "$HASH" = "$BUNDLE_SHA256"
+          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
+          install_args=(
+            bundle install
+            --bundle "$RUNNER_TEMP/relkit-bundle"
+            --project "products/${{ needs.prepare.outputs.product }}/relkit.project.json"
+            --project-root "$GITHUB_WORKSPACE"
+            --home "$RUNNER_TEMP/relkit-home"
+            --target "${{ matrix.host_target }}"
+          )
+          if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
+            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
+          fi
+          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
+          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
+
+      - name: Install signed Operator bundle (Windows)
+        if: steps.applicable.outputs.skip != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_WINDOWS_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_WINDOWS_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+        run: |
+          if (-not $env:OPS_URL -or -not $env:OPS_SHA256 -or
+              -not $env:BUNDLE_URL -or -not $env:BUNDLE_SHA256) {
+            throw "Relkit Operator bundle variables are not configured"
+          }
+          $ops = Join-Path $env:RUNNER_TEMP "relkit-ops.exe"
+          $archive = Join-Path $env:RUNNER_TEMP "relkit-bundle.zip"
+          $bundle = Join-Path $env:RUNNER_TEMP "relkit-bundle"
+          Invoke-WebRequest -UseBasicParsing $env:OPS_URL -OutFile $ops
+          if ((Get-FileHash $ops -Algorithm SHA256).Hash.ToLower() -ne $env:OPS_SHA256.ToLower()) {
+            throw "relkit-ops digest mismatch"
+          }
+          Invoke-WebRequest -UseBasicParsing $env:BUNDLE_URL -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLower() -ne $env:BUNDLE_SHA256.ToLower()) {
+            throw "Operator bundle digest mismatch"
+          }
+          Expand-Archive -Path $archive -DestinationPath $bundle -Force
+          $relkitHome = Join-Path $env:RUNNER_TEMP "relkit-home"
+          $installArgs = @(
+            "bundle", "install",
+            "--bundle", $bundle,
+            "--project", "products/${{ needs.prepare.outputs.product }}/relkit.project.json",
+            "--project-root", $env:GITHUB_WORKSPACE,
+            "--home", $relkitHome,
+            "--target", "${{ matrix.host_target }}"
+          )
+          if ($env:RELKIT_CANDIDATE_ROOT_FINGERPRINT) {
+            $installArgs += @("--candidate-root-fingerprint", $env:RELKIT_CANDIDATE_ROOT_FINGERPRINT)
+          }
+          & $ops @installArgs
+          if ($LASTEXITCODE -ne 0) { throw "Operator bundle install failed" }
+          "RELKIT_HOME=$relkitHome" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Produce ArtifactSet (Unix)
+        if: steps.applicable.outputs.skip != 'true' && runner.os != 'Windows'
+        working-directory: products/${{ needs.prepare.outputs.product }}
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          ./relkitw artifacts produce \
+            --version "$VERSION" \
+            --channel "$CHANNEL" \
+            --target "${{ matrix.target }}" \
+            --out-dir "dist/relkit-artifact-set/${{ matrix.target }}" \
+            --out "dist/relkit-artifact-set/${{ matrix.target }}/artifact-set.json"
+
+      - name: Produce ArtifactSet (Windows)
+        if: steps.applicable.outputs.skip != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        working-directory: products/${{ needs.prepare.outputs.product }}
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          .\relkitw.cmd artifacts produce `
+            --version $env:VERSION `
+            --channel $env:CHANNEL `
+            --target "${{ matrix.target }}" `
+            --out-dir "dist/relkit-artifact-set/${{ matrix.target }}" `
+            --out "dist/relkit-artifact-set/${{ matrix.target }}/artifact-set.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        if: steps.applicable.outputs.skip != 'true'
+        with:
+          name: sim-artifact-set-${{ needs.prepare.outputs.product }}-${{ matrix.target }}
+          path: products/${{ needs.prepare.outputs.product }}/dist/relkit-artifact-set/${{ matrix.target }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  operator-publish:
+    name: Operator publish and verify
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install signed Operator bundle
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
+          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
+          install_args=(
+            bundle install
+            --bundle "$RUNNER_TEMP/relkit-bundle"
+            --project "products/${{ needs.prepare.outputs.product }}/relkit.project.json"
+            --project-root "$GITHUB_WORKSPACE"
+            --home "$RUNNER_TEMP/relkit-home"
+            --target linux-amd64
+          )
+          if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
+            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
+          fi
+          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
+          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sim-artifact-set-${{ needs.prepare.outputs.product }}-*
+          path: artifacts
+          merge-multiple: false
+
+      - name: Merge ArtifactSets
+        run: |
+          set -euo pipefail
+          args=(--out "dist/relkit-artifact-set/merged/artifact-set.json")
+          for dir in artifacts/sim-artifact-set-*; do
+            args+=(--in "$dir/artifact-set.json")
+          done
+          if [ "${#args[@]}" -le 2 ]; then
+            echo "no artifact sets downloaded" >&2
+            exit 1
+          fi
+          pushd "products/${{ needs.prepare.outputs.product }}"
+          ./relkitw artifacts merge "${args[@]}"
+          popd
+
+      - name: Stage and execute release
+        env:
+          RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
+          RELKIT_RELEASE_VIA_CI: "1"
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+          test -n "$RELKIT_UPLOAD_TOKEN"
+          pushd "products/${{ needs.prepare.outputs.product }}"
+          ./relkitw stage \
+            --artifact-set "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
+          ./relkitw release --version "$VERSION"
+          release_log="$RUNNER_TEMP/relkit-release-execute.log"
+          set +e
+          ./relkitw release --version "$VERSION" --execute 2>&1 | tee "$release_log"
+          release_rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$release_rc" -ne 0 ] && \
+             ! grep -Fq 'release commit could not be verified from consumer-visible backends' "$release_log"; then
+            exit "$release_rc"
+          fi
+          verified=0
+          for delay in 0 2 5 10 20 30; do
+            if [ "$delay" -gt 0 ]; then sleep "$delay"; fi
+            if ./relkitw verify released --version "$VERSION" --channel "$CHANNEL"; then
+              verified=1
+              break
+            fi
+          done
+          if [ "$verified" -ne 1 ]; then
+            echo "release was not consumer-visible after bounded verification" >&2
+            if [ "$release_rc" -ne 0 ]; then exit "$release_rc"; fi
+            exit 1
+          fi
+          popd
+
+  e2e:
+    name: e2e (${{ needs.prepare.outputs.product }})
+    needs: [prepare, operator-publish]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Dart
+        if: needs.prepare.outputs.product == 'sim-s1'
+        uses: dart-lang/setup-dart@v1
+
+      - name: Setup Rust
+        if: needs.prepare.outputs.product == 'sim-s2-manager'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Go
+        if: needs.prepare.outputs.product == 'sim-s3'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sim-artifact-set-${{ needs.prepare.outputs.product }}-*
+          path: artifacts
+          merge-multiple: false
+
+      - name: Build baseline (from) binaries
+        shell: bash
+        env:
+          PRODUCT: ${{ needs.prepare.outputs.product }}
+        run: |
+          set -euo pipefail
+          # baseline 用本次 release 的 installer 产物直接安装（e2e 断言 up-to-date）。
+          # from→to 升级路径在第二版发布时启用（baseline = 上一版 installer）。
+          echo "baseline install comes from the published release artifacts"
+
+      - name: Install baseline from release
+        shell: bash
+        env:
+          PRODUCT: ${{ needs.prepare.outputs.product }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+          # 从 build job 的 artifact 里取 windows installer + payload，物化到 install root：
+          # payload zip 内即安装目录树（主二进制最终名 + relkit-updater sidecar）。
+          mkdir -p .e2e/"$PRODUCT"/install
+          set -- artifacts/sim-artifact-set-"$PRODUCT"-windows-amd64
+          if [ "$PRODUCT" = sim-s3 ]; then
+            # sim-s3 是组件套件：直接用 payload zip 的安装目录树物化全部组件 + sidecar。
+            payload=$(ls "$1" | grep 'sim-server-windows-amd64-payload.zip$' | head -1 || true)
+            if [ -z "$payload" ]; then
+              echo "no sim-server payload found in $1" >&2; ls -la "$1" >&2; exit 1
+            fi
+            unzip -o -q "$1/$payload" -d .e2e/"$PRODUCT"/install/
+            ls -la .e2e/"$PRODUCT"/install/
+            exit 0
+          fi
+          installer=$(ls "$1" | grep -E '\.(exe|js)$' | grep -v artifact-set.json | head -1 || true)
+          if [ -z "$installer" ]; then
+            echo "no installer artifact found in $1" >&2
+            ls -la "$1" >&2
+            exit 1
+          fi
+          if [[ "$installer" == *.js ]]; then
+            cp "$1/$installer" .e2e/"$PRODUCT"/install/sim-s2-managed.js
+          else
+            cp "$1/$installer" .e2e/"$PRODUCT"/install/"$(basename "$installer" | sed -E 's/-windows-amd64(\.exe)?$/\1/')"
+          fi
+          # sidecar: installer 产物不带 sidecar，从 payload zip 提取
+          payload=$(ls "$1" | grep 'payload.zip$' | head -1 || true)
+          if [ -n "$payload" ]; then
+            unzip -o -j "$1/$payload" 'relkit-updater*' -d .e2e/"$PRODUCT"/install/ || true
+          fi
+          ls -la .e2e/"$PRODUCT"/install/
+
+      - name: Run e2e driver
+        shell: bash
+        env:
+          PRODUCT: ${{ needs.prepare.outputs.product }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+          # 首版发布: baseline = release 版本本身 → e2e 断言 up-to-date 终态。
+          node scripts/e2e_driver.mjs \
+            --product "$PRODUCT" \
+            --from "$VERSION" \
+            --expect "$VERSION" \
+            --channel "$CHANNEL" \
+            --rounds 2

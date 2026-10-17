@@ -1,7 +1,10 @@
 {
   "schema": "relkit.project/1",
   "product": "sim-s3",
-  "channels": ["dev", "stable"],
+  "channels": [
+    "dev",
+    "stable"
+  ],
   "versionPolicy": {
     "schema": "relkit.version-policy/1",
     "targets": {
@@ -25,12 +28,24 @@
       }
     }
   },
-  "selectorDimensions": ["os", "arch", "component", "audience"],
+  "selectorDimensions": [
+    "os",
+    "arch",
+    "component",
+    "audience"
+  ],
   "operatorRef": "firoyang-public",
-  "trustFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
-  "roles": ["publisher", "updater-host", "subscriber"],
+  "trustFingerprint": "sha256:8bcb6c24c9ce672f315f96eff446d9cee7edd2c6f3bfa113a3d4927f00199598",
+  "roles": [
+    "publisher",
+    "updater-host",
+    "subscriber"
+  ],
   "artifactProducer": {
-    "command": ["node", "../../scripts/producer.mjs"],
+    "command": [
+      "node",
+      "../../scripts/producer.mjs"
+    ],
     "extensionSchema": "relkit.extension/1",
     "timeoutSeconds": 5400,
     "envAllowlist": [
@@ -52,13 +67,17 @@
       "TMP",
       "CI"
     ],
-    "permissions": ["read-workspace", "write-out-dir", "exec-self"]
+    "permissions": [
+      "read-workspace",
+      "write-out-dir",
+      "exec-self"
+    ]
   },
   "runtimeProfilePublication": {
-    "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+    "rootFingerprint": "sha256:dc890a3416aab0d884f965f41e8cf01f34de640f2e4409f8419c952ef5c91866",
     "rupSchemaSet": "rup.v2",
     "recovery": {
-      "message": "sim-s3 自动更新不可用。本产品为 relkit S3 可选套件模拟消费者。",
+      "message": "SIM auto-update unavailable. This product is a relkit simulated consumer used for update contract validation only.",
       "links": [
         {
           "label": "relkit",
@@ -70,15 +89,23 @@
   "runtimeProfileSubscriptions": [
     {
       "productRef": "sim-s3",
-      "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER"
+      "rootFingerprint": "sha256:dc890a3416aab0d884f965f41e8cf01f34de640f2e4409f8419c952ef5c91866"
     }
   ],
   "capabilityFingerprint": {
-    "osArch": ["linux-amd64", "windows-amd64", "darwin-arm64"],
-    "facades": ["go"],
+    "osArch": [
+      "linux-amd64",
+      "windows-amd64",
+      "darwin-arm64"
+    ],
+    "facades": [
+      "go"
+    ],
     "projections": [],
     "topology": "selectable-product-suite",
-    "subscriptions": ["sim-s3"],
+    "subscriptions": [
+      "sim-s3"
+    ],
     "requiredContracts": [
       {
         "domain": "publishProtocol",
