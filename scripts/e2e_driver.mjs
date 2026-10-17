@@ -91,6 +91,19 @@ function assertVersion(expected, label) {
   process.stdout.write(`[ok] ${label}: ${line}\n`);
 }
 
+// manager 场景: apply 后代管的 sim-s2-managed 也被切换到 expect 版本（library 安装）。
+function assertManagedVersion(expected, label) {
+  const managedExe = path.join(installRoot, "sim-s2-managed.js");
+  if (!existsSync(managedExe)) return; // 无代管物则跳过
+  const out = spawnSync("node", [managedExe, "--version"], { encoding: "utf8" });
+  if (out.status !== 0) fail(`${label} (managed): 退出 ${out.status}: ${out.stderr}`);
+  const line = (out.stdout ?? "").trim();
+  if (!line.includes(expected)) {
+    fail(`${label} (managed): 期望版本含 "${expected}"，实际 "${line}"`);
+  }
+  process.stdout.write(`[ok] ${label} (managed library): ${line}\n`);
+}
+
 assertVersion(fromVersion, "baseline");
 
 // 2. 更新循环: check → apply → 重启 → 断言新版本
@@ -110,6 +123,9 @@ for (let round = 1; round <= rounds; round++) {
     }
     process.stdout.write((apply.stdout ?? "").trim() + "\n");
     assertVersion(expectVersion, `round ${round} after-apply`);
+    if (product === "sim-s2-manager") {
+      assertManagedVersion(expectVersion, `round ${round} after-apply`);
+    }
     current = expectVersion;
     continue;
   }

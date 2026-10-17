@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+4
+
+- 第四版：启用真实 from→to 升级 e2e（baseline 从 CDN 拉取 0.1.0+3，check → download → apply → 重启断言）。
+
 ## 0.1.0+3
 
 - 第三版：修正 e2e 基线安装的 sidecar 提取（payload zip 内 files/ 目录段），重验 from→to 升级路径。

@@ -27,6 +27,10 @@ on:
       version:
         description: "version to release (e.g. 0.1.0+2)"
         required: true
+      baseline_version:
+        description: "baseline (from) version for upgrade e2e; empty = previous CHANGELOG section"
+        required: false
+        default: ""
   push:
     branches:
       - sim-hosts
@@ -52,6 +56,7 @@ jobs:
       product: ${{ steps.meta.outputs.product }}
       version: ${{ steps.meta.outputs.version }}
       channel: ${{ steps.meta.outputs.channel }}
+      baseline_version: ${{ steps.meta.outputs.baseline_version }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve product version channel
@@ -84,6 +89,14 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "product=$PRODUCT version=$VERSION channel=$CHANNEL"
+          # baseline（from）版本：显式输入优先；否则取 CHANGELOG 倒数第二个小节。
+          # 当前小节是本次发布的 to，上一小节是可从 CDN 下载的 from。
+          BASELINE="${{ github.event.inputs.baseline_version }}"
+          if [ -z "$BASELINE" ]; then
+            BASELINE=$(grep -E '^## ' "$CHANGELOG" | sed -E 's/^## +//; s/ +$//' | sed -n '2p')
+          fi
+          echo "baseline=$BASELINE"
+          echo "baseline_version=$BASELINE" >> "$GITHUB_OUTPUT"
 
   build:
     name: ArtifactSet (${{ matrix.target }})
@@ -413,65 +426,46 @@ jobs:
         with:
           go-version: "1.26.3"
 
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: sim-artifact-set-${{ needs.prepare.outputs.product }}-*
-          path: artifacts
-          merge-multiple: false
-
-      - name: Build baseline (from) binaries
-        shell: bash
-        env:
-          PRODUCT: ${{ needs.prepare.outputs.product }}
-        run: |
-          set -euo pipefail
-          # baseline 用本次 release 的 installer 产物直接安装（e2e 断言 up-to-date）。
-          # from→to 升级路径在第二版发布时启用（baseline = 上一版 installer）。
-          echo "baseline install comes from the published release artifacts"
-
       - name: Install baseline from release
         shell: bash
         env:
           PRODUCT: ${{ needs.prepare.outputs.product }}
           VERSION: ${{ needs.prepare.outputs.version }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
+          BASELINE: ${{ needs.prepare.outputs.baseline_version }}
+          CDN: https://update-staging.firoyang.com/artifact
         run: |
           set -euo pipefail
-          # 从 build job 的 artifact 里取 windows installer + payload，物化到 install root：
-          # payload zip 内即安装目录树（主二进制最终名 + relkit-updater sidecar）。
+          # baseline 版本：优先 CDN 上一版（真实升级路径）；无 baseline 时用本次版本。
+          FROM_VER="$BASELINE"
+          if [ -z "$FROM_VER" ] || [ "$FROM_VER" = "$VERSION" ]; then
+            FROM_VER="$VERSION"
+          fi
+          VER_ENC=$(printf '%s' "$FROM_VER" | sed 's/+/%2B/g')
           mkdir -p .e2e/"$PRODUCT"/install
-          set -- artifacts/sim-artifact-set-"$PRODUCT"-windows-amd64
+          dl() { curl -fsSL "$CDN/$PRODUCT/$VER_ENC/$1" -o ".e2e/$PRODUCT/install/$2"; }
           if [ "$PRODUCT" = sim-s3 ]; then
-            # sim-s3 是组件套件：用 payload zip 的安装目录树物化全部组件 + sidecar。
-            # zip 内布局是根级 files.pb + files/<name>；-j 平铺丢弃目录层级，
-            # 'files/*' 通配不跨 / 且根级 files.pb 不匹配，sidecar 一并落位。
-            payload=$(ls "$1" | grep 'sim-server-windows-amd64-payload.zip$' | head -1 || true)
-            if [ -z "$payload" ]; then
-              echo "no sim-server payload found in $1" >&2; ls -la "$1" >&2; exit 1
-            fi
-            unzip -o -j "$1/$payload" 'files/*' -d .e2e/"$PRODUCT"/install/
-            ls -la .e2e/"$PRODUCT"/install/
-            exit 0
-          fi
-          installer=$(ls "$1" | grep -E '\.(exe|js)$' | grep -v artifact-set.json | head -1 || true)
-          if [ -z "$installer" ]; then
-            echo "no installer artifact found in $1" >&2; ls -la "$1" >&2; exit 1
-          fi
-          if [[ "$installer" == *.js ]]; then
-            cp "$1/$installer" .e2e/"$PRODUCT"/install/sim-s2-managed.js
+            # sim-s3 组件套件：拉 sim-server payload zip 平铺解压（组件 + sidecar 落位）。
+            dl "sim-server-windows-amd64-payload.zip" "sim-server-payload.zip"
+            unzip -o -j ".e2e/$PRODUCT/install/sim-server-payload.zip" 'files/*' -d ".e2e/$PRODUCT/install/"
+            rm ".e2e/$PRODUCT/install/sim-server-payload.zip"
+          elif [ "$PRODUCT" = sim-s2-managed ]; then
+            # managed 是 blob js（无 sidecar，更新由 manager 驱动）。
+            dl "sim-s2-managed-windows-amd64.js" "sim-s2-managed.js"
           else
-            cp "$1/$installer" .e2e/"$PRODUCT"/install/"$(basename "$installer" | sed -E 's/-windows-amd64(\.exe)?$/\1/')"
+            # s1 / manager：payload zip 布局为 files.pb + files/<主程序> +
+            # files/relkit-updater*（实测 0.1.0+3）。-j 平铺后主程序名即产品标准名
+            # （sim-s1.exe / sim-s2-manager.exe），sidecar 一并落位，无需改名。
+            if [ "$PRODUCT" = sim-s1 ]; then STD="sim-s1.exe"; else STD="sim-s2-manager.exe"; fi
+            dl "windows-payload.zip" "payload.zip"
+            unzip -o -j ".e2e/$PRODUCT/install/payload.zip" 'files/*' -d ".e2e/$PRODUCT/install/"
+            rm ".e2e/$PRODUCT/install/payload.zip"
+            if [ ! -f ".e2e/$PRODUCT/install/$STD" ]; then
+              echo "payload extract: $STD missing" >&2; ls -la ".e2e/$PRODUCT/install/" >&2; exit 1
+            fi
+            ls ".e2e/$PRODUCT/install/" | grep -q 'relkit-updater' || { echo "sidecar missing after extract" >&2; exit 1; }
           fi
-          # sidecar: installer 产物不带 sidecar，从 payload zip 提取
-          # （zip 内布局是 files/<name>；unzip 通配不跨 /，须带目录段）。
-          # sim-s2-managed 的 payload 是 noSidecar 的（updater-projection 角色，
-          # 更新由 manager 驱动），跳过 sidecar 提取。
-          payload=$(ls "$1" | grep 'payload.zip$' | head -1 || true)
-          if [ -n "$payload" ] && [ "$PRODUCT" != sim-s2-managed ]; then
-            unzip -o -j "$1/$payload" 'files/relkit-updater*' -d .e2e/"$PRODUCT"/install/
-            ls .e2e/"$PRODUCT"/install/ | grep -q 'relkit-updater' || { echo "sidecar missing after extract" >&2; exit 1; }
-          fi
-          ls -la .e2e/"$PRODUCT"/install/
+          ls -la ".e2e/$PRODUCT/install/"
 
       - name: Run e2e driver
         shell: bash
@@ -479,12 +473,23 @@ jobs:
           PRODUCT: ${{ needs.prepare.outputs.product }}
           VERSION: ${{ needs.prepare.outputs.version }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
+          BASELINE: ${{ needs.prepare.outputs.baseline_version }}
         run: |
           set -euo pipefail
-          # 首版发布: baseline = release 版本本身 → e2e 断言 up-to-date 终态。
-          node scripts/e2e_driver.mjs \
-            --product "$PRODUCT" \
-            --from "$VERSION" \
-            --expect "$VERSION" \
-            --channel "$CHANNEL" \
-            --rounds 2
+          if [ -n "$BASELINE" ] && [ "$BASELINE" != "$VERSION" ]; then
+            # 真实 from→to 升级路径: baseline = CDN 上的上一版制品。
+            node scripts/e2e_driver.mjs \
+              --product "$PRODUCT" \
+              --from "$BASELINE" \
+              --expect "$VERSION" \
+              --channel "$CHANNEL" \
+              --rounds 3
+          else
+            # 无 baseline（首版）: 自装自验 up-to-date 终态。
+            node scripts/e2e_driver.mjs \
+              --product "$PRODUCT" \
+              --from "$VERSION" \
+              --expect "$VERSION" \
+              --channel "$CHANNEL" \
+              --rounds 2
+          fi
