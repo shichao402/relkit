@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+4
+
+- 第四版：+3 发布成功（污染节点已 unpublish），from→to 升级 e2e（baseline 0.1.0+3，双订阅 apply + managed library 断言）。
+
 ## 0.1.0+3
 
 - 第三版：from→to 升级 e2e（baseline 0.1.0+2，双订阅 apply + 代管 managed library 断言按 active 指针）。
