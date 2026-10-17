@@ -315,13 +315,20 @@ jobs:
             exit 1
           fi
           out="$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
+          out_dir="$(dirname "$out")"
           pushd "products/${{ needs.prepare.outputs.product }}"
-          mkdir -p "$(dirname "$out")"
-          # 单平台产品只有 1 个 artifact-set：merge 要求至少两输入，
-          # 此时直通拷贝为 merged 输出（内容即最终 ArtifactSet）。
+          mkdir -p "$out_dir"
+          # 单平台产品只有 1 个 artifact-set：merge 要求至少两输入。
+          # 直通时必须复刻 merge 的输出语义：制品文件与 artifact-set.json
+          # 同放在 merged/ 输出目录（stage 从该目录读制品）。
           if [ "${#ins[@]}" -eq 1 ]; then
+            src_dir="$(dirname "${ins[0]}")"
             cp "${ins[0]}" "$out"
-            echo "single artifact set: pass-through copy"
+            for f in "$src_dir"/*; do
+              [ "$(basename "$f")" = "artifact-set.json" ] && continue
+              cp "$f" "$out_dir/"
+            done
+            echo "single artifact set: pass-through copy (json + files)"
           else
             args=(--out "$out")
             for f in "${ins[@]}"; do
