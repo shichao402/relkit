@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+7
+
+- 第七版（修复轮）：客户端 codeOf 语义修复——当前 code 改取版本 build 号 `+N`（与 s1/manager 同语义），此前误用 `sdk.SemverCode`（剥掉 `+N` 导致 CurrentCode=1000 恒大于索引节点，永远 up-to-date）。
+
 ## 0.1.0+6
 
 - 第六版：from 0.1.0+5 → to 0.1.0+6 真实升级 e2e（baseline +5 制品已确认在 CDN 服务器；本轮验证组件套件 payload 升级链 +6）。

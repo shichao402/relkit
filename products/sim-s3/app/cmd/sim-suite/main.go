@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 
 	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
 	"github.com/shichao402/relkit/sdk"
@@ -88,12 +90,16 @@ func openUpdater(ctx context.Context, rt *updaterv1.Runtime) (*updaterfacade.Upd
 	return opened.Updater, nil
 }
 
+// 发布 code = 版本串的 build 号（+N），与服务器索引节点 code 空间一致。
+// 注意：不能用 sdk.SemverCode（那是 semver 段编码 major*1e6+minor*1e3+patch，
+// 会剥掉 +N，导致 CurrentCode 恒大于索引节点而永远 up-to-date）。
 func codeOf(v string) int64 {
-	code, err := sdk.SemverCode(v)
-	if err != nil {
-		return 0
+	if i := strings.LastIndex(v, "+"); i >= 0 {
+		if n, err := strconv.ParseInt(v[i+1:], 10, 64); err == nil {
+			return n
+		}
 	}
-	return int64(code)
+	return 1
 }
 
 func run(component string) {
