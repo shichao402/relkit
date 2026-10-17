@@ -431,9 +431,11 @@ jobs:
             cp "$1/$installer" .e2e/"$PRODUCT"/install/"$(basename "$installer" | sed -E 's/-windows-amd64(\.exe)?$/\1/')"
           fi
           # sidecar: installer 产物不带 sidecar，从 payload zip 提取
+          # （zip 内布局是 files/<name>，含 files/ 前缀）
           payload=$(ls "$1" | grep 'payload.zip$' | head -1 || true)
           if [ -n "$payload" ]; then
-            unzip -o -j "$1/$payload" 'relkit-updater*' -d .e2e/"$PRODUCT"/install/ || true
+            unzip -o -j "$1/$payload" '*relkit-updater*' -d .e2e/"$PRODUCT"/install/
+            ls .e2e/"$PRODUCT"/install/ | grep -q 'relkit-updater' || { echo "sidecar missing after extract" >&2; exit 1; }
           fi
           ls -la .e2e/"$PRODUCT"/install/
 
