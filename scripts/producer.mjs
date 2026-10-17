@@ -182,7 +182,11 @@ function buildSimS2Manager(input, out) {
       SIM_MANAGED_BOOTSTRAP_FILE: managedBootstrap,
     },
   });
-  const binary = path.join("app", "target", "release", "sim-s2-manager.exe");
+  const built = path.join("app", "target", "release", "sim-s2-manager.exe");
+  // cargo 产物在 app/target/release/（项目树内），canonical wrapper 要求
+  // artifact 位于 out-dir：拷贝进去再用。
+  const binary = path.join(out, "sim-s2-manager.exe");
+  copyFileSync(built, binary);
   const selectors = { os: "windows", arch: "x64" };
   try {
     return [

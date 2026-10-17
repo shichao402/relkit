@@ -315,7 +315,15 @@ jobs:
             exit 1
           fi
           pushd "products/${{ needs.prepare.outputs.product }}"
-          ./relkitw artifacts merge "${args[@]}"
+          # 单平台产品只有 1 个 artifact-set：merge 要求至少两输入，
+          # 此时直通拷贝为 merged 输出（内容即最终 ArtifactSet）。
+          if [ "${#args[@]}" -eq 3 ]; then
+            mkdir -p "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged"
+            cp "${args[1]}" "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
+            echo "single artifact set: pass-through copy"
+          else
+            ./relkitw artifacts merge "${args[@]}"
+          fi
           popd
 
       - name: Stage and execute release
