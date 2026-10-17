@@ -47,7 +47,11 @@
       "USERPROFILE",
       "HOME",
       "CARGO_HOME",
-      "RUSTUP_HOME"
+      "RUSTUP_HOME",
+      "LIB",
+      "INCLUDE",
+      "LIBPATH",
+      "EXTERNAL_INCLUDE"
     ],
     "permissions": [
       "read-workspace",

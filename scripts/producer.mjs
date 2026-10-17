@@ -206,7 +206,7 @@ function buildSimS2Managed(input, out) {
   const selectors = { os: "windows", arch: "x64" };
   return [
     artifact("windows-installer", destination, "blob", target, selectors),
-    payloadArtifact(input, out, destination, "windows-payload", target, selectors, "windows-installer", "sim-s2-managed.js"),
+    payloadArtifact(input, out, destination, "windows-payload", target, selectors, "windows-installer", "sim-s2-managed.js", { noSidecar: true }),
   ];
 }
 
@@ -220,29 +220,33 @@ function buildSimS3(input, out) {
   const GOARCH = { "linux-amd64": "amd64", "windows-amd64": "amd64", "darwin-arm64": "arm64" }[target];
   const suffix = GOOS === "windows" ? ".exe" : "";
   const components = ["sim-server", "sim-exec", "sim-host-setup"];
+  // 单入口构建一次（app/cmd/sim-suite 运行时按二进制名定组件身份），
+  // 再按组件名复制三份，避免重复编译同一源码。
+  const suiteBinary = path.join(out, `sim-suite-${GOOS}-${GOARCH}${suffix}`);
+  run(
+    "go",
+    [
+      "build",
+      "-trimpath",
+      "-ldflags",
+      `-X main.version=${input.version} -X main.runtimeBootstrapBase64=${bootstrapB64}`,
+      "-o",
+      suiteBinary,
+      "./app/cmd/sim-suite",
+    ],
+    {
+      env: {
+        ...process.env,
+        GOOS: GOOS,
+        GOARCH: GOARCH,
+        CGO_ENABLED: "0",
+      },
+    },
+  );
   const artifacts = [];
   for (const component of components) {
     const binary = path.join(out, `${component}-${GOOS}-${GOARCH}${suffix}`);
-    run(
-      "go",
-      [
-        "build",
-        "-trimpath",
-        "-ldflags",
-        `-X main.version=${input.version} -X main.runtimeBootstrapBase64=${bootstrapB64}`,
-        "-o",
-        binary,
-        `./app/cmd/${component}`,
-      ],
-      {
-        env: {
-          ...process.env,
-          GOOS: GOOS,
-          GOARCH: GOARCH,
-          CGO_ENABLED: "0",
-        },
-      },
-    );
+    copyFileSync(suiteBinary, binary);
     const selectors = {
       os: GOOS,
       arch: GOARCH,
@@ -257,7 +261,7 @@ function buildSimS3(input, out) {
   return artifacts;
 }
 
-function payloadArtifact(input, out, binary, id, target, selectors, installerId, finalName) {
+function payloadArtifact(input, out, binary, id, target, selectors, installerId, finalName, options = {}) {
   // 用 canonical wrapper 提供的 RELKIT_CORE 组 payload（与真实 producer 同路径）。
   const core = String(process.env.RELKIT_CORE ?? "").trim();
   if (!core) fail("RELKIT_CORE was not supplied by the canonical wrapper");
@@ -265,10 +269,14 @@ function payloadArtifact(input, out, binary, id, target, selectors, installerId,
   mkdirSync(tree, { recursive: true });
   // payload 树 = 安装目录树：主二进制用最终安装名（与 executableRelpath 一致）
   // + relkit-updater sidecar（从物化缓存拷入）。
+  // noSidecar: managed 产品（updater-projection 角色）不自带 sidecar——
+  // 其 resolution 不含 bin/updater 组件，更新由 manager 侧订阅驱动（Loom 同款）。
   copyFileSync(binary, path.join(tree, finalName));
-  const sidecarName = process.platform === "win32" ? "relkit-updater.exe" : "relkit-updater";
-  const sidecarSource = path.join(".relkit", "components", "bin", sidecarName);
-  copyFileSync(sidecarSource, path.join(tree, sidecarName));
+  if (!options.noSidecar) {
+    const sidecarName = process.platform === "win32" ? "relkit-updater.exe" : "relkit-updater";
+    const sidecarSource = path.join(".relkit", "components", "bin", sidecarName);
+    copyFileSync(sidecarSource, path.join(tree, sidecarName));
+  }
   const payload = path.join(out, `${id}.zip`);
   run(core, ["payload", "build", "--tree", tree, "--out", payload]);
   return artifact(id, payload, "payload", target, selectors, { payloadOf: installerId });
