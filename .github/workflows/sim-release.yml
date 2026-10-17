@@ -68,7 +68,20 @@ jobs:
           INPUT_CHANNEL: ${{ github.event.inputs.channel }}
         run: |
           set -euo pipefail
-          PRODUCT="${INPUT_PRODUCT:-sim-s1}"
+          PRODUCT="${INPUT_PRODUCT:-}"
+          if [ -z "$PRODUCT" ]; then
+            # push 触发：从变更文件推导产品（本次 push 中 CHANGELOG 有变更的产品）。
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+              PRODUCT=$(git diff --name-only "$BEFORE" "$AFTER" -- 'products/*/CHANGELOG.md' \
+                | sed -E 's#products/([^/]+)/CHANGELOG.md#\1#' | tail -1)
+            fi
+            if [ -z "$PRODUCT" ]; then
+              # fallback：工作区内所有产品 CHANGELOG 顶部版本中 code 最高且未发布者，取 sim-s1 兜底。
+              PRODUCT=sim-s1
+            fi
+          fi
           CHANNEL="${INPUT_CHANNEL:-dev}"
           VERSION="${INPUT_VERSION:-}"
           if [ -z "$VERSION" ]; then
