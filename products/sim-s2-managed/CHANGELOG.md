@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+5
+
+- 第五版：control-plane 换根（relkit-distribution-2027）+ relkit v0.6.17 控制面后重跑 dev 渠道发布与 e2e（from 0.1.0+4 → 0.1.0+5，library 安装切换按 active 指针）。
+
 ## 0.1.0+4
 
 - 第四版：供 manager 代管链路升级消费（library 安装切换 +1 → +2 → +3 → +4）。
