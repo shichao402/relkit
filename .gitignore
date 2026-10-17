@@ -1,0 +1,20 @@
+# relkit 物化缓存（wrapper materialize 产物，随构建重建）
+.relkit/
+
+# 本地验证与 e2e 临时产物
+.sim-scratch/
+.e2e/
+
+# Dart / Rust / Node / Go 构建痕迹
+.dart_tool/
+**/app/.dart_tool/
+**/app/target/
+**/app/.runtime-input/
+**/app/dist/
+
+# Node
+node_modules/
+
+# IDE
+.idea/
+.vscode/

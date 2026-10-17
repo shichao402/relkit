@@ -1,0 +1,102 @@
+{
+  "schema": "relkit.project/1",
+  "product": "sim-s3",
+  "channels": ["dev", "stable"],
+  "versionPolicy": {
+    "schema": "relkit.version-policy/1",
+    "targets": {
+      "linux-amd64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      },
+      "windows-amd64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      },
+      "darwin-arm64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      }
+    }
+  },
+  "selectorDimensions": ["os", "arch", "component", "audience"],
+  "operatorRef": "firoyang-public",
+  "trustFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+  "roles": ["publisher", "updater-host", "subscriber"],
+  "artifactProducer": {
+    "command": ["node", "../../scripts/producer.mjs"],
+    "extensionSchema": "relkit.extension/1",
+    "timeoutSeconds": 5400,
+    "envAllowlist": [
+      "PATH",
+      "RELKIT_CORE",
+      "PYTHON",
+      "GOFLAGS",
+      "GOPATH",
+      "GOMODCACHE",
+      "GOCACHE",
+      "GOPROXY",
+      "HOME",
+      "USERPROFILE",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "SYSTEMROOT",
+      "SystemRoot",
+      "TEMP",
+      "TMP",
+      "CI"
+    ],
+    "permissions": ["read-workspace", "write-out-dir", "exec-self"]
+  },
+  "runtimeProfilePublication": {
+    "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+    "rupSchemaSet": "rup.v2",
+    "recovery": {
+      "message": "sim-s3 自动更新不可用。本产品为 relkit S3 可选套件模拟消费者。",
+      "links": [
+        {
+          "label": "relkit",
+          "url": "https://github.com/shichao402/relkit"
+        }
+      ]
+    }
+  },
+  "runtimeProfileSubscriptions": [
+    {
+      "productRef": "sim-s3",
+      "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER"
+    }
+  ],
+  "capabilityFingerprint": {
+    "osArch": ["linux-amd64", "windows-amd64", "darwin-arm64"],
+    "facades": ["go"],
+    "projections": [],
+    "topology": "selectable-product-suite",
+    "subscriptions": ["sim-s3"],
+    "requiredContracts": [
+      {
+        "domain": "publishProtocol",
+        "peer": "agent",
+        "min": 2,
+        "max": 3
+      },
+      {
+        "domain": "artifactSet",
+        "peer": "producer",
+        "id": "relkit.artifact-set/1"
+      },
+      {
+        "domain": "updaterIpc",
+        "peer": "facade",
+        "min": 3,
+        "max": 3
+      }
+    ]
+  }
+}

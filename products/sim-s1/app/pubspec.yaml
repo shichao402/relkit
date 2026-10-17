@@ -1,0 +1,15 @@
+{
+  "name": "sim_s1",
+  "description": "relkit S1 simulated consumer (Dart facade, mirrors SvnMergeTool topology)",
+  "publish_to": "none",
+  "version": "0.1.0+1",
+  "environment": {
+    "sdk": ">=3.6.0 <4.0.0"
+  },
+  "dependencies": {
+    "fixnum": "^1.1.1",
+    "rup_client": {
+      "path": "../.relkit/components/sdk/dart"
+    }
+  }
+}

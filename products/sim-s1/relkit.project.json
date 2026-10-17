@@ -1,0 +1,94 @@
+{
+  "schema": "relkit.project/1",
+  "product": "sim-s1",
+  "channels": ["dev", "stable"],
+  "versionPolicy": {
+    "schema": "relkit.version-policy/1",
+    "targets": {
+      "windows-amd64": {
+        "mode": "library",
+        "retain": 2,
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      },
+      "darwin-universal": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": false,
+        "allowRollback": true
+      }
+    }
+  },
+  "selectorDimensions": ["os", "arch"],
+  "operatorRef": "firoyang-public",
+  "trustFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+  "roles": ["publisher", "updater-host", "subscriber"],
+  "artifactProducer": {
+    "command": ["node", "../../scripts/producer.mjs"],
+    "extensionSchema": "relkit.extension/1",
+    "timeoutSeconds": 5400,
+    "envAllowlist": [
+      "PATH",
+      "RELKIT_CORE",
+      "CI",
+      "SYSTEMROOT",
+      "SystemRoot",
+      "TEMP",
+      "TMP",
+      "LOCALAPPDATA",
+      "APPDATA",
+      "HOME",
+      "USERPROFILE",
+      "PUB_CACHE",
+      "PUB_HOSTED_URL",
+      "FLUTTER_STORAGE_BASE_URL"
+    ],
+    "permissions": ["read-workspace", "write-out-dir", "exec-self"]
+  },
+  "runtimeProfilePublication": {
+    "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+    "rupSchemaSet": "rup.v2",
+    "recovery": {
+      "message": "sim-s1 自动更新不可用。本产品为 relkit S1 模拟消费者，仅用于更新合同验证。",
+      "links": [
+        {
+          "label": "relkit",
+          "url": "https://github.com/shichao402/relkit"
+        }
+      ]
+    }
+  },
+  "runtimeProfileSubscriptions": [
+    {
+      "productRef": "sim-s1",
+      "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER"
+    }
+  ],
+  "capabilityFingerprint": {
+    "osArch": ["windows-amd64", "darwin-universal"],
+    "facades": ["dart"],
+    "projections": [],
+    "topology": "cross-platform-updater-host",
+    "subscriptions": ["sim-s1"],
+    "requiredContracts": [
+      {
+        "domain": "publishProtocol",
+        "peer": "agent",
+        "min": 2,
+        "max": 3
+      },
+      {
+        "domain": "artifactSet",
+        "peer": "producer",
+        "id": "relkit.artifact-set/1"
+      },
+      {
+        "domain": "updaterIpc",
+        "peer": "facade",
+        "min": 3,
+        "max": 3
+      }
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "schema": "relkit.project/1",
+  "product": "sim-s2-manager",
+  "channels": ["dev", "stable"],
+  "versionPolicy": {
+    "schema": "relkit.version-policy/1",
+    "targets": {
+      "windows-amd64": {
+        "mode": "in-place",
+        "allowInstallOnly": false,
+        "allowSwitch": false,
+        "allowRollback": true
+      }
+    }
+  },
+  "selectorDimensions": ["os", "arch"],
+  "operatorRef": "firoyang-public",
+  "trustFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+  "roles": ["publisher", "updater-host", "subscriber"],
+  "artifactProducer": {
+    "command": ["node", "../../scripts/producer.mjs"],
+    "extensionSchema": "relkit.extension/1",
+    "timeoutSeconds": 5400,
+    "envAllowlist": [
+      "PATH",
+      "RELKIT_CORE",
+      "CI",
+      "SYSTEMROOT",
+      "SystemRoot",
+      "TEMP",
+      "TMP",
+      "LOCALAPPDATA",
+      "APPDATA",
+      "USERPROFILE",
+      "HOME",
+      "CARGO_HOME",
+      "RUSTUP_HOME"
+    ],
+    "permissions": ["read-workspace", "write-out-dir", "exec-self"]
+  },
+  "runtimeProfilePublication": {
+    "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+    "rupSchemaSet": "rup.v2",
+    "recovery": {
+      "message": "sim-s2-manager 自动更新不可用。本产品为 relkit S2 管理器模拟消费者。",
+      "links": [
+        {
+          "label": "relkit",
+          "url": "https://github.com/shichao402/relkit"
+        }
+      ]
+    }
+  },
+  "runtimeProfileSubscriptions": [
+    {
+      "productRef": "sim-s2-manager",
+      "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER"
+    },
+    {
+      "productRef": "sim-s2-managed",
+      "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER"
+    }
+  ],
+  "capabilityFingerprint": {
+    "osArch": ["windows-amd64"],
+    "facades": ["rust"],
+    "projections": [],
+    "topology": "manager-managed-products",
+    "subscriptions": ["sim-s2-manager", "sim-s2-managed"],
+    "requiredContracts": [
+      {
+        "domain": "publishProtocol",
+        "peer": "agent",
+        "min": 2,
+        "max": 3
+      },
+      {
+        "domain": "artifactSet",
+        "peer": "producer",
+        "id": "relkit.artifact-set/1"
+      },
+      {
+        "domain": "updaterIpc",
+        "peer": "facade",
+        "min": 3,
+        "max": 3
+      }
+    ]
+  }
+}

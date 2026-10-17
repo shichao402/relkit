@@ -1,0 +1,72 @@
+{
+  "schema": "relkit.project/1",
+  "product": "sim-s2-managed",
+  "channels": ["dev", "stable"],
+  "versionPolicy": {
+    "schema": "relkit.version-policy/1",
+    "targets": {
+      "windows-amd64": {
+        "mode": "library",
+        "retain": 3,
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      }
+    }
+  },
+  "selectorDimensions": ["os", "arch"],
+  "operatorRef": "firoyang-public",
+  "trustFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+  "roles": ["publisher", "updater-projection"],
+  "artifactProducer": {
+    "command": ["node", "../../scripts/producer.mjs"],
+    "extensionSchema": "relkit.extension/1",
+    "timeoutSeconds": 5400,
+    "envAllowlist": [
+      "PATH",
+      "RELKIT_CORE",
+      "CI",
+      "SYSTEMROOT",
+      "SystemRoot",
+      "TEMP",
+      "TMP",
+      "LOCALAPPDATA",
+      "APPDATA"
+    ],
+    "permissions": ["read-workspace", "write-out-dir", "exec-self"]
+  },
+  "runtimeProfilePublication": {
+    "rootFingerprint": "sha256:ROOTFINGERPRINT-PLACEHOLDER",
+    "rupSchemaSet": "rup.v2",
+    "recovery": {
+      "message": "sim-s2-managed 自动更新不可用。本产品为 relkit S2 被管理端模拟消费者。",
+      "links": [
+        {
+          "label": "relkit",
+          "url": "https://github.com/shichao402/relkit"
+        }
+      ]
+    }
+  },
+  "runtimeProfileSubscriptions": [],
+  "capabilityFingerprint": {
+    "osArch": ["windows-amd64"],
+    "facades": [],
+    "projections": ["typescript"],
+    "topology": "managed-product",
+    "subscriptions": [],
+    "requiredContracts": [
+      {
+        "domain": "publishProtocol",
+        "peer": "agent",
+        "min": 2,
+        "max": 3
+      },
+      {
+        "domain": "artifactSet",
+        "peer": "producer",
+        "id": "relkit.artifact-set/1"
+      }
+    ]
+  }
+}
