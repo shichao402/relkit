@@ -306,22 +306,27 @@ jobs:
       - name: Merge ArtifactSets
         run: |
           set -euo pipefail
-          args=(--out "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json")
+          ins=()
           for dir in "$GITHUB_WORKSPACE"/artifacts/sim-artifact-set-*; do
-            args+=(--in "$dir/artifact-set.json")
+            ins+=("$dir/artifact-set.json")
           done
-          if [ "${#args[@]}" -le 2 ]; then
+          if [ "${#ins[@]}" -eq 0 ]; then
             echo "no artifact sets downloaded" >&2
             exit 1
           fi
+          out="$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
           pushd "products/${{ needs.prepare.outputs.product }}"
+          mkdir -p "$(dirname "$out")"
           # 单平台产品只有 1 个 artifact-set：merge 要求至少两输入，
           # 此时直通拷贝为 merged 输出（内容即最终 ArtifactSet）。
-          if [ "${#args[@]}" -eq 3 ]; then
-            mkdir -p "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged"
-            cp "${args[1]}" "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
+          if [ "${#ins[@]}" -eq 1 ]; then
+            cp "${ins[0]}" "$out"
             echo "single artifact set: pass-through copy"
           else
+            args=(--out "$out")
+            for f in "${ins[@]}"; do
+              args+=(--in "$f")
+            done
             ./relkitw artifacts merge "${args[@]}"
           fi
           popd
