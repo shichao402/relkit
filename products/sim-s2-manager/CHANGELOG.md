@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+5
+
+- 第五版：+4 发布验证通过（in-place apply 语义已入 e2e driver），from→to 升级 e2e（baseline 0.1.0+4）。
+
 ## 0.1.0+4
 
 - 第四版：+3 发布成功（污染节点已 unpublish），from→to 升级 e2e（baseline 0.1.0+3，双订阅 apply + managed library 断言）。
