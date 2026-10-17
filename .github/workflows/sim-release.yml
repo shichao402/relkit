@@ -153,8 +153,8 @@ jobs:
         env:
           OPS_URL: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_URL || vars.RELKIT_OPS_LINUX_URL }}
           OPS_SHA256: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_SHA256 || vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+          BUNDLE_URL: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
+          BUNDLE_SHA256: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
         run: |
           set -euo pipefail
           test -n "$OPS_URL" && test -n "$OPS_SHA256"
@@ -187,8 +187,8 @@ jobs:
         env:
           OPS_URL: ${{ vars.RELKIT_OPS_WINDOWS_URL }}
           OPS_SHA256: ${{ vars.RELKIT_OPS_WINDOWS_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+          BUNDLE_URL: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
+          BUNDLE_SHA256: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
         run: |
           if (-not $env:OPS_URL -or -not $env:OPS_SHA256 -or
               -not $env:BUNDLE_URL -or -not $env:BUNDLE_SHA256) {
@@ -271,8 +271,8 @@ jobs:
         env:
           OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
           OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+          BUNDLE_URL: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
+          BUNDLE_SHA256: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
         run: |
           set -euo pipefail
           test -n "$OPS_URL" && test -n "$OPS_SHA256"

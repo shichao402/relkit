@@ -75,7 +75,7 @@
     },
     {
       "productRef": "sim-s2-managed",
-      "rootFingerprint": "sha256:9a4150c04bdbfe3b087783c727512b207b05cb21c7d5a2d85d614595f378e8a1"
+      "rootFingerprint": "sha256:41524378a0bad9a98830afc2731ad0d34178a7c1ab59a5943a2b15542ea36d03"
     }
   ],
   "capabilityFingerprint": {
