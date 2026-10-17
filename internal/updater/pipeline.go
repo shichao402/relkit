@@ -136,7 +136,11 @@ func applyContentTable(dataDir string, sess *updaterv1.ApplySessionRecord, plan 
 		return err
 	}
 	journalPath := filepath.Join(sess.StagedRoot, "journal.pb")
-	backupRoot := filepath.Join(sess.StagedRoot, "backup")
+	// backup 必须与 targetRoot 同卷：os.Rename 不能跨盘符（Windows EXDEV）。
+	// in-place 的 targetRoot 可能与 dataDir（StagedRoot）不同卷，backup 放
+	// targetRoot 下随安装目录清理；library 的目标在 installRoot/versions 下，
+	// 与 StagedRoot 跨卷同样不安全，统一用 targetRoot 同卷位置。
+	backupRoot := filepath.Join(targetRoot, ".relkit-backup", sess.SessionId)
 	_ = os.RemoveAll(backupRoot)
 	journal := &updaterv1.ApplyJournal{SessionId: sess.SessionId}
 	rollback := func(cause error) error {
