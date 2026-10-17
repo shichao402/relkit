@@ -319,9 +319,11 @@ jobs:
           pushd "products/${{ needs.prepare.outputs.product }}"
           # 不要提前创建 merged/：relkit artifacts merge 要求输出目录尚不存在
           # （否则报 merge output directory already exists）。仅单输入直通需自建。
-          # 单平台产品只有 1 个 artifact-set：merge 要求至少两输入。
-          # 直通时必须复刻 merge 的输出语义：制品文件与 artifact-set.json
-          # 同放在 merged/ 输出目录（stage 从该目录读制品）。
+          # TODO(relkit): relkit artifacts merge 硬性要求 ≥2 输入（vnext.go:1083），
+          # 单平台产品（sim-s2-*/sim-s3）只有 1 个 ArtifactSet，无合法 merge 路径。
+          # 当前 cp 直通跳过了 merge 内部的 VerifyFiles / 重复路径校验，是权宜之计。
+          # 建议 relkit 增加官方单输入支持（或 artifacts passthrough 子命令，保留校验），
+          # 届时删除本分支，统一走 merge。
           if [ "${#ins[@]}" -eq 1 ]; then
             mkdir -p "$out_dir"
             src_dir="$(dirname "${ins[0]}")"
@@ -353,9 +355,13 @@ jobs:
           product_roots=()
           if [ "${{ needs.prepare.outputs.product }}" = sim-s2-managed ]; then
             # sim-s2-managed（updater-projection，Loom 同款）无订阅、Node blob 无 facade，
-            # offline bundle 通道下 bootstrap 不物化其产品根。verify released 显式供给
-            # Product RUP Root（诊断性验收：消费面 index 由 e2e 真实覆盖；订阅链路验收
-            # 由 sim-s2-manager 的双订阅 resolution 覆盖）。
+            # offline bundle 通道下 bootstrap 不物化其产品根。
+            # TODO(relkit): offline bundle 只写 RuntimeProfiles（offlinebundle.Install），
+            # 未订阅产品无 Product RUP Root 通道，verify released 必然报
+            # "no Product RUP Root was provisioned"。显式 --product-root 仅为诊断手段，
+            # 按 SKILL.md 不得作为唯一验收证据。
+            # 建议 relkit 增加 manager 代管验收通道：由 manager 的双订阅 resolution
+            # 覆盖 managed 的发布验收。届时删除本段。
             test -n "$MANAGED_ROOT_PB64" || { echo "RELKIT_PRODUCT_ROOT_SIM_S2_MANAGED var is empty" >&2; exit 1; }
             printf '%s' "$MANAGED_ROOT_PB64" | base64 -d > "$RUNNER_TEMP/sim-s2-managed-root.pb"
             product_roots+=(--product-root "$RUNNER_TEMP/sim-s2-managed-root.pb")
@@ -364,15 +370,9 @@ jobs:
           ./relkitw stage \
             --artifact-set "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
           ./relkitw release --version "$VERSION"
-          release_log="$RUNNER_TEMP/relkit-release-execute.log"
-          set +e
-          ./relkitw release --version "$VERSION" --execute 2>&1 | tee "$release_log"
-          release_rc=${PIPESTATUS[0]}
-          set -e
-          if [ "$release_rc" -ne 0 ] && \
-             ! grep -Fq 'release commit could not be verified from consumer-visible backends' "$release_log"; then
-            exit "$release_rc"
-          fi
+          # relkit-agent 的 release.verify_failed 是第一性原理门禁（发布必须被消费面验证），
+          # 宿主 CI 一律不放行；这里同样不放行，失败即失败。
+          ./relkitw release --version "$VERSION" --execute
           verified=0
           for delay in 0 2 5 10 20 30; do
             if [ "$delay" -gt 0 ]; then sleep "$delay"; fi
@@ -383,7 +383,6 @@ jobs:
           done
           if [ "$verified" -ne 1 ]; then
             echo "release was not consumer-visible after bounded verification" >&2
-            if [ "$release_rc" -ne 0 ]; then exit "$release_rc"; fi
             exit 1
           fi
           popd
