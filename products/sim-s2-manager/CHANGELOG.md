@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+7
+
+- 第七版：fix-forward。+6 的 from 侧（+5 制品）内嵌 v0.6.16 sidecar，in-place 跨卷 backup rename 触发旧 bug；+7 的 from 侧（+6 制品）已内嵌 v0.6.17 updater，重跑 from 0.1.0+6 → 0.1.0+7 e2e 验证修复后路径。
+
 ## 0.1.0+6
 
 - 第六版：control-plane 换根（relkit-distribution-2027）+ relkit v0.6.17 updater（in-place 跨卷 backup 修复）后重跑 from 0.1.0+5 → 0.1.0+6 真实升级 e2e（双订阅 apply + managed library 断言）。
