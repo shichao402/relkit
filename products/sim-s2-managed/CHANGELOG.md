@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+4
+
+- 第四版：供 manager 代管链路升级消费（library 安装切换 +1 → +2 → +3 → +4）。
+
 ## 0.1.0+3
 
 - 第三版：供 manager 代管链路 from→to 升级 e2e 消费（library 安装切换 +1 → +2 → +3）。

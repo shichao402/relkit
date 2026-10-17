@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+4
+
+- 第四版：from→to 升级 e2e（baseline 0.1.0+3，组件套件 payload 升级链 +4）。
+
 ## 0.1.0+3
 
 - 第三版：from→to 升级 e2e（baseline 0.1.0+2，组件套件 payload 平铺安装 + check → apply → 断言）。

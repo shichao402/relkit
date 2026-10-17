@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+3
+
+- 第三版：from→to 升级 e2e（baseline 0.1.0+2，双订阅 apply + 代管 managed library 断言按 active 指针）。
+
 ## 0.1.0+2
 
 - 第二版：from→to 升级 e2e（baseline 0.1.0+1，双订阅 apply：自更新 in-place + 代管 managed library 安装）。
