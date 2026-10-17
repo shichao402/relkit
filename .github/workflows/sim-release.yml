@@ -71,8 +71,8 @@ jobs:
           PRODUCT="${INPUT_PRODUCT:-}"
           if [ -z "$PRODUCT" ]; then
             # push 触发：从变更文件推导产品（本次 push 中 CHANGELOG 有变更的产品）。
-            BEFORE="${{ github.event.before }}"
-            AFTER="${{ github.sha }}"
+            BEFORE="HEAD~1"
+            AFTER="HEAD"
             if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
               PRODUCT=$(git diff --name-only "$BEFORE" "$AFTER" -- 'products/*/CHANGELOG.md' \
                 | sed -E 's#products/([^/]+)/CHANGELOG.md#\1#' | tail -1)
