@@ -306,8 +306,8 @@ jobs:
       - name: Merge ArtifactSets
         run: |
           set -euo pipefail
-          args=(--out "dist/relkit-artifact-set/merged/artifact-set.json")
-          for dir in artifacts/sim-artifact-set-*; do
+          args=(--out "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json")
+          for dir in "$GITHUB_WORKSPACE"/artifacts/sim-artifact-set-*; do
             args+=(--in "$dir/artifact-set.json")
           done
           if [ "${#args[@]}" -le 2 ]; then
