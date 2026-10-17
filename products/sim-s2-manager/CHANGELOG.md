@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+6
+
+- 第六版：control-plane 换根（relkit-distribution-2027）+ relkit v0.6.17 updater（in-place 跨卷 backup 修复）后重跑 from 0.1.0+5 → 0.1.0+6 真实升级 e2e（双订阅 apply + managed library 断言）。
+
 ## 0.1.0+5
 
 - 第五版：+4 发布验证通过（in-place apply 语义已入 e2e driver），from→to 升级 e2e（baseline 0.1.0+4）。
