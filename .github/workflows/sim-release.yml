@@ -2,6 +2,11 @@
 # 复刻 Dec release.yml 的 Operator 分工：产品流水线只生产/合并 ArtifactSet；
 # 发布 transaction 由 Operator（RELKIT_UPLOAD_TOKEN + RELKIT_RELEASE_VIA_CI）执行。
 # 四产品共用 workflow，product 矩阵展开；sim-s1 双平台、其余 windows。
+#
+# 多产品矩阵（2026-10-18 重构）：push 触发时 derive_release_targets.mjs 从 diff
+# 推导全部待发布产品（0f54474 教训：tail-1 单产品推导会漏跑双产品提交中的
+# 另一个），build/operator-publish/e2e 全部按 matrix.product 展开。
+# yaml 只做编排，推导逻辑全部在 scripts/（PAC 铁律）。
 
 name: Sim release
 
@@ -39,7 +44,7 @@ on:
       - "scripts/**"
 
 concurrency:
-  group: sim-${{ github.event.inputs.product || 'all' }}-release
+  group: sim-${{ github.event.inputs.product || 'push' }}-release
   cancel-in-progress: false
 
 permissions:
@@ -53,74 +58,63 @@ jobs:
     name: prepare
     runs-on: ubuntu-latest
     outputs:
-      product: ${{ steps.meta.outputs.product }}
-      version: ${{ steps.meta.outputs.version }}
-      channel: ${{ steps.meta.outputs.channel }}
-      baseline_version: ${{ steps.meta.outputs.baseline_version }}
+      matrix: ${{ steps.meta.outputs.matrix }}
+      releases: ${{ steps.meta.outputs.releases }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Resolve product version channel
+      - name: Derive release plan
         id: meta
         shell: bash
         env:
           INPUT_PRODUCT: ${{ github.event.inputs.product }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+          INPUT_BASELINE: ${{ github.event.inputs.baseline_version }}
         run: |
           set -euo pipefail
-          PRODUCT="${INPUT_PRODUCT:-}"
-          if [ -z "$PRODUCT" ]; then
-            # push 触发：从变更文件推导产品（本次 push 中 CHANGELOG 有变更的产品）。
+          # 发布计划推导全部走项目脚本（多产品矩阵 + per-product 参数）。
+          # push 无 CHANGELOG 变更 → exit 3 → matrix=[] → 下游全部 skip（不兜底重发）。
+          if [ -n "$INPUT_PRODUCT" ]; then
+            PLAN=$(node scripts/derive_release_targets.mjs --dispatch "$INPUT_PRODUCT" "$INPUT_VERSION" "$INPUT_CHANNEL" "$INPUT_BASELINE")
+          else
             BEFORE="HEAD~1"
             AFTER="HEAD"
-            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
-              PRODUCT=$(git diff --name-only "$BEFORE" "$AFTER" -- 'products/*/CHANGELOG.md' \
-                | sed -E 's#products/([^/]+)/CHANGELOG.md#\1#' | tail -1)
-            fi
-            if [ -z "$PRODUCT" ]; then
-              # fallback：工作区内所有产品 CHANGELOG 顶部版本中 code 最高且未发布者，取 sim-s1 兜底。
-              PRODUCT=sim-s1
+            if [ -n "$(git rev-list -n 1 "$BEFORE" 2>/dev/null)" ] && [ "$(git rev-parse "$BEFORE" 2>/dev/null)" != "0000000000000000000000000000000000000000" ]; then
+              set +e
+              PLAN=$(node scripts/derive_release_targets.mjs "$BEFORE" "$AFTER")
+              RC=$?
+              set -e
+              if [ "$RC" -eq 3 ]; then
+                echo "matrix=[]" >> "$GITHUB_OUTPUT"
+                echo "releases={}" >> "$GITHUB_OUTPUT"
+                echo "no CHANGELOG change; nothing to release"
+                exit 0
+              elif [ "$RC" -ne 0 ]; then
+                exit "$RC"
+              fi
+            else
+              # 首提交 / 无法取 HEAD~1：无历史可比，不发
+              echo "matrix=[]" >> "$GITHUB_OUTPUT"
+              echo "releases={}" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
           fi
-          CHANNEL="${INPUT_CHANNEL:-dev}"
-          VERSION="${INPUT_VERSION:-}"
-          if [ -z "$VERSION" ]; then
-            # push 触发时无 version 输入：从产品 CHANGELOG 最新小节推导。
-            CHANGELOG="products/$PRODUCT/CHANGELOG.md"
-            if [ ! -f "$CHANGELOG" ]; then
-              echo "no workflow_dispatch version and no $CHANGELOG for push trigger" >&2
-              exit 1
-            fi
-            VERSION=$(grep -E '^## ' "$CHANGELOG" | head -1 | sed -E 's/^## +//; s/ +$//')
-            echo "derived version from CHANGELOG: $VERSION"
-          fi
-          case "$VERSION" in
-            *+*) ;;
-            *) echo "version 必须带 +build (e.g. 0.1.0+2)，got $VERSION"; exit 1 ;;
-          esac
-          echo "product=$PRODUCT" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "product=$PRODUCT version=$VERSION channel=$CHANNEL"
-          # baseline（from）版本：显式输入优先；否则取 CHANGELOG 倒数第二个小节。
-          # 当前小节是本次发布的 to，上一小节是可从 CDN 下载的 from。
-          BASELINE="${{ github.event.inputs.baseline_version }}"
-          if [ -z "$BASELINE" ]; then
-            BASELINE=$(grep -E '^## ' "$CHANGELOG" | sed -E 's/^## +//; s/ +$//' | sed -n '2p')
-          fi
-          echo "baseline=$BASELINE"
-          echo "baseline_version=$BASELINE" >> "$GITHUB_OUTPUT"
+          echo "plan: $PLAN"
+          MATRIX=$(printf '%s' "$PLAN" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.stringify(JSON.parse(s).products))})')
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "releases=$(printf '%s' "$PLAN" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.stringify(JSON.parse(s).releases))}')" >> "$GITHUB_OUTPUT"
 
   build:
-    name: ArtifactSet (${{ matrix.target }})
+    name: ArtifactSet (${{ matrix.product }} / ${{ matrix.target }})
     needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        product: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+        target:
           - target: windows-amd64
             runner: windows-latest
             host_target: windows-amd64
@@ -130,12 +124,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 仅当产品需要当前平台时才构建（sim-s1 双平台，其余仅 windows）
+      - name: Materialize release params
+        shell: bash
+        env:
+          RELEASES: ${{ needs.prepare.outputs.releases }}
+          PRODUCT: ${{ matrix.product }}
+        run: |
+          set -euo pipefail
+          eval "$(printf '%s' "$RELEASES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s)[process.argv[1]];console.log(`VERSION=${JSON.stringify(r.version)}`);console.log(`CHANNEL=${JSON.stringify(r.channel)}`);console.log(`BASELINE=${JSON.stringify(r.baseline||"")}`)}' "$PRODUCT")"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
+          echo "BASELINE=$BASELINE" >> "$GITHUB_ENV"
+
+      # 仅当产品需要当前平台时才构建（sim-s1 双平台，其余仅 windows）。
+      # product × target 笛卡尔积中不合法的组合在此 skip。
       - name: Check target applicability
         id: applicable
         shell: bash
         env:
-          PRODUCT: ${{ needs.prepare.outputs.product }}
+          PRODUCT: ${{ matrix.product }}
           MATRIX_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
@@ -157,15 +164,15 @@ jobs:
           node-version: "22"
 
       - name: Setup Dart
-        if: steps.applicable.outputs.skip != 'true' && needs.prepare.outputs.product == 'sim-s1'
+        if: steps.applicable.outputs.skip != 'true' && matrix.product == 'sim-s1'
         uses: dart-lang/setup-dart@v1
 
       - name: Setup Rust
-        if: steps.applicable.outputs.skip != 'true' && needs.prepare.outputs.product == 'sim-s2-manager'
+        if: steps.applicable.outputs.skip != 'true' && matrix.product == 'sim-s2-manager'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Setup Go
-        if: steps.applicable.outputs.skip != 'true' && needs.prepare.outputs.product == 'sim-s3'
+        if: steps.applicable.outputs.skip != 'true' && matrix.product == 'sim-s3'
         uses: actions/setup-go@v5
         with:
           go-version: "1.26.3"
@@ -181,8 +188,8 @@ jobs:
         env:
           OPS_URL: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_URL || vars.RELKIT_OPS_LINUX_URL }}
           OPS_SHA256: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_SHA256 || vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
-          BUNDLE_SHA256: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
+          BUNDLE_URL: ${{ matrix.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || matrix.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || matrix.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
+          BUNDLE_SHA256: ${{ matrix.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || matrix.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || matrix.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
         run: |
           set -euo pipefail
           test -n "$OPS_URL" && test -n "$OPS_SHA256"
@@ -198,8 +205,8 @@ jobs:
           install_args=(
             bundle install
             --bundle "$RUNNER_TEMP/relkit-bundle"
-            --project "products/${{ needs.prepare.outputs.product }}/relkit.project.json"
-            --project-root "$GITHUB_WORKSPACE/products/${{ needs.prepare.outputs.product }}"
+            --project "products/${{ matrix.product }}/relkit.project.json"
+            --project-root "$GITHUB_WORKSPACE/products/${{ matrix.product }}"
             --home "$RUNNER_TEMP/relkit-home"
             --target "${{ matrix.host_target }}"
           )
@@ -215,8 +222,8 @@ jobs:
         env:
           OPS_URL: ${{ vars.RELKIT_OPS_WINDOWS_URL }}
           OPS_SHA256: ${{ vars.RELKIT_OPS_WINDOWS_SHA256 }}
-          BUNDLE_URL: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
-          BUNDLE_SHA256: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
+          BUNDLE_URL: ${{ matrix.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || matrix.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || matrix.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
+          BUNDLE_SHA256: ${{ matrix.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || matrix.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || matrix.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
         run: |
           if (-not $env:OPS_URL -or -not $env:OPS_SHA256 -or
               -not $env:BUNDLE_URL -or -not $env:BUNDLE_SHA256) {
@@ -238,8 +245,8 @@ jobs:
           $installArgs = @(
             "bundle", "install",
             "--bundle", $bundle,
-            "--project", "products/${{ needs.prepare.outputs.product }}/relkit.project.json",
-            "--project-root", "$env:GITHUB_WORKSPACE/products/${{ needs.prepare.outputs.product }}",
+            "--project", "products/${{ matrix.product }}/relkit.project.json",
+            "--project-root", "$env:GITHUB_WORKSPACE/products/${{ matrix.product }}",
             "--home", $relkitHome,
             "--target", "${{ matrix.host_target }}"
           )
@@ -252,10 +259,10 @@ jobs:
 
       - name: Produce ArtifactSet (Unix)
         if: steps.applicable.outputs.skip != 'true' && runner.os != 'Windows'
-        working-directory: products/${{ needs.prepare.outputs.product }}
+        working-directory: products/${{ matrix.product }}
         env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          VERSION: ${{ env.VERSION }}
+          CHANNEL: ${{ env.CHANNEL }}
         run: |
           ./relkitw artifacts produce \
             --version "$VERSION" \
@@ -267,10 +274,10 @@ jobs:
       - name: Produce ArtifactSet (Windows)
         if: steps.applicable.outputs.skip != 'true' && runner.os == 'Windows'
         shell: pwsh
-        working-directory: products/${{ needs.prepare.outputs.product }}
+        working-directory: products/${{ matrix.product }}
         env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          VERSION: ${{ env.VERSION }}
+          CHANNEL: ${{ env.CHANNEL }}
         run: |
           .\relkitw.cmd artifacts produce `
             --version $env:VERSION `
@@ -283,24 +290,40 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.applicable.outputs.skip != 'true'
         with:
-          name: sim-artifact-set-${{ needs.prepare.outputs.product }}-${{ matrix.target }}
-          path: products/${{ needs.prepare.outputs.product }}/dist/relkit-artifact-set/${{ matrix.target }}/
+          name: sim-artifact-set-${{ matrix.product }}-${{ matrix.target }}
+          path: products/${{ matrix.product }}/dist/relkit-artifact-set/${{ matrix.target }}/
           if-no-files-found: error
           retention-days: 7
 
   operator-publish:
-    name: Operator publish and verify
+    name: Operator publish and verify (${{ matrix.product }})
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        product: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Materialize release params
+        shell: bash
+        env:
+          RELEASES: ${{ needs.prepare.outputs.releases }}
+          PRODUCT: ${{ matrix.product }}
+        run: |
+          set -euo pipefail
+          eval "$(printf '%s' "$RELEASES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s)[process.argv[1]];console.log(`VERSION=${JSON.stringify(r.version)}`);console.log(`CHANNEL=${JSON.stringify(r.channel)}`);console.log(`BASELINE=${JSON.stringify(r.baseline||"")}`)}' "$PRODUCT")"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
+          echo "BASELINE=$BASELINE" >> "$GITHUB_ENV"
 
       - name: Install signed Operator bundle
         env:
           OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
           OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
-          BUNDLE_SHA256: ${{ needs.prepare.outputs.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || needs.prepare.outputs.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || needs.prepare.outputs.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
+          BUNDLE_URL: ${{ matrix.product == 'sim-s1' && vars.RELKIT_BUNDLE_URL_SIM_S1 || matrix.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGER || matrix.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_URL_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_URL_SIM_S3 }}
+          BUNDLE_SHA256: ${{ matrix.product == 'sim-s1' && vars.RELKIT_BUNDLE_SHA256_SIM_S1 || matrix.product == 'sim-s2-manager' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGER || matrix.product == 'sim-s2-managed' && vars.RELKIT_BUNDLE_SHA256_SIM_S2_MANAGED || vars.RELKIT_BUNDLE_SHA256_SIM_S3 }}
         run: |
           set -euo pipefail
           test -n "$OPS_URL" && test -n "$OPS_SHA256"
@@ -314,8 +337,8 @@ jobs:
           install_args=(
             bundle install
             --bundle "$RUNNER_TEMP/relkit-bundle"
-            --project "products/${{ needs.prepare.outputs.product }}/relkit.project.json"
-            --project-root "$GITHUB_WORKSPACE/products/${{ needs.prepare.outputs.product }}"
+            --project "products/${{ matrix.product }}/relkit.project.json"
+            --project-root "$GITHUB_WORKSPACE/products/${{ matrix.product }}"
             --home "$RUNNER_TEMP/relkit-home"
             --target linux-amd64
           )
@@ -327,7 +350,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: sim-artifact-set-${{ needs.prepare.outputs.product }}-*
+          pattern: sim-artifact-set-${{ matrix.product }}-*
           path: artifacts
           merge-multiple: false
 
@@ -344,7 +367,7 @@ jobs:
           fi
           out="$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
           out_dir="$(dirname "$out")"
-          pushd "products/${{ needs.prepare.outputs.product }}"
+          pushd "products/${{ matrix.product }}"
           # 不要提前创建 merged/：relkit artifacts merge 要求输出目录尚不存在
           # （否则报 merge output directory already exists）。仅单输入直通需自建。
           # TODO(relkit): relkit artifacts merge 硬性要求 ≥2 输入（vnext.go:1083），
@@ -374,14 +397,12 @@ jobs:
         env:
           RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
           RELKIT_RELEASE_VIA_CI: "1"
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
           MANAGED_ROOT_PB64: ${{ vars.RELKIT_PRODUCT_ROOT_SIM_S2_MANAGED }}
         run: |
           set -euo pipefail
           test -n "$RELKIT_UPLOAD_TOKEN"
           product_roots=()
-          if [ "${{ needs.prepare.outputs.product }}" = sim-s2-managed ]; then
+          if [ "${{ matrix.product }}" = sim-s2-managed ]; then
             # sim-s2-managed（updater-projection，Loom 同款）无订阅、Node blob 无 facade，
             # offline bundle 通道下 bootstrap 不物化其产品根。
             # TODO(relkit): offline bundle 只写 RuntimeProfiles（offlinebundle.Install），
@@ -394,7 +415,7 @@ jobs:
             printf '%s' "$MANAGED_ROOT_PB64" | base64 -d > "$RUNNER_TEMP/sim-s2-managed-root.pb"
             product_roots+=(--product-root "$RUNNER_TEMP/sim-s2-managed-root.pb")
           fi
-          pushd "products/${{ needs.prepare.outputs.product }}"
+          pushd "products/${{ matrix.product }}"
           ./relkitw stage \
             --artifact-set "$GITHUB_WORKSPACE/dist/relkit-artifact-set/merged/artifact-set.json"
           ./relkitw release --version "$VERSION"
@@ -416,11 +437,27 @@ jobs:
           popd
 
   e2e:
-    name: e2e (${{ needs.prepare.outputs.product }})
+    name: e2e (${{ matrix.product }})
     needs: [prepare, operator-publish]
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        product: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Materialize release params
+        shell: bash
+        env:
+          RELEASES: ${{ needs.prepare.outputs.releases }}
+          PRODUCT: ${{ matrix.product }}
+        run: |
+          set -euo pipefail
+          eval "$(printf '%s' "$RELEASES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s)[process.argv[1]];console.log(`VERSION=${JSON.stringify(r.version)}`);console.log(`CHANNEL=${JSON.stringify(r.channel)}`);console.log(`BASELINE=${JSON.stringify(r.baseline||"")}`)}' "$PRODUCT")"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
+          echo "BASELINE=$BASELINE" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -428,15 +465,15 @@ jobs:
           node-version: "22"
 
       - name: Setup Dart
-        if: needs.prepare.outputs.product == 'sim-s1'
+        if: matrix.product == 'sim-s1'
         uses: dart-lang/setup-dart@v1
 
       - name: Setup Rust
-        if: needs.prepare.outputs.product == 'sim-s2-manager'
+        if: matrix.product == 'sim-s2-manager'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Setup Go
-        if: needs.prepare.outputs.product == 'sim-s3'
+        if: matrix.product == 'sim-s3'
         uses: actions/setup-go@v5
         with:
           go-version: "1.26.3"
@@ -444,16 +481,19 @@ jobs:
       - name: Install baseline from release
         shell: bash
         env:
-          PRODUCT: ${{ needs.prepare.outputs.product }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
-          BASELINE: ${{ needs.prepare.outputs.baseline_version }}
+          PRODUCT: ${{ matrix.product }}
           CDN: https://update-staging.firoyang.com/artifact
         run: |
           set -euo pipefail
           # baseline 版本：优先 CDN 上一版（真实升级路径）；无 baseline 时用本次版本。
           FROM_VER="$BASELINE"
           if [ -z "$FROM_VER" ] || [ "$FROM_VER" = "$VERSION" ]; then
+            FROM_VER="$VERSION"
+          fi
+          # sim-s2-managed（install-only 验收）例外：e2e 断言对象是本次发布的制品本身，
+          # driver 的 install-only 断言 expect 本次 VERSION，故拉 VERSION blob；升级语义
+          # 由 manager e2e 的代管断言覆盖，baseline blob 对 managed 无验收意义。
+          if [ "$PRODUCT" = sim-s2-managed ]; then
             FROM_VER="$VERSION"
           fi
           VER_ENC=$(printf '%s' "$FROM_VER" | sed 's/+/%2B/g')
@@ -465,7 +505,7 @@ jobs:
             unzip -o -j ".e2e/$PRODUCT/install/sim-server-payload.zip" 'files/*' -d ".e2e/$PRODUCT/install/"
             rm ".e2e/$PRODUCT/install/sim-server-payload.zip"
           elif [ "$PRODUCT" = sim-s2-managed ]; then
-            # managed 是 blob js（无 sidecar，更新由 manager 驱动）。
+            # managed 是 blob js（无 sidecar，更新由 manager 驱动；e2e 走 install-only 断言）。
             dl "sim-s2-managed-windows-amd64.js" "sim-s2-managed.js"
           else
             # s1 / manager：payload zip 布局为 files.pb + files/<主程序> +
@@ -484,11 +524,6 @@ jobs:
 
       - name: Run e2e driver
         shell: bash
-        env:
-          PRODUCT: ${{ needs.prepare.outputs.product }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
-          BASELINE: ${{ needs.prepare.outputs.baseline_version }}
         run: |
           set -euo pipefail
           if [ -n "$BASELINE" ] && [ "$BASELINE" != "$VERSION" ]; then
@@ -500,7 +535,7 @@ jobs:
               --channel "$CHANNEL" \
               --rounds 3
           else
-            # 无 baseline（首版）: 自装自验 up-to-date 终态。
+            # 无 baseline（首版）: 自装自验 up-to-date 终态（managed 走 install-only 断言）。
             node scripts/e2e_driver.mjs \
               --product "$PRODUCT" \
               --from "$VERSION" \

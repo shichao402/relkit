@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+7
+
+- 第七版：验证 install-only e2e 断言（driver 短路 + workflow 拉本次 VERSION blob）与多产品发布矩阵的 push 推导（managed 单产品链）。
+
 ## 0.1.0+6
 
 - 第六版：from 0.1.0+5 → to 0.1.0+6 真实升级 e2e（baseline +5 制品已确认在 CDN 服务器；本轮验证 blob 安装链完整升级路径）。

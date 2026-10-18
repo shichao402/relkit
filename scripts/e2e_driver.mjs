@@ -110,6 +110,10 @@ const PRODUCT_DIRS = {
     node: true,
     defaultExeName: "sim-s2-managed.js",
     placement: "library",
+    // updater-projection 产品（Loom 同款）：自身不驱动 updater（main.js 任意 argv
+    // 都是 hello-world，无 check/apply 子命令），升级由 manager 代管切换。
+    // e2e 走 install-only 断言：CDN blob 可执行 + 版本正确（R12 实证）。
+    installOnly: true,
   },
   "sim-s3": {
     exe: (root) => path.join(root, `${component}.exe`),
@@ -183,6 +187,15 @@ function assertManagedVersion(expected, label) {
     fail(`${label} (managed): 期望版本含 "${expected}"，实际 "${line}"`);
   }
   process.stdout.write(`[ok] ${label} (managed library): ${line}\n`);
+}
+
+if (spec.installOnly) {
+  // install-only 验收（updater-projection 产品）：安装根的 blob 即本次发布版本
+  // （workflow 从 CDN 拉本次 VERSION），断言可执行 + 版本正确即 PASS。
+  // from→to 自升级语义由 manager e2e 的 assertManagedVersion 代管断言覆盖。
+  assertVersion(expectVersion, "install-only");
+  process.stdout.write(`\ne2e PASS: ${product} install-only ${expectVersion} (${channel})\n`);
+  process.exit(0);
 }
 
 assertVersion(fromVersion, "baseline");
