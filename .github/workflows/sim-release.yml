@@ -102,9 +102,13 @@ jobs:
             fi
           fi
           echo "plan: $PLAN"
-          MATRIX=$(printf '%s' "$PLAN" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.stringify(JSON.parse(s).products))})')
+          # 提取走项目脚本（单一实现源，PAC 铁律）：VAR=$(cmd) 赋值形式在 set -e 下
+          # 失败即红——run 39096462210 教训：echo "x=$(cmd)" 会吞掉命令替换失败码，
+          # step 绿但输出未注册，下游矩阵静默缺席。
+          MATRIX=$(printf '%s' "$PLAN" | node scripts/verify_plan_extract.mjs matrix)
+          RELEASES_OUT=$(printf '%s' "$PLAN" | node scripts/verify_plan_extract.mjs releases)
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-          echo "releases=$(printf '%s' "$PLAN" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.stringify(JSON.parse(s).releases))}')" >> "$GITHUB_OUTPUT"
+          echo "releases=$RELEASES_OUT" >> "$GITHUB_OUTPUT"
 
   build:
     name: ArtifactSet (${{ matrix.product }} / ${{ matrix.target }})
@@ -131,7 +135,9 @@ jobs:
           PRODUCT: ${{ matrix.product }}
         run: |
           set -euo pipefail
-          eval "$(printf '%s' "$RELEASES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s)[process.argv[1]];console.log(`VERSION=${JSON.stringify(r.version)}`);console.log(`CHANNEL=${JSON.stringify(r.channel)}`);console.log(`BASELINE=${JSON.stringify(r.baseline||"")}`)}' "$PRODUCT")"
+          # 提取走项目脚本（单一实现源）：输出与 eval 消费格式完全一致；
+          # 未知产品/坏 JSON 时脚本非零退出，set -e 下 step 红，fail-loud。
+          eval "$(printf '%s' "$RELEASES" | node scripts/verify_plan_extract.mjs "$PRODUCT")"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
           echo "BASELINE=$BASELINE" >> "$GITHUB_ENV"
@@ -313,7 +319,9 @@ jobs:
           PRODUCT: ${{ matrix.product }}
         run: |
           set -euo pipefail
-          eval "$(printf '%s' "$RELEASES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s)[process.argv[1]];console.log(`VERSION=${JSON.stringify(r.version)}`);console.log(`CHANNEL=${JSON.stringify(r.channel)}`);console.log(`BASELINE=${JSON.stringify(r.baseline||"")}`)}' "$PRODUCT")"
+          # 提取走项目脚本（单一实现源）：输出与 eval 消费格式完全一致；
+          # 未知产品/坏 JSON 时脚本非零退出，set -e 下 step 红，fail-loud。
+          eval "$(printf '%s' "$RELEASES" | node scripts/verify_plan_extract.mjs "$PRODUCT")"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
           echo "BASELINE=$BASELINE" >> "$GITHUB_ENV"
@@ -454,7 +462,9 @@ jobs:
           PRODUCT: ${{ matrix.product }}
         run: |
           set -euo pipefail
-          eval "$(printf '%s' "$RELEASES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s)[process.argv[1]];console.log(`VERSION=${JSON.stringify(r.version)}`);console.log(`CHANNEL=${JSON.stringify(r.channel)}`);console.log(`BASELINE=${JSON.stringify(r.baseline||"")}`)}' "$PRODUCT")"
+          # 提取走项目脚本（单一实现源）：输出与 eval 消费格式完全一致；
+          # 未知产品/坏 JSON 时脚本非零退出，set -e 下 step 红，fail-loud。
+          eval "$(printf '%s' "$RELEASES" | node scripts/verify_plan_extract.mjs "$PRODUCT")"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
           echo "BASELINE=$BASELINE" >> "$GITHUB_ENV"
