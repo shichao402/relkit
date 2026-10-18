@@ -114,6 +114,9 @@ jobs:
   build:
     name: ArtifactSet (${{ matrix.product }} / ${{ matrix.target }})
     needs: prepare
+    # 空矩阵（exit-3 skip）时 fromJSON 展开为 []，矩阵 job 无实例可建会直接把 run
+    # 打红（run 39097646193 实证）。守卫让空矩阵显式 skipped，run 保持 success。
+    if: needs.prepare.outputs.matrix != '[]'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -313,6 +316,7 @@ jobs:
   operator-publish:
     name: Operator publish and verify (${{ matrix.product }})
     needs: [prepare, build]
+    if: needs.prepare.outputs.matrix != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -456,6 +460,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.product }})
     needs: [prepare, operator-publish]
+    if: needs.prepare.outputs.matrix != '[]'
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -543,6 +548,8 @@ jobs:
 
       - name: Run e2e driver
         shell: bash
+        env:
+          PRODUCT: ${{ matrix.product }}
         run: |
           set -euo pipefail
           if [ -n "$BASELINE" ] && [ "$BASELINE" != "$VERSION" ]; then
