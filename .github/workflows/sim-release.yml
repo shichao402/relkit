@@ -117,8 +117,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 动态 product 维度（derive 输出）× 静态 target 维度；runner / host_target
+        # 由 include 按 target 匹配补齐。教训（run 39096462210 / 39097384892）：
+        # 对象列表挂在 target: 维度下是非法矩阵——维度值必须是标量，对象只属于
+        # include；错误形态 = build job 创建失败（完全缺席、无失败注解、run 红），
+        # 与数据无关（两次 run 分别带真实矩阵与空矩阵，缺席一致）。
         product: ${{ fromJSON(needs.prepare.outputs.matrix) }}
         target:
+          - windows-amd64
+          - darwin-universal
+        include:
           - target: windows-amd64
             runner: windows-latest
             host_target: windows-amd64
