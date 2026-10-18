@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0+8
+
+- 第八版：install-only e2e 断言终验（PRODUCT env 修复后）+ 空矩阵 skip 守卫实证后的 push 推导全链（build 双 target 矩阵 → publish +8 → install-only e2e 断言本次制品）。
+
 ## 0.1.0+7
 
 - 第七版：验证 install-only e2e 断言（driver 短路 + workflow 拉本次 VERSION blob）与多产品发布矩阵的 push 推导（managed 单产品链）。
