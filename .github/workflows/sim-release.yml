@@ -42,6 +42,7 @@ on:
     paths:
       - "products/**"
       - "scripts/**"
+      - ".github/workflows/sim-release.yml"
 
 concurrency:
   group: sim-${{ github.event.inputs.product || 'push' }}-release
