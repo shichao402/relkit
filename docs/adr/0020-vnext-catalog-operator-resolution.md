@@ -118,6 +118,34 @@ Relkit 版本字段。
 签名身份校验，唯一差距是 scheme/端口。签名 endpoint 的重签迁域属无时限 backlog：仅当
 Operator Profile 因其他实质变更需要重签时顺带迁移，不为同构单独重签。
 
+#### 写面收敛后的过渡态：缺省端点权威与「必须覆盖」
+
+2026-10-19 内网完成三域名拆分（`publish` 写面 / `update-internal` SDK 读面 SSOT / `update`
+人页 + 存量兼容读），2026-10-20 删除了 `update` 域上的 `/v1/` 写面 location，写面唯一入口
+收敛到 `publish`。这一步把上文「签名端点是缺省权威、transport 覆盖是受限网络的逃生门」的
+关系在**内网翻转成了事实上的必须覆盖**：
+
+- 内网产品当前接入的 candidate Operator Profile 仍把 `endpoints.agent/consumer/directory`
+  签在 `update.<domain>`（旧域）。Profile 是签名文档，改 domain 必须重签。
+- 旧域 `/v1/` 下线后，任何**不带 `RELKIT_AGENT_TRANSPORT_URL`** 的 `release --execute`
+  都会把请求打到已退役的写面并失败。因此内网所有真实发布路径都必须显式覆盖。
+- 这不是代码缺陷：覆盖机制按本文档的设计工作，校验范围、CI 门禁、不含拓扑断言都未变。
+  这是**控制面内容（签名 Profile）落后于部署现状（域名收敛）**形成的版本落差。
+
+结论与约束（写下来避免后来者误判）：
+
+1. 「缺省签名端点可用」在内网当前**不成立**，不要据此设计或验证任何流程；验收写面必须走
+   显式覆盖路径，或等 Profile 重签后再验。
+2. 该落差不能靠放宽覆盖校验来消除（那会把逃生门变成常态，且与「签名端点是服务身份权威」
+   的定位冲突）；也不能靠在旧域保留 `/v1/` 来消除（那等于放弃写面收敛目标）。唯一正解是
+   重签 Profile，而 candidate 根私钥不持有，故列为无时限 backlog。
+3. 重签时的目标端点：`agent` → `https://publish.<domain>/`（内网 CI 侧仍需 http 覆盖），
+   `consumer`/`directory` → `https://update-internal.<domain>/`。
+4. 同构判定只看域名职责，不看「缺省端点是哪一版」：三域职责与外网一致即算同构成立，
+   Profile 内容迭代属常规运维。
+
+
+
 
 Schema 草案：[`../design/vnext/schemas/relkit.operator-profile.1.schema.json`](../design/vnext/schemas/relkit.operator-profile.1.schema.json)
 
@@ -292,6 +320,13 @@ lane 的复制品——candidate lane 是同服务器 namespace 隔离，与独�
 - 一次 CI 版本固定且可审计
 - 滚动服务持续暴露兼容问题，而不靠每仓私自 pin 掩盖
 - 端点配置与部署拓扑解耦：同机、分机、换机均不改客户端配置；换地址只改一行 env
+- 写面收敛为单域名入口（`publish.<domain>`），读面 SSOT 为 `update-internal.<domain>`，
+  人页与存量兼容留在 `update.<domain>`；三域职责内外网一致，写面收敛以「旧域 `/v1/` 返回
+  404/403、publish 仍返回 405/400」为可验证判据
+- 过渡态代价：签名 Profile 未重签期间，内网缺省端点不可用、必须显式覆盖 transport。
+  这条落差写进 [publish-topology.md](../design/publish-topology.md) §7.1 与本文档
+  「写面收敛后的过渡态」小节，重签属无时限 backlog
+
 
 ## 完成标准（本 ADR）
 

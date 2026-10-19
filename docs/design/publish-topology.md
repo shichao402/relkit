@@ -172,4 +172,24 @@ flowchart TB
 - 客户端与 CI 看到的 `https://publish.devcloud.woa.com:443` / `https://update-internal.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 vhost。箱上无证书时 `listen 80`，有证后加 `listen 443 ssl`，流程不变
 - 内网 GET `/` 不现算门户；没有 rebuild dump 时是短说明，面板在 `https://publish.devcloud.woa.com/-/admin`（迁移期 `https://update.devcloud.woa.com/-/admin` 仍可用）。外网数据面已是本机 store 协议树，HTML 由 agent 站点 sinks 部署。
 
+### 7.1 同构定稿（2026-10-20，内网写面收敛完成后）
+
+内网与外网在**域名职责**这一层已经绝对同构，收敛完成的判据是三域各自只承担一种角色：
+
+| 域名 | 角色 | 内网实测响应（2026-10-20） |
+|---|---|---|
+| `publish.<domain>` | CI 写面 + 存量 entryUrls 兼容读 | `POST /v1/publish` 400（缺协议体）、`GET/PUT /v1/publish` 405（route 活、方法不允许）、读面 200 |
+| `update-internal.<domain>` | 内嵌 SDK 协议读面（SSOT，`baseUrl` 指向此域） | 读面 200、`GET /v1/publish` 404、`PUT/POST` 403（`limit_except GET`） |
+| `update.<domain>` | 人页 + 存量签名 URL 只读兼容 | 读面 200、`GET /v1/publish` 404、`PUT/POST` 403，与 update-internal 方法级完全同构 |
+
+收敛动作与判据（内网，2026-10-20）：
+
+- `update` 域的 `location /v1/`（→ agent `127.0.0.1:8787`）已删除，写面语义在该域彻底消失；`/-/health`、`/-/admin`、`/-/p/`、`/-/latest/`、`issue-handler`、只读 `/` 全部保留。
+- 删除后 `update` 与 `update-internal` 的方法级矩阵完全相同（GET 404 / PUT 403 / POST 403），差别只剩「update 多带 console 人页与控制面」。这就是「写面单一收敛」的可验证形态。
+- 反向确认：`publish` 仍是唯一活写面（`POST /v1/publish` 400 而非 404/403），因此收敛不是把所有域都关掉，而是把唯一入口留下。
+
+**唯一剩余差距：传输层，不是配置模型。** 内网 CI 写面是 `http://publish.<domain>/`（:80），外网是 `https://publish.<domain>/`（:443）。根因是蓝盾构建池的网络策略：到 443 的连接被定向拦截，且池内设备证书为池内自签伪证书，即便放行也无法建立可信 TLS；同一台箱的 agent 进程在箱内回连自身 https 域名同样不通（TLS 由 WOA 网关在箱外终结，箱上无 443 监听）。两侧在「显式端点配置 + 签名身份校验」这套行为模型上完全一致，只有 scheme/端口不同。
+
+**签名 Operator 端点与部署现状的落差（过渡态，需知）。** 内网三产品当前使用的 candidate Operator Profile 仍把 `endpoints.agent/consumer/directory` 签在 `update.devcloud.woa.com`（见 `MISSION-LOG` 偏离 18）。CI 三份 yaml 各自显式注入 `RELKIT_AGENT_TRANSPORT_URL` 指向 publish 域，所以链路正常；但**不带覆盖 env 的缺省 `release --execute` 在旧域写面下线后不再可用**。candidate 根私钥不在本机，无法为同构单独重签 Profile，故迁移列为无时限 backlog：仅当 Operator Profile 因其他实质变更需要重签时，顺带把 `agent` 迁 publish 域、`consumer`/`directory` 迁 update-internal 域。
+
 > 2026-09-26 raw 兼容面下线：唯一还在打 /rup/ 的客户端（43.132.141.25，用户自有 CVM）日志核实已双轨访问新协议路径（/index、/manifest 直连，1.13.96 已装），/rup/ 轮询只是残留 cron；其余 /rup/ 流量全是验证 curl。三件套下线：DNSPod DeleteRecord 删 raw A 记录（RecordId 2380132895，回读 0 条，公共 DNS 返回 DNSPod 停放页与任意不存在子域一致）；nginx vhost 归档 raw-compat.conf.retired-20260926（非删除）；certbot delete 证书（Let's Encrypt 可随时重签）。Dec 仓 relkit.json 删除 backends.cos 死配置段（含嵌入副本，测试防回归断言保留），UPDATE_ARCHITECTURE.md 同步 relkit-store 现状（commit 7eb4dcd）。旧 relkit-cos-cert-renew.timer/service 空壳单元一并删除（daemon-reload 生效）。publish/update/update-internal 三面复验 200。以后需要旧代兼容面时重新加回（DNS A 记录 + certbot + vhost 三步）。
