@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -216,11 +215,18 @@ func hasPublishContract(values []contracts.Capability) bool {
 	return false
 }
 
-// vNextAgentTransportURL preserves the signed Operator endpoint as the
-// authority while allowing a CI adapter to carry the same protocol through a
-// local tunnel. The credential may only be redirected to a loopback listener:
-// arbitrary endpoint overrides would let a compromised build exfiltrate the
-// product-scoped Agent token.
+// vNextAgentTransportURL resolves the agent endpoint used by an execute-mode
+// release. The signed Operator endpoint stays the default authority. In CI the
+// transport may be overridden by RELKIT_AGENT_TRANSPORT_URL because a build
+// network can reach the same publish service through a different scheme, port,
+// or host name than the one baked into the signed profile.
+//
+// The override is a plain explicit endpoint configuration, not a topology
+// assertion: it is never compared against the signed endpoint's host or IP, so
+// the same configuration works whether the service instance happens to run on
+// the same machine or a different one. What is still enforced is configuration
+// hygiene (absolute http/https URL, no credentials, no query, no fragment) and
+// the CI gate (the variable is only meaningful when RELKIT_RELEASE_VIA_CI=1).
 func vNextAgentTransportURL(signedURL string, execute bool) (string, error) {
 	signedURL = strings.TrimSpace(signedURL)
 	if !execute {
@@ -233,19 +239,15 @@ func vNextAgentTransportURL(signedURL string, execute bool) (string, error) {
 	if os.Getenv("RELKIT_RELEASE_VIA_CI") != "1" {
 		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL requires RELKIT_RELEASE_VIA_CI=1")
 	}
-	parsed, err := url.ParseRequestURI(override)
-	if err != nil || parsed.Host == "" {
-		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must be an absolute HTTP(S) loopback URL")
+	parsed, err := url.Parse(override)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" {
+		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must be an absolute HTTP(S) URL")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must use http or https")
 	}
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must not contain credentials, query, or fragment")
-	}
-	host := net.ParseIP(parsed.Hostname())
-	if host == nil || !host.IsLoopback() {
-		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must target a loopback IP")
 	}
 	return override, nil
 }

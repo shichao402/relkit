@@ -84,13 +84,40 @@ Relkit 版本字段。
 - `operatorRef` 解析为逻辑名 → relkit-ops / CI 注入的已签名 Profile 路径或 URL（带 trustFingerprint 校验）
 - **一份 Profile = 一个 deployment**。dev/stable、内网/公网、多机若部署事实不同，则多份 Profile、多个 `deploymentId`
 - project 只引用逻辑 Operator；具体 deployment 由 CI/环境选择注入，不把机器地址写入产品仓
-- 签名 endpoint 是服务身份与默认路由的权威事实；受限网络中的 CI adapter
-  可以建立本机隧道，但不得重写 Profile 或 resolution。写路径仅在
-  `RELKIT_RELEASE_VIA_CI=1` 的 execute 模式接受独立的
-  `RELKIT_AGENT_TRANSPORT_URL`，且目标必须是 loopback IP；它不复用旧控制面的
-  `RELKIT_AGENT_URL`，因此不会把签名 endpoint 与兼容配置混为一谈，产品 Token 也不会被
-  环境变量导向任意远端。发布后只读验证可显式传入 `--consumer` 与 `--directory` 的
-  隧道路由，验证结果仍绑定原 resolution digest、deployment identity 与产品签名根
+- 签名 endpoint 是服务身份与默认路由的权威事实；受限网络中的 CI 可以显式指定同一服务的可达端点，
+  但不得重写 Profile 或 resolution。写路径仅在 `RELKIT_RELEASE_VIA_CI=1` 的 execute 模式接受独立的
+  `RELKIT_AGENT_TRANSPORT_URL`，它不复用旧控制面的 `RELKIT_AGENT_URL`，因此不会把签名 endpoint 与
+  兼容配置混为一谈。发布后只读验证可显式传入 `--consumer` 与 `--directory`，验证结果仍绑定原
+  resolution digest、deployment identity 与产品签名根
+
+#### 服务端点：服务 = 域名一一对应，拓扑无关
+
+`RELKIT_AGENT_TRANSPORT_URL` 是**纯粹的显式端点配置**，不是拓扑断言。校验只覆盖配置卫生
+（绝对 http/https URL、无用户凭据、无 query、无 fragment）与 CI 门禁（仅在
+`RELKIT_RELEASE_VIA_CI=1` 的 execute 模式生效），**不校验**它与签名端点的 IP/host 关系。
+
+判据是「一个服务实例对应一个域名」：publish 服务有 `publish.<domain>`，update 服务有
+`update.<domain>`，agent 端点随服务域名走。服务实例是否与签名端点同机属部署细节，客户端配置
+不得表达，也不得据此 fail closed —— 任何同机校验在服务分机部署或换机迁移当天就会误伤。
+
+早期版本的 loopback 限制是**隧道时代的历史约束**，不是安全边界的必要组成，拆锁论证：
+
+1. 历史前提消失：隧道时代 agent 没有对外端口，只能借本机 loopback 端口转发；隧道退役后 agent
+   是正规服务（域名 + token 鉴权），端点配置不再需要绑定本机地址。
+2. 外网对照证伪：外网 CI 无此锁、无端点覆盖，因为签名端点本就签在 publish 域，缺省即正确。
+   内网需要覆盖是网络差异所致，不是安全等级差异。
+3. 威胁模型不成立：该变量由 yaml 版本控制写入，能改 yaml 的攻击者已持有流水线编辑权，端点锁
+   不提供增量防御。
+4. verify 面先例：只读验证的 `--consumer` / `--directory` 一直是显式 flag 且无 host 校验，
+   transport 面放宽才是内部一致。
+5. 拓扑无关：任何同机/同 IP 校验都把部署拓扑烧进客户端配置语义，服务分机部署即 fail closed。
+
+传输层按环境降级：内网 CI 受限构建池只有 http:80 可达（443 被网络策略定向拦截，且池内设备
+证书为伪证书，即便放行也无法建立可信 TLS），因此内网 CI 写面为 `http://publish.<domain>/`；
+公网与办公网保持 https。这是环境能力差异，不是配置行为模型差异——两侧都是显式端点配置 +
+签名身份校验，唯一差距是 scheme/端口。签名 endpoint 的重签迁域属无时限 backlog：仅当
+Operator Profile 因其他实质变更需要重签时顺带迁移，不为同构单独重签。
+
 
 Schema 草案：[`../design/vnext/schemas/relkit.operator-profile.1.schema.json`](../design/vnext/schemas/relkit.operator-profile.1.schema.json)
 
@@ -218,12 +245,53 @@ wrapper 固定 Distribution Root fingerprint、Operator/Catalog 协议、project
 - build 中重复 resolve
 - candidate 写 stable 或改 production certified 指针
 - 把 browse `catalog.json` 当作 Distribution Catalog
+- 参数化端点配置时校验其与签名端点的同机性
+
+## 未来方向：事实源收敛（星状拓扑，仅落档不实施）
+
+本节记录诊断与目标形态，本轮不实施；立项时另立 ADR 与需求流程。
+
+**诊断。** 签名与 resolution 这套机制，本质是对「网状结构 + 多事实源对不齐」的补丁。ADR 背景
+原文即自证：重复解析漂移、v0.5 各仓私 pin 反模式，都是在多个可写事实源之间对齐的代价。若不
+存在多事实源，这一层开销的相当部分可省。
+
+**目标形态（逻辑串联 + 间接寻址）。** 宿主只与服务实例打交道，不再各自解析 git release、
+mirror、catalog 等多个源。开发期 SDK 获取与签名、发布期写面、运行期读面，全部单点依赖所接入
+的 relkit 服务实例。分发不是实时代理 git release/mirror，而是 update 服提供 SDK／工具下载
+链接与文档的间接寻址：资产物理源任意可替换，`digest` 钉字节，「链接可换、源可换、货不可换」，
+git 降格为当前恰好可用的物理源之一，与 relkit 解耦。
+
+**入口（轻量化）。** 指引文档 + 服务实例地址即可，信任根指纹作为可选加固。HTTPS + 受控域名
+下 TLS 已覆盖主威胁（CA 沦陷、域名劫持、http MITM 属低概率残余风险）。
+
+**信任模型（不换位）。** 服务实例仅搬运 Distribution Root 已签资产，宿主仍验原签名，信任链
+起点不变。显式禁止的形态：实例在线持私钥重签一切——那等于实例被入侵即全托管面沦陷。
+
+**既有支撑。** wrapper「优先 Operator 预置资产」、catalog 可由 agent 间接提供、module H1、
+`requires/provides` 合同向量 hard fail、candidate lane、`update-staging` 独立实例均已在协议层
+成立。真正差距是部署决策：默认资产源现为 git release，SDK 可由服务实例充当 goproxy。
+
+**不可消除的三样。** 入口指针 + 指纹预置（总得知道去哪儿、信谁）、服务实例背后的不可变物理源
+（总得有字节）、签名换位不消失（换的只是签名主体位置；终态端点即 agent 自身，签名换家反而
+简化）。单点可用性代价：三时区同挂时不可用；缓解为资产预置缓存 + 多实例读面分担，但写面仍是
+单点。
+
+**预发布服。** 本质是独立起一个 relkit 服务实例（同代码零逻辑改动、版本更新），不是 candidate
+lane 的复制品——candidate lane 是同服务器 namespace 隔离，与独立实例是两回事。宿主 dev 渠道
+经各自 Profile 接入即可，一份 Profile = 一个 deployment 天然支持。
+
+**政策收紧项。** 相邻版本兼容窗口是让 latest-compatible 有意义的前提，值得采纳；协议版本显式化
++ 拒绝时明确告知。
+
+**风险先例。** agent 不兼容升级的波及面（30 个在线产品）即该形态的单点风险样板，故实施必须先
+有兼容窗口与预发布服先行。
 
 ## 后果
 
 - Pin 属于部署事实（Operator），不属于项目偏好
 - 一次 CI 版本固定且可审计
 - 滚动服务持续暴露兼容问题，而不靠每仓私自 pin 掩盖
+- 端点配置与部署拓扑解耦：同机、分机、换机均不改客户端配置；换地址只改一行 env
 
 ## 完成标准（本 ADR）
 
