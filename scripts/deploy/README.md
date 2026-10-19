@@ -35,7 +35,7 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 `uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-store` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
 
-现网数据面是 `update.devcloud.woa.com:8080`，与控制面共用主机名但不共用端口，也不经 nginx。后续可给数据面绑定独立 DNS，届时同时替换 `baseUrl` 与 `uploadUrl`。
+内网与外网三域名绝对同构（2026-10-19）：`publish.devcloud.woa.com`（CI 写面）、`update-internal.devcloud.woa.com`（SDK 读面，profile `baseUrl` 指向这里）、`update.devcloud.woa.com`（人页 + 存量兼容读）。内网 publish profile 的 `baseUrl` 切 `https://update-internal.devcloud.woa.com/`、`uploadUrl` 切 `https://publish.devcloud.woa.com/`（对齐外网 dec/cronkit 2026-09-26 形态）。旧口径「数据面 `update.devcloud.woa.com:8080` 与控制面共主机名不共端口」退役，新接入不要再用 `:8080` 裸端口 URL。
 
 `upgrade` 默认从当前 HEAD 构建；改完代码直接 `--apply` 即可。只有 `--unsafe-from-dist` 才会把盘上已有的 `dist/` 送上去。
 
