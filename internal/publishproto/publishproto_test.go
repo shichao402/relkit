@@ -70,3 +70,24 @@ func TestDisabledWindowAcceptsAnything(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// Write endpoints report the actionable reason in "cause" and may leave
+// "message" empty. Explain must surface it instead of printing an empty tail.
+func TestExplainFallsBackToCause(t *testing.T) {
+	body := []byte(`{"ok":false,"code":"release.verify_failed","error":"release.verify_failed","cause":"manifest 0.1.0 does not list this backend's URL"}`)
+	err := Explain(http.StatusConflict, body)
+	if err == nil {
+		t.Fatal("a non-OK decision with an error code must produce an error")
+	}
+	if got := err.Error(); got != "release.verify_failed: manifest 0.1.0 does not list this backend's URL" {
+		t.Fatalf("unexpected message: %q", got)
+	}
+}
+
+func TestExplainPrefersMessageOverCause(t *testing.T) {
+	body := []byte(`{"ok":false,"error":"release.verify_failed","message":"short reason","cause":"long detail"}`)
+	err := Explain(http.StatusConflict, body)
+	if err == nil || err.Error() != "release.verify_failed: short reason" {
+		t.Fatalf("unexpected message: %v", err)
+	}
+}

@@ -109,6 +109,7 @@ type Decision struct {
 	ServerCommit     string `json:"serverCommit,omitempty"`
 	Error            string `json:"error,omitempty"`
 	Message          string `json:"message,omitempty"`
+	Cause            string `json:"cause,omitempty"`
 	PublisherVersion string `json:"publisherVersion,omitempty"`
 }
 
@@ -208,7 +209,13 @@ func Explain(status int, body []byte) error {
 			need, decision.MinProtocol, decision.MaxProtocol,
 		)
 	default:
-		return fmt.Errorf("%s: %s", decision.Error, strings.TrimSpace(decision.Message))
+		detail := strings.TrimSpace(decision.Message)
+		if detail == "" {
+			// Write endpoints may report the actionable reason in "cause" and
+			// leave "message" empty. Dropping it hides the whole failure.
+			detail = strings.TrimSpace(decision.Cause)
+		}
+		return fmt.Errorf("%s: %s", decision.Error, detail)
 	}
 }
 

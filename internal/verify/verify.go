@@ -66,13 +66,24 @@ type ReleasedOptions struct {
 
 // RunReleased re-reads the committed release from consumer-visible backend
 // pointers. It is intentionally independent from the publish write path.
+//
+// Declared-URL enforcement is limited to the version being released. Manifests
+// are signed with the backend base URL in force at publish time, so tightening
+// this gate to the whole index would let a base-URL change (a host rename, say)
+// permanently block new releases on that channel until retainVersions prunes
+// the old nodes. Historical drift is still reported, as a warning.
 func RunReleased(cfg *config.Config, options ReleasedOptions, printer Printer) (*Findings, error) {
-	findings, err := Run(cfg, options.Channel, options.To, options.Deep, printer)
-	if err != nil {
-		return nil, err
-	}
 	if options.Version == "" {
 		return nil, Error{Message: "released verification requires an expected version"}
+	}
+	findings, err := run(cfg, runOptions{
+		channel:        options.Channel,
+		to:             options.To,
+		deep:           options.Deep,
+		strictVersions: map[string]bool{options.Version: true},
+	}, printer)
+	if err != nil {
+		return nil, err
 	}
 	channel, err := cfg.ChannelOrDefault(options.Channel)
 	if err != nil {
@@ -278,12 +289,33 @@ func verifyRuntimeProfileReference(
 	}
 }
 
+// runOptions carries the knobs shared by the standalone `verify` command and
+// the release commit gate. strictVersions is empty for the standalone command,
+// which means every version in the index is held to the current backend URLs.
+type runOptions struct {
+	channel        string
+	to             []string
+	deep           bool
+	strictVersions map[string]bool
+}
+
+func (o runOptions) strict(version string) bool {
+	if len(o.strictVersions) == 0 {
+		return true
+	}
+	return o.strictVersions[version]
+}
+
 func Run(cfg *config.Config, channel string, to []string, deep bool, printer Printer) (*Findings, error) {
+	return run(cfg, runOptions{channel: channel, to: to, deep: deep}, printer)
+}
+
+func run(cfg *config.Config, options runOptions, printer Printer) (*Findings, error) {
 	if printer == nil {
 		printer = func(string) {}
 	}
 
-	resolvedChannel, err := cfg.ChannelOrDefault(channel)
+	resolvedChannel, err := cfg.ChannelOrDefault(options.channel)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +324,7 @@ func Run(cfg *config.Config, channel string, to []string, deep bool, printer Pri
 		return nil, err
 	}
 
-	targetNames := append([]string(nil), to...)
+	targetNames := append([]string(nil), options.to...)
 	if len(targetNames) == 0 {
 		targetNames = append([]string(nil), cfg.PublishTo...)
 	}
@@ -355,13 +387,13 @@ func Run(cfg *config.Config, channel string, to []string, deep bool, printer Pri
 			printer(fmt.Sprintf("    reachability ok (%d version(s))", len(index.Versions)))
 		}
 
-		checkManifests(backend, index, cfg.Product, findings, printer)
+		checkManifests(backend, index, cfg.Product, options, findings, printer)
 
-		if deep {
+		if options.deep {
 			if !backend.URLsAreLive() {
 				findings.Note(fmt.Sprintf("--deep on %s checked stored bytes only; this backend's URLs are not expected to resolve yet", name))
 			}
-			checkArtifactsReachable(backend, index, cfg.Product, findings, printer)
+			checkArtifactsReachable(backend, index, cfg.Product, options, findings, printer)
 		}
 	}
 
@@ -463,18 +495,26 @@ func checkShape(index *model.IndexDocument, findings *Findings) {
 	}
 }
 
-func checkDeclaredURL(backend backends.Backend, key string, declaredURLs []string, what string, findings *Findings) *string {
+func checkDeclaredURL(backend backends.Backend, key string, declaredURLs []string, what string, strict bool, findings *Findings) *string {
 	expected := backend.URLFor(key)
 	if expected == nil {
 		return nil
 	}
 	if !containsURL(declaredURLs, *expected) {
-		findings.Error(fmt.Sprintf("%s does not list this backend's URL for %s\n           expects: %s\n           listed:  %s", what, key, *expected, strings.Join(declaredURLs, ", ")))
+		message := fmt.Sprintf("%s does not list this backend's URL for %s\n           expects: %s\n           listed:  %s", what, key, *expected, strings.Join(declaredURLs, ", "))
+		if strict {
+			findings.Error(message)
+		} else {
+			// Manifests are signed with the base URL in force at publish time.
+			// A later host rename leaves older versions declaring the old URL;
+			// that drift must not block new releases, so it is reported only.
+			findings.Warn("pre-existing, not released by this run: " + message)
+		}
 	}
 	return expected
 }
 
-func checkManifests(backend backends.Backend, index *model.IndexDocument, product string, findings *Findings, printer Printer) {
+func checkManifests(backend backends.Backend, index *model.IndexDocument, product string, options runOptions, findings *Findings, printer Printer) {
 	nodes := append([]*model.VersionNode(nil), index.Versions...)
 	slices.SortFunc(nodes, compareVersionNodes)
 	for _, node := range nodes {
@@ -482,7 +522,7 @@ func checkManifests(backend backends.Backend, index *model.IndexDocument, produc
 			continue
 		}
 		key := model.ManifestKey(product, node.Version)
-		checkDeclaredURL(backend, key, node.Manifest.Urls, "index entry for "+node.Version, findings)
+		checkDeclaredURL(backend, key, node.Manifest.Urls, "index entry for "+node.Version, options.strict(node.Version), findings)
 
 		raw, err := backend.Get(key)
 		if err != nil {
@@ -518,7 +558,7 @@ func checkManifests(backend backends.Backend, index *model.IndexDocument, produc
 	}
 }
 
-func checkArtifactsReachable(backend backends.Backend, index *model.IndexDocument, product string, findings *Findings, printer Printer) {
+func checkArtifactsReachable(backend backends.Backend, index *model.IndexDocument, product string, options runOptions, findings *Findings, printer Printer) {
 	nodes := append([]*model.VersionNode(nil), index.Versions...)
 	slices.SortFunc(nodes, compareVersionNodes)
 	for _, node := range nodes {
@@ -539,7 +579,7 @@ func checkArtifactsReachable(backend backends.Backend, index *model.IndexDocumen
 				continue
 			}
 			key := model.ArtifactKey(product, node.Version, artifact.Filename)
-			url := checkDeclaredURL(backend, key, artifact.Urls, fmt.Sprintf("manifest %s, artifact %s", node.Version, artifact.Id), findings)
+			url := checkDeclaredURL(backend, key, artifact.Urls, fmt.Sprintf("manifest %s, artifact %s", node.Version, artifact.Id), options.strict(node.Version), findings)
 			if !backend.URLsAreLive() {
 				stored, err := backend.Get(key)
 				if err != nil || stored == nil {
