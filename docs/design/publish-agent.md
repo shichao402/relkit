@@ -222,6 +222,20 @@ CI 默认走 `relkit staged-put`：多连接并发 PUT 各片。片大小与并�
 Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请求直接返回上次结果。  
 同一 `product` 并发 publish 返回 409。
 
+## 4.1 提交门禁的校验范围
+
+`POST /v1/publish` 在 index 与 directory 落盘后内联跑一次 consumer 可见性复核
+（`verify.RunReleased`）：目标版本的 index 节点、manifest、directory、Runtime Profile
+参考都按严格口径校验，任何一项不达即 409 `release.verify_failed`。
+
+**declared URL 的严格比对只覆盖本次发布的版本**（relkit 0.6.19 起）。原因是 manifest 的
+`urls[]` 在签名时就固定了当时的 backend `baseUrl`：换域名（例如读面从 `update.` 迁到
+`update-internal.`）之后，index 里所有历史版本都会与当前 `URLFor()` 不符。若门禁对全量
+index 严格，该通道会在 `retainVersions` 淘汰完旧节点之前**无法再发布**——2026-10-19 的
+Loom-Editor #51 即为此。历史漂移现在以 warning 呈现，交由独立的 `relkit verify` 报告。
+
+同包 `RunReleasedHTTP` 一直只校验目标版本，两个入口的语义由此对齐。
+
 ## 5. 部署
 
 见 [`scripts/deploy/`](../../scripts/deploy/)：
@@ -229,7 +243,7 @@ Agent 用 `stagedSha256`（或显式 `idempotencyKey`）落盘回放，重复请
 - `relkit-agent.example.json`
 - `relkit-agent.intranet.example.json`（WOA 控制面）
 - `relkit-intranet-product.example.json`（内网 `relkit-compatible` publish profile 骨架）
-- `nginx-intranet.example.conf`（内网 `update.devcloud.woa.com`：`/v1/` → agent `:8787`；`/` 仅作为旧签名 URL 的只读兼容入口。当前数据面直达独立监听的 serve）
+- `nginx-intranet.example.conf`（内网三 vhost，与外网绝对同构 2026-10-19：`publish.devcloud.woa.com` = CI 写面 `/v1/` → agent `:8787` + 兼容读；`update-internal.devcloud.woa.com` = SDK 协议读面 → store `:8080`；`update.devcloud.woa.com` = 人页 + 旧签名 URL 只读兼容）
 - `relkit-agent.service`
 - `Caddyfile.relkit-agent.example`（`publish.firoyang.com` → `127.0.0.1:8787`）
 - `python scripts/deploy/relkit.py`（`build` / `install` / `upgrade`）
