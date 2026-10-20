@@ -101,14 +101,25 @@ func Run(ctx context.Context, spec Spec, input any, output any) error {
 	command.Stdin = bytes.NewReader(stdin)
 
 	var stdout limitedBuffer
-	var stderr limitedBuffer
+	// stderr 必须实时透传，不能只收进内存缓冲。
+	//
+	// 扩展（尤其是 artifact-producer）会把构建工具的输出写到 stderr，
+	// 一次构建正常要跑十几分钟。此前 stderr 全部收进内存、等 command.Run()
+	// 返回才可能被打印，导致超时或挂死时整段输出随缓冲区一起丢失，
+	// CI 任务日志呈现"长时间零输出"，无法判断卡在哪一步（D17 #94）。
+	//
+	// 现在：每一行到达即写入本进程 stderr（蓝盾/终端可见），同时保留
+	// 有界尾部副本，供失败信息里附带最后若干行上下文。
+	stderrSink := newTeeTailWriter(os.Stderr, maxExtensionStderrTail)
 	command.Stdout = &stdout
-	command.Stderr = &stderr
+	command.Stderr = stderrSink
 	if err := command.Run(); err != nil {
 		if runContext.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("extension %s timed out after %s", spec.Kind, timeout)
+			return fmt.Errorf("extension %s timed out after %s; stderr tail: %s",
+				spec.Kind, timeout, stderrSink.Tail())
 		}
-		return fmt.Errorf("extension %s failed: %w; stderr: %s", spec.Kind, err, stderr.String())
+		return fmt.Errorf("extension %s failed: %w; stderr tail: %s",
+			spec.Kind, err, stderrSink.Tail())
 	}
 	if output == nil {
 		if len(bytes.TrimSpace(stdout.Bytes())) != 0 {
@@ -133,6 +144,38 @@ func allowedEnvironment(names []string) []string {
 }
 
 const maxExtensionOutput = 16 << 20
+
+// stderr 尾部预留：失败信息里附带的上下文长度，不影响实时透传。
+const maxExtensionStderrTail = 8 << 10
+
+// teeTailWriter 把写入同时转发给上游 writer（实时可见）并保留最后 N 字节，
+// 供错误信息附带上下文。并发由单 goroutine 读取保证，无需加锁。
+type teeTailWriter struct {
+	dst  io.Writer
+	keep int
+	tail []byte
+}
+
+func newTeeTailWriter(dst io.Writer, keep int) *teeTailWriter {
+	return &teeTailWriter{dst: dst, keep: keep}
+}
+
+func (w *teeTailWriter) Write(data []byte) (int, error) {
+	// 落盘/透传失败不影响进程本身：构建工具的输出丢了也不该让构建失败。
+	_, _ = w.dst.Write(data)
+	if w.keep > 0 {
+		w.tail = append(w.tail, data...)
+		if len(w.tail) > w.keep {
+			w.tail = w.tail[len(w.tail)-w.keep:]
+		}
+	}
+	return len(data), nil
+}
+
+// Tail 返回已保留的尾部内容（可能被截断在行中间，仅用于诊断展示）。
+func (w *teeTailWriter) Tail() string {
+	return string(w.tail)
+}
 
 type limitedBuffer struct {
 	bytes.Buffer
