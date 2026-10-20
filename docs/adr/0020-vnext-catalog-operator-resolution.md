@@ -115,10 +115,10 @@ Relkit 版本字段。
 传输层按环境降级：内网 CI 受限构建池只有 http:80 可达（443 被网络策略定向拦截，且池内设备
 证书为伪证书，即便放行也无法建立可信 TLS），因此内网 CI 写面为 `http://publish.<domain>/`；
 公网与办公网保持 https。这是环境能力差异，不是配置行为模型差异——两侧都是显式端点配置 +
-签名身份校验，唯一差距是 scheme/端口。签名 endpoint 的重签迁域属无时限 backlog：仅当
-Operator Profile 因其他实质变更需要重签时顺带迁移，不为同构单独重签。
+签名身份校验，唯一差距是 scheme/端口。签名 endpoint 的迁域已于 2026-10-20 随候选信任根
+轮换一并完成（新 Profile sequence 16，三端点统一 http:80，详见下文「写面收敛后的过渡态」）。
 
-#### 写面收敛后的过渡态：缺省端点权威与「必须覆盖」
+#### 写面收敛后的过渡态：缺省端点权威与「必须覆盖」（2026-10-20 已闭环）
 
 2026-10-19 内网完成三域名拆分（`publish` 写面 / `update-internal` SDK 读面 SSOT / `update`
 人页 + 存量兼容读），2026-10-20 删除了 `update` 域上的 `/v1/` 写面 location，写面唯一入口
@@ -134,13 +134,22 @@ Operator Profile 因其他实质变更需要重签时顺带迁移，不为同构
 
 结论与约束（写下来避免后来者误判）：
 
-1. 「缺省签名端点可用」在内网当前**不成立**，不要据此设计或验证任何流程；验收写面必须走
-   显式覆盖路径，或等 Profile 重签后再验。
+1. 「缺省签名端点可用」在过渡期**不成立**：当时验收写面必须走显式覆盖路径。该落差已于
+   2026-10-20 由候选信任根轮换闭环——新 Operator Profile（`relkit-candidate-2026b`，sequence 16）
+   把 `agent` 签在 `http://publish.<domain>/`、`consumer`/`directory` 签在
+   `http://update-internal.<domain>/`，内网缺省 `release --execute` 恢复可用（Loom `dev/0.2.2+92`
+   构建 #55 以缺省路径发布并 verify 通过，无 transport 覆盖、无 blob 钉死 CLI）。
 2. 该落差不能靠放宽覆盖校验来消除（那会把逃生门变成常态，且与「签名端点是服务身份权威」
    的定位冲突）；也不能靠在旧域保留 `/v1/` 来消除（那等于放弃写面收敛目标）。唯一正解是
-   重签 Profile，而 candidate 根私钥不持有，故列为无时限 backlog。
-3. 重签时的目标端点：`agent` → `https://publish.<domain>/`（内网 CI 侧仍需 http 覆盖），
-   `consumer`/`directory` → `https://update-internal.<domain>/`。
+   重签 Profile。过渡期的阻碍是「candidate 根私钥不持有」，根因是旧根生成后未归档；本轮以
+   **换信任根**替代「找回私钥」，并立了硬前置：新根私钥双处归档、逐一验签通过后才允许签发。
+3. 重签实际采用的端点：`agent` → `http://publish.<domain>/`，`consumer`/`directory` →
+   `http://update-internal.<domain>/`，三端点统一 `http:80`。此处与过渡期设想的 https 目标不同，
+   原因是端点必须按**消费方网络可达性**签，而不是按「域名听起来该是 https」签：箱上无 443 监听
+   （TLS 由 WOA 网关终结），蓝盾池直连 IP 的 443 被网络策略拦截。首版签成 https 导致 `verify
+   released` 连续 12 次 `dial tcp 9.134.241.248:443: connect: connection refused`（Loom #54 红），
+   修正为 http:80 后 sequence 15→16 重签、bundle 重造，Loom #55 全绿。这条教训应固化为规则：
+   **签名端点 = 消费方实测可达的 scheme + 端口**。
 4. 同构判定只看域名职责，不看「缺省端点是哪一版」：三域职责与外网一致即算同构成立，
    Profile 内容迭代属常规运维。
 
@@ -323,9 +332,10 @@ lane 的复制品——candidate lane 是同服务器 namespace 隔离，与独�
 - 写面收敛为单域名入口（`publish.<domain>`），读面 SSOT 为 `update-internal.<domain>`，
   人页与存量兼容留在 `update.<domain>`；三域职责内外网一致，写面收敛以「旧域 `/v1/` 返回
   404/403、publish 仍返回 405/400」为可验证判据
-- 过渡态代价：签名 Profile 未重签期间，内网缺省端点不可用、必须显式覆盖 transport。
-  这条落差写进 [publish-topology.md](../design/publish-topology.md) §7.1 与本文档
-  「写面收敛后的过渡态」小节，重签属无时限 backlog
+- 过渡态已闭环（2026-10-20）：候选信任根轮换后，内网缺省 `release --execute` 恢复可用，
+  transport 覆盖从「必须」回到「可选逃生门」。过程与判据见 [publish-topology.md](../design/publish-topology.md)
+  §7.1 与本文档「写面收敛后的过渡态」小节；端点 scheme 的取值规则（按消费方实测可达性签）
+  同步记入该小节第 3 条
 
 
 ## 完成标准（本 ADR）
