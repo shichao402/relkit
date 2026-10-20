@@ -323,6 +323,13 @@ func Install(options InstallOptions) (*resolution.Document, error) {
 	if err := writeImmutableEqual(filepath.Join(root, ".relkit", "resolution.json"), bundle.Resolution); err != nil {
 		return nil, err
 	}
+	// resolution.json 记录了 runtimeProfileDigests，doctor 会按
+	// .relkit/control-plane/runtime-profiles/<product>.json 去读回并比对摘要。
+	// 离线安装必须把 bundle 里携带的 profile 与信任根一并物化到同一位置，
+	// 否则带 runtimeProfileSubscriptions 的产品安装完直接跑 relkitw 必然失败。
+	if err := writeRuntimeProfileCache(root, bundle); err != nil {
+		return nil, err
+	}
 	if bundle.Resolution.Identity == resolution.IdentityCandidate {
 		if err := writeTextAtomic(
 			filepath.Join(root, ".relkit", "candidate-root-fingerprint"),
@@ -333,6 +340,43 @@ func Install(options InstallOptions) (*resolution.Document, error) {
 		}
 	}
 	return &bundle.Resolution, nil
+}
+
+// writeRuntimeProfileCache materializes the Runtime Profiles carried by an
+// offline bundle into the location the CLI's doctor reads back
+// (.relkit/control-plane/runtime-profiles/<product>.json plus the matching
+// <product>.roots directory). Without it, install succeeds but the very next
+// doctor run fails with "resolved Runtime Profile is unavailable" for every
+// product that declares runtimeProfileSubscriptions.
+func writeRuntimeProfileCache(root string, bundle *resolution.Bundle) error {
+	if len(bundle.Resolution.RuntimeProfileDigests) == 0 {
+		return nil
+	}
+	for productRef, expected := range bundle.Resolution.RuntimeProfileDigests {
+		profile, ok := bundle.RuntimeProfiles[productRef]
+		if !ok {
+			return fmt.Errorf("resolution bundle has no runtime profile %q", productRef)
+		}
+		if profile.Digest != expected {
+			return fmt.Errorf("runtime profile %q digest is %s, resolution records %s", productRef, profile.Digest, expected)
+		}
+		roots, ok := bundle.RuntimeRoots[productRef]
+		if !ok || len(roots) == 0 {
+			return fmt.Errorf("resolution bundle has no runtime roots for %q", productRef)
+		}
+		directory := filepath.Join(root, ".relkit", "control-plane", "runtime-profiles")
+		if err := document.WriteAtomic(filepath.Join(directory, productRef+".json"), profile); err != nil {
+			return err
+		}
+		rootDirectory := filepath.Join(directory, productRef+".roots")
+		if err := os.RemoveAll(rootDirectory); err != nil {
+			return err
+		}
+		if _, err := writePublicKeys(rootDirectory, productRef+"-root", roots); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writePublicKeys(directory, prefix string, values []resolution.PublicKey) ([]string, error) {
