@@ -795,6 +795,25 @@ class BackupRotationTests(unittest.TestCase):
             with self.assertRaises(deploy_cli.Fail):
                 deploy_cli.prune_backups(Path(tmp), 0)
 
+    def test_prune_dry_run_matches_real_run(self):
+        """A preview must name exactly what the real run would delete."""
+        def build(root: Path) -> None:
+            for name in ["20260901T000000Z", "20260902T000000Z", "20260903T000000Z"]:
+                (root / name).mkdir()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build(root)
+            preview = deploy_cli.prune_backups(root, 1, dry_run=True)
+            self.assertEqual(len(list(root.iterdir())), 3, "dry run must delete nothing")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build(root)
+            actual = deploy_cli.prune_backups(root, 1)
+
+        self.assertEqual(preview, actual)
+
     def test_upgrade_defaults_keep_five_snapshots(self):
         args = deploy_cli.build_parser().parse_args(["upgrade", "--host", "box", "--plan"])
         self.assertEqual(args.keep_backups, 5)

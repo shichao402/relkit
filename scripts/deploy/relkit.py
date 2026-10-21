@@ -1238,12 +1238,19 @@ def snapshot_dirs(backup_root: Path) -> list[Path]:
     )
 
 
-def prune_backups(backup_root: Path, keep: int, current: Optional[Path] = None) -> list[str]:
+def prune_backups(
+    backup_root: Path,
+    keep: int,
+    current: Optional[Path] = None,
+    dry_run: bool = False,
+) -> list[str]:
     """Delete the oldest snapshots until `keep` remain. Never removes `current`.
 
     Rotation must never delete the snapshot a failed apply would roll back
     from, so `current` is exempt from the count: the retained set is `current`
-    plus the newest snapshots that fill the remaining budget.
+    plus the newest snapshots that fill the remaining budget. With dry_run the
+    same selection is reported but nothing is deleted, so a preview can never
+    disagree with the real run.
     """
     if keep < 1:
         raise Fail(f"keep must be at least 1, got {keep}")
@@ -1255,11 +1262,11 @@ def prune_backups(backup_root: Path, keep: int, current: Optional[Path] = None) 
     surplus = len(candidates) - budget
     if surplus <= 0:
         return []
-    removed: list[str] = []
-    for path in candidates[:surplus]:
-        shutil.rmtree(path)
-        removed.append(path.name)
-    return removed
+    doomed = candidates[:surplus]
+    if not dry_run:
+        for path in doomed:
+            shutil.rmtree(path)
+    return [path.name for path in doomed]
 
 
 def probe_local() -> dict[str, Any]:
@@ -1490,15 +1497,17 @@ def cmd_remote(args: argparse.Namespace) -> None:
     if args.remote_cmd == "prune-backups":
         root = Path(args.backup_root or "/var/backups/relkit")
         if not root.is_dir():
-            print(json.dumps({"ok": True, "root": str(root), "total": 0, "removed": [], "dryRun": args.dry_run}, ensure_ascii=False, indent=2))
+            print(json.dumps({"ok": True, "root": str(root), "total": 0, "removed": [], "remaining": [], "dryRun": args.dry_run}, ensure_ascii=False, indent=2))
             return
-        snapshots = snapshot_dirs(root)
+        snapshots = [path.name for path in snapshot_dirs(root)]
         if args.dry_run:
-            keep_names = {path.name for path in snapshots[-(args.keep or 0):]} if args.keep else set()
-            removed = [path.name for path in snapshots if path.name not in keep_names]
+            # Report what a real run would do, using the same selection rule, so
+            # --dry-run never disagrees with --apply about which snapshots go.
+            removed = prune_backups(root, args.keep, dry_run=True)
         else:
             removed = prune_backups(root, args.keep)
-        remaining = [path.name for path in snapshot_dirs(root)]
+        gone = set(removed)
+        remaining = [name for name in snapshots if name not in gone]
         print(
             json.dumps(
                 {
