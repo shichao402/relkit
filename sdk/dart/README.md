@@ -44,6 +44,21 @@ repo and document the sync command (do not treat the mirror as upstream).
 
 Generated types: `lib/src/gen/rup/v2/` (re-exported by `package:rup_client/rup_client.dart`).
 
+## Cross-implementation gate
+
+`test/interop_test.dart` reads `test/fixtures/interop-index.json`, which holds an
+envelope sealed by the Go control plane through the same path `publish.Run` uses.
+The Dart side verifies the signature, parses the index and runs chain selection on
+those exact bytes; `internal/envelope` re-seals on every `go test` run so the
+checked-in bytes cannot drift from what relkit actually emits.
+
+Do not edit the fixture by hand. After an intentional wire change:
+
+```
+go test ./internal/envelope -run TestSdkInteropFixtureIsNotStale -update-sdk-interop-fixture
+```
+
+
 ## What it does
 
 - `Updater` (facade) — spawn `relkit-updater` for check/download/apply

@@ -76,7 +76,22 @@
 
 ---
 
+## 2026-10-21 断代收尾：Dart 互操作证据重建
+
+- 2026-10-16 记录的“Dart 85 项（含真实 Relkit publish → Dart consume 互操作）”当时属实，
+  但该测试的可用性探针调用的是 `relkit init`（ADR 0019 §1 已删）。探针把
+  “unknown command” 当成“relkit 未安装”，于是整组测试在 vNext 下**静默跳过**并报绿，
+  互操作证据自断代起实际为空。
+- 处置：删除以 legacy 命令面驱动的 `sdk/dart/test/interop_test.dart`，改为
+  `internal/envelope` 用与 `publish.Run` 相同的封签路径产出
+  `sdk/dart/test/fixtures/interop-index.json`，Dart 侧对该字节做验签、解析与链式选路；
+  `TestSdkInteropFixtureIsNotStale` 每次 `go test` 重新封签比对，手改 fixture 即红。
+- 现状（2026-10-21 实测）：Dart 83 项全绿、0 跳过；`go test ./... -count=1` 无 FAIL。
+
+---
+
 ## A. 接入体验（宿主视角）
+
 
 | # | 类型 | 产品侧承诺 | 你应看到的证据（实现后） | 状态 |
 | --- | --- | --- | --- | --- |
