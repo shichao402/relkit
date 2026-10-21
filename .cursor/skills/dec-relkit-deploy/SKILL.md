@@ -18,11 +18,18 @@ description: >
 - 已有箱子换二进制（`upgrade --plan` / `--apply`）
 - 为本仓 Release 交叉编译（`build`）
 
-产品仓开箱、升 lock、注册/轮换/吊销 token **不要用本 skill**，用 [`relkit-ops`](../relkit-ops/SKILL.md) 与 `python scripts/host/relkit_host.py`。
+产品仓开箱、resolution/bundle、注册/轮换/吊销 token **不要用本 skill**，统一走
+[`relkit-ops`](../relkit-ops/SKILL.md)。产品仓物化的 Python host 控制面
+（`scripts/host/relkit_host.py`）已随 ADR 0019 §1 删除，不存在可用副本。
 
 ## 入口
 
 只跑 `python scripts/deploy/relkit.py`（仓库根；Linux 可用 `python3`）。细节以 [`scripts/deploy/README.md`](../../../scripts/deploy/README.md) 和该脚本 `--help` 为准。
+
+ADR 0016 拆分后的两个专用入口：
+
+- 现网仍在跑 `relkit-serve.service` 的盒子：先 `migrate-serve --host <Host> --store-binary dist/relkit-store-linux-amd64` 一步迁到 `relkit-store.service`，之后才可走 `upgrade`。
+- 面板独立 unit：`install console --binary dist/relkit-console-linux-amd64 --dir <发布树> --state-dir <agent state>`；迁移盒子自动继承树里的 `.relkit-serve-admin.json` 操作员账户，不重发 bootstrap。
 
 不要手拼 SSH 写配置，不要用腾讯云 TAT / MCP 代跑命令，不要编造命令输出。Go 的 `relkit` / `relkit-agent` / `relkit-store` 不是人用的第二套装机 CLI。
 
@@ -35,19 +42,34 @@ description: >
 5. **agent + serve 是固定配套**：现网箱必须两个进程都在。缺哪个先 `install` 那个，再 `upgrade`（不要 `--agent-only` / `--serve-only`）。`--agent-only` / `--serve-only` 只留给临时抢救，不是现网拓扑。
 6. 公网站点配置属于 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]`（`makers`/`backend`/`directory`，ADR 0015；旧 `site.makers` 加载时等价展开，已 deprecated），不能下沉到产品 profile。升级后检查 `curl -fsS http://127.0.0.1:8787/-/site` 只返回脱敏 readiness；若配置或模板有变化，执行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。这不发布产品版本。
 
+## 与 vNext 控制面切换的边界
+
+`relkit.py upgrade` 只原子替换 agent/store 二进制，不会自动改变
+Distribution Root、Catalog、Operator Profile 或 candidate/production lane。完整顺序是：
+
+1. `relkit.py upgrade --plan`，确认后 `--apply`。
+2. 用 `relkit-ops agent policy` 执行 `plan → execute + 唯一备份`。
+3. 重启/reload agent，检查 `/-/health`；失败立即恢复备份并再次重启。
+4. 宿主 CI 改用对应 production bundle；stable 前移除 Candidate Root 授权。
+
+公网与内网 deployment 分别执行并保留证据，不能用一个认证域的健康检查代替另一个。
+逐步发布和读回语义见
+[`first-production-rollout.md`](../../../docs/design/vnext/first-production-rollout.md)。
+
 现网别名：
 
 | Host | 跑什么 | upgrade |
 |---|---|---|
-| `cvm-gz`（`publish.firoyang.com`） | 外网 agent 控制面 + serve 操作面（数据面已在本机 store） | 两个都升；不要 `--agent-only`；不要改 profile URL |
+| `publish.firoyang.com` | 外网 agent 控制面 + serve 操作面（数据面已在本机 store） | 两个都升；不要 `--agent-only`；不要改 profile URL |
 | `update.devcloud.woa.com` | 内网 agent + store 数据面（同机另有 `publish.devcloud.woa.com` / `update-internal.devcloud.woa.com` vhost，2026-10-19 三域名同构拆分） | 两个都升；不要传 `--public-base-url`（会改掉 loom 的 `https://…`） |
 
 ## 禁止
 
 - 用 example JSON 覆盖现网配置
 - 打印 token 或带 `sig=` 的 URL
-- upgrade 默默 `--rotate-token`（token 只经产品仓 `relkit_host.py`）
+- upgrade 默默 `--rotate-token`（token 只经 `relkit-ops rotate`）
 - 重跑 `install` 来升级已有实例
 - 把 `scripts/deploy/` 打进产品 lock 或拷进产品仓
 
-升完 agent 后，发版必须用同一 release 的 publisher（协议窗口，ADR 0009）。
+升完 agent 后，发版必须使用当前 Operator Profile 与 immutable resolution 声明兼容的
+publisher；`exact` 部署使用该完整 distribution，不能只凭 tag 名猜测兼容性。

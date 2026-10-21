@@ -4,104 +4,295 @@
 ---
 name: relkit-ops
 description: >
-  产品仓 relkit 开箱、发版、升 lock、在已有 serve/agent 上注册/列产品/轮换/吊销 token。
-  有 scripts/host/relkit_host.py（或 scripts/relkit_host.py）时使用。
+  为宿主接入 Relkit vNext，管理 Operator、Candidate 认证、Catalog 晋升、
+  完整离线 bundle、原子升级和凭据轮换。项目存在 relkit.project.json，
+  或用户要求接入、升级、认证、轮换 Relkit 时使用。
 ---
 
-# relkit 运维
+# Relkit vNext 运维
 
-## 入口
+本 Skill 是薄编排，不实现第二份 schema、门禁或“完成步骤”账本。
 
-只跑 `python scripts/host/relkit_host.py`（无参数只分流，不替你确认）。该文件是 parser/dispatch 入口，具体实现位于同一 release 固定的 `scripts/host/hostlib/`；不要绕过入口直接调用内部模块。子命令、闸门、drift 以该脚本 `--help` / `onboard explain` / `status` 为准。
+- `relkit`：产品 core；负责 resolve、ArtifactSet、stage/publish、协议和 updater。
+- `relkit-ops`：机器/Operator 面；负责 Profile、Catalog、供给、认证、升级和凭据。
+- 本 Skill：读取结构化证据、向用户确认真正的选择、调用上述命令。
 
-判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
+所有字段、错误码和后置条件以对应二进制当前 `--help` 与 JSON 输出为准。禁止在
+Skill 中复制一份校验逻辑，禁止手改签名文档绕过失败。
 
-Go 的 `relkit` / `relkit-store` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
+先运行结构化命令取得现场事实，只向用户确认会改变产品行为或风险归属的真实选择。
+不要要求用户先理解或逐项拍板 root、fleet、Profile、Catalog 字段；将其翻译成
+“目标 Operator、最终 distribution、受影响产品、回滚点”后再展示。安全且可机械验证的
+内部默认由 core/ops 闭合。
 
-**箱子上的二进制**（空机 systemd、换 `relkit-agent` / `relkit-store`）不在本 skill。那是 relkit 仓的 [`relkit-deploy`](../relkit-deploy/SKILL.md) 与 `python scripts/deploy/relkit.py`。现网箱 **agent + serve 固定配套**，缺 serve 不算升完。产品仓里若 `versionRelation=behind` 且 `onPublishRoute=true`，告诉用户先到 relkit 仓升远端，不要在本仓假装能 `upgrade --host`。
+## 宿主接入
 
-## 状态与缓存
+1. 审查宿主只提交：
+   - `relkit.project.json`
+   - Relkit 生成的 `relkitw` / `relkitw.cmd`
+   - 宿主自己的 producer / UI / 业务代码
+2. 项目声明只含产品、逻辑 `operatorRef`、信任指纹、角色、能力、构建入口。
+   不得含 Relkit 版本、真实服务器地址、Token、SSH、私钥或 mirror 凭据。
+3. 先运行：
 
-- 决策记录：**提交** `.relkit/onboarding.json`。瞬时文件只在 `.relkit/cache/`（`onboarding.md`、`onboarding.local.json`、staged 树）。
-- `ensure_gitignore` 保证 `.relkit/cache/`、`.relkit-keys/*.private.pb` 与 `__pycache__/`。不要把产品状态写进 skill cache / `docs/`。重置：`onboard reset --yes`。
+```text
+relkit-ops status --inventory <operator-inventory> --json
+relkit-ops bootstrap provision --inventory <operator-inventory> --json
+./relkitw inspect --json
+./relkitw doctor --resolution .relkit/resolution.json --project relkit.project.json --json
+```
 
-## 批量决策优先
+4. 缺少用户意图时，只问会实质改变声明或 Operator 的问题；不要把可从
+   `status/inspect/doctor` 得到的事实反问用户。
 
-1. 先运行 `onboard start` / `onboard inspect` 完成现状检查，再单独向用户确认本次意图：`fresh`（新接入）、`reconfigure`（重新开箱）或 `upgrade`（沿用已确认决策升级）。现状与意图冲突时先解释冲突，不猜。
-2. 运行 `onboard questions --intent <intent> --json`。先向用户展示其中的 `evidence.topology`、`evidence.remote`、`implications` 与 `blocked`，再提交这一波 `questions`。禁止脱离这些现场证据自行概括发布路径或 token 现状。
-3. 将整批回答按输出的 `answerShape` 写入 `.relkit/cache/`，运行 `onboard apply --answers <file>`。它按 `revision` 检查现状是否变化，并原子校验全部答案；任何冲突都不会写入部分状态。
-4. 批次按依赖分波次，不强求一次问完。`blocked` 中的决策本轮禁止询问；先完成它指出的前置项（例如确认 SSH Host），重新生成批次，拿到 live inventory 后再问 token。若脚本返回冲突，只重问报错项；若 revision 过期，重新生成问题批次并只问变化项。
-5. 决策落盘后再执行 action steps。可以并行委派互不写同一文件、互不改同一远端状态的调查或实现；共享产品状态、同一配置文件、serve/agent 注册与 release 必须按依赖顺序经 `relkit_host.py` 执行和复核。
+## 首次 clone 的三条供给路径
 
-逐项 `onboard set` 只作为修改单个已知答案的兼容入口，不是默认开箱体验。脚本保持非交互；由 agent 使用结构化提问收集用户批量答案。
+- 公网：组织提供钉死 SHA-256 的 bootstrap URL；wrapper 校验后再运行。
+- 仅 mirror：`bootstrap provision` 预置 Operator 映射和 bootstrap binary；
+  resolution 中记录 mirror→公开源顺序，每个文件仍验 Catalog 摘要。
+- 完全离线：由 ops 创建并安装完整 distribution bundle：
 
-## 闸门短指针
+```text
+relkit-ops bundle create \
+  --project relkit.project.json \
+  --resolution-bundle <resolution-bundle.json> \
+  --asset <sha256:...=path> --out <bundle-dir>
+relkit-ops bundle verify --project relkit.project.json --bundle <bundle-dir> --json
+relkit-ops bundle install \
+  --project relkit.project.json --project-root . \
+  --target <os-arch> --bundle <bundle-dir> --json
+```
 
-- 开箱前先跑 `onboard start` / `onboard inspect`：脚本会列出 `relkit.json` backends、VERSION、lock、SSH Include/通配匹配主机。`http-put` / `local` / `static-http` 等陈旧类型是 error，挡住 `product.id`。不要用手写确认代替 inspect。
-- `ssh.host`：问人之前脚本已展开 `~/.ssh/config` 的 Include 与通配，并列出 exact / patterns / matched。通配本身不是 SSH 别名。写入 `onboard set ssh.host <值>`。
-- 发布拓扑：只认 `questions --json` 的 `evidence.topology`。`mode=direct` 表示 `publishTo` 只含 S3 等直连后端，serve/agent token 与注册不在发布链路上；不要因状态里残留 `ssh.host` 就把远端说成必需。
-- `sidecar.layout`：只认 lock 装到 `tools/bin/relkit-updater`；可选 `relkit.json` `sidecar.packScript` 只校验接线，不硬编码 `.mjs`。真产物归 `pack.ci`。macOS 的 universal sidecar 只跑 `relkit_host.py sidecar universal --out <路径>`：`install` 每个目标都装成同一个文件名，只能放构建机自己的架构。**这条闸门说的是 sidecar 二进制打进发布树的位置，与客户端 `InstallSpec.layout`（`wholeRoot` / `versionedDir` / `fileSet`）无关**，同名不同事。
-- 安装布局：宿主填 `InstallSpec.layout` 之前先读 relkit 仓 `docs/design/install-layouts.md`。SPEC 附录 B 只分类。要点：`versionedDir` 的 launcher **由产品自己提供**；与 `wholeRoot` 一样 `requires_host_exit=true`；`retain` 按最近 N 份清理并尊重 `reserved_codes`（项目 pin），多实例跨更新至少 `retain=2`；`active.json` 只是默认指针，按项目选版靠产品 pin + `CheckOp.exact_code` + `ApplyOp.install_only` + list/switch/rollback；macOS 的 `versionedDir` 拷完整 `.app` 到 `versions/<id>/<Product>.app`，launcher 必须用 LaunchServices/`open` 启动，禁止 exec `Contents/MacOS/*`。installRoot 不能放在签名 `.app` 内部。
-- `relkit_consume.py` 是 release 内部件，随版本在 `scripts/host/` 里搬家。产品代码禁止 `import relkit_consume`，也禁止再写 `scripts/relkit_consume.py` 这个已退役路径；闸门 `consumer-entry-only` 会报，改法是走 `relkit_host.py` 的子命令。
-- host 脚本要求 Python ≥ 3.9（hostlib 导入期就会求值 PEP 585 泛型）。产品入口脚本不要接受或安装 3.8，否则闸门 `host-python-floor` 报 drift；CI 容器只装 3.8 时要改成装 3.9 以上。
-- `fake.release`：只跑 `relkit_host.py fake verify`。缺 staged 树时脚本自己 dummy stage + simulate，禁止手调 `relkit.exe stage`。本机无 COS/S3 发布密钥时仍应能 simulate（对着空远端 index 合并 dummy staged）。
-- `pack.ci`：GitHub Actions 里 `relkit_host.py install` 之后真正 `stage`/`cas-put`/`release --execute` 的工作流算已接线；只 `install` 不够。
-- `updater.process`：封闭词由组件 registry 派生（当前 `rust` / `node` / `dart` / `go` / `other`），**不是** `rust-shell`。手写 DTO / `serde(default)` 吞缺键是 drift。产品源码出现 `RupUpdater` 或 `sdk.Updater` 也是 drift：升级宿主只许走 facade + sidecar。选择 `other` 时，`relkit.json` 必须声明存在的 `updater.entry`；存在 WebView 还必须声明 `updater.projection`。sidecar 名只能出现在声明入口（及 `sidecar.packScript`），projection 仍按满强度形状检测。
-- `updater.urlAllowlist` 是路径列表，只豁免这些路径中的 updater endpoint/base URL 文本；不豁免 sidecar 名、手写 `CheckResult` / `UpdateAvailable`、自声明 proto 或宽松反序列化。
-- agent 发布：`release --execute` 必须由 CI 设 `RELKIT_RELEASE_VIA_CI=1`；本地不要发。
-- 人页：产品 `relkit.json` 只写 `site.title/description/homepage`，禁止 `site.makers` / `site.sinks`。sink 配置（`makers` projectId/region/tokenEnv、`backend`、`directory`）属于箱上 `relkit-agent.json` 顶层 `site.sinks[]`（ADR 0015）；产品发布只更新 `site/`、`latest/` 数据，agent 异步全量静态重建。人页落后时到 relkit 仓按 `relkit-deploy` 跑 `relkit-agent site-rebuild`，禁止靠重发产品版本救页。
-- `share-with`：只能从 `evidence.remote.products` 的真实产品 ID 中选择；`operatorTokenPresent=true` 不等于存在可继承的产品 token。远端不可读或 `blocked` 含 `token.isolation` 时禁止让用户猜。独占文件是 `{product}.token`；共用后改名为 `tokens/shared.token`（冲突则 `shared-N`）。chown / restart 必须读 `list` 打出的文件名，禁止用 `share-with` 的产品 id 拼路径。不打印 token 内容。
-- publish profile 的字段归属：`baseUrl` 属产品（进签名 manifest 的客户端下载地址，以产品仓 `relkit.json` 为准）；`uploadUrl` 与 `tokenEnv` 属箱子（agent 自己的写入端点与 systemd 喂给它的凭据变量，本形态是 `RELKIT_SERVE_TOKEN`）。CI 的 `RELKIT_UPLOAD_TOKEN` 只到 agent HTTP API 为止，不在 agent 进程环境里，别把它填进 profile。`agent provision` 会从箱上已装 profile 继承箱上字段，不要手改远端 profile 绕过它。
-- 远端版本：`versionRelation=behind` 且 `onPublishRoute=true` 时先升级远端（relkit 仓 `relkit-deploy`）；若 `onPublishRoute=false`，明确告诉用户它落后但不阻塞当前产品发布。
-- 失败记账：带 `code=` 的 `Fail` 写入 `.relkit/cache/ops-journal.jsonl`（`unclassified` 不记）。`retrospect` 输出本次遇到 / 已修进脚本或 skill / 未消化；未消化非 0。
+Bundle 必须包含所选 distribution 的全部 component/release asset；缺一个摘要即失败。
+不得只塞一份 CLI 冒充完整离线供给。安装会把目标平台的 `relkit` 与
+`relkit-ops` 一并放入项目 `.relkit/bootstrap/`，后续产品 Job 使用这份受信
+`relkit-ops` 传递 ArtifactSet，不继续依赖外部 bootstrap。
 
-## 完成后：先复盘会话，再跑机械闸门
+Operator 将 Release 组件同步到内容寻址 mirror 时使用 core 命令，不复制宿主脚本：
 
-`retrospect` 只能看文件与带错误码的命令失败；它看不到用户纠正、人工验收结果，
-也看不到「命令成功但交付结果不对」。因此 **命令退出码为 0 不能替代会话复盘**。
+```text
+relkit-ops distribution mirror \
+  --distribution <relkit-distribution.json> \
+  --release-assets-base <immutable-release-download-base> \
+  --mirror-root <operator-mirror-root> --json
+```
 
-先从本次运维意图开始重读对话与操作记录，逐项找出：
+写凭据只从 `MIRRORS_USERNAME` / `MIRRORS_PASSWORD`（或显式改名后的 env 引用）
+读取。命令必须同步 distribution 的全部 component 和 `releaseAssets`，逐项校验
+上游摘要、写入 `blobs/<sha256>` 并读回校验；409 仅在
+读回字节摘要相同后视为幂等成功。Operator Profile 的 `sources.mirrors` 必须指向
+同一 root；不得在产品仓保存 mirror 地址或凭据。
 
-- 用户对目标、范围或前提的纠正；
-- 人工验收与原先判断相反的结果；
-- 绕过正式入口的临时处理；
-- 当时显示成功、后来才证明不完整的步骤。
+安装 Candidate bundle 时还必须显式授权独立候选根：
 
-每项必须先分类，再决定落点：
+```text
+relkit-ops bundle install \
+  --project relkit.project.json --project-root . \
+  --target <os-arch> --bundle <bundle-dir> \
+  --candidate-root-fingerprint <sha256:...> --json
+```
 
-1. **relkit 通用流程缺口**：换成任意无关产品、严格照本 Skill 操作仍会踩中。
-   必须指出最早可拦截的 relkit 阶段（inspect / questions / apply / upgrade /
-   install / fake verify / verify / release / retrospect），以及该阶段能读取的输入、
-   应做的机械判断和失败结果。修复应落在 relkit 的脚本、Skill、测试或发布产物；
-   不得拿当前产品的专用测试或配置当通用流程优化。
-2. **产品自身缺口**：只在该产品的宿主、权限、UI 或打包结构中成立。留在产品仓，
-   不冒充 relkit 运维优化。
-3. **Agent 理解偏差**：例如用户问流程，却回答具体项目。先用一句话复述当前范围，
-   再给建议；若这种误解可重复发生，就修本 Skill 的提示，不给产品加门阀。
+缺少或不匹配该指纹必须失败；它不能从 bundle 自己推导，也不能复用为 stable
+发布授权。Production bundle 不需要该参数。
 
-复盘输出必须写清「现象 / 原流程为何没拦 / 最早拦截阶段 / 可机械化改动」。
-只重复「应该有更新说明」「应该测试权限」这类已知目标，不算流程优化。
-发现新的通用缺口但本次不能落地时，必须明确列为未消化，不能宣称运维流程完成。
+## 发布
 
-复盘结论只写在回话里等于没记账：`retrospect` 读不到对话。每一项都要
-`retrospect note --code <类名> --class generic|product|agent --text "<四段结论>"`，
-落盘后 `ops.retrospect` 变 `stale`、`retrospect` 非 0，直到该类被修进脚本 / skill /
-测试并进入已消化集合。
+宿主 producer 只返回 `relkit.artifact-set/1`。产品 CI 固定到 merged ArtifactSet
+为止：
 
-若复盘留下未消化的 **generic**（或必须改 host / skill 才能消化的 note），
-先问用户选 **效率绕过** 还是 **标准回修**；禁止 agent 自行默绕或默修。
+```text
+relkitw doctor
+relkitw artifacts produce / merge
+relkit-ops artifact-set push \
+  --project relkit.project.json \
+  --artifact-set <merged/artifact-set.json> \
+  --url <build-unique-immutable-url> --json
+```
 
-- **不可绕过**：`lock.releaseRelation=behind`；远端 `versionRelation=behind` 且
-  `onPublishRoute=true`；会导致发错包的 CI / 宿主行为。
-- **效率绕过**：产品缺口已落地即可继续日常；接受本机 `ops.retrospect=stale`；
-  **不得**手改 lock / `DIGESTED`（会 drift）；回话写明「用户选择绕过」与上游
-  issue/PR 链接。绕过不等于 verified，也不把 journal 标成已消化。
-- **标准回修**：回 relkit 修脚本 / skill / 测试 → 进 `DIGESTED` → 发版 → 产品
-  `upgrade` → `retrospect` 0 / `ops.retrospect=verified`。
-- 产品类已在产品仓修好的 code：只在 relkit 发版时纳入已消化集合；不要鼓励产品仓
-  改 `scripts/host` 消 note。
+`push` 返回的 `archiveSha256` 和 URL 必须作为成对证据传给独立 Operator Job；
+URL 至少包含不可复用的 CI build identity，禁止覆盖另一次构建。Operator Job 先
+按摘要拉回：
 
-会话复盘完成后，运行 `python scripts/host/relkit_host.py retrospect`，再运行
-`status` 检查 `ops.retrospect` 已是 `verified`。若之后用户验收又暴露新问题，
-前一次 verified 已过期，必须重新复盘并重跑。只有会话复盘没有未消化项、且命令
-退出码为 0，才能宣称完成。`RETROSPECT.md` 只是入口指针，阅读它本身不构成完成闸门。
+```text
+relkit-ops artifact-set pull \
+  --project relkit.project.json --url <url> \
+  --sha256 <archiveSha256> --out-dir <new-dir> --json
+relkitw stage --artifact-set <new-dir/artifact-set.json>
+relkitw release --version <version>
+relkitw release --version <version> --execute
+relkitw verify released \
+  --resolution <immutable-resolution.json> \
+  --version <version> --channel <channel> \
+  [--consumer <loopback-url>] [--directory <loopback-url>]
+```
+
+同一次发布只生成一次 immutable resolution，跨 Job 传递原文件。不得中途再次解析
+`latest`。产品 Job 只持 ArtifactSet 传输凭据，不持 endpoint/agent token/签名私钥；
+只有 Operator Job 可注入 `RELKIT_UPLOAD_TOKEN`，且必须设置
+`RELKIT_RELEASE_VIA_CI=1`。Operator 不改产品业务选择。
+关键 artifact/manifest/index/directory/Runtime Profile 任一步失败都不得报告成功；
+网页投影失败可告警并重建。
+
+正式场景必须让 bundle 安装后的 Runtime Bootstrap 提供 Product RUP Root；显式
+`--product-root <product-rup-root.pb>` 只用于诊断旧环境变量或 mapping，不得成为唯一
+验收证据。公开 SDK 还必须解析控制面实际生成的 bootstrap 字节，不能只解析手写 fixture。
+
+`release --execute` 报错时不能直接假设“没有发布”。若日志显示已上传或可能已提交，
+先用同一 version/channel、immutable resolution 和匹配
+`runtimeProfilePublication.rootFingerprint` 的 Product RUP Root 从消费者入口执行
+有界重试的 `verify released`：
+
+- 验证通过：保留原发布，不重发同一 immutable version。
+- 明确未提交：才允许重试 execute。
+- 部分提交：按 `partial-commit` / fix-forward 处理，不覆盖历史。
+
+Candidate verify 必须显式授权 Candidate Root；production verify 不得继续携带 Candidate
+Root。Candidate Root 与 Product RUP Root 职责不同，禁止用其中一个替代另一个。
+
+Candidate resolution 使用独立 Candidate Root 和 agent candidate lane，只能发非
+stable 渠道。生产与 candidate 凭据、Catalog 和写权限不得共用。
+
+## Candidate 认证与 Catalog 晋升
+
+先创建仓库外的不可复用工作目录（CI 使用 `${RUNNER_TEMP}`）；impact、report、Catalog/Profile
+快照不得写回源码 checkout，否则 clean-source 门禁必须失败。
+
+先明确**认证域**：待晋升 Catalog、目标 Operator/发布责任边界与一份 fleet 共同定义。
+fleet 是该域内的匿名场景、固定 canary、临时首用者及 `requiredCi` 登记，不是服务器集群，
+也不是所有 Relkit 使用者仓库。公网与内网若是不同 Operator/责任边界，使用不同 Catalog
+快照和 fleet；一个域的 report 不能晋升另一个域。
+
+1. 用 production Catalog、candidate Catalog/Profile 和两套公开根生成 impact：
+
+```text
+relkit-ops impact generate ... \
+  --escape-registry conformance/production-escapes --repo-root . \
+  --risk <documentation|single-capability|contract|cross-cutting> \
+  --out <outside-repo-work-dir>/impact.json
+```
+
+2. 用 ops 私有 fleet 登记选择 cohort/canary 并运行反向 CI：
+
+```text
+relkit-ops certify \
+  --fleet <fleet.json> --impact <outside-repo-work-dir>/impact.json \
+  --escape-registry conformance/production-escapes --repo-root . \
+  --out <outside-repo-work-dir>/certification.json --json
+```
+
+- 每个完整 distribution 先通过可移植的 S1–S3；目标认证域再执行与其产品相关的场景和 canary。
+- 普通能力/合同变更：受影响 cohort 的固定 canary + 轮换样本。
+- 新能力：首个声明该能力的宿主临时 mandatory。
+- 签名、resolution、发布事务、协议、registry、IPC 等横切变更：`--full`，
+  该认证域 fleet 的全部 mandatory 条目；不是未来所有客户仓库。
+- 只有 Catalog 重算确认无组件或合同变化时才可使用 `documentation`；它默认可零宿主。
+- 某域声明的内网/外网 CI 任一路缺失，结果必须为 `skipped-unverified`，不能认证。
+  不属于该域的环境可以延期，但必须明确“未在该环境晋升”，不得复用其他域报告。
+
+`impact` 固定 Candidate commit，以及包含测试源码摘要的 regression coverage digest；
+`certify` 必须从同一干净 commit 重审、执行当前平台适用的回归并要求 digest 未漂移，
+再把结果写入 `relkit.certification-report/2`。Catalog 晋升时当前干净源码也必须仍是
+该 Candidate commit。报告绑定 fleet 摘要、宿主项目摘要和完整
+`requiredCi` 选择；晋升必须传入同一 fleet 重算，替换或裁剪均失败。只有该报告与当前
+registry 仍一致才能晋升：
+
+```text
+relkit-ops catalog transition \
+  --state certified \
+  --fleet <fleet.json> \
+  --impact <outside-repo-work-dir>/impact.json \
+  --certification-report <outside-repo-work-dir>/certification.json \
+  --escape-registry conformance/production-escapes --repo-root . \
+  ...
+```
+
+Candidate authority 本身不能签 certified Catalog。
+
+## Agent policy 切换
+
+二进制升级与 lane 切换是两件事。每个 deployment 都必须先只读计划，再用本次唯一的
+回滚路径原子执行：
+
+```text
+relkit-ops agent policy \
+  --config <relkit-agent.json> --policy <candidate-or-production-policy.json> --json
+relkit-ops agent policy \
+  --config <relkit-agent.json> --policy <candidate-or-production-policy.json> \
+  --backup <unique-utc-backup.json> --execute --json
+```
+
+随后由 deploy adapter 执行 `restart/reload → GET /-/health`；任一步失败都恢复该备份、
+再次重启并复验。公网与内网使用不同 policy、`deploymentId` 和证据，不能越域复用。
+切 production 时，production bundle 和 policy 都不得继续携带 Candidate Root；CI 移除
+`RELKIT_CANDIDATE_ROOT_FINGERPRINT` 后才可触发 stable。
+
+## Operator 升级
+
+先展示计划，再执行：
+
+```text
+relkit-ops plan --inventory <inventory> --to <version|latest> --out upgrade.json --json
+relkit-ops upgrade <operator> --inventory <inventory> --plan upgrade.json --execute --json
+```
+
+计划必须列出服务、mirror、合同变化和精确 distribution。执行顺序固定为
+candidate→sync→deploy→verify→activate。任一步失败运行 rollback，active Profile
+保持旧内容；不得让项目看见半升级 Profile。
+
+## 凭据轮换
+
+```text
+relkit-ops rotate <credential-name> --inventory <inventory> --execute --json
+```
+
+完成顺序固定为 mint→更新 secret store→服务用户可读→reload/restart→健康及写权限
+验证→吊销旧凭据→原子激活新 Profile。任一步失败都不得标 active。输出只允许 opaque
+secret reference，禁止打印或提交 token。
+
+## 收尾
+
+如果本次问题没有被现有自动化提前发现，不能只补说明或把 code 记为
+“已消化”。先分类：
+
+- `generic` / `agent`：在 Relkit 中创建中央 production escape 记录，关联已经会执行的
+  真实回归测试和 tracking issue/PR（已知 fix PR 可直接作为 tracking）；跨组件问题必须
+  有真实场景证据。
+- 产品专属：记录和回归留在宿主仓，不进入中央 registry。
+
+普通开发/review 对目标分支运行审计并真实执行证据；它允许尚未知的 merge
+commit/release，但不允许删除历史记录或缺测试：
+
+```text
+relkit-ops escape audit \
+  --registry conformance/production-escapes --repo-root . \
+  --baseline-ref origin/<base> --execute --json
+```
+
+release prep 在修复 merge 后补齐 closure；tag 构建对上一正式 tag 运行严格审计：
+
+```text
+relkit-ops escape audit \
+  --registry conformance/production-escapes --repo-root . \
+  --baseline-ref <previous-stable-tag> --release <vX.Y.Z> --json
+```
+
+中央记录的状态与校验均由 `relkit-ops` 推导，Skill 不复制 schema 或判定逻辑。
+平台限定证据只能在声明的平台执行；其他平台报告为 `deferred`，不能冒充已执行。
+登记 path 必须就是实际执行 symbol 的定义文件。Python/Node 是否通过由 runner 的结构化
+结果/事件及来源文件判定，Go 要求 package 内唯一声明；Rust 只接受直接 `tests/*.rs`
+中的无条件顶层测试，并以独立 target 精确执行。导入文件、同名 suite/测试或自行打印的
+“通过”文本无效。
+PR 的 Linux/Windows matrix 必须合起来覆盖全部声明平台。只有审计通过、回归随候选与
+发布门禁执行，且同类问题会在下一个无关宿主暴露前被拦住，才算完成沉淀。
+
+使用结构化输出复查：
+
+```text
+relkit-ops status --inventory <inventory> --json
+./relkitw inspect --json
+./relkitw doctor --resolution .relkit/resolution.json --project relkit.project.json --json
+relkit verify released ...
+```
+
+失败按稳定 `code` 归因并修正式 core/ops/声明。禁止为单一宿主加仓库名特判，
+禁止恢复 Python host/onboarding、复制 bootstrap 或平行门禁。
