@@ -88,6 +88,22 @@
   `TestSdkInteropFixtureIsNotStale` 每次 `go test` 重新封签比对，手改 fixture 即红。
 - 现状（2026-10-21 实测）：Dart 83 项全绿、0 跳过；`go test ./... -count=1` 无 FAIL。
 
+## 2026-10-21 cronkit 退出 vNext 接入范围
+
+- 裁决：cronkit 不迁移，按“从未接入”处理。它是四宿主（Loom、Loom-Launcher、
+  SvnMergeTool、Dec）之外唯一还持有 `relkit.json` + `scripts/relkit.lock.json` +
+  `scripts/host` + `.relkit/onboarding.json` 的纯 legacy 仓。
+- 含义：vNext 的接入面就是四宿主，没有第五个待迁移宿主，也没有为 cronkit 保留的
+  兼容分支。`representative-scenarios.md` 早已把 cronkit 列为不纳入本轮设计与门禁，
+  本次只是把“以后再说”明确成“不做”。
+- 不产生的欠账：relkit 不因这次退出而保留任何按产品特判的路径。`cmd/relkit` 的
+  命令面与 `internal/vnext/registry/components.json` 都不含产品身份，cronkit 在
+  Go 代码里只作为多产品测试样例出现（agent token 作用域、site 多 profile），
+  这类用例换成任意产品名等价，不属于兼容负担。
+- cronkit 仓自身的 legacy 控制面（`relkit.json` 控制面、`scripts/host`、
+  `relkit ci release --execute` 发版链）不在本仓删除范围，随该仓归档处置；
+  本裁决只表示 Relkit 不再把它计入接入清单。
+
 ---
 
 ## A. 接入体验（宿主视角）

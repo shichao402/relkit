@@ -84,3 +84,8 @@ S1–S3 全绿不是“任何项目、任何环境都不会出问题”的证明
 | Dec | S3；component×audience；Go/Rust facade | 不得双份手工 runtime 配置 |
 
 cronkit、novoard-agent、SvnAutoMerge 等**不纳入**本轮设计与门禁。
+
+其中 cronkit 于 2026-10-21 由用户裁决**退出接入范围**，按“从未接入”处理：
+vNext 的接入面就是上表四仓，没有第五个待迁移宿主。它仓内的 legacy 控制面
+（`relkit.json` 控制面、`scripts/host`、`relkit ci release --execute` 发版链）
+随该仓自行归档，Relkit 不为其保留任何兼容分支或按产品特判的路径。

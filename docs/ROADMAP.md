@@ -10,6 +10,9 @@
   生产按 Operator 认证域独立推进。首个公网 Dec 窗口见
   [切换手册](design/vnext/cutover.md) 与
   [推进记录](design/vnext/first-production-rollout.md)。
+- **接入面**：Loom、Loom-Launcher、SvnMergeTool、Dec 四宿主，没有第五个待迁移宿主。
+  cronkit 已由 2026-10-21 裁决退出接入范围，按“从未接入”处理，Relkit 不为它保留
+  兼容分支。
 - **原则**：不先修单仓倒推 Relkit；仓库身份不进入 core。使用者验收以
   USER-ACCEPTANCE 的运行证据为准，ADR 正文不算“通过”。
 
