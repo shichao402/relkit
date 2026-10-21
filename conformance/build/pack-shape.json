@@ -3,33 +3,6 @@
   "description": "Product-tree pack shapes shared by every relkit build implementation: entry sets, tree hashes, and refusal faces. Zip framing is not pinned (deflate streams differ across implementations); entry names + contents + tree-sha256 are.",
   "cases": [
     {
-      "name": "host-scripts-working-tree-shape",
-      "description": "host-scripts packs every file under scripts/host (working tree, __pycache__ excluded) — the registry required paths plus the release contract, the backfill script, and the e2e compat check.",
-      "component": "host-scripts",
-      "expectEntries": [
-        "backfill-cronkit-stable.sh",
-        "e2e_raw_compat_check.go",
-        "hostlib/__init__.py",
-        "hostlib/const.py",
-        "hostlib/digest.py",
-        "hostlib/facets.py",
-        "hostlib/gates.py",
-        "hostlib/inspect.py",
-        "hostlib/onboard.py",
-        "hostlib/reconcile.py",
-        "hostlib/release.py",
-        "hostlib/remote.py",
-        "hostlib/retrospect.py",
-        "hostlib/runtime.py",
-        "hostlib/ssh.py",
-        "hostlib/state.py",
-        "release-contract.json",
-        "relkit_consume.py",
-        "relkit_host.py"
-      ],
-      "expectTreeSha256": "4d7cd9673035a57687250d99b6cf0f2c6bcee653f5b763dbe6268ce6d675956b"
-    },
-    {
       "name": "bindings-ts-listed-files",
       "description": "bindings-ts packs exactly the four listed files.",
       "component": "bindings-ts",

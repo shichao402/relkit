@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shichao402/relkit/internal/registry"
+	vnextregistry "github.com/shichao402/relkit/internal/vnext/registry"
 )
 
 // Entry is one file to pack into an archive: source path on disk plus the
@@ -263,78 +263,67 @@ func (c *RepoContext) goDepsEntries(source, module string, entrypoints, files, e
 
 // ComponentEntries derives the full entry list for one product-tree
 // component: pack kind dispatch, pack extras, exclude paths, and the host
-// surface check for updater-carrying components.
-func (c *RepoContext) ComponentEntries(name string) ([]Entry, error) {
-	row, ok := registry.ByName[name]
+// surface check for updater-carrying components. The pack shape is declared in
+// the single vNext component registry.
+func (c *RepoContext) ComponentEntries(document *vnextregistry.Document, name string) ([]Entry, error) {
+	row, ok := document.ByName(name)
 	if !ok {
 		return nil, fmt.Errorf("unknown component %q", name)
 	}
-	if row.Role != registry.RoleProductTree {
+	if row.Role != vnextregistry.RoleFacade && row.Role != vnextregistry.RoleProjection {
 		return nil, fmt.Errorf("%s is not a packed product-tree", name)
 	}
-	kind := row.Pack.Kind
+	if row.Build.Pack == nil {
+		return nil, fmt.Errorf("%s declares no pack block", name)
+	}
+	pack := row.Build.Pack
+	kind := pack.Kind
 	if kind == "" {
-		kind = registry.PackTrackedTree
+		kind = vnextregistry.PackTrackedTree
 	}
 	var entries []Entry
 	var err error
 	switch kind {
-	case registry.PackListedFiles:
-		entries, err = c.listedFileEntries(row.Source, row.Pack.Files, row.Name)
-	case registry.PackWorkingTree:
-		entries, err = c.workingTreeEntries(row.Source, row.Pack.ExcludeParts)
-	case registry.PackGoDeps:
-		entries, err = c.goDepsEntries(row.Source, row.Pack.GoModule, row.Pack.GoEntrypoints, row.Pack.Files, row.Pack.ExcludeSuffixes)
-	case registry.PackTrackedTree:
-		entries, err = c.treeEntries(row.Source)
+	case vnextregistry.PackListedFiles:
+		entries, err = c.listedFileEntries(row.Build.Source, pack.Files, row.Name)
+	case vnextregistry.PackWorkingTree:
+		entries, err = c.workingTreeEntries(row.Build.Source, pack.ExcludeParts)
+	case vnextregistry.PackGoDeps:
+		entries, err = c.goDepsEntries(row.Build.Source, pack.GoModule, pack.GoEntrypoints, pack.Files, pack.ExcludeSuffixes)
+	case vnextregistry.PackTrackedTree:
+		entries, err = c.treeEntries(row.Build.Source)
 	default:
 		return nil, fmt.Errorf("%s has unknown pack %q", row.Name, kind)
 	}
 	if err != nil {
 		return nil, err
 	}
-	for _, extra := range row.Pack.PackExtras {
+	for _, extra := range pack.Extras {
 		full := filepath.Join(c.Root, filepath.FromSlash(extra[0]))
 		if info, err := os.Stat(full); err != nil || info.IsDir() {
 			return nil, fmt.Errorf("%s extra %s is missing", row.Name, extra[0])
 		}
 		entries = append(entries, Entry{Source: full, ArchiveName: extra[1]})
 	}
-	if len(row.Pack.ExcludePaths) > 0 {
-		entries = filterExcludedPaths(entries, row.Pack.ExcludePaths)
+	if len(pack.ExcludePaths) > 0 {
+		entries = filterExcludedPaths(entries, pack.ExcludePaths)
 	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("%s packed no files", row.Name)
 	}
-	if row.UpdaterProcess != "" {
-		if err := c.hostSurfaceCheck(&row, entries); err != nil {
-			return nil, err
+	// The retired source-grep facade gate (ADR 0019 §1) used to scan packed
+	// sources for an in-process engine. What stays enforceable is structural:
+	// every facade path a component declares must really be inside its archive.
+	if len(row.Build.FacadePaths) > 0 {
+		packed := make(map[string]bool, len(entries))
+		for _, entry := range entries {
+			packed[entry.ArchiveName] = true
+		}
+		for _, facade := range row.Build.FacadePaths {
+			if !packed[facade] {
+				return nil, fmt.Errorf("%s facade %s is not packed", row.Name, facade)
+			}
 		}
 	}
 	return entries, nil
-}
-
-// hostSurfaceCheck mirrors packed_host_surface_errors: host zips may ship
-// protocol helpers plus a facade, never an in-process engine.
-func (c *RepoContext) hostSurfaceCheck(row *registry.Component, entries []Entry) error {
-	names := []string{}
-	texts := map[string]string{}
-	for _, entry := range entries {
-		ext := strings.ToLower(filepath.Ext(entry.Source))
-		if !hostSourceSuffixSet[ext] {
-			continue
-		}
-		data, err := os.ReadFile(entry.Source)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", entry.Source, err)
-		}
-		names = append(names, entry.ArchiveName)
-		texts[entry.ArchiveName] = string(data)
-	}
-	sort.Strings(names)
-	problems := packedHostSurfaceErrors(row, names, texts)
-	if len(problems) > 0 {
-		return fmt.Errorf("%s", strings.Join(problems, "; "))
-	}
-	return nil
 }

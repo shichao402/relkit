@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/shichao402/relkit/internal/publishproto"
-	legacyregistry "github.com/shichao402/relkit/internal/registry"
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	"github.com/shichao402/relkit/internal/vnext/canonical"
 	"github.com/shichao402/relkit/internal/vnext/catalog"
@@ -122,12 +121,8 @@ func BuildDistribution(options BuildDistributionOptions) (*catalog.Distribution,
 	}
 	components := make([]catalog.Component, 0)
 	for _, definition := range registry.Components {
-		legacy, ok := legacyregistry.ByName[definition.Name]
-		if !ok {
-			return nil, fmt.Errorf("component %q has no release artifact naming rule", definition.Name)
-		}
 		for _, target := range definition.Targets {
-			assetName, manifestTarget, err := distributionAssetName(legacy, target)
+			assetName, manifestTarget, err := definition.ReleaseAssetName(target)
 			if err != nil {
 				return nil, fmt.Errorf("component %s/%s: %w", definition.Name, target, err)
 			}
@@ -220,23 +215,6 @@ func immutableSourceBase(raw string) (string, error) {
 		return "", fmt.Errorf("source-base must be an immutable https URL without query or fragment")
 	}
 	return value.String(), nil
-}
-
-func distributionAssetName(component legacyregistry.Component, target string) (string, string, error) {
-	if target == "all" {
-		if component.Archive == "" {
-			return "", "", fmt.Errorf("portable component has no archive")
-		}
-		return component.Archive, "any-any", nil
-	}
-	if component.BinaryPrefix == "" {
-		return "", "", fmt.Errorf("targeted component has no binary prefix")
-	}
-	name := component.BinaryPrefix + "-" + target
-	if strings.HasPrefix(target, "windows-") {
-		name += ".exe"
-	}
-	return name, target, nil
 }
 
 func verifyReleaseAsset(root, name, expectedHex string) (string, error) {

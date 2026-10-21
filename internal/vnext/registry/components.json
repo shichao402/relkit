@@ -1,5 +1,6 @@
 {
   "schema": "relkit.component-registry/1",
+  "buildTargets": ["linux-amd64", "linux-arm64", "windows-amd64", "darwin-amd64", "darwin-arm64"],
   "components": [
     {
       "name": "store",
@@ -8,13 +9,23 @@
       "targets": ["linux-amd64", "linux-arm64"],
       "provides": [
         {"domain": "publishProtocol", "peer": "cli", "min": 2, "max": 3}
-      ]
+      ],
+      "build": {
+        "flag": "store",
+        "goPackage": "./cmd/relkit-store",
+        "binaryPrefix": "relkit-store"
+      }
     },
     {
       "name": "console",
       "role": "infrastructure-binary",
       "transport": "release-asset",
-      "targets": ["linux-amd64", "linux-arm64"]
+      "targets": ["linux-amd64", "linux-arm64"],
+      "build": {
+        "flag": "console",
+        "goPackage": "./cmd/relkit-console",
+        "binaryPrefix": "relkit-console"
+      }
     },
     {
       "name": "agent",
@@ -23,13 +34,23 @@
       "targets": ["linux-amd64", "linux-arm64"],
       "provides": [
         {"domain": "publishProtocol", "peer": "cli", "min": 2, "max": 3}
-      ]
+      ],
+      "build": {
+        "flag": "agent",
+        "goPackage": "./cmd/relkit-agent",
+        "binaryPrefix": "relkit-agent"
+      }
     },
     {
       "name": "ops",
       "role": "infrastructure-binary",
       "transport": "release-asset",
-      "targets": ["linux-amd64", "linux-arm64", "windows-amd64", "darwin-amd64", "darwin-arm64", "darwin-universal"]
+      "targets": ["linux-amd64", "linux-arm64", "windows-amd64", "darwin-amd64", "darwin-arm64", "darwin-universal"],
+      "build": {
+        "flag": "ops",
+        "goPackage": "./cmd/relkit-ops",
+        "binaryPrefix": "relkit-ops"
+      }
     },
     {
       "name": "cli",
@@ -43,7 +64,12 @@
       ],
       "provides": [
         {"domain": "artifactSet", "peer": "producer", "id": "relkit.artifact-set/1"}
-      ]
+      ],
+      "build": {
+        "flag": "cli",
+        "goPackage": "./cmd/relkit",
+        "binaryPrefix": "relkit"
+      }
     },
     {
       "name": "updater",
@@ -57,7 +83,12 @@
       ],
       "provides": [
         {"domain": "updaterIpc", "peer": "facade", "min": 3, "max": 3}
-      ]
+      ],
+      "build": {
+        "flag": "updater",
+        "goPackage": "./cmd/relkit-updater",
+        "binaryPrefix": "relkit-updater"
+      }
     },
     {
       "name": "sdk-dart",
@@ -67,7 +98,18 @@
       "destination": ".relkit/components/sdk/dart",
       "requires": [
         {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
-      ]
+      ],
+      "build": {
+        "flag": "dart-sdk",
+        "archive": "relkit-sdk-dart.zip",
+        "source": "sdk/dart",
+        "updaterProcess": "dart",
+        "facadePaths": ["lib/src/updater_facade.dart"],
+        "pack": {
+          "kind": "tracked-tree",
+          "excludePaths": ["lib/src/updater.dart", "lib/src/scheduler.dart", "example/", "test/"]
+        }
+      }
     },
     {
       "name": "sdk-go",
@@ -77,7 +119,21 @@
       "destination": ".relkit/components/sdk/go",
       "requires": [
         {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
-      ]
+      ],
+      "build": {
+        "flag": "go-sdk",
+        "archive": "relkit-sdk-go.zip",
+        "source": ".",
+        "updaterProcess": "go",
+        "facadePaths": ["sdk/updaterfacade/facade.go"],
+        "pack": {
+          "kind": "go-deps",
+          "files": ["go.mod", "go.sum"],
+          "excludeSuffixes": ["_test.go"],
+          "goEntrypoints": ["./sdk", "./sdk/updaterfacade"],
+          "goModule": "github.com/shichao402/relkit"
+        }
+      }
     },
     {
       "name": "sdk-rust",
@@ -87,7 +143,18 @@
       "destination": ".relkit/components/sdk/rust",
       "requires": [
         {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
-      ]
+      ],
+      "build": {
+        "flag": "rust-sdk",
+        "archive": "relkit-sdk-rust.zip",
+        "source": "sdk/rust",
+        "updaterProcess": "rust",
+        "facadePaths": ["src/lib.rs"],
+        "pack": {
+          "kind": "tracked-tree",
+          "extras": [["proto/updater/v1/updater.proto", "proto/updater/v1/updater.proto"]]
+        }
+      }
     },
     {
       "name": "bindings-ts",
@@ -97,7 +164,18 @@
       "destination": ".relkit/components/bindings/ts",
       "requires": [
         {"domain": "updaterIpc", "peer": "updater", "min": 3, "max": 3}
-      ]
+      ],
+      "build": {
+        "flag": "bindings-ts",
+        "archive": "relkit-bindings-ts.zip",
+        "source": "bindings/ts",
+        "updaterProcess": "node",
+        "facadePaths": ["dist/updater_pb.js"],
+        "pack": {
+          "kind": "listed-files",
+          "files": ["package.json", "README.md", "dist/updater_pb.js", "dist/updater_pb.d.ts"]
+        }
+      }
     }
   ]
 }

@@ -1,6 +1,6 @@
 # ADR 0012：单一组件 Registry
 
-- 状态：Accepted
+- 状态：Accepted（载体已迁移：Python `facets.py` 与 `host-scripts` role 于 2026-10-21 随 ADR 0019 §1 删除，声明式注册表现存于 `internal/vnext/registry/components.json`）
 - 日期：2026-09-15
 - 关联：[0010](0010-single-updater-engine.md)、[0011](0011-immutable-release-consume.md)
 

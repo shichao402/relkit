@@ -20,6 +20,7 @@ import (
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/publishproto"
 	"github.com/shichao402/relkit/internal/stage"
+	vnextrelease "github.com/shichao402/relkit/internal/vnext/release"
 )
 
 func TestPutUploadsCASAndThinStaged(t *testing.T) {
@@ -55,8 +56,26 @@ func TestPutUploadsCASAndThinStaged(t *testing.T) {
 	if err := os.WriteFile(stage.StagedPath(root, version), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(stage.ReleasePolicyPath(root, version), []byte(`{"product":"demo"}`), 0o644); err != nil {
+	// ADR 0019 §1 retired release-policy.json; the vNext resolution digest plus
+	// its four sidecar documents are what make a staged tree uploadable.
+	doc.ResolutionDigest = "sha256:" + strings.Repeat("a", 64)
+	data, err = rupv2.MarshalStaged(doc)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(stage.StagedPath(root, version), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		vnextrelease.ResolutionFile,
+		vnextrelease.ResolutionBundleFile,
+		vnextrelease.ProjectFile,
+		vnextrelease.ArtifactSetFile,
+	} {
+		path := filepath.Join(stage.StagingDir(root, version), name)
+		if err := os.WriteFile(path, []byte(`{"schema":"test"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	var server *httptest.Server
@@ -351,7 +370,7 @@ func assertThinArchive(t *testing.T, body io.Reader) {
 			t.Fatalf("thin archive contains %q", header.Name)
 		}
 	}
-	if strings.Join(names, ",") != "staged.pb,release-policy.json" {
+	if strings.Join(names, ",") != "staged.pb,resolution.json,resolution-bundle.json,relkit.project.json,artifact-set.json" {
 		t.Fatalf("archive names=%v", names)
 	}
 }

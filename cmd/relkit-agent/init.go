@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,9 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
-	relkitconfig "github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/uploadtoken"
 )
@@ -30,7 +27,6 @@ func runInit(out io.Writer, args []string) error {
 	remove := fs.Bool("remove", false, "with -product: drop that product from the map")
 	tokenOnly := fs.Bool("token-only", false, "with -product: rotate that product's upload token")
 	shareWith := fs.String("share-with", "", "with -product: grant the same token as this existing product")
-	migrateProfile := fs.Bool("migrate-profile", false, "with -product: extract a machine publish profile from product-root relkit.json, then rename that file aside")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -39,7 +35,7 @@ func runInit(out io.Writer, args []string) error {
 	// would otherwise become a silent "no products" listing.
 	switch {
 	case *list:
-		if *product != "" || *remove || *root != "" || *migrateProfile || *tokenOnly || *shareWith != "" {
+		if *product != "" || *remove || *root != "" || *tokenOnly || *shareWith != "" {
 			return fmt.Errorf("-list-products takes no other arguments")
 		}
 		return runInitListProducts(out, *configPath)
@@ -49,9 +45,6 @@ func runInit(out io.Writer, args []string) error {
 		}
 		if *root != "" {
 			return fmt.Errorf("-remove cannot be combined with -root")
-		}
-		if *migrateProfile {
-			return fmt.Errorf("-remove cannot be combined with -migrate-profile")
 		}
 		if *tokenOnly {
 			return fmt.Errorf("-remove cannot be combined with -token-only")
@@ -67,24 +60,10 @@ func runInit(out io.Writer, args []string) error {
 		if *root != "" {
 			return fmt.Errorf("-token-only cannot be combined with -root")
 		}
-		if *migrateProfile {
-			return fmt.Errorf("-token-only cannot be combined with -migrate-profile")
-		}
 		if *shareWith != "" {
 			return fmt.Errorf("-token-only cannot be combined with -share-with")
 		}
 		return runInitRotateProductToken(out, *configPath, *product)
-	case *migrateProfile:
-		if *product == "" {
-			return fmt.Errorf("-migrate-profile needs -product <id>")
-		}
-		if *root != "" {
-			return fmt.Errorf("-migrate-profile cannot be combined with -root")
-		}
-		if *shareWith != "" {
-			return fmt.Errorf("-migrate-profile cannot be combined with -share-with")
-		}
-		return runInitMigrateProfile(out, *configPath, *product)
 	}
 	if *shareWith != "" {
 		if *product == "" {
@@ -479,96 +458,15 @@ func runInitAddProduct(out io.Writer, configPath, product, root string) error {
 	}
 	fmt.Fprintf(out, "\nThis product's publisher needs this token:\n")
 	fmt.Fprintf(out, "  export RELKIT_UPLOAD_TOKEN='%s'\n", token)
-	fmt.Fprintf(out, "Put signing keys under the root, then create the machine publish profile.\n")
-	fmt.Fprintf(out, "A repository release-policy.json will arrive with each staged release.\n")
+	fmt.Fprintf(out, "Put signing keys under the root, then create the machine publish profile at\n")
+	fmt.Fprintf(out, "  %s\n", filepath.Join(filepath.Dir(configPath), "products", product+".json"))
+	fmt.Fprintf(out, "The profile carries product, signing.keyId, backends and publishTo; the agent\n")
+	fmt.Fprintf(out, "reads it together with the staged vNext project/resolution bundle.\n")
 	fmt.Fprintf(out, "If this directory was created as root, give it to the service user:\n")
 	fmt.Fprintf(out, "  chown -R relkit:relkit %s\n", root)
 	fmt.Fprintf(out, "  chown relkit:relkit %s\n", tokenPath)
 	fmt.Fprintf(out, "Restart the service to load it:\n")
 	fmt.Fprintf(out, "  systemctl restart relkit-agent\n")
-	return nil
-}
-
-func runInitMigrateProfile(out io.Writer, configPath, product string) error {
-	if err := model.CheckIdentifier(product, "product"); err != nil {
-		return err
-	}
-	cfg, err := loadInitConfig(configPath)
-	if err != nil {
-		return err
-	}
-	pc, ok := cfg.Products[product]
-	if !ok {
-		return fmt.Errorf("%s is not listed in products", product)
-	}
-	root := pc.Root
-	if !filepath.IsAbs(root) {
-		root = filepath.Join(filepath.Dir(configPath), root)
-	}
-	profilePath := pc.Profile
-	if profilePath == "" {
-		profilePath = defaultProfilePath(configPath, product)
-		pc.Profile = filepath.ToSlash(filepath.Join("products", product+".json"))
-	} else if !filepath.IsAbs(profilePath) {
-		profilePath = filepath.Join(filepath.Dir(configPath), profilePath)
-	}
-	if _, err := os.Stat(profilePath); err == nil {
-		return fmt.Errorf("publish profile already exists: %s", profilePath)
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	legacyPath := filepath.Join(root, relkitconfig.ConfigName)
-	legacy, err := relkitconfig.Load(legacyPath)
-	if err != nil {
-		return fmt.Errorf("load product-root config: %w", err)
-	}
-	if legacy.Product != product {
-		return fmt.Errorf("product-root config product %q does not match %q", legacy.Product, product)
-	}
-	profile, err := relkitconfig.ExtractPublishProfile(legacy)
-	if err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(profile, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Publish profiles contain no secret values and must be traversable by the
-	// unprivileged service user even when init runs as root.
-	if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
-		return err
-	}
-	// Profile contains endpoint and environment-variable names, never secret
-	// values. Keep it world-readable so a root-run init remains readable by the
-	// unprivileged relkit-agent service user.
-	if err := os.WriteFile(profilePath, append(data, '\n'), 0o644); err != nil {
-		return err
-	}
-	cfg.Products[product] = pc
-	if err := writeFileConfig(configPath, cfg); err != nil {
-		_ = os.Remove(profilePath)
-		return err
-	}
-	// Agent never reads product-root relkit.json. Rename it aside so it cannot
-	// be mistaken for a second publish source.
-	asidePath := legacyPath + ".migrated"
-	if _, err := os.Stat(asidePath); err == nil {
-		asidePath = fmt.Sprintf("%s.migrated.%d", legacyPath, time.Now().Unix())
-	} else if err != nil && !os.IsNotExist(err) {
-		_ = os.Remove(profilePath)
-		return err
-	}
-	if err := os.Rename(legacyPath, asidePath); err != nil {
-		_ = os.Remove(profilePath)
-		return fmt.Errorf("wrote profile but failed to move %s aside: %w", legacyPath, err)
-	}
-	fmt.Fprintf(out, "config  %s\n", configPath)
-	fmt.Fprintf(out, "product %s\n", product)
-	fmt.Fprintf(out, "profile %s\n", profilePath)
-	fmt.Fprintf(out, "source  %s -> %s\n", legacyPath, asidePath)
-	fmt.Fprintf(out, "\nPublish now requires staged release-policy.json + the profile above.\n")
-	fmt.Fprintf(out, "Restart relkit-agent after deploying a build that supports release-policy.json.\n")
 	return nil
 }
 

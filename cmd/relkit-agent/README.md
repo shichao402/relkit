@@ -1,8 +1,8 @@
 # relkit-agent
 
-> 本目录是仓库的一部分（`cmd/relkit-agent`）。部署脚本在 `scripts/deploy/`。产品仓运维入口是 `scripts/host/relkit_host.py`。设计见 [`docs/design/publish-agent.md`](../../docs/design/publish-agent.md)。
+> 本目录是仓库的一部分（`cmd/relkit-agent`）。部署脚本在 `scripts/deploy/`。产品仓不再物化任何运维脚本；代为调用的入口是 Operator 侧的 `relkit-ops agent policy`。设计见 [`docs/design/publish-agent.md`](../../docs/design/publish-agent.md)。
 
-发布控制面：CI 只 `relkit stage` 并上传 staged 树；本机持签名私钥与后端凭据执行 `publish.Run`。客户端永远不连 agent。
+发布控制面：CI 只产出 vNext ArtifactSet 与 staged 树；本机持签名私钥与后端凭据执行 `publish.Run`。客户端永远不连 agent。
 
 ## 配置路径
 
@@ -29,31 +29,29 @@
 | `maxPartConcurrency` | 同一 upload id 同时进行的 part PUT 上限，超出返回 429 |
 | `uploadTTL` | 未完成会话过期（Go duration，如 `24h`） |
 
-客户端用 `relkit staged-put`，片大小与并发另由 `--part-size` / `--concurrency` 或环境变量 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY` 决定，不能超过 agent 上限。
-
 ## 发布时读哪份配置
 
-**只认这一条路径：** staged 树里的 `release-policy.json` + 本机 `/etc/relkit-agent/products/<id>.json`（`product` 与 `signing.keyId` 必须一致）。缺任一则失败。
+vNext 断代后只剩一条路径：本机 `/etc/relkit-agent/products/<id>.json` 的 publish profile，加上 staged 树里的 vNext 控制面文档（`staged.pb` + `resolution.json` + `resolution-bundle.json` + `relkit.project.json` + `artifact-set.json`）。profile 的 `product` 必须与请求的产品一致。
 
-`PUT /v1/staged`（整包与分片 complete）会在解包后立即校验：staged 树缺 `release-policy.json` 直接 **400**，不再等到 `POST /v1/publish` 才失败。
+staged 树必须携带 `resolution.json` 的 digest；缺该字段 `PUT /v1/staged`（整包与分片 complete）在解包后立即 **400**，不再等到 `POST /v1/publish`。
 
-产品根上的 `relkit.json` **不是**发布配置，agent 不会读它。`relkit stage` 写出的 policy 不含私钥、backends、`publishTo`；profile 不含公钥集与通道策略。
+产品根上的 `relkit.json` **不是**发布配置，agent 从不读它，代码里也不再有读取它的入口（ADR 0019 §1 已删除 `init -migrate-profile`）。
 
-签名用的公钥取 staged 树 `release-policy.json` 的 `signing.publicKeys`。profile 没有公钥集。这台机上应至少留一个 staged 版本。
+签名用的公钥取 profile 的 `signing.publicKeys`（或 `signing.keys` 声明的轮换窗口）。ADR 0019 §1 退役的 `release-policy.json` 不再参与，staged 树里也不再产出该文件。
 
-profile 与 release-policy 均为 **strict 解析**（`DisallowUnknownFields`）：未知字段判整个文件非法，报错文案是 `is not a valid publish profile` / `is not a valid product policy`（publish 阶段 HTTP 400）。不静默忽略、不承诺向后兼容、无迁移工具。合法字段集即 relkit 源码 `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` / `ProductPolicy` 结构体字段集。
+profile 为 **strict 解析**（`DisallowUnknownFields`）：未知字段判整个文件非法，报错文案是 `is not a valid publish profile`（publish 阶段 HTTP 400）。不静默忽略、不承诺向后兼容、无迁移工具。合法字段集即 relkit 源码 `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` / `PublicKeyConfig` 结构体字段集。
 
 strict 拒绝的排障链路（2026-09-26 stable 首发两跑两败的沉淀）：
 
 1. 症状：CI publish job 在 `cas/credentials` 步骤 exit 2，agent 日志出现 `is not a valid publish profile`。
 2. `gh run view <id> --log-failed` 定位失败步骤。
 3. `ssh <host> 'sudo cat /etc/relkit-agent/products/<product>.json'` 找出被拒字段。
-4. 对照 `internal/config/policy.go` 结构体删冗余字段。常见欠账：`signing.publicKeys`、`directory.entryUrls`、`directory.services`——设计归属都是产品仓 `release-policy.json`。
+4. 对照 `internal/config/policy.go` 的 `PublishProfile` 结构体删冗余字段。vNext 断代后通道与版本策略不在 profile 里，也不在任何 staged 文档里，出现即拒。
 5. `systemctl restart relkit-agent`，然后 `gh run rerun <id> --failed`。
 
 ## 人页 sink（`site.sinks[]`，ADR 0015）
 
-人页 browse dump（`index.html` / `<product>.html` / `catalog.json`）的部署目的地由 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]` 声明；产品 profile 不参与 sink 选择，产品 `relkit.json` 只提供 `site.title/description/homepage` 文案。
+人页 browse dump（`index.html` / `<product>.html` / `catalog.json`）的部署目的地由 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]` 声明；产品 profile 不参与 sink 选择，产品侧 `site.title/description/homepage` 文案由 `relkit.project.json` 提供。
 
 | type | 配置 | 行为 |
 |---|---|---|
@@ -67,13 +65,13 @@ dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审
 
 ## 运维
 
-装机 / 换二进制：`python scripts/deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：产品仓 `python scripts/host/relkit_host.py agent add --execute`；共用既有发布凭据时显式加 `--share-with <existing-id>`（重启另加 `--restart`）。`init` 是内部写配置接口，不是人用 CLI。
+装机 / 换二进制：`python scripts/deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：Operator 侧 `relkit-ops agent policy --config <cfg> --policy <relkit.agent-product-policy/1>`；同机共用既有发布凭据时在 policy 里显式声明同一 token 条目。`relkit-agent init` 是内部写配置接口，不是人用 CLI。
 
 证书续期与 agent 同机、不同进程：安装 `scripts/deploy/relkit-cos-cert-renew.service` + `.timer`，配置 `/etc/relkit-cos-cert/renew.json`（`targets[]` 每条是 region + bucket + domain）。不要把 COS 密钥写进 agent 的同一份 env 以外的仓库文件。注意部署位置的网络前提：该工具既要 TLS 拨号到目标 COS 自定义域名，又要调 `ssl.tencentcloudapi.com` 续期，装机的机器两条链路都得通——现网装在内网发布机（2026-09-25 自外网 CVM 迁入：香港机到广州 COS 公网入口 443 跨境不通，probe 永远超时）。
 
 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
-新产品：产品仓 `relkit_host.py agent add --execute`，再在机上准备 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要往产品根塞发布凭据。
+新产品：先用 `relkit-ops agent policy` 落 policy，再在机上准备 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要往产品根塞发布凭据。
 
 改 `/etc/relkit-agent/env` 后必须 `systemctl restart`。COS / 产品上传 token / EdgeOne 是三套东西。root 跑 init 时 `products/` 必须 `0755`，`tokens/` 给服务用户可读（文件 0600、目录让 relkit 能读）。
 

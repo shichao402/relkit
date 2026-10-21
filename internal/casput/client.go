@@ -605,19 +605,18 @@ func buildThinArchive(root, version string, staged *model.StagedDocument) (strin
 	}
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
-	sources := []string{stage.StagedPath(root, version)}
 	if staged.ResolutionDigest == "" {
-		sources = append(sources, stage.ReleasePolicyPath(root, version))
-	} else {
-		stagingRoot := stage.StagingDir(root, version)
-		for _, name := range []string{
-			vnextrelease.ResolutionFile,
-			vnextrelease.ResolutionBundleFile,
-			vnextrelease.ProjectFile,
-			vnextrelease.ArtifactSetFile,
-		} {
-			sources = append(sources, filepath.Join(stagingRoot, name))
-		}
+		return cleanup(fmt.Errorf("staged release carries no vNext resolution digest; nothing to upload (the release-policy.json control plane is retired)"))
+	}
+	stagingRoot := stage.StagingDir(root, version)
+	sources := []string{stage.StagedPath(root, version)}
+	for _, name := range []string{
+		vnextrelease.ResolutionFile,
+		vnextrelease.ResolutionBundleFile,
+		vnextrelease.ProjectFile,
+		vnextrelease.ArtifactSetFile,
+	} {
+		sources = append(sources, filepath.Join(stagingRoot, name))
 	}
 	for _, source := range sources {
 		info, err := os.Stat(source)

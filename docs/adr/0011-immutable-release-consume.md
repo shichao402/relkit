@@ -1,6 +1,6 @@
 # ADR 0011：宿主只消费不可变 Release 附件
 
-- 状态：Accepted
+- 状态：Accepted（部分退役：决策 1 的 `scripts/host` 附件、决策 3、决策 4、决策 6 已被 ADR 0017 取代，并随 ADR 0019 §1 在 2026-10-21 从代码中删除；决策 5 为历史事实）
 - 日期：2026-09-10
 - 取代：`relkit.consume/1` 源码 sparse checkout 与宿主现场构建
 

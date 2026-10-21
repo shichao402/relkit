@@ -18,14 +18,14 @@ CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯�
 
 ## 2. 信任边界
 
-发布配置拆成两份，在 agent 上合并后才调用 `publish.Run`：
+发布配置只有一份机器文件，配 vNext 控制面文档后调用 `publish.Run`：
 
 | 文件 | 谁写、放哪 | 装什么 | 禁止装什么 |
 |---|---|---|---|
-| `release-policy.json` | 仓库 `relkit stage` 写入 staged 树，随元数据上传 | 产品 id、通道、`codeStrategy`、公钥、directory 入口、site 文案 | 私钥路径、后端凭据、`ingest` / `artifactTo` / `pointerTo`、全部 Makers 配置、changelog 本地 `file` |
-| publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product` + `signing.keyId`（与 policy 对齐）、私钥 env/path、backends、`ingest`、`artifactTo` / `pointerTo`、directory 发布目标 | 公钥集、通道策略、entryUrls、全部 Makers 配置 |
+| publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product` + 签名密钥引用（`signing.keyId` / `signing.keys`）、公钥集、backends、`ingest`、`artifactTo` / `pointerTo`、directory 发布目标 | 通道与版本策略、通道级 entryUrls、全部 Makers 配置 |
+| staged vNext 控制面 | CI 侧 `relkit stage` 写入 staged 树，随元数据上传 | `staged.pb`、`resolution.json`、`resolution-bundle.json`、`relkit.project.json`、`artifact-set.json` | 私钥、后端凭据、publish 目标 |
 
-产品根上的 `relkit.json` **不是** agent 发布配置。仓库里那份只给本地 / CI 的 `relkit stage` 抽 policy 用；发布机上若还留着旧副本，应迁 profile 后改名为 `relkit.json.migrated` 或删掉。
+ADR 0019 §1 已整体退役 `release-policy.json`：它不再是发布输入，agent 也不接受缺 resolution digest 的 staged 树。产品根上的 `relkit.json` **不是** agent 发布配置，agent 从不读它，仓内也不再有读取它的代码路径。
 
 `product` 与 `signing.keyId` 必须两边一致，否则拒绝发布。产品树根永远是 agent 配置里的 `products.<id>.root`，不以 JSON 文档里的路径为准。
 
@@ -37,38 +37,41 @@ CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯�
 
 ### 2.1 staged 树（CI 交给 agent 的内容）
 
-agent 只需要清单与策略，不需要产物副本：
+agent 只需要控制面文档与摘要，不需要产物副本：
 
 ```text
 .relkit/cache/staged/<version>/
-  staged.pb              # 版本、code、产物清单与哈希
-  release-policy.json    # 仓库侧 portable 策略
+  staged.pb                 # 版本、code、产物清单与哈希
+  resolution.json           # vNext resolution
+  resolution-bundle.json    # 签名 resolution bundle
+  relkit.project.json       # 项目声明
+  artifact-set.json         # 合并后的 ArtifactSet
 ```
 
-CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。目标路径：这些文件按凭据文档 PUT 到 **ingest 后端**的 `cas/{sha256}`，**每个 blob 一次**，与本轮有几个后端无关；交给 agent 的 tar **不含** `artifacts/`（只有 `staged.pb` + `release-policy.json`）。现网整包 tar 仍可带上 `artifacts/`，agent 解包后走 `PutArtifactCAS`。瘦 tar 路径下，缺文件是否可发布由 ingest 上是否已有对应 `cas/{sha256}` 决定（见失败语义），不要在解包时因为没有 `artifacts/` 就失败。
+CI 本机仍会有 `artifacts/`（stage 用来算 sha256）。目标路径：这些文件按凭据文档 PUT 到 **ingest 后端**的 `cas/{sha256}`，**每个 blob 一次**，与本轮有几个后端无关；交给 agent 的 tar **不含** `artifacts/`。瘦 tar 路径下，缺文件是否可发布由 ingest 上是否已有对应 `cas/{sha256}` 决定（见失败语义），不要在解包时因为没有 `artifacts/` 就失败。
 
-staged 树缺 `release-policy.json` 时，`PUT /v1/staged`（整包与分片 complete）解包后直接 **400**，不再等到 `POST /v1/publish`（agent 0.1.4 起）；本机没有可读 profile 仍是 publish 时失败。
+staged 树缺 `resolution.json` 的 digest 时，`PUT /v1/staged`（整包与分片 complete）解包后直接 **400**，不再等到 `POST /v1/publish`；本机没有可读 profile 仍是 publish 时失败。
 
 ### 2.2 publish profile
 
 缺省路径：与 `relkit-agent.json` 同目录的 `products/<product>.json`（安装后即 `/etc/relkit-agent/products/<id>.json`）。`products.<id>.profile` 可覆盖。profile 只含端点与环境变量**名**，不含密钥明文；init 写成 `0644`，以便 root 跑 init 后 `relkit` 用户仍能读。
 
-字段语义表（机器 profile 的合法字段集 = `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` 结构体字段集）：
+字段语义表（机器 profile 的合法字段集 = `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` / `PublicKeyConfig` 结构体字段集）：
 
-| 字段 | 归属 | 语义 |
-|---|---|---|
-| `product` | 机器 profile | 必须与 release-policy 的 `product` 一致，否则拒绝发布 |
-| `signing.keyId` | 机器 profile | 必须与 policy 的 `signing.keyId` 一致 |
-| `signing.privateKeyEnv` / `signing.privateKeyPath` | 机器 profile | 私钥引用（env 名或路径）；公钥永远不在这里 |
-| `backends` | 机器 profile | 各后端端点与凭据 env 名 |
-| `publishTo` | 机器 profile | 发布目标后端列表 |
-| `directory.publishTo` | 机器 profile | directory 指针发布目标 |
-| `signing.publicKeys` | 产品仓 `release-policy.json` | 公钥 SSOT 在产品策略，防发布机私钥与产品公钥配对错误 |
-| `directory.entryUrls` | 产品仓 `release-policy.json` | directory 文档内容由 staged 树的 release-policy 决定，机器只声明发布目标 |
-| `directory.services` | 产品仓 `release-policy.json` | 客户端概念随 staged 树走 |
-| `defaultChannel` / `channels` / `codeStrategy` / `retainVersions` | 产品仓 `release-policy.json` | 通道与版本策略 |
+| 字段 | 语义 |
+|---|---|
+| `product` | 必须与请求的产品一致，否则拒绝发布 |
+| `signing.keyId` | 主签名密钥；`signing.keys` 存在时改用轮换窗口 |
+| `signing.privateKeyEnv` / `signing.privateKeyPath` | 私钥引用（env 名或路径） |
+| `signing.publicKeys` | 客户端内嵌的验签公钥集，轮换窗口与 `signing.keys` 共用 |
+| `backends` | 各后端端点与凭据 env 名 |
+| `publishTo` | 发布目标后端列表 |
+| `directory.publishTo` | directory 指针发布目标 |
+| `directory.entryUrls` / `directory.services` | directory 文档内容 |
 
-strict 校验已生效（2026-09-26 双发布面部署 `0.4.24+94b2ef5`）：agent 对 publish profile 与 release-policy **双侧** strict 解析（`DisallowUnknownFields`），未知字段判整个文件非法、publish 阶段返回 400。机器 profile schema **不承诺向后兼容**，无迁移工具、无兼容垫片；旧 agent 的宽松解析让冗余字段静默存活，strict 是防止欠账再累积的基线。strict 拒绝时的排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
+通道与版本策略在 vNext 断代后既不在 profile 也不在 staged 文档里：它们由 `relkit.project.json` 与 resolution 决定，profile 出现这些字段即被 strict 拒绝。
+
+strict 校验已生效：agent 对 publish profile strict 解析（`DisallowUnknownFields`），未知字段判整个文件非法、publish 阶段返回 400。profile schema **不承诺向后兼容**，无迁移工具、无兼容垫片。strict 拒绝时的排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
 
 ### 2.3 CAS：一次 ingest，之后由 agent 分发
 
@@ -204,7 +207,7 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 - `GET /-/health`
 - `PUT /v1/drop/{product}/{version}/{filename}` — 双 Job 交换口：一端先把 zip 放下，另一端再 HEAD/GET 取走。Bearer。不是发布。
 - GET / HEAD / DELETE `/v1/drop/{product}/{version}/{filename}` — 同上，鉴权后才能读或清理未发布包；build-scoped 汇总成功后删除，失败时保留现场
-- `PUT /v1/staged/{product}/{version}` — staged 树的 `tar.gz`。现网常带 `artifacts/`；目标路径只含 `staged.pb` + `release-policy.json`
+- `PUT /v1/staged/{product}/{version}` — staged 树的 `tar.gz`。目标路径只含 vNext 五件套（`staged.pb` / `resolution.json` / `resolution-bundle.json` / `relkit.project.json` / `artifact-set.json`）；现网若仍带 `artifacts/`，解包后走 `PutArtifactCAS`
 - `POST /v1/staged/{product}/{version}/uploads` — 创建分片会话。JSON：`bytes`、`sha256`、可选 `partSize`
 - `PUT /v1/staged/{product}/{version}/uploads/{id}/parts/{n}` — 一片；可选 `X-Relkit-Part-SHA256`
 - `GET` / `DELETE` `/v1/staged/{product}/{version}/uploads/{id}` — 查询已收片 / 放弃
@@ -253,20 +256,19 @@ DNS：`publish.firoyang.com` A → 发布机公网 IP。Agent 只听本机；TLS
 实装说明（2026-08）：发布机上已有 nginx 占用 `:80`，因此 HTTPS 用 **nginx + certbot** 反代 `127.0.0.1:8787`，而不是再起 Caddy。若主机是空机，仍可用 `scripts/deploy/Caddyfile.relkit-agent.example`。
 
 产品清单不要手改 `uploadTokens`。独占产品默认 `tokens/<id>.token`；同一发布方
-管理的产品可显式 `--share-with <existing-id>`，让一条 token 条目授权多个产品，
-文件改名为 `tokens/shared.token`（已占用则 `shared-N`）。运维脚本以
+管理的产品可显式 `-share-with <existing-id>`，让一条 token 条目授权多个产品，
+文件改名为 `tokens/shared.token`（已占用则 `shared-N`）。运维命令以
 `-list-products` 打出的路径为准，不要用某个产品 id 去猜文件名。CI 环境变量名固定为
 `RELKIT_UPLOAD_TOKEN`。**禁止**实例级 `uploadTokenFile` /
-`RELKIT_AGENT_TOKEN`。产品增删走产品仓：
+`RELKIT_AGENT_TOKEN`。产品声明走 Operator 侧 policy 文档：
 
 ```text
-python scripts/host/relkit_host.py agent list
-python scripts/host/relkit_host.py agent add --execute
-python scripts/host/relkit_host.py agent add --share-with <existing-id> --execute
-python scripts/host/relkit_host.py agent remove --execute
+relkit-ops agent policy --config <agent-cfg> --policy <relkit.agent-product-policy/1>
 ```
 
-机上 `init` 是内部写盘接口。改完后先把新 `RELKIT_UPLOAD_TOKEN` 交给该产品 CI，再 `--restart`。
+机上 `relkit-agent init` 是内部写盘接口（`-product` / `-list-products` / `-remove` /
+`-token-only` / `-share-with`），不是人用 CLI。改完后先把新 `RELKIT_UPLOAD_TOKEN`
+交给该产品 CI，再重启服务。
 
 ### 5.1 删除旧后端前的部署顺序
 
@@ -281,9 +283,9 @@ python scripts/host/relkit_host.py agent remove --execute
 
 ## 6. Token 轮换
 
-1. 产品仓 `python scripts/host/relkit_host.py agent add --execute`（已有产品则走 serve/agent 的 rotate）
+1. 在机上执行 `relkit-agent init -config <cfg> -product <id> -token-only`（同机共用凭据用 `-share-with <existing-id>`）
 2. 把项目 `.secrets` 里的 `RELKIT_UPLOAD_TOKEN` 写进该产品 CI secret
-3. 用户允许后再 `--restart`
+3. 用户允许后重启 `relkit-agent`
 4. 旧 token 在重启后立即失效（无宽限期）
 
 不要轮换「整台机一把」。没有这种东西。
@@ -293,16 +295,16 @@ python scripts/host/relkit_host.py agent remove --execute
 内网不必把产物发到公网 COS。控制面仍是 agent，数据面仍是 WOA 目录（现有 `https://update.devcloud.woa.com/` 的 GET 树）。
 
 1. 在箱上安装 `relkit-agent` 与 `relkit-serve`。内网数据目录用 `/data`：serve `--addr :8080 --dir /data/relkit-serve`，agent `--state-dir /data/relkit-agent --product-root /data/relkit --config-example scripts/deploy/relkit-agent.intranet.example.json`。已有实例用 `python scripts/deploy/relkit.py upgrade --host <Host>`。
-2. 每个产品的 **publish profile** 把 `ingest`、`artifactTo`、`pointerTo` 都指到 `relkit-compatible`；`baseUrl` 为客户端匿名下载地址，`uploadUrl` 必须是 **CI 与 agent 都能访问的 serve 写入端点**，禁止填只因同机才可用的 loopback。serve 应像 COS endpoint 一样独立对外监听，上传正文不经过 agent 的 nginx；`baseUrl` 可以等于该 endpoint，也可以另用只读域名/CDN。`tokenEnv` 为 `RELKIT_SERVE_TOKEN`。样例：`scripts/deploy/relkit-intranet-product.example.json`。旧机若产品根还留着整份配置，可先 `-migrate-profile`。
+2. 每个产品的 **publish profile** 把 `ingest`、`artifactTo`、`pointerTo` 都指到 `relkit-compatible`；`baseUrl` 为客户端匿名下载地址，`uploadUrl` 必须是 **CI 与 agent 都能访问的 serve 写入端点**，禁止填只因同机才可用的 loopback。serve 应像 COS endpoint 一样独立对外监听，上传正文不经过 agent 的 nginx；`baseUrl` 可以等于该 endpoint，也可以另用只读域名/CDN。`tokenEnv` 为 `RELKIT_SERVE_TOKEN`。样例：`scripts/deploy/relkit-intranet-product.example.json`。产品根若还留着旧 `relkit.json`，agent 不读它，直接删掉即可——仓内已无迁移入口。
 3. 私钥只在这台机上。CI 只持 **该产品** 的 `RELKIT_UPLOAD_TOKEN`。
 
    发布是两段接力，两段各有一张 token，不要混：CI 用 `RELKIT_UPLOAD_TOKEN` 把
    staged 树交给 agent；agent 再用 profile `tokenEnv` 指向的变量（本形态是
    `RELKIT_SERVE_TOKEN`，由 systemd `EnvironmentFile` 提供）写 serve 数据面。
-   因此 `tokenEnv` 与 `uploadUrl` 是**箱上事实**，产品仓 `relkit.json` 里同名字段
-   描述的是 CI 直连后端的场景。`relkit_host.py agent provision` 生成 profile 时从
-   箱上已装 profile 继承这两个字段，只有首次创建才用默认值；`baseUrl` 相反，始终
-   以产品仓为准，因为它是要写进签名 manifest 的客户端下载地址。
+   因此 `tokenEnv` 与 `uploadUrl` 是**箱上事实**，产品侧的 `relkit.project.json` 只
+   描述声明与目标；`relkit-ops agent policy` 生成 profile 时从箱上已装 profile
+   继承这两个字段，只有首次创建才用默认值；`baseUrl` 相反，始终以项目声明为准，
+   因为它是要写进签名 manifest 的客户端下载地址。
 4. `relkit-store` 对外提供完整数据面 API：正式对象继续匿名 Range GET；普通 PUT / COPY / HEAD / DELETE 由运营方 Bearer 保护，CAS PUT 由短期对象能力签名保护。和 COS 一样，公开可达不等于匿名可写。
 
 Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某产品的 token 发给无关仓库。不要用实例级 Bearer 当「同机共享」。

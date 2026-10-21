@@ -13,13 +13,14 @@ import (
 
 	"github.com/shichao402/relkit/internal/build"
 	"github.com/shichao402/relkit/internal/publishproto"
-	"github.com/shichao402/relkit/internal/registry"
+	"github.com/shichao402/relkit/internal/vnext/registry"
 )
 
 // cmdBuild implements `relkit build`: cross-compile host/product binaries and
-// pack product-tree zips, writing the relkit.release/1 manifest. Mirrors
-// scripts/deploy/relkit.py build for the release CI face (ADR 0017 phase 1
-// batch 3).
+// pack product-tree zips, writing the relkit.release/1 manifest. The component
+// table and asset naming rules come from the single vNext registry; the
+// retired internal/registry table and scripts/host/release-contract.json are
+// gone (ADR 0019 §1).
 func cmdBuild(args []string) error {
 	root := "."
 	outDir := "dist"
@@ -28,6 +29,10 @@ func cmdBuild(args []string) error {
 	all := false
 	checkTag := ""
 	selected := map[string]bool{}
+	registryDocument, err := registry.Default()
+	if err != nil {
+		return err
+	}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -51,18 +56,10 @@ func cmdBuild(args []string) error {
 			all = true
 		case strings.HasPrefix(arg, "--"):
 			flag := strings.TrimPrefix(arg, "--")
-			found := false
-			for _, row := range registry.All() {
-				if row.BuildFlag == flag {
-					found = true
-					break
-				}
+			if _, ok := registryDocument.ByBuildFlag(flag); !ok {
+				return fmt.Errorf("unknown flag %q", arg)
 			}
-			if found {
-				selected[flag] = true
-				continue
-			}
-			return fmt.Errorf("unknown flag %q", arg)
+			selected[flag] = true
 		default:
 			return fmt.Errorf("unknown argument %q", arg)
 		}
@@ -83,22 +80,23 @@ func cmdBuild(args []string) error {
 		return err
 	}
 
-	binaryRows := append(registry.InRole(registry.RoleHostBinary), registry.InRole(registry.RoleProductBinary)...)
+	binaryRows := registryDocument.InRoles(registry.RoleInfrastructureBinary, registry.RoleProductBinary)
 	var targets []string
 	var treeRows []registry.Component
+	treeCandidates := registryDocument.InRoles(registry.RoleFacade, registry.RoleProjection)
 	if all {
 		for _, row := range binaryRows {
 			targets = append(targets, row.Name)
 		}
-		treeRows = registry.InRole(registry.RoleProductTree)
+		treeRows = treeCandidates
 	} else {
 		for _, row := range binaryRows {
-			if selected[row.BuildFlag] {
+			if selected[row.Build.Flag] {
 				targets = append(targets, row.Name)
 			}
 		}
-		for _, row := range registry.InRole(registry.RoleProductTree) {
-			if selected[row.BuildFlag] {
+		for _, row := range treeCandidates {
+			if selected[row.Build.Flag] {
 				treeRows = append(treeRows, row)
 			}
 		}
@@ -108,7 +106,7 @@ func cmdBuild(args []string) error {
 	}
 
 	platforms := [][2]string{}
-	for _, target := range registry.Targets {
+	for _, target := range registryDocument.BuildTargets {
 		parts := strings.SplitN(target, "-", 2)
 		platforms = append(platforms, [2]string{parts[0], parts[1]})
 	}
@@ -152,24 +150,18 @@ func cmdBuild(args []string) error {
 	}
 	fmt.Printf("build %s\n", stamp)
 
-	contract, err := build.HostReleaseContract(root)
-	if err != nil {
-		return err
-	}
+	// The retired scripts/host/release-contract.json is gone (ADR 0019 §1).
+	// The protocol and updater IPC windows now come from their Go sources of
+	// truth, which is where the contract file used to be pinned from anyway.
 	ipcMin, ipcMax, err := build.UpdateIPCWindow(root)
 	if err != nil {
 		return err
 	}
-	ipcWindow, _ := contract["updaterIpc"].(map[string]any)
-	if ipcWindow == nil || intOf(ipcWindow["min"]) != ipcMin || intOf(ipcWindow["max"]) != ipcMax {
-		return fmt.Errorf("scripts/host/release-contract.json updaterIpc does not match internal/updater/const.go")
+	if publishproto.Min <= 0 || publishproto.Max < publishproto.Min {
+		return fmt.Errorf("internal/publishproto declares an invalid protocol window [%d,%d]", publishproto.Min, publishproto.Max)
 	}
-	protocol, _ := contract["protocol"].(map[string]any)
-	if protocol == nil {
-		return fmt.Errorf("scripts/host/release-contract.json protocol must be an object")
-	}
-	if intOf(protocol["min"]) != publishproto.Min || intOf(protocol["max"]) != publishproto.Max {
-		return fmt.Errorf("scripts/host/release-contract.json protocol does not match internal/publishproto")
+	if ipcMin <= 0 || ipcMax < ipcMin {
+		return fmt.Errorf("internal/updater declares an invalid IPC window [%d,%d]", ipcMin, ipcMax)
 	}
 
 	type builtArtifact struct {
@@ -182,17 +174,20 @@ func cmdBuild(args []string) error {
 	var built []builtArtifact
 
 	for _, name := range targets {
-		row := registry.ByName[name]
+		row, ok := registryDocument.ByName(name)
+		if !ok {
+			return fmt.Errorf("component %q is not registered", name)
+		}
 		ldflags := "-s -w -X main.version=" + stamp
 		for _, platform := range platforms {
 			osName, arch := platform[0], platform[1]
-			binaryName := fmt.Sprintf("%s-%s-%s", row.BinaryPrefix, osName, arch)
+			binaryName := fmt.Sprintf("%s-%s-%s", row.Build.BinaryPrefix, osName, arch)
 			if osName == "windows" {
 				binaryName += ".exe"
 			}
 			destination := filepath.Join(outPath, binaryName)
 			fmt.Printf("  %s\n", binaryName)
-			if err := goBuildCross(root, row.GoPackage, destination, ldflags, osName, arch); err != nil {
+			if err := goBuildCross(root, row.Build.GoPackage, destination, ldflags, osName, arch); err != nil {
 				return err
 			}
 			digest, err := build.FileSHA256(destination)
@@ -203,27 +198,20 @@ func cmdBuild(args []string) error {
 		}
 	}
 
-	hostTreeHash := ""
 	for _, row := range treeRows {
-		entries, err := ctx.ComponentEntries(row.Name)
+		entries, err := ctx.ComponentEntries(registryDocument, row.Name)
 		if err != nil {
 			return err
 		}
-		archive := filepath.Join(outPath, row.Archive)
+		archive := filepath.Join(outPath, row.Build.Archive)
 		if err := build.WriteDeterministicZip(archive, entries); err != nil {
 			return err
-		}
-		if row.Probe == registry.ProbeTreeSHA256 {
-			hostTreeHash, err = build.TreeSHA256(entries)
-			if err != nil {
-				return err
-			}
 		}
 		digest, err := build.FileSHA256(archive)
 		if err != nil {
 			return err
 		}
-		built = append(built, builtArtifact{Component: row.Name, OS: "any", Arch: "any", Path: row.Archive, SHA256: digest})
+		built = append(built, builtArtifact{Component: row.Name, OS: "any", Arch: "any", Path: row.Build.Archive, SHA256: digest})
 	}
 
 	ident, err := ctx.Identity()
@@ -235,15 +223,12 @@ func cmdBuild(args []string) error {
 		"version":       stamp,
 		"commit":        ident.Commit,
 		"dirty":         ident.Dirty,
-		"minProtocol":   intOf(protocol["min"]),
-		"maxProtocol":   intOf(protocol["max"]),
+		"minProtocol":   publishproto.Min,
+		"maxProtocol":   publishproto.Max,
 		"minUpdaterIpc": ipcMin,
 		"maxUpdaterIpc": ipcMax,
 		"builtAt":       time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		"artifacts":     built,
-	}
-	if hostTreeHash != "" {
-		manifest["hostScriptsSha256"] = hostTreeHash
 	}
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

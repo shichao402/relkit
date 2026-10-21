@@ -37,20 +37,17 @@ def _repo_root() -> Path:
 
 
 REPO_ROOT = _repo_root()
-HOST_DIR = REPO_ROOT / "scripts" / "host"
 REQUIREMENTS = DEPLOY_DIR / "requirements.txt"
 VENV_DIR = DEPLOY_DIR / ".venv"
 BOOTSTRAP_ENV = "RELKIT_DEPLOY_BOOTSTRAPPED"
 MIN_PY = (3, 9)
-# Sibling copies on a remote /tmp/relkit-deploy, then the in-repo host scripts.
-for extra in (DEPLOY_DIR, HOST_DIR):
-    if str(extra) not in sys.path:
-        sys.path.insert(0, str(extra))
-from hostlib.facets import (  # noqa: E402
+# Sibling copies on a remote /tmp/relkit-deploy load relkit_ops and components
+# from the same directory they were shipped into.
+if str(DEPLOY_DIR) not in sys.path:
+    sys.path.insert(0, str(DEPLOY_DIR))
+from components import (  # noqa: E402
     BY_NAME,
-    HOST_SOURCE_SUFFIXES,
     TARGETS,
-    packed_host_surface_errors,
     components as registry_components,
 )
 
@@ -350,16 +347,9 @@ def component_entries(name: str) -> list[tuple[Path, str]]:
         ]
     if not entries:
         raise Fail(f"{row.name} packed no files")
-    if row.updater_process:
-        texts = {
-            name: source.read_text(encoding="utf-8", errors="ignore")
-            for source, name in entries
-            if source.suffix.lower() in HOST_SOURCE_SUFFIXES
-            and source.is_file()
-        }
-        problems = packed_host_surface_errors(row, [name for _, name in entries], texts)
-        if problems:
-            raise Fail("; ".join(problems))
+    # The retired source-grep facade gate (ADR 0019 §1) used to scan these
+    # entries for an in-process updater. Structure alone decides what is packed
+    # now: a facade's own conformance suite proves it, not a text match here.
     return entries
 
 
@@ -373,39 +363,12 @@ def pack_path_excluded(archive_name: str, prefixes: Sequence[str]) -> bool:
     return False
 
 
-def host_script_entries() -> list[tuple[Path, str]]:
-    return component_entries("host-scripts")
-
-
 def rust_sdk_entries() -> list[tuple[Path, str]]:
     return component_entries("sdk-rust")
 
 
 def go_sdk_entries() -> list[tuple[Path, str]]:
     return component_entries("sdk-go")
-
-
-def host_scripts_tree_sha256(entries: Sequence[tuple[Path, str]]) -> str:
-    digest = hashlib.sha256()
-    for source, archive_name in sorted(entries, key=lambda item: item[1]):
-        digest.update(archive_name.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(
-            source.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        )
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def host_release_contract() -> dict[str, Any]:
-    path = REPO_ROOT / "scripts" / "host" / "release-contract.json"
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        die(f"cannot read {path}: {error}")
-    if not isinstance(value, dict) or value.get("schema") != "relkit.host-contract/1":
-        die(f"{path} must use relkit.host-contract/1")
-    return value
 
 
 def cmd_build(args: argparse.Namespace) -> None:
@@ -440,22 +403,16 @@ def cmd_build(args: argparse.Namespace) -> None:
         die("no build platforms left after --os/--arch filters")
     pkgs = {row.name: (row.go_package, row.binary_prefix) for row in binary_rows}
     step(f"build {stamp}")
-    contract = host_release_contract()
+    # The retired scripts/host/release-contract.json used to pin these windows
+    # (ADR 0019 §1). Their Go sources are the SSOT now; validating the window
+    # itself is `relkit build`'s job, and this deploy path keeps the same rule.
     ipc_min, ipc_max = updater_ipc_window()
-    if contract.get("updaterIpc") != {"min": ipc_min, "max": ipc_max}:
-        die(
-            "scripts/host/release-contract.json updaterIpc does not match "
-            "internal/updater/const.go"
-        )
-    protocol = contract.get("protocol")
-    if not isinstance(protocol, dict):
-        die("scripts/host/release-contract.json protocol must be an object")
     protocol_min, protocol_max = publish_protocol_window()
-    if protocol != {"min": protocol_min, "max": protocol_max}:
-        die(
-            "scripts/host/release-contract.json protocol does not match "
-            "internal/publishproto/publishproto.go"
-        )
+    if protocol_min <= 0 or protocol_max < protocol_min:
+        die("internal/publishproto declares an invalid protocol window")
+    if ipc_min <= 0 or ipc_max < ipc_min:
+        die("internal/updater declares an invalid IPC window")
+    protocol = {"min": protocol_min, "max": protocol_max}
     built: list[dict[str, Any]] = []
     for kind in targets:
         pkg, prefix = pkgs[kind]
@@ -477,13 +434,10 @@ def cmd_build(args: argparse.Namespace) -> None:
                 env=env,
             )
             built.append({"component": kind, "os": os_name, "arch": arch, "path": dest.name, "sha256": file_sha256(dest)})
-    host_tree_hash = ""
     for row in selected_trees:
         entries = component_entries(row.name)
         archive = out_dir / row.archive
         write_deterministic_zip(archive, entries)
-        if row.probe == "tree-sha256":
-            host_tree_hash = host_scripts_tree_sha256(entries)
         built.append(
             {
                 "component": row.name,
@@ -506,11 +460,6 @@ def cmd_build(args: argparse.Namespace) -> None:
         "builtAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "artifacts": built,
     }
-    if host_tree_hash:
-        manifest["hostScriptsSha256"] = host_tree_hash
-        manifest["consumerSha256"] = file_sha256(
-            REPO_ROOT / "scripts" / "host" / "relkit_consume.py"
-        )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"output in {out_dir}")
 
@@ -944,7 +893,7 @@ def cmd_install_agent(args: argparse.Namespace) -> None:
     self_check_agent(str(cfg.get("addr") or "127.0.0.1:8787"))
     print(f"config {config_path}")
     print("next: EnvironmentFile=/etc/relkit-agent/env for RELKIT_SERVE_TOKEN / COS keys")
-    print("new product: product-repo python scripts/host/relkit_host.py agent add --execute")
+    print("new product: vNext relkit-ops agent policy --config <cfg> --policy <relkit.agent-product-policy/1>")
 
 
 def cmd_install_console(args: argparse.Namespace) -> None:
@@ -1603,11 +1552,10 @@ def remote_bootstrap_sources() -> list[tuple[Path, str]]:
     return [
         (DEPLOY_DIR / "relkit.py", ""),
         (DEPLOY_DIR / "relkit_ops.py", ""),
+        (DEPLOY_DIR / "components.py", ""),
         (DEPLOY_DIR / "relkit-store.service", ""),
         (DEPLOY_DIR / "relkit-agent.service", ""),
         (DEPLOY_DIR / "relkit-console.service", ""),
-        (HOST_DIR / "hostlib" / "__init__.py", "hostlib"),
-        (HOST_DIR / "hostlib" / "facets.py", "hostlib"),
     ]
 
 
@@ -1744,12 +1692,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
             die(f"profile {name}: {exc}")
     ident = git_identity()
     protocol_min, protocol_max = publish_protocol_window()
-    contract_protocol = host_release_contract().get("protocol")
-    if contract_protocol != {"min": protocol_min, "max": protocol_max}:
-        die(
-            "scripts/host/release-contract.json protocol does not match "
-            "internal/publishproto/publishproto.go"
-        )
     print(
         "source:",
         json.dumps(

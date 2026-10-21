@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	legacyregistry "github.com/shichao402/relkit/internal/registry"
 	"github.com/shichao402/relkit/internal/vnext/catalog"
 	"github.com/shichao402/relkit/internal/vnext/document"
 	vnextregistry "github.com/shichao402/relkit/internal/vnext/registry"
@@ -85,9 +84,8 @@ func distributionFixture(t *testing.T, omit string) BuildDistributionOptions {
 	}
 	written := map[string]bool{}
 	for _, definition := range registry.Components {
-		legacy := legacyregistry.ByName[definition.Name]
 		for _, target := range definition.Targets {
-			name, _, err := distributionAssetName(legacy, target)
+			name, _, err := definition.ReleaseAssetName(target)
 			if err != nil {
 				t.Fatal(err)
 			}

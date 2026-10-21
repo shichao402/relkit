@@ -656,34 +656,17 @@ func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (st
 		log.Printf("staged tree %s/%s: %v", product, version, err)
 		return "", &stagedHTTPError{http.StatusBadRequest, "invalid staged tree: " + err.Error()}
 	}
-	if stagedDocument.ResolutionDigest != "" {
-		if err := s.validateVNextStaged(product, version, pc, stagedDocument); err != nil {
-			_ = os.RemoveAll(dest)
-			return "", &stagedHTTPError{http.StatusBadRequest, "invalid vNext staged tree: " + err.Error()}
-		}
-		if err := s.writeStagedSHA(product, version, sum); err != nil {
-			_ = os.RemoveAll(dest)
-			return "", &stagedHTTPError{http.StatusInternalServerError, "persist staged sha256: " + err.Error()}
-		}
-		return dest, nil
+	// ADR 0019 §1 retired the release-policy.json control plane. A staged tree
+	// without vNext provenance is no longer publishable: the signed resolution
+	// digest is the only accepted proof of what the tree contains.
+	if stagedDocument.ResolutionDigest == "" {
+		_ = os.RemoveAll(dest)
+		log.Printf("staged tree %s/%s: no resolution digest", product, version)
+		return "", &stagedHTTPError{http.StatusBadRequest, "staged tree carries no vNext resolution digest; run 'relkit stage --artifact-set' to produce a vNext staged release"}
 	}
-	policyPath := stage.ReleasePolicyPath(pc.Root, version)
-	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
+	if err := s.validateVNextStaged(product, version, pc, stagedDocument); err != nil {
 		_ = os.RemoveAll(dest)
-		log.Printf("staged tree %s/%s: no release-policy.json at %s", product, version, policyPath)
-		return "", &stagedHTTPError{http.StatusBadRequest, "release-policy.json required at " + policyPath + "; run 'relkit stage' to produce a portable policy"}
-	} else if statErr != nil {
-		_ = os.RemoveAll(dest)
-		return "", &stagedHTTPError{http.StatusBadRequest, "inspect release policy: " + statErr.Error()}
-	}
-	policy, err := stage.LoadReleasePolicy(pc.Root, version)
-	if err != nil {
-		_ = os.RemoveAll(dest)
-		return "", &stagedHTTPError{http.StatusBadRequest, "invalid release policy: " + err.Error()}
-	}
-	if policy.Product != product {
-		_ = os.RemoveAll(dest)
-		return "", &stagedHTTPError{http.StatusBadRequest, fmt.Sprintf("release policy product %q does not match route product %q", policy.Product, product)}
+		return "", &stagedHTTPError{http.StatusBadRequest, "invalid vNext staged tree: " + err.Error()}
 	}
 	if err := s.writeStagedSHA(product, version, sum); err != nil {
 		_ = os.RemoveAll(dest)
@@ -868,39 +851,26 @@ func sha256HexEqual(presented, stored string) bool {
 }
 
 func loadProductConfig(pc ProductConfig, version string) (*config.Config, string, error) {
-	stagedDocument, stagedErr := stage.LoadStaged(pc.Root, version)
-	if stagedErr == nil && stagedDocument.ResolutionDigest != "" {
-		productDocument, err := vnextproject.Load(filepath.Join(stage.StagingDir(pc.Root, version), vnextrelease.ProjectFile))
-		if err != nil {
-			return nil, "", err
-		}
-		profile, err := config.LoadPublishProfile(pc.Profile)
-		if err != nil {
-			return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
-		}
-		cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root)
-		if err != nil {
-			return nil, "", err
-		}
-		return cfg, "vNext project/resolution bundle + " + pc.Profile, nil
-	}
-	policyPath := stage.ReleasePolicyPath(pc.Root, version)
-	policy, err := config.LoadProductPolicy(policyPath)
+	stagedDocument, err := stage.LoadStaged(pc.Root, version)
 	if err != nil {
-		return nil, "", fmt.Errorf("release-policy.json required at %s: %w", policyPath, err)
+		return nil, "", err
 	}
-	if strings.TrimSpace(pc.Profile) == "" {
-		return nil, "", fmt.Errorf("publish profile path is empty for product %q", policy.Product)
+	if stagedDocument.ResolutionDigest == "" {
+		return nil, "", fmt.Errorf("staged release %s carries no vNext resolution digest; the release-policy.json control plane is retired (ADR 0019 §1)", version)
+	}
+	productDocument, err := vnextproject.Load(filepath.Join(stage.StagingDir(pc.Root, version), vnextrelease.ProjectFile))
+	if err != nil {
+		return nil, "", err
 	}
 	profile, err := config.LoadPublishProfile(pc.Profile)
 	if err != nil {
 		return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
 	}
-	cfg, err := config.MergeProductPolicy(policy, profile, pc.Root)
+	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root)
 	if err != nil {
 		return nil, "", err
 	}
-	return cfg, "staged release-policy.json + " + pc.Profile, nil
+	return cfg, "vNext project/resolution bundle + " + pc.Profile, nil
 }
 
 func mergeVNextPublishConfig(

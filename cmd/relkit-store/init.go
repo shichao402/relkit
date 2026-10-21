@@ -115,7 +115,7 @@ func runInit(out io.Writer, args []string) error {
 	fmt.Fprintf(out, "  export RELKIT_UPLOAD_TOKEN='%s'\n\n", token)
 	fmt.Fprintf(out, "\nServing directory is %s; create it before starting.\n", *dir)
 	fmt.Fprintf(out, "Then: relkit-store -config %s\n", configPath)
-	fmt.Fprintf(out, "Product token ops: product-repo python scripts/host/relkit_host.py serve\n")
+	fmt.Fprintf(out, "Product onboarding: relkit-ops agent policy --config <cfg> --policy <relkit.agent-product-policy/1>\n")
 	fmt.Fprintf(out, "Operator panel: relkit-console init (separate binary, ADR 0016)\n")
 	return nil
 }

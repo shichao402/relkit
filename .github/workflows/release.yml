@@ -37,7 +37,7 @@ jobs:
         run: |
           go test ./...
           cargo test --manifest-path sdk/rust/Cargo.toml
-          python -m unittest scripts/deploy/test_relkit.py scripts/test_relkit_consume.py scripts/test_relkit_host.py
+          python -m unittest scripts/deploy/test_relkit.py
           npm --prefix bindings/ts ci
           npm --prefix bindings/ts test
       - name: Execute production escape regressions

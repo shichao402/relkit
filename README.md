@@ -49,7 +49,8 @@ Operator 先 provision bootstrap，或向完全离线 CI 提供签名 distributi
 
 `relkitw` 验证 Catalog、Operator Profile、Runtime Profile 与 resolution，再按摘要把
 CLI、updater、SDK 和 projection 物化到 `.relkit/components/`。宿主不 clone Relkit，
-不从 PATH 猜 CLI，也不维护 consume lock、`scripts/host` 或 onboarding 状态。
+不从 PATH 猜 CLI，也不维护 consume lock、产品仓物化脚本或 onboarding 状态；这些
+legacy 控制面已按 ADR 0019 §1 整体删除。
 
 项目声明合同见
 [`docs/adr/0020-vnext-catalog-operator-resolution.md`](docs/adr/0020-vnext-catalog-operator-resolution.md)；

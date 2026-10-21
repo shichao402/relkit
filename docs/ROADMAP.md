@@ -59,7 +59,7 @@
 - **宿主项目规则（届时强制）**：升级到改路径的大版本时，宿主仓必须同步迁移引用点（path dep / `file:` 依赖 / CI 物化脚本）并把旧 `third_party/relkit` 树整删重建，不留双路径。消费仓 CI 门禁：非白名单仓 `git ls-files <物化路径>` 非空即红（真 vendored 的子树显式豁免，如 Loom-Launcher 的 `sdk/rust`）。
 - **过渡期（现在就成立，不依赖改名）**：各消费仓 `third_party/README.md` 锚点说明「此树按 lock 可重建、非 vendored 依赖」；relkit 侧 `StackSkipDirs` 已补 `.ci-tools`/`vendor`（issue #27 根因）。
 - **不做**：为改名单独发版、单独开五仓协调窗口；渐进双路径长期共存；把物化树挪进 `.relkit/` 现有状态命名空间。
-- **落点**：`internal/registry` Destination、`internal/consume`（check/install/stage）、`scripts/host/hostlib/facets.py`、conformance 用例；各宿主仓构建清单与 `.gitignore`。
+- **落点**：vNext registry（`internal/vnext/registry/components.json`）的 destination、CLI `materialize`/`wrapper`、conformance 用例；各宿主仓 `relkit.project.json` 与 `.gitignore`。`internal/registry`、`internal/consume`、`scripts/host/hostlib/facets.py` 已随 ADR 0019 §1 删除，不再是改动面。
 
 ## 操作面板：从本机盘长成发布管理
 

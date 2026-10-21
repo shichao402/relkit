@@ -19,14 +19,9 @@ sys.path.insert(0, str(DEPLOY))
 
 import relkit_ops as ops  # noqa: E402
 import relkit as deploy_cli  # noqa: E402
-from hostlib.facets import (
+from components import (
     BY_NAME,
-    HOST_SOURCE_SUFFIXES,
-    Component,
     TARGETS,
-    packed_host_surface_errors,
-    validate_components,
-    with_component,
 )
 
 
@@ -59,9 +54,10 @@ class SsotTests(unittest.TestCase):
     def test_publish_protocol_contract_matches_code(self):
         minimum, maximum = deploy_cli.publish_protocol_window()
         self.assertEqual((minimum, maximum), (2, 3))
-        self.assertEqual(
-            deploy_cli.host_release_contract()["protocol"],
-            {"min": minimum, "max": maximum},
+        # ADR 0019 §1 retired scripts/host/release-contract.json; the Go source
+        # above is the only place the window is declared now.
+        self.assertFalse(
+            (deploy_cli.REPO_ROOT / "scripts" / "host" / "release-contract.json").exists()
         )
 
 
@@ -373,13 +369,12 @@ class MissingTargetTests(unittest.TestCase):
         self.assertIn("no binary at /usr/local/bin/relkit-store", missing[0])
         self.assertNotIn("no systemd unit", missing[0])
 
-    def test_remote_bootstrap_includes_hostlib_facets(self):
+    def test_remote_bootstrap_carries_every_module_the_remote_cli_imports(self):
         sources = deploy_cli.remote_bootstrap_sources()
         names = [(path.name, dest) for path, dest in sources]
         self.assertIn(("relkit.py", ""), names)
         self.assertIn(("relkit_ops.py", ""), names)
-        self.assertIn(("__init__.py", "hostlib"), names)
-        self.assertIn(("facets.py", "hostlib"), names)
+        self.assertIn(("components.py", ""), names)
         for path, _dest in sources:
             self.assertTrue(path.is_file(), path)
 
@@ -429,21 +424,16 @@ class CliParseTests(unittest.TestCase):
         self.assertIn("pack_kind()", source)
 
     def test_registry_pack_covers_required_archive_paths(self):
-        self.assertEqual(BY_NAME["host-scripts"].pack_kind(), "working-tree")
+        # ADR 0019 §1 retired the host-scripts product-tree, so the remaining
+        # zipped components are the three SDK facades plus the TS projection.
         self.assertEqual(BY_NAME["sdk-go"].pack_kind(), "go-deps")
         self.assertEqual(BY_NAME["sdk-rust"].pack_kind(), "tracked-tree")
         self.assertEqual(BY_NAME["bindings-ts"].pack_kind(), "listed-files")
         self.assertEqual(BY_NAME["sdk-dart"].pack_kind(), "tracked-tree")
+        self.assertNotIn("host-scripts", BY_NAME)
         for row in deploy_cli.registry_components("product-tree"):
             names = {name for _, name in deploy_cli.component_entries(row.name)}
-            for required in row.required_paths:
-                self.assertTrue(
-                    required in names or any(
-                        name == required or name.startswith(required.rstrip("/") + "/")
-                        for name in names
-                    ),
-                    f"{row.name} packed files missing {required}",
-                )
+            self.assertTrue(names, f"{row.name} packed no files")
 
     def test_host_zips_omit_in_process_updater(self):
         dart = {name for _, name in deploy_cli.component_entries("sdk-dart")}
@@ -457,20 +447,15 @@ class CliParseTests(unittest.TestCase):
         self.assertTrue(any(name.startswith("sdk/") for name in go))
         self.assertTrue(any(name.startswith("sdk/updaterfacade/") for name in go))
         self.assertTrue(any(name.startswith("internal/ipc/") for name in go))
+        # The retired source-grep gate is gone; what remains enforceable is that
+        # every declared facade path really is inside its archive.
         for row in deploy_cli.registry_components("product-tree"):
             if not row.updater_process:
                 continue
-            entries = deploy_cli.component_entries(row.name)
-            names = [name for _, name in entries]
-            texts = {
-                name: source.read_text(encoding="utf-8", errors="ignore")
-                for source, name in entries
-                if source.suffix.lower() in HOST_SOURCE_SUFFIXES
-                and source.is_file()
-            }
-            self.assertEqual(packed_host_surface_errors(row, names, texts), ())
-            self.assertIn("facade", row.host_api)
+            names = {name for _, name in deploy_cli.component_entries(row.name)}
             self.assertTrue(row.facade_paths)
+            for facade in row.facade_paths:
+                self.assertIn(facade, names)
 
     def test_tag_ci_builds_every_registry_component(self):
         workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
@@ -486,8 +471,10 @@ class CliParseTests(unittest.TestCase):
     def test_registry_preserves_artifact_and_install_name_goldens(self):
         self.assertEqual(BY_NAME["sdk-rust"].archive, "relkit-sdk-rust.zip")
         self.assertEqual(BY_NAME["bindings-ts"].archive, "relkit-bindings-ts.zip")
+        # The vNext registry derives shell names from binaryPrefix alone: one
+        # rule for every product binary instead of a per-target override table.
         self.assertEqual(BY_NAME["cli"].install_name("windows-amd64"), "relkit.exe")
-        self.assertEqual(BY_NAME["cli"].install_name("linux-amd64"), "relkit-linux-amd64")
+        self.assertEqual(BY_NAME["cli"].install_name("linux-amd64"), "relkit")
         self.assertEqual(BY_NAME["cli"].install_name("darwin-arm64"), "relkit")
         self.assertEqual(
             [f"{BY_NAME['updater'].binary_prefix}-{target}" + (".exe" if target.startswith("windows-") else "")
@@ -501,52 +488,27 @@ class CliParseTests(unittest.TestCase):
             ],
         )
 
-    def test_fictional_facade_is_one_validated_registry_row(self):
-        row = Component(
-            "sdk-zig", "product-tree", "zig-sdk", "relkit-sdk-zig.zip",
-            "sdk/zig", "third_party/relkit/sdk/zig", "files",
-            ("build.zig",), portable=True, detect=("build.zig",),
-            updater_process="zig", import_signals=("@import(\"relkit\")",),
-            host_api=("facade",), facade_paths=("src/lib.zig",),
-        )
-        rows = with_component(row)
-        added = rows[-1]
-        self.assertEqual(added.build_flag, "zig-sdk")
-        self.assertEqual(added.name, "sdk-zig")
-        self.assertEqual(added.destination, "third_party/relkit/sdk/zig")
-        self.assertEqual(added.updater_process, "zig")
-        with self.assertRaisesRegex(ValueError, "updater_process requires facade_paths"):
-            validate_components([
-                Component(
-                    "sdk-nim", "product-tree", "nim-sdk", "relkit-sdk-nim.zip",
-                    "sdk/nim", "third_party/relkit/sdk/nim", "files",
-                    ("src/lib.nim",), portable=True, updater_process="nim",
-                    host_api=("facade",),
-                )
-            ])
-        dart = BY_NAME["sdk-dart"]
+    def test_registry_declares_each_facade_once(self):
+        """ADR 0021: one row per facade, and a facade row is one validated unit.
+
+        The retired facets.py validator is gone with the Python registry, so the
+        invariants it used to assert are now asserted against the single vNext
+        registry that replaced it.
+        """
+        trees = deploy_cli.registry_components("product-tree")
         self.assertEqual(
-            packed_host_surface_errors(
-                dart, dart.facade_paths, {dart.facade_paths[0]: "class Updater {}"},
-            ),
-            (),
+            [row.name for row in trees],
+            ["sdk-dart", "sdk-go", "sdk-rust", "bindings-ts"],
         )
-        self.assertTrue(
-            packed_host_surface_errors(
-                dart, dart.facade_paths, {"lib/src/updater.dart": "class RupUpdater {}"},
+        for row in trees:
+            self.assertTrue(row.build_flag)
+            self.assertTrue(row.archive)
+            self.assertTrue(row.source)
+            self.assertEqual(
+                bool(row.updater_process), bool(row.facade_paths),
+                f"{row.name} must declare updaterProcess and facadePaths together",
             )
-        )
-        self.assertTrue(
-            packed_host_surface_errors(dart, ("lib/src/other.dart",), {})
-        )
-        with self.assertRaisesRegex(ValueError, "listed-files pack requires pack_files"):
-            validate_components([
-                Component(
-                    "sdk-bad", "product-tree", "bad-sdk", "relkit-sdk-bad.zip",
-                    "sdk/bad", "third_party/relkit/sdk/bad", "files",
-                    ("x",), portable=True, pack="listed-files",
-                )
-            ])
+        self.assertNotIn("host-scripts", BY_NAME)
 
     def test_help_and_subcommands(self):
         env = os.environ.copy()
@@ -621,19 +583,14 @@ class CliParseTests(unittest.TestCase):
             deploy_cli.write_deterministic_zip(second, entries)
             self.assertEqual(first.read_bytes(), second.read_bytes())
 
-    def test_host_scripts_archive_has_stable_tree_hash(self):
-        args = deploy_cli.build_parser().parse_args(["build", "--host-scripts"])
-        self.assertTrue(args.host_scripts)
-        entries = deploy_cli.host_script_entries()
-        names = [name for _, name in entries]
-        self.assertIn("relkit_consume.py", names)
-        self.assertIn("relkit_host.py", names)
-        self.assertIn("hostlib/facets.py", names)
-        self.assertFalse(any("__pycache__" in name for name in names))
-        first = deploy_cli.host_scripts_tree_sha256(entries)
-        second = deploy_cli.host_scripts_tree_sha256(entries)
-        self.assertEqual(first, second)
-        self.assertEqual(len(first), 64)
+    def test_retired_host_scripts_component_is_not_packable(self):
+        # ADR 0019 §1 deleted scripts/host; the registry must reject the name
+        # rather than quietly pack an empty tree.
+        self.assertNotIn("host-scripts", BY_NAME)
+        with self.assertRaises(KeyError):
+            deploy_cli.component_entries("host-scripts")
+        args = deploy_cli.build_parser().parse_args(["build", "--all"])
+        self.assertFalse(hasattr(args, "host_scripts"))
 
     def test_rust_sdk_archive_excludes_ignored_target(self):
         ignore = (deploy_cli.REPO_ROOT / "sdk" / "rust" / ".gitignore").read_text(

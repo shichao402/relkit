@@ -1,6 +1,6 @@
 # deploy CLI
 
-与 `scripts/host/` 并列：产品仓走 host，本仓装机 / 换二进制走这里。
+本脚本只负责 Operator 机器的装机与换二进制。产品仓不再物化任何 Python 运维脚本（ADR 0019 §1）；产品侧的声明与策略走 `relkit.project.json` 与 `relkit-ops agent policy`。
 
 唯一入口：`python scripts/deploy/relkit.py`（仓库根目录执行；Linux 上也可用 `python3 scripts/deploy/relkit.py`）。Agent 流程见 [`DecAssets/skills/relkit-deploy/SKILL.md`](../../DecAssets/skills/relkit-deploy/SKILL.md)。
 
@@ -16,7 +16,7 @@
 | `migrate-serve` | 现网仍在跑 `relkit-serve.service` 的盒子一步迁移到 `relkit-store.service`（ADR 0016 第 4 步：配置迁 `/etc/relkit-store/relkit-store.json`，树/token/数据文件不动，备份后可回滚） |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |
 
-禁止：用 example JSON 覆盖现网配置；把 token 或带 `sig=` 的 URL 打进聊天/工单；upgrade 默默 `--rotate-token`；跳过发布验证。产品 token 的签发/轮换/吊销不在本脚本，走产品仓 `relkit_host.py serve`。不要用腾讯云 TAT / MCP 代跑本脚本。
+禁止：用 example JSON 覆盖现网配置；把 token 或带 `sig=` 的 URL 打进聊天/工单；upgrade 默默 `--rotate-token`；跳过发布验证。产品 token 的签发/轮换/吊销走 Operator 侧 `relkit-ops agent policy` 或在机上执行 `relkit-agent init -product <id> -token-only`；不要用腾讯云 TAT / MCP 代跑本脚本。
 
 ## 黄金路径（升级已有内网机）
 
@@ -43,7 +43,7 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../../docs/adr/0009-publisher-protocol-negotiation.md)）。升级 agent 后必须用同一 release 的 publisher。滚动放行时可临时下调 `minPublishProtocol`（设 0 关闭）。
 
-agent 对 publish profile 是 strict 解析：未知字段即拒（publish 阶段 400），不承诺向后兼容。升级前扫一遍目标机 `/etc/relkit-agent/products/*.json` 是否带结构体外字段（合法字段集 = relkit 源码 `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile`；常见冗余：`signing.publicKeys` / `directory.entryUrls` / `directory.services`，归属产品仓 release-policy），有则删字段再升级。这一步的定位是清欠账，不是兼容承诺；排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
+agent 对 publish profile 是 strict 解析：未知字段即拒（publish 阶段 400），不承诺向后兼容。升级前扫一遍目标机 `/etc/relkit-agent/products/*.json` 是否带结构体外字段（合法字段集 = relkit 源码 `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` / `PublicKeyConfig`），有则删字段再升级。vNext 断代后通道与版本策略既不在 profile 也不在 staged 文档里，出现即拒；排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
 
 公网静态目录由 agent 顶层 `site.sinks[]`（ADR 0015）拥有；产品 profile 不再携带 Makers。upgrade 会移除旧 profile 的 `site` 块、把旧 agent `site.makers` 迁移为 `site.sinks: [{"type":"makers",...}]`，但不会猜 projectId，也不会覆盖现网 agent JSON。由运营者把 sinks（Makers 的 projectId/region/tokenEnv 等）写入 `/etc/relkit-agent/relkit-agent.json`，重启后用 `curl -fsS http://127.0.0.1:8787/-/site` 检查脱敏 readiness，再运行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。修人页不需要重发产品版本。
 
@@ -72,7 +72,7 @@ sudo python3 scripts/deploy/relkit.py install agent \
 
 产品树在 `/data/relkit/<product>`。已有实例且 `--addr`/`--dir` 与现网不一致时，`install serve` 拒绝执行（避免把 30341 / `/srv/releases` 写进内网机）。这时用 `upgrade`。
 
-产品仓注册/轮换/吊销上传 token：`python scripts/host/relkit_host.py serve …`（需要 `--execute`；重启另加 `--restart`）。
+产品仓注册/轮换/吊销上传 token：由 Operator 侧 `relkit-ops agent policy --config <cfg> --policy <relkit.agent-product-policy/1>` 写入，或在机上执行 `relkit-agent init -product <id> -token-only`（重启另加 `systemctl restart relkit-agent`）。
 
 ## 测试
 

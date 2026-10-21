@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"path/filepath"
 
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/publish"
-	"github.com/shichao402/relkit/internal/stage"
+	vnextproject "github.com/shichao402/relkit/internal/vnext/project"
+	vnextrelease "github.com/shichao402/relkit/internal/vnext/release"
 )
 
 // handleUnpublish removes one published version from a channel's signed index
@@ -24,59 +25,30 @@ type unpublishRequest struct {
 }
 
 // loadUnpublishConfig builds a publish config for a version whose staged tree
-// may already be gone. It prefers the staged release-policy.json (the same
-// source publish uses); when no staged tree remains it falls back to the most
-// recent staged release's policy, and finally to the machine profile with the
-// policy reconstructed from nothing (channels/retain from the agent's view).
+// may already be gone. ADR 0019 §1 retired the release-policy.json control
+// plane: the vNext project document plus the machine publish profile is the
+// only authority, and it is readable whether or not the staged tree survives
+// because it lives in the product repository, not in .relkit/cache.
 func loadUnpublishConfig(pc ProductConfig, product, version string) (*config.Config, string, error) {
-	policyPath := stage.ReleasePolicyPath(pc.Root, version)
-	if _, err := os.Stat(policyPath); err == nil {
-		policy, err := config.LoadProductPolicy(policyPath)
-		if err != nil {
-			return nil, "", fmt.Errorf("release-policy.json at %s: %w", policyPath, err)
-		}
-		profile, err := config.LoadPublishProfile(pc.Profile)
-		if err != nil {
-			return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
-		}
-		cfg, err := config.MergeProductPolicy(policy, profile, pc.Root)
-		if err != nil {
-			return nil, "", err
-		}
-		return cfg, "staged release-policy.json + " + pc.Profile, nil
+	if pc.Profile == "" {
+		return nil, "", fmt.Errorf("publish profile path is empty for product %q", product)
 	}
-
-	// The staged tree for this version is gone. Any remaining staged release
-	// carries the same repository-owned policy (product, channels, retain,
-	// public keys), so use the newest one instead of guessing.
-	versions, err := stage.StagedVersions(pc.Root)
-	if err == nil {
-		for _, candidate := range versions {
-			candidatePath := stage.ReleasePolicyPath(pc.Root, candidate)
-			policy, err := config.LoadProductPolicy(candidatePath)
-			if err != nil {
-				continue
-			}
-			if policy.Product != product {
-				continue
-			}
-			profile, err := config.LoadPublishProfile(pc.Profile)
-			if err != nil {
-				return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
-			}
-			cfg, err := config.MergeProductPolicy(policy, profile, pc.Root)
-			if err != nil {
-				return nil, "", err
-			}
-			return cfg, fmt.Sprintf("release-policy.json from staged %s (its own staged tree is gone) + %s", candidate, pc.Profile), nil
-		}
+	productDocument, err := vnextproject.Load(filepath.Join(pc.Root, vnextrelease.ProjectFile))
+	if err != nil {
+		return nil, "", fmt.Errorf("vNext project document for %q: %w", product, err)
 	}
-
-	// No staged policy anywhere: reject. The signed index is only as good as
-	// the policy that verifies it, and inventing one from the profile alone
-	// (which carries no public keys) would let unpublish strip verification
-	// from the index it rewrites.
-	return nil, "", fmt.Errorf("no staged release-policy.json for %s under %s; re-stage the version or publish a replacement first (the policy carries the public keys that verify the index)", version, pc.Root)
+	if productDocument.Product != product {
+		return nil, "", fmt.Errorf("project document declares product %q, not %q", productDocument.Product, product)
+	}
+	profile, err := config.LoadPublishProfile(pc.Profile)
+	if err != nil {
+		return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
+	}
+	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root)
+	if err != nil {
+		return nil, "", err
+	}
+	return cfg, "vNext project document + " + pc.Profile, nil
 }
 
 func (s *Server) handleUnpublish(w http.ResponseWriter, r *http.Request) {

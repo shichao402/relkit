@@ -1,6 +1,6 @@
 # ADR 0019: vNext 断代边界与协议合同
 
-- 状态：Accepted（vNext core、发布事务与 conformance 已实现）
+- 状态：Accepted（vNext core、发布事务与 conformance 已实现；§1 控制面删除已于 2026-10-21 在 relkit 仓内执行完毕）
 - 日期：2026-10-16
 - 取代：[ADR 0017](0017-cli-owns-consume-source-channel.md) 的 consume/host/onboarding 控制面（决策 2、4 中产品仓入口与 lock `relkit.consume/3` follow-latest 语义）；不取代其 Go module + sumdb 传输经验
 - 修订：[ADR 0011](0011-immutable-release-consume.md) 的 lock/consume 形态；[ADR 0012](0012-single-component-registry.md) 的 Python `facets.py` 载体（声明式 registry 归属 ADR 0021）

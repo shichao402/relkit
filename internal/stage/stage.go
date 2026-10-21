@@ -6,26 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/changelog"
 	"github.com/shichao402/relkit/internal/config"
-	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/payload"
-	"github.com/shichao402/relkit/internal/selectors"
 )
 
 const stagingRoot = ".relkit/cache/staged"
-const releasePolicyName = "release-policy.json"
-
-var reservedKeys = map[string]struct{}{
-	"id":       {},
-	"kind":     {},
-	"filename": {},
-}
 
 type Error struct {
 	Message string
@@ -35,15 +24,10 @@ func (e Error) Error() string {
 	return e.Message
 }
 
-type AddSpec struct {
-	Path      string
-	PairsText string            // hand-written CLI form: "id=app,kind=binary,os=windows"
-	Pairs     map[string]string // structured form; wins over PairsText on key clash
-	Track     string            // "install" or "payload"
-}
-
-type Printer func(string)
-
+// StagingDir is the per-version staged tree under the product root. It is the
+// data-plane layout shared by `relkit stage`, the agent's staged upload, and
+// the publisher; the legacy release-policy.json sidecar is retired
+// (ADR 0019 §1), so the directory no longer carries repository policy.
 func StagingDir(root, version string) string {
 	return filepath.Join(root, stagingRoot, version)
 }
@@ -52,14 +36,8 @@ func StagedPath(root, version string) string {
 	return filepath.Join(StagingDir(root, version), "staged.pb")
 }
 
-func ReleasePolicyPath(root, version string) string {
-	return filepath.Join(StagingDir(root, version), releasePolicyName)
-}
-
 // StagedVersions lists versions that have a staging directory under root, most
-// recently written first. Callers that need repository-owned policy on a
-// publish host read it from the newest staged release, since each release
-// carries its own release-policy.json.
+// recently written first.
 func StagedVersions(root string) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(root, stagingRoot))
 	if err != nil {
@@ -96,7 +74,7 @@ func LoadStaged(root, version string) (*model.StagedDocument, error) {
 	path := StagedPath(root, version)
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
-		return nil, Error{Message: fmt.Sprintf("no staged release for version %q (expected %s); run 'relkit stage' first", version, path)}
+		return nil, Error{Message: fmt.Sprintf("no staged release for version %q (expected %s); run 'relkit stage --artifact-set' first", version, path)}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -109,305 +87,8 @@ func LoadStaged(root, version string) (*model.StagedDocument, error) {
 	return staged, nil
 }
 
-func LoadReleasePolicy(root, version string) (*config.ProductPolicy, error) {
-	path := ReleasePolicyPath(root, version)
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return nil, Error{Message: fmt.Sprintf("no staged release policy for version %q (expected %s); run 'relkit stage' first", version, path)}
-	}
-	return config.LoadProductPolicy(path)
-}
-
-func ParseKeyValues(text string) (map[string]string, error) {
-	result := map[string]string{}
-	for _, rawPart := range strings.Split(text, ",") {
-		part := strings.TrimSpace(rawPart)
-		if part == "" {
-			continue
-		}
-		if !strings.Contains(part, "=") {
-			return nil, Error{Message: fmt.Sprintf("expected key=value pairs separated by commas, got %q", part)}
-		}
-		key, value, _ := strings.Cut(part, "=")
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" {
-			return nil, Error{Message: fmt.Sprintf("empty key in %q", part)}
-		}
-		if _, exists := result[key]; exists {
-			return nil, Error{Message: fmt.Sprintf("duplicate key %q", key)}
-		}
-		result[key] = value
-	}
-	return result, nil
-}
-
-func SplitControls(pairs map[string]string) (map[string]string, map[string]any, map[string]string, error) {
-	controls := map[string]string{}
-	meta := map[string]any{}
-	selectorsMap := map[string]string{}
-	for key, value := range pairs {
-		if _, ok := reservedKeys[key]; ok {
-			controls[key] = value
-			continue
-		}
-		if strings.HasPrefix(key, "meta.") {
-			metaKey := strings.TrimPrefix(key, "meta.")
-			if metaKey == "" {
-				return nil, nil, nil, Error{Message: fmt.Sprintf("meta key is empty in %q", key)}
-			}
-			meta[metaKey] = value
-			continue
-		}
-		selectorsMap[key] = value
-	}
-	return controls, meta, selectorsMap, nil
-}
-
-func BuildArtifact(source string, pairs map[string]string, report *[]string) (*model.StagedArtifact, error) {
-	sourcePath := source
-	info, err := os.Stat(sourcePath)
-	if err != nil || info.IsDir() {
-		return nil, Error{Message: fmt.Sprintf("artifact not found: %s", sourcePath)}
-	}
-
-	controls, meta, selectorsMap, err := SplitControls(pairs)
-	if err != nil {
-		return nil, err
-	}
-
-	filename := filepath.Base(sourcePath)
-	if value, ok := controls["filename"]; ok {
-		filename = value
-	}
-	if err := model.CheckFilename(filename); err != nil {
-		return nil, err
-	}
-	if err := model.CheckSelectors(selectorsMap, "selectors"); err != nil {
-		return nil, err
-	}
-
-	kind := controls["kind"]
-	if kind == "" {
-		kind = model.InferKind(filename)
-		*report = append(*report, fmt.Sprintf("  kind inferred as %-9s for %s", kind, filename))
-	}
-
-	artifactID := controls["id"]
-	if artifactID == "" {
-		artifactID, err = model.DefaultArtifactID(selectorsMap)
-		if err != nil {
-			return nil, err
-		}
-		*report = append(*report, fmt.Sprintf("  id derived as   %-9s for %s", artifactID, filename))
-	}
-
-	digest, size, err := model.Sha256File(sourcePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return model.NewStagedArtifact(
-		artifactID,
-		filename,
-		size,
-		digest,
-		kind,
-		selectorsMap,
-		nilIfEmpty(meta),
-		sourcePath,
-	)
-}
-
-func Run(cfg *config.Config, version string, code, minFrom int, adds []AddSpec, channel string, notes string, notesFile string, notesURL string, useLink bool, printer Printer) (*model.StagedDocument, error) {
-	if printer == nil {
-		printer = func(string) {}
-	}
-
-	resolvedChannel, err := cfg.ChannelOrDefault(channel)
-	if err != nil {
-		return nil, err
-	}
-
-	notes, notesURL, err = changelog.ResolveNotes(
-		changelog.Config{File: cfg.Changelog.File, URLTemplate: cfg.Changelog.URLTemplate},
-		cfg.Root,
-		version,
-		notes,
-		notesFile,
-		notesURL,
-	)
-	if err != nil {
-		return nil, Error{Message: err.Error()}
-	}
-
-	if len(adds) == 0 {
-		return nil, Error{Message: "at least one --install or --payload is required"}
-	}
-
-	var report []string
-	artifacts := make([]*model.StagedArtifact, 0, len(adds))
-	var temporary []string
-	defer func() {
-		for _, path := range temporary {
-			_ = os.Remove(path)
-		}
-	}()
-	for _, add := range adds {
-		pairs := map[string]string{}
-		for key, value := range add.Pairs {
-			pairs[key] = value
-		}
-		if add.PairsText != "" {
-			textPairs, err := ParseKeyValues(add.PairsText)
-			if err != nil {
-				return nil, err
-			}
-			for key, value := range textPairs {
-				if _, exists := pairs[key]; !exists {
-					pairs[key] = value
-				}
-			}
-		}
-		source := add.Path
-		switch add.Track {
-		case "payload":
-			if kind := pairs["kind"]; kind != "" && kind != "payload" {
-				return nil, Error{Message: "--payload kind is always payload"}
-			}
-			pairs["kind"] = "payload"
-			if pairs["apply"] != "" && pairs["apply"] != "relkit-payload" {
-				return nil, Error{Message: "--payload reserves selector apply=relkit-payload"}
-			}
-			pairs["apply"] = "relkit-payload"
-			if pairs["filename"] == "" {
-				_, _, selectorsMap, splitErr := SplitControls(pairs)
-				if splitErr != nil {
-					return nil, splitErr
-				}
-				artifactID := pairs["id"]
-				if artifactID == "" {
-					artifactID, err = model.DefaultArtifactID(selectorsMap)
-					if err != nil {
-						return nil, err
-					}
-				}
-				pairs["filename"] = fmt.Sprintf("%s-%s-%s.zip", cfg.Product, version, artifactID)
-			}
-			tmp, err := os.CreateTemp("", "relkit-payload-*.zip")
-			if err != nil {
-				return nil, err
-			}
-			source = tmp.Name()
-			if err := tmp.Close(); err != nil {
-				return nil, err
-			}
-			temporary = append(temporary, source)
-			table, err := payload.Build(source, payload.BuildOptions{Tree: add.Path})
-			if err != nil {
-				return nil, Error{Message: err.Error()}
-			}
-			report = append(report, fmt.Sprintf("  payload contains %d file(s), %d script(s)", len(table.Files), len(table.Scripts)))
-		case "install":
-			if pairs["kind"] == "payload" {
-				return nil, Error{Message: "--install cannot use kind=payload"}
-			}
-		default:
-			return nil, Error{Message: fmt.Sprintf("artifact track %q is not supported; use --install or --payload", add.Track)}
-		}
-		artifact, err := BuildArtifact(source, pairs, &report)
-		if err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, artifact)
-	}
-
-	if duplicateIDs := findDuplicateIDs(artifacts); len(duplicateIDs) > 0 {
-		return nil, Error{Message: fmt.Sprintf("artifact ids must be unique within a release; duplicated: %s", strings.Join(duplicateIDs, ", "))}
-	}
-	if duplicateFilenames := findDuplicateFilenames(artifacts); len(duplicateFilenames) > 0 {
-		return nil, Error{Message: fmt.Sprintf("artifact filenames must be unique within a release; duplicated: %s", strings.Join(duplicateFilenames, ", "))}
-	}
-
-	if duplicates := selectors.FindDuplicateSelectors(artifacts); len(duplicates) > 0 {
-		first := duplicates[0]
-		return nil, Error{Message: fmt.Sprintf("artifacts %q and %q declare identical selectors %v, so one of them could never be chosen (SPEC.md 11)", first.FirstID, first.SecondID, first.Selectors)}
-	}
-	if err := requireInstallCounterparts(artifacts); err != nil {
-		return nil, err
-	}
-
-	staged, err := model.NewStagedDocument(cfg.Product, version, code, minFrom, resolvedChannel, artifacts, notes, notesURL, "")
-	if err != nil {
-		return nil, err
-	}
-
-	if notes != "" {
-		printer(fmt.Sprintf("notes: %d chars", len(notes)))
-	}
-	if notesURL != "" {
-		printer("notesUrl: " + notesURL)
-	}
-
-	targetDir := ArtifactsDir(cfg.Root, version)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return nil, err
-	}
-	for _, artifact := range staged.Artifacts {
-		target := filepath.Join(targetDir, artifact.Filename)
-		if err := materialize(artifact.SourcePath, target, useLink); err != nil {
-			return nil, err
-		}
-	}
-
-	data, err := rupv2.MarshalStaged(staged)
-	if err != nil {
-		return nil, err
-	}
-	policy, err := config.ExtractProductPolicy(cfg)
-	if err != nil {
-		return nil, err
-	}
-	policyData, err := jsonio.MarshalPretty(policy)
-	if err != nil {
-		return nil, err
-	}
-	if err := jsonio.WritePath(StagedPath(cfg.Root, version), data); err != nil {
-		return nil, err
-	}
-	if err := jsonio.WritePath(ReleasePolicyPath(cfg.Root, version), policyData); err != nil {
-		return nil, err
-	}
-
-	for _, line := range report {
-		printer(line)
-	}
-	printer(fmt.Sprintf("staged %s (code %d, channel %s, minFrom %d)", version, code, resolvedChannel, minFrom))
-	for _, artifact := range staged.Artifacts {
-		hashPrefix := artifact.Sha256
-		if len(hashPrefix) > 12 {
-			hashPrefix = hashPrefix[:12]
-		}
-		printer(fmt.Sprintf("  %-12s %-40s %12d bytes  %s", artifact.Id, artifact.Filename, artifact.Size, hashPrefix))
-	}
-	printer("staging tree: " + StagingDir(cfg.Root, version))
-	return staged, nil
-}
-
 func VerifyStagedHashes(cfg *config.Config, staged *model.StagedDocument) []string {
 	return verifyStagedHashes(cfg, staged, false)
-}
-
-func ValidateStagedPolicy(staged *model.StagedDocument) error {
-	if staged == nil {
-		return Error{Message: "staged document is nil"}
-	}
-	for _, artifact := range staged.Artifacts {
-		if artifact == nil || model.ArtifactKindString(artifact.GetKind()) == "" {
-			return Error{Message: "staged artifact has unknown or unspecified kind"}
-		}
-	}
-	return requireInstallCounterparts(staged.Artifacts)
 }
 
 // VerifyPresentStagedHashes verifies every artifact that is present locally,

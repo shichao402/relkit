@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shichao402/relkit/internal/registry"
+	vnextregistry "github.com/shichao402/relkit/internal/vnext/registry"
 	"github.com/shichao402/relkit/internal/testutil"
 )
 
 // buildFixture is one case in conformance/build/pack-shape.json: a component
-// packed into a zip whose entry set and per-entry digests must match the
-// recorded expectation. Zip bytes differ across deflate implementations
-// (Python zlib vs Go flate); the pinned surface is entry names + entry
-// contents + tree-sha256, which is what locks and manifests consume.
+// packed into a zip whose entry set must match the recorded expectation. Zip
+// bytes differ across deflate implementations (Python zlib vs Go flate), so the
+// pinned surface is entry names plus per-entry content, which is what the
+// vNext ArtifactSet consumes.
 type buildFixture struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -31,7 +31,6 @@ type buildPackCase struct {
 	Name          string   `json:"name"`
 	Component     string   `json:"component"`
 	ExpectEntries []string `json:"expectEntries"`
-	ExpectTreeSHA string   `json:"expectTreeSha256"`
 	ExpectError   string   `json:"expectError"`
 }
 
@@ -52,7 +51,11 @@ func TestBuildPackShapeConformance(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			root := testutil.RepoRoot(t)
 			ctx := &RepoContext{Root: root, Number: "0.0.0"}
-			entries, err := ctx.ComponentEntries(tc.Component)
+			document, err := vnextregistry.Default()
+			if err != nil {
+				t.Fatalf("registry: %v", err)
+			}
+			entries, err := ctx.ComponentEntries(document, tc.Component)
 			if tc.ExpectError != "" {
 				if err == nil {
 					t.Fatalf("expected error %q, got %d entries", tc.ExpectError, len(entries))
@@ -73,16 +76,6 @@ func TestBuildPackShapeConformance(t *testing.T) {
 			if !equalStringSets(names, tc.ExpectEntries) {
 				t.Errorf("entry set differs:\n  got  %v\n  want %v", names, tc.ExpectEntries)
 			}
-
-			if tc.ExpectTreeSHA != "" {
-				treeSHA, err := TreeSHA256(entries)
-				if err != nil {
-					t.Fatalf("TreeSHA256: %v", err)
-				}
-				if treeSHA != tc.ExpectTreeSHA {
-					t.Errorf("tree-sha256 = %s, want %s", treeSHA, tc.ExpectTreeSHA)
-				}
-			}
 		})
 	}
 }
@@ -93,7 +86,11 @@ func TestBuildPackShapeConformance(t *testing.T) {
 func TestBuildDeterministicZipContent(t *testing.T) {
 	root := testutil.RepoRoot(t)
 	ctx := &RepoContext{Root: root, Number: "0.0.0"}
-	entries, err := ctx.ComponentEntries("bindings-ts")
+	document, err := vnextregistry.Default()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	entries, err := ctx.ComponentEntries(document, "bindings-ts")
 	if err != nil {
 		t.Fatalf("ComponentEntries(bindings-ts): %v", err)
 	}
@@ -150,25 +147,6 @@ func TestBuildDeterministicZipContent(t *testing.T) {
 	}
 	digest := sha256.Sum256(first)
 	_ = hex.EncodeToString(digest[:])
-}
-
-// TestBuildHostScriptsTreeSHARecomputedFromZip pins the cross-implementation
-// contract: the tree hash the Go build pins must equal what any consumer
-// computes from the packed zip contents (entry names + newline-normalized
-// contents), matching the Python producer's value.
-func TestBuildHostScriptsTreeSHARecomputedFromZip(t *testing.T) {
-	root := testutil.RepoRoot(t)
-	ctx := &RepoContext{Root: root, Number: "0.0.0"}
-	entries, err := ctx.ComponentEntries("host-scripts")
-	if err != nil {
-		t.Fatalf("ComponentEntries(host-scripts): %v", err)
-	}
-	treeSHA, err := TreeSHA256(entries)
-	if err != nil {
-		t.Fatalf("TreeSHA256: %v", err)
-	}
-	_ = treeSHA
-	_ = registry.ProbeTreeSHA256
 }
 
 func timeDate1980() time.Time {

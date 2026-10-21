@@ -2,35 +2,23 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/buildver"
-	"github.com/shichao402/relkit/internal/config"
-	"github.com/shichao402/relkit/internal/directory"
-	"github.com/shichao402/relkit/internal/envelope"
-	"github.com/shichao402/relkit/internal/fallback"
 	"github.com/shichao402/relkit/internal/jsonio"
-	"github.com/shichao402/relkit/internal/keys"
 	"github.com/shichao402/relkit/internal/model"
-	"github.com/shichao402/relkit/internal/publish"
 	"github.com/shichao402/relkit/internal/publishproto"
-	"github.com/shichao402/relkit/internal/simulate"
-	"github.com/shichao402/relkit/internal/stage"
 	"github.com/shichao402/relkit/internal/verify"
 	vnextbootstrap "github.com/shichao402/relkit/internal/vnext/bootstrap"
 	"github.com/shichao402/relkit/internal/vnext/project"
 	"github.com/shichao402/relkit/internal/vnext/resolution"
 	"github.com/shichao402/relkit/internal/vnext/trust"
-	projver "github.com/shichao402/relkit/version"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -62,7 +50,7 @@ func run(argv []string) (code int) {
 		}
 	}()
 
-	configPath, showVersion, args, err := stripGlobalFlags(argv)
+	showVersion, args, err := stripGlobalFlags(argv)
 	if err != nil {
 		return fail(err)
 	}
@@ -78,12 +66,6 @@ func run(argv []string) (code int) {
 	command := args[0]
 	rest := args[1:]
 	switch command {
-	case "init":
-		err = cmdInit(rest)
-	case "keygen":
-		err = cmdKeygen(rest, configPath)
-	case "version":
-		err = cmdVersion(rest, configPath)
 	case "resolve":
 		err = cmdResolve(rest)
 	case "doctor":
@@ -97,37 +79,11 @@ func run(argv []string) (code int) {
 	case "payload":
 		err = cmdPayload(rest)
 	case "stage":
-		err = cmdStage(rest, configPath)
+		err = cmdStage(rest)
 	case "inspect":
-		err = cmdInspect(rest, configPath)
-	case "simulate":
-		err = cmdSimulate(rest, configPath)
+		err = cmdInspect(rest)
 	case "verify":
-		err = cmdVerify(rest, configPath)
-	case "publish":
-		err = cmdPublish(rest, configPath)
-	case "staged-put":
-		err = cmdStagedPut(rest)
-	case "cas-put":
-		err = cmdCASPut(rest, configPath)
-	case "fallback":
-		err = cmdFallback(rest, configPath)
-	case "directory":
-		err = cmdDirectory(rest, configPath)
-	case "backends":
-		err = cmdBackends(rest)
-	case "install":
-		err = cmdConsumeInstall(rest)
-	case "status":
-		err = cmdConsumeStatus(rest)
-	case "check":
-		err = cmdConsumeCheck(rest)
-	case "upgrade":
-		err = cmdConsumeUpgrade(rest)
-	case "latest":
-		err = cmdConsumeLatest(rest)
-	case "ci":
-		err = cmdCI(rest)
+		err = cmdVerify(rest)
 	case "release":
 		err = cmdRelease(rest)
 	case "build":
@@ -141,199 +97,17 @@ func run(argv []string) (code int) {
 	return 0
 }
 
-func cmdInit(args []string) error {
-	var directory string
-	product := ""
-	force := false
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--product":
-			i++
-			product = mustValue(args, i, "--product")
-		case arg == "--force":
-			force = true
-		case strings.HasPrefix(arg, "-"):
-			return fmt.Errorf("unknown flag %q", arg)
-		case directory == "":
-			directory = arg
-		default:
-			return fmt.Errorf("unexpected argument %q", arg)
-		}
-	}
-
-	if directory == "" {
-		directory = "."
-	}
-	target, err := filepath.Abs(filepath.Join(directory, config.ConfigName))
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(target); err == nil && !force {
-		return fmt.Errorf("%s already exists; pass --force to overwrite", target)
-	}
-	if product == "" {
-		product = filepath.Base(filepath.Dir(target))
-	}
-	if err := model.CheckIdentifier(product, "product"); err != nil {
-		return err
-	}
-	data, err := jsonio.MarshalPretty(config.Skeleton(product))
-	if err != nil {
-		return err
-	}
-	if err := jsonio.WritePath(target, data); err != nil {
-		return err
-	}
-	fmt.Println("wrote " + target)
-
-	versionPath := filepath.Join(filepath.Dir(target), projver.FileName)
-	if _, err := os.Stat(versionPath); err == nil && !force {
-		fmt.Println("kept existing " + versionPath)
-	} else {
-		doc, err := projver.Skeleton("0.1.0+1")
-		if err != nil {
-			return err
-		}
-		doc.Path = versionPath
-		if err := doc.Write(); err != nil {
-			return err
-		}
-		fmt.Println("wrote " + versionPath)
-	}
-
-	fmt.Println("next: 'relkit keygen --key-id k1 --out keys/', then paste the public key into signing.publicKeys")
-	fmt.Println("version SSOT: edit with 'relkit version set|bump'; stage/publish read it when version args are omitted")
-	return nil
+// cmdStage stages a vNext release from an immutable ArtifactSet. ADR 0019 §1
+// retired the release-policy/relkit.json staging face: --artifact-set is the
+// only accepted input shape.
+func cmdStage(args []string) error {
+	return cmdStageVNext(args)
 }
 
-func cmdKeygen(args []string, configPath string) error {
-	keyID := ""
-	outDir := "keys"
-	force := false
-	updateConfig := false
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--key-id":
-			i++
-			keyID = mustValue(args, i, "--key-id")
-		case arg == "--out":
-			i++
-			outDir = mustValue(args, i, "--out")
-		case arg == "--force":
-			force = true
-		case arg == "--update-config":
-			updateConfig = true
-		default:
-			return fmt.Errorf("unknown flag %q", arg)
-		}
-	}
-	if keyID == "" {
-		return fmt.Errorf("--key-id is required")
-	}
-	if err := model.CheckIdentifier(keyID, "keyId"); err != nil {
-		return err
-	}
-
-	resolvedOut, err := filepath.Abs(outDir)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(resolvedOut, 0o755); err != nil {
-		return err
-	}
-
-	publicPath := filepath.Join(resolvedOut, keyID+".public.pb")
-	privatePath := filepath.Join(resolvedOut, keyID+".private.pb")
-	for _, path := range []string{publicPath, privatePath} {
-		if _, err := os.Stat(path); err == nil && !force {
-			return fmt.Errorf("%s already exists; pass --force to overwrite (this invalidates every client that embedded the old key)", path)
-		}
-	}
-
-	seed, err := keys.GenerateSeed()
-	if err != nil {
-		return err
-	}
-	publicDoc := keys.PublicKeyDocument(keyID, seed)
-	privateDoc := keys.PrivateKeyDocument(keyID, seed)
-
-	publicBytes, err := rupv2.MarshalPublicKey(&publicDoc)
-	if err != nil {
-		return err
-	}
-	privateBytes, err := rupv2.MarshalPrivateKey(&privateDoc)
-	if err != nil {
-		return err
-	}
-	if err := jsonio.WritePath(publicPath, publicBytes); err != nil {
-		return err
-	}
-	if err := jsonio.WritePath(privatePath, privateBytes); err != nil {
-		return err
-	}
-	keys.RestrictPermissions(privatePath)
-
-	fmt.Println("public  " + publicPath)
-	fmt.Println("private " + privatePath)
-	fmt.Println()
-	fmt.Println("publicKeyBase64: " + base64.StdEncoding.EncodeToString(publicDoc.PublicKey))
-
-	if updateConfig {
-		target, adopted, err := recordPublicKey(configPath, keyID, publicDoc)
-		if err != nil {
-			return err
-		}
-		fmt.Println("recorded in " + target + " under signing.publicKeys")
-		if adopted {
-			fmt.Printf("signing.keyId set to %q (it named no configured key)\n", keyID)
-		}
-		fmt.Printf("To publish from this machine, set signing.privateKeyPath to %s (per-product key file; do not use a shared environment variable).\n", filepath.Base(privatePath))
-	} else {
-		fmt.Printf("Add that to signing.publicKeys in %s (or re-run with --update-config), and embed it in the client.\n", config.ConfigName)
-	}
-	fmt.Println()
-
-	ignored, _ := keys.IsGitIgnored(privatePath, resolvedOut)
-	if ignored == nil {
-		fmt.Println("NOTE: could not determine whether the private key is git-ignored.")
-	} else if !*ignored {
-		fmt.Printf("WARNING: %s is NOT git-ignored.\n", filepath.Base(privatePath))
-		fmt.Println("         Add '*.private.pb' to .gitignore before committing anything. A leaked signing key means anyone can forge updates for every client that trusts it.")
-	}
-	return nil
-}
-
-func cmdStage(args []string, configPath string) error {
-	if slices.Contains(args, "--artifact-set") {
-		return cmdStageVNext(args)
-	}
-	opts, err := parseStageArgs(args)
-	if err != nil {
-		return err
-	}
-	if err := resolveStageVersion(opts, configPath); err != nil {
-		return err
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	code, err := cfg.ResolveCode(opts.version, opts.code)
-	if err != nil {
-		return err
-	}
-	_, err = stage.Run(cfg, opts.version, code, opts.minFrom, opts.adds, opts.channel, opts.notes, opts.notesFile, opts.notesURL, opts.link, func(line string) {
-		fmt.Println(line)
-	})
-	return err
-}
-
-func cmdInspect(args []string, configPath string) error {
-	versionArg := ""
+// cmdInspect prints one resolved document. Without arguments (or with --json)
+// it reports the immutable resolution selected for this invocation; --file
+// prints a staged/derived protobuf document for diagnostics.
+func cmdInspect(args []string) error {
 	fileArg := ""
 	resolutionArg := ""
 	asJSON := false
@@ -353,48 +127,33 @@ func cmdInspect(args []string, configPath string) error {
 			raw = true
 		case strings.HasPrefix(arg, "-"):
 			return fmt.Errorf("unknown flag %q", arg)
-		case versionArg == "":
-			versionArg = arg
 		default:
 			return fmt.Errorf("unexpected argument %q", arg)
 		}
 	}
 
-	if resolutionArg != "" || (asJSON && versionArg == "" && fileArg == "") {
+	if fileArg == "" {
 		if resolutionArg == "" {
 			resolutionArg = selectedResolutionPath()
 		}
+		_ = asJSON
 		return inspectVNextResolution(resolutionArg)
-	}
-
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
 	}
 
 	var (
 		document map[string]any
 		message  proto.Message
 	)
-	if versionArg != "" {
-		staged, err := stage.LoadStaged(cfg.Root, versionArg)
+	if strings.EqualFold(filepath.Ext(fileArg), ".json") {
+		if err := jsonio.LoadPathLenient(fileArg, &document); err != nil {
+			return err
+		}
+	} else {
+		loaded, err := loadProtoDocument(fileArg)
 		if err != nil {
 			return err
 		}
-		message = staged
-	} else if fileArg != "" {
-		if strings.EqualFold(filepath.Ext(fileArg), ".json") {
-			if err := jsonio.LoadPathLenient(fileArg, &document); err != nil {
-				return err
-			}
-		} else {
-			message, err = loadProtoDocument(fileArg)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		return fmt.Errorf("pass either a version or --file")
+		message = loaded
 	}
 
 	if document != nil {
@@ -408,7 +167,8 @@ func cmdInspect(args []string, configPath string) error {
 
 	if !raw {
 		if env, ok := message.(*model.Envelope); ok {
-			unsealed, err := unsealForInspection(env, cfg)
+			fmt.Fprintln(os.Stderr, "# envelope signatures are not re-verified by inspect; use `relkit verify released` for trust")
+			unsealed, err := unsealForInspection(env)
 			if err != nil {
 				return err
 			}
@@ -424,83 +184,17 @@ func cmdInspect(args []string, configPath string) error {
 	return err
 }
 
-func cmdSimulate(args []string, configPath string) error {
-	fromSpec := "all"
-	indexPath := ""
-	withStaged := ""
-	channel := ""
-	backendName := ""
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--from":
-			i++
-			fromSpec = mustValue(args, i, "--from")
-		case arg == "--index":
-			i++
-			indexPath = mustValue(args, i, "--index")
-		case arg == "--with-staged":
-			i++
-			withStaged = mustValue(args, i, "--with-staged")
-		case arg == "--channel":
-			i++
-			channel = mustValue(args, i, "--channel")
-		case arg == "--backend":
-			i++
-			backendName = mustValue(args, i, "--backend")
-		default:
-			return fmt.Errorf("unknown flag %q", arg)
-		}
+// cmdVerify dispatches `relkit verify released`. ADR 0019 §1 retired the
+// backend-crawl verifier that read relkit.json: released verification always
+// runs against an immutable resolution plus a signed offline bundle.
+func cmdVerify(args []string) error {
+	if len(args) == 0 || args[0] != "released" {
+		return fmt.Errorf("usage: relkit verify released --version <v> --channel <dev|stable> --resolution <path>")
 	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	_, err = simulate.Run(cfg, fromSpec, indexPath, channel, withStaged, backendName, func(line string) {
-		fmt.Println(line)
-	})
-	return err
+	return cmdVerifyReleased(args[1:])
 }
 
-func cmdVerify(args []string, configPath string) error {
-	if len(args) > 0 && args[0] == "released" {
-		return cmdVerifyReleased(args[1:], configPath)
-	}
-	channel := ""
-	deep := false
-	var to []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--channel":
-			i++
-			channel = mustValue(args, i, "--channel")
-		case arg == "--to":
-			i++
-			to = append(to, mustValue(args, i, "--to"))
-		case arg == "--deep":
-			deep = true
-		default:
-			return fmt.Errorf("unknown flag %q", arg)
-		}
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	findings, err := verify.Run(cfg, channel, to, deep, func(line string) {
-		fmt.Println(line)
-	})
-	if err != nil {
-		return err
-	}
-	if !findings.OK() {
-		return exitCodeError{code: 1}
-	}
-	return nil
-}
-
-func cmdVerifyReleased(args []string, configPath string) error {
+func cmdVerifyReleased(args []string) error {
 	options := verify.ReleasedOptions{}
 	resolutionPath := strings.TrimSpace(os.Getenv("RELKIT_RESOLUTION"))
 	projectPath := defaultProjectPath
@@ -559,45 +253,25 @@ func cmdVerifyReleased(args []string, configPath string) error {
 			return fmt.Errorf("unknown flag %q", arg)
 		}
 	}
-	if resolutionPath != "" {
-		resolved, err := resolution.Load(resolutionPath)
-		if err != nil {
-			return err
-		}
-		if options.ResolutionDigest != "" && options.ResolutionDigest != resolved.Digest {
-			return fmt.Errorf("--resolution-digest does not match %s", resolutionPath)
-		}
-		if options.OperatorDeploymentID != "" && options.OperatorDeploymentID != resolved.Operator.DeploymentID {
-			return fmt.Errorf("--operator does not match %s", resolutionPath)
-		}
-		options.ResolutionDigest = resolved.Digest
-		options.OperatorDeploymentID = resolved.Operator.DeploymentID
+	if resolutionPath == "" {
+		return fmt.Errorf("verify released requires --resolution or RELKIT_RESOLUTION")
 	}
+	resolved, err := resolution.Load(resolutionPath)
+	if err != nil {
+		return err
+	}
+	if options.ResolutionDigest != "" && options.ResolutionDigest != resolved.Digest {
+		return fmt.Errorf("--resolution-digest does not match %s", resolutionPath)
+	}
+	if options.OperatorDeploymentID != "" && options.OperatorDeploymentID != resolved.Operator.DeploymentID {
+		return fmt.Errorf("--operator does not match %s", resolutionPath)
+	}
+	options.ResolutionDigest = resolved.Digest
+	options.OperatorDeploymentID = resolved.Operator.DeploymentID
 	if options.Version == "" {
 		return fmt.Errorf("verify released requires --version")
 	}
-	if options.ResolutionDigest == "" {
-		return fmt.Errorf("verify released requires --resolution or --resolution-digest")
-	}
-	if resolutionPath != "" {
-		return verifyReleasedVNext(
-			projectPath, resolutionPath, consumerURL, directoryURL, productRootPaths, options,
-		)
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	findings, err := verify.RunReleased(cfg, options, func(line string) {
-		fmt.Println(line)
-	})
-	if err != nil {
-		return err
-	}
-	if !findings.OK() {
-		return exitCodeError{code: 1}
-	}
-	return nil
+	return verifyReleasedVNext(projectPath, resolutionPath, consumerURL, directoryURL, productRootPaths, options)
 }
 
 func verifyReleasedVNext(
@@ -714,444 +388,7 @@ func releaseProductRootPaths(mapping *vnextbootstrap.Document, productDocument *
 	return nil
 }
 
-func cmdPublish(args []string, configPath string) error {
-	versionArg := ""
-	var to []string
-	dryRun := false
-	allowBackfill := false
-	allowPartial := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--to":
-			i++
-			to = append(to, mustValue(args, i, "--to"))
-		case arg == "--dry-run":
-			dryRun = true
-		case arg == "--allow-backfill":
-			allowBackfill = true
-		case arg == "--allow-partial":
-			allowPartial = true
-		case strings.HasPrefix(arg, "-"):
-			return fmt.Errorf("unknown flag %q", arg)
-		case versionArg == "":
-			versionArg = arg
-		default:
-			return fmt.Errorf("unexpected argument %q", arg)
-		}
-	}
-	resolvedVersion, err := resolvePublishVersion(versionArg, configPath)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	_, err = publish.Run(cfg, resolvedVersion, to, dryRun, allowBackfill, allowPartial, func(line string) {
-		fmt.Println(line)
-	})
-	return err
-}
-
-func cmdFallback(args []string, configPath string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: relkit fallback set --max-code N --url URL [options]")
-	}
-	subcommand := args[0]
-	rest := args[1:]
-	switch subcommand {
-	case "set":
-		return cmdFallbackSet(rest, configPath)
-	default:
-		return fmt.Errorf("unknown fallback subcommand %q (want set)", subcommand)
-	}
-}
-
-func cmdFallbackSet(args []string, configPath string) error {
-	var to []string
-	dryRun := false
-	clear := false
-	minCode := int64(0)
-	maxCode := int64(0)
-	hasMaxCode := false
-	manualURL := ""
-	message := ""
-	mandatory := false
-	selectors := map[string]string{}
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--to":
-			i++
-			to = append(to, mustValue(args, i, "--to"))
-		case arg == "--dry-run":
-			dryRun = true
-		case arg == "--clear":
-			clear = true
-		case arg == "--min-code":
-			i++
-			value, err := strconv.ParseInt(mustValue(args, i, "--min-code"), 10, 64)
-			if err != nil {
-				return fmt.Errorf("--min-code: %w", err)
-			}
-			minCode = value
-		case arg == "--max-code":
-			i++
-			value, err := strconv.ParseInt(mustValue(args, i, "--max-code"), 10, 64)
-			if err != nil {
-				return fmt.Errorf("--max-code: %w", err)
-			}
-			maxCode = value
-			hasMaxCode = true
-		case arg == "--url":
-			i++
-			manualURL = mustValue(args, i, "--url")
-		case arg == "--message":
-			i++
-			message = mustValue(args, i, "--message")
-		case arg == "--mandatory":
-			mandatory = true
-		case arg == "--selector":
-			i++
-			raw := mustValue(args, i, "--selector")
-			key, value, ok := strings.Cut(raw, "=")
-			if !ok || key == "" || value == "" {
-				return fmt.Errorf("--selector expects key=value, got %q", raw)
-			}
-			selectors[key] = value
-		case strings.HasPrefix(arg, "-"):
-			return fmt.Errorf("unknown flag %q", arg)
-		default:
-			return fmt.Errorf("unexpected argument %q", arg)
-		}
-	}
-
-	opts := fallback.Options{
-		Clear:  clear,
-		To:     to,
-		DryRun: dryRun,
-	}
-	if !clear {
-		if !hasMaxCode {
-			return fmt.Errorf("--max-code is required (or pass --clear)")
-		}
-		opts.Rules = []fallback.RuleInput{{
-			MinCode:   minCode,
-			MaxCode:   maxCode,
-			ManualURL: manualURL,
-			Message:   message,
-			Mandatory: mandatory,
-			Selectors: selectors,
-		}}
-	}
-
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	_, err = fallback.Set(cfg, opts, func(line string) {
-		fmt.Println(line)
-	})
-	return err
-}
-
-func cmdDirectory(args []string, configPath string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: relkit directory set [--from-config] [--service id=...,index-url=...] [--to name] [--dry-run]")
-	}
-	subcommand := args[0]
-	rest := args[1:]
-	switch subcommand {
-	case "set":
-		return cmdDirectorySet(rest, configPath)
-	default:
-		return fmt.Errorf("unknown directory subcommand %q (want set)", subcommand)
-	}
-}
-
-func cmdDirectorySet(args []string, configPath string) error {
-	var to []string
-	dryRun := false
-	fromConfig := false
-	var services []directory.ServiceInput
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--to":
-			i++
-			to = append(to, mustValue(args, i, "--to"))
-		case arg == "--dry-run":
-			dryRun = true
-		case arg == "--from-config":
-			fromConfig = true
-		case arg == "--service":
-			i++
-			service, err := parseDirectoryServiceFlag(mustValue(args, i, "--service"))
-			if err != nil {
-				return err
-			}
-			services = append(services, service)
-		case strings.HasPrefix(arg, "-"):
-			return fmt.Errorf("unknown flag %q", arg)
-		default:
-			return fmt.Errorf("unexpected argument %q", arg)
-		}
-	}
-
-	if fromConfig && len(services) > 0 {
-		return fmt.Errorf("--from-config cannot be combined with --service")
-	}
-	if !fromConfig && len(services) == 0 {
-		// Default to config services when present; otherwise require explicit input.
-		fromConfig = true
-	}
-
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	opts := directory.Options{
-		To:     to,
-		DryRun: dryRun,
-	}
-	if !fromConfig {
-		opts.Services = services
-	}
-	_, err = directory.Set(cfg, opts, func(line string) {
-		fmt.Println(line)
-	})
-	return err
-}
-
-func parseDirectoryServiceFlag(raw string) (directory.ServiceInput, error) {
-	service := directory.ServiceInput{Priority: 100}
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(part, "=")
-		if !ok || key == "" || value == "" {
-			return directory.ServiceInput{}, fmt.Errorf("--service expects key=value pairs, got %q in %q", part, raw)
-		}
-		switch strings.ToLower(key) {
-		case "id":
-			service.ID = value
-		case "priority":
-			n, err := strconv.ParseInt(value, 10, 32)
-			if err != nil {
-				return directory.ServiceInput{}, fmt.Errorf("--service priority: %w", err)
-			}
-			service.Priority = int32(n)
-		case "index-url", "indexurl":
-			service.IndexURL = value
-		case "fallback-url", "fallbackurl":
-			service.FallbackURL = value
-		case "channel":
-			service.Channel = value
-		default:
-			return directory.ServiceInput{}, fmt.Errorf("unknown --service field %q", key)
-		}
-	}
-	if service.ID == "" || service.IndexURL == "" {
-		return directory.ServiceInput{}, fmt.Errorf("--service requires id= and index-url=")
-	}
-	return service, nil
-}
-
-func cmdBackends(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("backends takes no arguments")
-	}
-	fmt.Println("backend types implemented in this build:")
-	fmt.Println()
-	types := backends.AvailableTypes()
-	slices.Sort(types)
-	for _, backendType := range types {
-		summary, required, optional := backends.SummaryFor(backendType)
-		fmt.Println("  " + backendType)
-		fmt.Println("    " + summary)
-		if len(required) == 0 {
-			fmt.Println("    required: -")
-		} else {
-			fmt.Println("    required: " + strings.Join(required, ", "))
-		}
-		if len(optional) > 0 {
-			fmt.Println("    optional: " + strings.Join(optional, ", "))
-		}
-		fmt.Println()
-	}
-	fmt.Println("Anything not listed here is unimplemented. See CLI.md section 6 for the full set")
-	fmt.Println("and which of them still need to be built.")
-	return nil
-}
-
-type stageArgs struct {
-	version   string
-	code      *int
-	minFrom   int
-	channel   string
-	notes     string
-	notesFile string
-	notesURL  string
-	link      bool
-	adds      []stage.AddSpec
-}
-
-func parseStageArgs(args []string) (*stageArgs, error) {
-	opts := &stageArgs{minFrom: 0}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--code":
-			i++
-			value, err := strconv.Atoi(mustValue(args, i, "--code"))
-			if err != nil {
-				return nil, err
-			}
-			opts.code = &value
-		case arg == "--min-from":
-			i++
-			value, err := strconv.Atoi(mustValue(args, i, "--min-from"))
-			if err != nil {
-				return nil, err
-			}
-			opts.minFrom = value
-		case arg == "--channel":
-			i++
-			opts.channel = mustValue(args, i, "--channel")
-		case arg == "--notes":
-			i++
-			opts.notes = mustValue(args, i, "--notes")
-		case arg == "--notes-file":
-			i++
-			opts.notesFile = mustValue(args, i, "--notes-file")
-		case arg == "--notes-url":
-			i++
-			opts.notesURL = mustValue(args, i, "--notes-url")
-		case arg == "--link":
-			opts.link = true
-		case arg == "--install" || arg == "--payload":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("%s requires a path", arg)
-			}
-			pathValue := args[i+1]
-			i++
-			pairs := ""
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				pairs = args[i+1]
-				i++
-			}
-			track := "install"
-			if arg == "--payload" {
-				track = "payload"
-			}
-			opts.adds = append(opts.adds, stage.AddSpec{Path: pathValue, PairsText: pairs, Track: track})
-		case strings.HasPrefix(arg, "-"):
-			return nil, fmt.Errorf("unknown flag %q", arg)
-		case opts.version == "":
-			opts.version = arg
-		default:
-			return nil, fmt.Errorf("unexpected argument %q", arg)
-		}
-	}
-	// Version may be omitted: cmdStage fills it from VERSION.json.
-	return opts, nil
-}
-
-func recordPublicKey(configPath string, keyID string, publicDoc model.PublicKeyDocument) (string, bool, error) {
-	target := configPath
-	var err error
-	if target == "" {
-		target, err = config.FindConfig("")
-		if err != nil {
-			return "", false, err
-		}
-		if target == "" {
-			return "", false, fmt.Errorf("--update-config needs a %s; run 'relkit init' first", config.ConfigName)
-		}
-	}
-
-	var data map[string]any
-	if err := jsonio.LoadPathLenient(target, &data); err != nil {
-		return "", false, err
-	}
-
-	signing, _ := data["signing"].(map[string]any)
-	if signing == nil {
-		signing = map[string]any{}
-		data["signing"] = signing
-	}
-
-	var entries []any
-	if existing, ok := signing["publicKeys"].([]any); ok {
-		for _, entry := range existing {
-			obj, ok := entry.(map[string]any)
-			if !ok {
-				continue
-			}
-			if obj["keyId"] == keyID {
-				continue
-			}
-			entries = append(entries, obj)
-		}
-	}
-	entries = append(entries, map[string]any{
-		"keyId":           keyID,
-		"publicKeyBase64": base64.StdEncoding.EncodeToString(publicDoc.PublicKey),
-	})
-	signing["publicKeys"] = entries
-
-	known := map[string]struct{}{keyID: {}}
-	for _, entry := range entries {
-		if obj, ok := entry.(map[string]any); ok {
-			if key, _ := obj["keyId"].(string); key != "" {
-				known[key] = struct{}{}
-			}
-		}
-	}
-	currentKeyID, _ := signing["keyId"].(string)
-	adopted := false
-	if _, ok := known[currentKeyID]; !ok {
-		signing["keyId"] = keyID
-		adopted = true
-	}
-
-	pretty, err := jsonio.MarshalPretty(data)
-	if err != nil {
-		return "", false, err
-	}
-	if err := jsonio.WritePath(target, pretty); err != nil {
-		return "", false, err
-	}
-	return target, adopted, nil
-}
-
-func unsealForInspection(env *model.Envelope, cfg *config.Config) (proto.Message, error) {
-	signedBy := []string{}
-	for _, entry := range env.Signatures {
-		if entry != nil && entry.KeyId != "" {
-			signedBy = append(signedBy, entry.KeyId)
-		}
-	}
-	slices.Sort(signedBy)
-
-	trusted, err := cfg.TrustedPublicKeys()
-	if err == nil && len(trusted) > 0 {
-		index, openErr := envelope.OpenEnvelope(env, trusted)
-		if openErr == nil {
-			fmt.Fprintln(os.Stderr, "# signature ok, signed by "+strings.Join(signedBy, ", "))
-			return index, nil
-		}
-		fmt.Fprintln(os.Stderr, "# WARNING: signature NOT verified: "+openErr.Error())
-		fmt.Fprintln(os.Stderr, "# showing the payload anyway, unverified")
-	} else {
-		fmt.Fprintln(os.Stderr, "# signature not checked: no signing.publicKeys configured")
-	}
-
+func unsealForInspection(env *model.Envelope) (proto.Message, error) {
 	index, err := rupv2.UnmarshalIndex(env.Payload)
 	if err != nil {
 		return nil, err
@@ -1199,34 +436,25 @@ func marshalProtoJSON(message proto.Message) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-func stripGlobalFlags(args []string) (string, bool, []string, error) {
-	configPath := ""
+func stripGlobalFlags(args []string) (bool, []string, error) {
 	showVersion := false
 	var remaining []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--version":
-			// Only `relkit --version` is global. `relkit staged-put --version 1.2.3`
-			// is the product version for that subcommand.
+			// Only a leading `relkit --version` is global; subcommand
+			// `--version <product version>` flags stay in argv.
 			if len(remaining) == 0 {
 				showVersion = true
 			} else {
 				remaining = append(remaining, arg)
 			}
-		case arg == "--config":
-			i++
-			if i >= len(args) {
-				return "", false, nil, fmt.Errorf("--config requires a value")
-			}
-			configPath = args[i]
-		case strings.HasPrefix(arg, "--config="):
-			configPath = strings.TrimPrefix(arg, "--config=")
 		default:
 			remaining = append(remaining, arg)
 		}
 	}
-	return configPath, showVersion, remaining, nil
+	return showVersion, remaining, nil
 }
 
 func mustValue(args []string, index int, flagName string) string {
@@ -1258,29 +486,15 @@ func usage() string {
 relkit ` + version + `
 
 Commands:
-  init
-  keygen
-  version
   resolve
   doctor
   materialize
   wrapper
+  artifacts
+  payload
   stage
   inspect
-  simulate
   verify
-  publish
-  staged-put
-  cas-put
-  fallback
-  directory
-  backends
-  install
-  status
-  check
-  upgrade
-  latest
-  ci
   release
   build
 `)

@@ -306,10 +306,6 @@ func (o runOptions) strict(version string) bool {
 	return o.strictVersions[version]
 }
 
-func Run(cfg *config.Config, channel string, to []string, deep bool, printer Printer) (*Findings, error) {
-	return run(cfg, runOptions{channel: channel, to: to, deep: deep}, printer)
-}
-
 func run(cfg *config.Config, options runOptions, printer Printer) (*Findings, error) {
 	if printer == nil {
 		printer = func(string) {}
