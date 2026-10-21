@@ -54,10 +54,19 @@ type Config struct {
 	StateDir string
 }
 
+// Product is one configured product root plus its machine publish profile.
 type Product struct {
 	ID      string
 	Root    string
 	Profile string
+}
+
+// productBackend pairs a resolved backend with the product whose profile
+// declared it, so sink resolution can name the offender instead of failing
+// with an anonymous "ambiguous" message.
+type productBackend struct {
+	product string
+	backend backends.Backend
 }
 
 type Printer func(string)
@@ -260,7 +269,7 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 // resolveSinks turns validated specs into live sinks. A backend sink must
 // name a backend that product profiles actually define, and every product
 // defining that name must agree on the data plane it points at.
-func resolveSinks(specs []SinkSpec, backendsByName map[string][]backends.Backend) ([]sink, error) {
+func resolveSinks(specs []SinkSpec, backendsByName map[string][]productBackend) ([]sink, error) {
 	dests := make([]sink, 0, len(specs))
 	for _, spec := range specs {
 		switch spec.Type {
@@ -271,17 +280,23 @@ func resolveSinks(specs []SinkSpec, backendsByName map[string][]backends.Backend
 		case SinkBackend:
 			instances := backendsByName[spec.Backend]
 			if len(instances) == 0 {
-				return nil, fmt.Errorf("site sink backend %q is not defined by any product profile", spec.Backend)
+				return nil, fmt.Errorf("site sink backend %q is not defined by any served product profile", spec.Backend)
 			}
-			for _, backend := range instances[1:] {
-				if backend.Type() != instances[0].Type() || backend.Describe() != instances[0].Describe() {
-					return nil, fmt.Errorf("site sink backend %q is ambiguous: products define it as different data planes", spec.Backend)
+			first := instances[0].backend
+			for _, instance := range instances[1:] {
+				if instance.backend.Type() != first.Type() || instance.backend.Describe() != first.Describe() {
+					return nil, fmt.Errorf(
+						"site sink backend %q is ambiguous: product %q defines it as %s but product %q defines it as %s",
+						spec.Backend,
+						instances[0].product, first.Describe(),
+						instance.product, instance.backend.Describe(),
+					)
 				}
 			}
-			if !instances[0].HostsBrowse() {
-				return nil, fmt.Errorf("site sink backend %q (%s) cannot serve the browse dump; only HostsBrowse backends may receive HTML", spec.Backend, instances[0].Type())
+			if !first.HostsBrowse() {
+				return nil, fmt.Errorf("site sink backend %q (%s) cannot serve the browse dump; only HostsBrowse backends may receive HTML", spec.Backend, first.Type())
 			}
-			dests = append(dests, backendSink{name: "backend:" + spec.Backend, backend: instances[0]})
+			dests = append(dests, backendSink{name: "backend:" + spec.Backend, backend: first})
 		case SinkDirectory:
 			dests = append(dests, directorySink{dir: spec.Path})
 		default:
@@ -389,11 +404,11 @@ func writeMembers(path string, members []string) error {
 // publish backends and backfills missing release details. Backends are also
 // indexed by profile name so declarative backend sinks can be resolved;
 // sinks are no longer derived from HostsBrowse.
-func collect(products []Product, printer Printer) ([]browse.ProductData, map[string][]backends.Backend, error) {
+func collect(products []Product, printer Printer) ([]browse.ProductData, map[string][]productBackend, error) {
 	sorted := append([]Product(nil), products...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	var inputs []browse.ProductData
-	backendsByName := map[string][]backends.Backend{}
+	backendsByName := map[string][]productBackend{}
 	for _, product := range sorted {
 		profile, err := config.LoadPublishProfile(product.Profile)
 		if err != nil {
@@ -404,13 +419,14 @@ func collect(products []Product, printer Printer) ([]browse.ProductData, map[str
 			Backends: profile.Backends, PublishTo: profile.PublishTo,
 		}
 		var sources []backends.Backend
+		declared := map[string][]productBackend{}
 		for _, name := range profile.PublishTo {
 			backend, err := createBackend(name, cfg, product.Root)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s backend %s: %w", product.ID, name, err)
 			}
 			sources = append(sources, backend)
-			backendsByName[name] = append(backendsByName[name], backend)
+			declared[name] = append(declared[name], productBackend{product: product.ID, backend: backend})
 		}
 		siteRaw, err := firstGet(sources, webmeta.SiteKey(product.ID))
 		if err != nil {
@@ -495,6 +511,14 @@ func collect(products []Product, printer Printer) ([]browse.ProductData, map[str
 		}
 		if len(input.Latests) > 0 {
 			inputs = append(inputs, input)
+			// Only products that actually contribute a page take part in sink
+			// resolution. A product with no site document is not on the page, so
+			// its backend declaration must not be able to make the sink
+			// ambiguous (or hijack the dump destination) for the products that
+			// are served.
+			for name, entries := range declared {
+				backendsByName[name] = append(backendsByName[name], entries...)
+			}
 		}
 	}
 	return inputs, backendsByName, nil
