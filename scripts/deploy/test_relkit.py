@@ -698,5 +698,113 @@ class ConsoleInstallTests(unittest.TestCase):
         self.assertIn("relkit-store.service", names)
 
 
+class BackupRotationTests(unittest.TestCase):
+    def test_backup_skips_regenerable_staged_cache(self):
+        """An upgrade snapshot must not carry the publish payload artifacts.
+
+        Every apply used to copy products/.relkit/cache/staged wholesale, which
+        made each 12MB snapshot 250MB and grew /var/backups/relkit without
+        bound. The cache is rebuilt on demand, so it is not backup material.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            products = root / "products"
+            staged = products / ".relkit" / "cache" / "staged" / "0.1.0+14" / "artifacts"
+            staged.mkdir(parents=True)
+            (staged / "payload.zip").write_bytes(b"x" * 4096)
+            (products / "dec.json").write_text('{"product":"dec"}\n', encoding="utf-8")
+
+            backup = root / "backup"
+            deploy_cli.backup_files(backup / "agent", [products])
+
+            copied = backup / "agent" / "products"
+            self.assertTrue((copied / "dec.json").is_file(), "config must be backed up")
+            self.assertFalse(
+                (copied / ".relkit").exists(),
+                "regenerable .relkit/cache must be skipped",
+            )
+
+    def test_backup_keeps_unrelated_cache_named_directories(self):
+        """Ignore rules match the relative path, not the bare directory name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            products = root / "products"
+            (products / "cache").mkdir(parents=True)
+            (products / "cache" / "keep.json").write_text("{}\n", encoding="utf-8")
+            (products / ".relkit" / "cache").mkdir(parents=True)
+            (products / ".relkit" / "cache" / "drop.bin").write_bytes(b"x")
+
+            backup = root / "backup"
+            deploy_cli.backup_files(backup / "agent", [products])
+
+            copied = backup / "agent" / "products"
+            self.assertTrue((copied / "cache" / "keep.json").is_file())
+            self.assertFalse((copied / ".relkit").exists())
+
+    def test_prune_keeps_newest_snapshots(self):
+        """In normal use the current snapshot is the newest, so keep=N means N."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            names = ["20260901T000000Z", "20260902T000000Z", "20260903T000000Z", "20260904T000000Z"]
+            for name in names:
+                (root / name).mkdir()
+            current = root / names[-1]
+
+            removed = deploy_cli.prune_backups(root, 2, current=current)
+
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["20260903T000000Z", "20260904T000000Z"],
+            )
+            self.assertEqual(sorted(removed), ["20260901T000000Z", "20260902T000000Z"])
+
+    def test_prune_never_deletes_current(self):
+        """A protected snapshot survives even when it is the oldest one.
+
+        Rotation runs right after a successful apply, where current is the
+        newest snapshot. Protecting it matters for the failure path: an apply
+        that breaks and rolls back must not find its own backup already gone.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            names = ["20260901T000000Z", "20260902T000000Z", "20260903T000000Z"]
+            for name in names:
+                (root / name).mkdir()
+            current = root / names[0]
+
+            deploy_cli.prune_backups(root, 1, current=current)
+
+            self.assertTrue(current.is_dir(), "the protected snapshot must never be deleted")
+
+    def test_prune_ignores_foreign_entries(self):
+        """A hand-made tarball is not a rotation candidate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "20260901T000000Z").mkdir()
+            (root / "20260902T000000Z").mkdir()
+            foreign = root / "manual-export.tar.gz"
+            foreign.write_bytes(b"keep me")
+
+            removed = deploy_cli.prune_backups(root, 1)
+
+            self.assertTrue(foreign.is_file(), "foreign files must survive rotation")
+            self.assertEqual(removed, ["20260901T000000Z"])
+
+    def test_prune_rejects_non_positive_keep(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(deploy_cli.Fail):
+                deploy_cli.prune_backups(Path(tmp), 0)
+
+    def test_upgrade_defaults_keep_five_snapshots(self):
+        args = deploy_cli.build_parser().parse_args(["upgrade", "--host", "box", "--plan"])
+        self.assertEqual(args.keep_backups, 5)
+        self.assertFalse(args.no_prune_backups)
+
+    def test_prune_backups_parser(self):
+        args = deploy_cli.build_parser().parse_args(["prune-backups", "--host", "box", "--keep", "3", "--dry-run"])
+        self.assertEqual(args.keep, 3)
+        self.assertTrue(args.dry_run)
+
+
 if __name__ == "__main__":
     unittest.main()

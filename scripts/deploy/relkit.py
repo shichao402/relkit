@@ -1147,6 +1147,66 @@ def systemd_show(unit: str, *props: str) -> dict[str, str]:
     return data
 
 
+# Directories that hold regenerable build state rather than configuration.
+# Copying them into every snapshot made each upgrade backup ~250MB instead of
+# ~12MB: the agent's products/ directory contains .relkit/cache/staged, which
+# stores the payload artifacts of the release currently being published.
+BACKUP_SKIP_DIRS = (".relkit/cache",)
+
+
+def backup_ignore(root: Path):
+    """Skip regenerable cache subtrees while copying root.
+
+    The pattern is matched against the path relative to root: a bare name
+    filter would also drop unrelated directories that happen to be called
+    cache. A directory whose entire content sits in a skipped subtree (such as
+    .relkit, whose only child is cache/) is skipped as well, so the snapshot
+    does not carry empty scaffolding that suggests something was backed up.
+    """
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        skipped: set[str] = set()
+        for name in names:
+            relative = _backup_relative(Path(directory) / name, root)
+            if relative is None:
+                continue
+            if _backup_skipped(relative) or _backup_empty_after_skip(Path(directory) / name, root):
+                skipped.add(name)
+        return skipped
+
+    return ignore
+
+
+def _backup_relative(path: Path, root: Path) -> Optional[str]:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _backup_skipped(relative: str) -> bool:
+    return any(
+        relative == skip or relative.startswith(skip + "/")
+        for skip in BACKUP_SKIP_DIRS
+    )
+
+
+def _backup_empty_after_skip(directory: Path, root: Path) -> bool:
+    """True when directory holds nothing but skipped subtrees."""
+    if not directory.is_dir():
+        return False
+    for child in directory.iterdir():
+        relative = _backup_relative(child, root)
+        if relative is None or _backup_skipped(relative):
+            continue
+        if child.is_dir():
+            if not _backup_empty_after_skip(child, root):
+                return False
+        else:
+            return False
+    return True
+
+
 def backup_files(backup_root: Path, files: Sequence[Path]) -> None:
     backup_root.mkdir(parents=True, exist_ok=True)
     os.chmod(backup_root, 0o700)
@@ -1155,9 +1215,51 @@ def backup_files(backup_root: Path, files: Sequence[Path]) -> None:
             continue
         dest = backup_root / path.name
         if path.is_dir():
-            shutil.copytree(path, dest, dirs_exist_ok=True)
+            shutil.copytree(path, dest, dirs_exist_ok=True, ignore=backup_ignore(path))
         else:
             shutil.copy2(path, dest)
+
+
+SNAPSHOT_NAME = re.compile(r"^\d{8}T\d{6}Z$")
+
+
+def snapshot_dirs(backup_root: Path) -> list[Path]:
+    """Upgrade snapshots only.
+
+    Names are the UTC stamp the CLI writes. Anything else in the directory (a
+    hand-made tarball, an ad-hoc copy) is deliberately not a rotation
+    candidate: deleting it would destroy data nobody asked us to manage.
+    """
+    if not backup_root.is_dir():
+        return []
+    return sorted(
+        (path for path in backup_root.iterdir() if path.is_dir() and SNAPSHOT_NAME.match(path.name)),
+        key=lambda path: path.name,
+    )
+
+
+def prune_backups(backup_root: Path, keep: int, current: Optional[Path] = None) -> list[str]:
+    """Delete the oldest snapshots until `keep` remain. Never removes `current`.
+
+    Rotation must never delete the snapshot a failed apply would roll back
+    from, so `current` is exempt from the count: the retained set is `current`
+    plus the newest snapshots that fill the remaining budget.
+    """
+    if keep < 1:
+        raise Fail(f"keep must be at least 1, got {keep}")
+    snapshots = snapshot_dirs(backup_root)
+    protected = {current.resolve()} if current is not None else set()
+    exempt = [path for path in snapshots if path.resolve() in protected]
+    candidates = [path for path in snapshots if path.resolve() not in protected]
+    budget = max(0, keep - len(exempt))
+    surplus = len(candidates) - budget
+    if surplus <= 0:
+        return []
+    removed: list[str] = []
+    for path in candidates[:surplus]:
+        shutil.rmtree(path)
+        removed.append(path.name)
+    return removed
 
 
 def probe_local() -> dict[str, Any]:
@@ -1385,6 +1487,33 @@ def cmd_remote(args: argparse.Namespace) -> None:
             raise Fail("migrate-serve failed at " + str(backup)) from exc
         print(json.dumps({"ok": True, "backup": str(backup), "notes": notes}, ensure_ascii=False, indent=2))
         return
+    if args.remote_cmd == "prune-backups":
+        root = Path(args.backup_root or "/var/backups/relkit")
+        if not root.is_dir():
+            print(json.dumps({"ok": True, "root": str(root), "total": 0, "removed": [], "dryRun": args.dry_run}, ensure_ascii=False, indent=2))
+            return
+        snapshots = snapshot_dirs(root)
+        if args.dry_run:
+            keep_names = {path.name for path in snapshots[-(args.keep or 0):]} if args.keep else set()
+            removed = [path.name for path in snapshots if path.name not in keep_names]
+        else:
+            removed = prune_backups(root, args.keep)
+        remaining = [path.name for path in snapshot_dirs(root)]
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "root": str(root),
+                    "total": len(snapshots),
+                    "removed": removed,
+                    "remaining": remaining,
+                    "dryRun": args.dry_run,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
     if args.remote_cmd == "apply":
         spec = load_json_object(Path(args.spec).read_text(encoding="utf-8"))
         backup = Path(spec.get("backup") or f"/var/backups/relkit/{int(time.time())}")
@@ -1432,6 +1561,21 @@ def cmd_remote(args: argparse.Namespace) -> None:
             print(f"apply failed: {redact_text(str(exc))}", file=sys.stderr)
             rollback(backup, prefix)
             raise Fail("upgrade failed; rolled back from " + str(backup)) from exc
+        keep = int(spec.get("keepBackups") or 0)
+        if keep:
+            try:
+                removed = prune_backups(backup.parent, keep, current=backup)
+            except OSError as exc:
+                # Rotation is housekeeping: an upgrade that applied cleanly must
+                # not be reported as failed because an old snapshot would not
+                # delete. Report it and leave the directory alone.
+                notes.append(f"backup rotation skipped: {redact_text(str(exc))}")
+                removed = []
+            if removed:
+                notes.append(
+                    f"backup rotation kept {keep} snapshot(s), removed {len(removed)}: "
+                    + ", ".join(removed)
+                )
         print(json.dumps({"ok": True, "backup": str(backup), "notes": notes}, ensure_ascii=False, indent=2))
         return
     die(f"unknown remote command {args.remote_cmd}")
@@ -1616,6 +1760,9 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     restart = not args.stage_only
     if not restart:
         print("WARNING: --stage-only updates files but does not restart; upgrade is not complete")
+    if args.keep_backups < 1:
+        die("--keep-backups must be at least 1")
+    keep_backups = 0 if args.no_prune_backups else args.keep_backups
     spec = {
         "upgradeServe": want_serve,
         "upgradeAgent": want_agent,
@@ -1626,6 +1773,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "publicBaseUrl": public,
         "publicUploadUrl": public_upload,
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
+        "keepBackups": keep_backups,
     }
     uploads: list[Path] = []
     if not args.unsafe_from_dist:
@@ -1691,6 +1839,39 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         die("remote apply failed")
     if not restart:
         print("apply finished as stage-only; systemd still runs the previous process")
+
+
+def cmd_prune_backups(args: argparse.Namespace) -> None:
+    host = args.host
+    if args.keep < 1:
+        die("--keep must be at least 1")
+    py = remote_python(host)
+    remote_dir = "/tmp/relkit-deploy"
+    run(ssh_argv(host, ["mkdir", "-p", remote_dir]))
+    by_dest: dict[str, list[Path]] = {}
+    for path, sub in remote_bootstrap_sources():
+        by_dest.setdefault(sub, []).append(path)
+    for sub, paths in by_dest.items():
+        dest = remote_dir if not sub else f"{remote_dir}/{sub}"
+        if sub:
+            run(ssh_argv(host, ["mkdir", "-p", dest]))
+        scp_to(host, paths, dest + "/")
+    argv = [
+        "sudo",
+        py,
+        remote_dir + "/relkit.py",
+        "remote",
+        "prune-backups",
+        "--keep",
+        str(args.keep),
+    ]
+    if args.dry_run:
+        argv.append("--dry-run")
+    out = run(ssh_argv(host, argv), capture=True, check=False)
+    print(out.stdout or "")
+    if out.returncode != 0:
+        print(redact_text(out.stderr or ""), file=sys.stderr)
+        die("remote prune-backups failed")
 
 
 def cmd_version(args: argparse.Namespace) -> None:
@@ -1780,6 +1961,23 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--prefix", default="/usr/local/bin")
     upgrade.add_argument("--serve-only", action="store_true")
     upgrade.add_argument("--agent-only", action="store_true")
+    upgrade.add_argument(
+        "--keep-backups",
+        type=int,
+        default=5,
+        metavar="N",
+        help="keep the newest N upgrade snapshots under /var/backups/relkit and delete older ones (default 5)",
+    )
+    upgrade.add_argument(
+        "--no-prune-backups",
+        action="store_true",
+        help="keep every snapshot; disables rotation for this run",
+    )
+
+    prune = sub.add_parser("prune-backups", help="rotate existing upgrade snapshots on a host")
+    prune.add_argument("--host", required=True)
+    prune.add_argument("--keep", type=int, default=5, metavar="N", help="keep the newest N snapshots (default 5)")
+    prune.add_argument("--dry-run", action="store_true", help="list what would be removed, delete nothing")
 
     ver = sub.add_parser("version", help="print VERSION.json (relkit SSOT)")
     ver.add_argument(
@@ -1795,8 +1993,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     remote = sub.add_parser("remote", help=argparse.SUPPRESS)
-    remote.add_argument("remote_cmd", choices=["probe", "apply", "migrate-serve"])
+    remote.add_argument("remote_cmd", choices=["probe", "apply", "migrate-serve", "prune-backups"])
     remote.add_argument("--spec")
+    remote.add_argument("--keep", type=int)
+    remote.add_argument("--dry-run", action="store_true")
+    remote.add_argument("--backup-root")
 
     return parser
 
@@ -1819,6 +2020,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             cmd_upgrade(args)
         elif args.cmd == "migrate-serve":
             cmd_migrate_serve(args)
+        elif args.cmd == "prune-backups":
+            cmd_prune_backups(args)
         elif args.cmd == "version":
             cmd_version(args)
         elif args.cmd == "remote":
