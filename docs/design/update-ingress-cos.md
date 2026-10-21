@@ -77,25 +77,25 @@ https://updates.<your-domain>/artifact/...
 ### 4.1 发布流程（构建 → CAS → 签名 → 提交）
 
 目标：发布机只做控制面（发预签名上传凭据、签名、Copy、写指针）。产物字节不进 CVM。  
-`POST /v1/cas/credentials`、S3/COS 长期钥 query 预签名 PUT、`relkit cas-put`、瘦 staged tar 与 `Materialize` 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` / `pointerTo` 字段拆分仍是目标态。
+`POST /v1/cas/credentials`、S3/COS 长期钥 query 预签名 PUT、`relkit release --execute` 内联的 CAS 上传（原 `relkit cas-put`，已随 ADR 0019 §1 删除）、瘦 staged tar 与 `Materialize` 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` / `pointerTo` 字段拆分仍是目标态。
 
 ```mermaid
 flowchart TB
   subgraph ciSide [CI 不持私钥 不持长期 COS 密钥]
     build["编译 / 打包产物"]
-    stageStep["relkit stage VERSION<br/>本地算 sha256 无网络<br/>抽出 release-policy.json"]
+    stageStep["relkit stage VERSION<br/>本地算 sha256 无网络<br/>产出 vNext 控制面五件套"]
     hasUrl{"该产物已有可 GET URL?"}
     declare["不进凭据文档<br/>URL 随 staged 申报"]
     askTok["POST /v1/cas/credentials<br/>请求带 sha256 / size / 已有 URL"]
     putCas["PUT cas/SHA256 到 ingest<br/>每个 blob 恰好一次"]
-    putMeta["PUT /v1/staged<br/>staged.pb + policy 几 KB"]
+    putMeta["PUT /v1/staged<br/>控制面五件套 几 KB"]
   end
 
   subgraph agentSide [发布机 控制面 大字节不驻留]
     ingress["publish.your-domain → 127.0.0.1:8787"]
     tokSvc["签发 requests[]<br/>目的地只有 ingest 一个<br/>COS query 预签名；serve 能力 URL"]
     headCas["Head cas 比 size<br/>不重算 sha256"]
-    mergeStep["release-policy.json +<br/>本机 products/PRODUCT.json"]
+    mergeStep["staged 控制面五件套 +<br/>本机 products/PRODUCT.json"]
     publishStep["publish.Run<br/>不按 Type 分支"]
     directoryStep["directory set<br/>directory_sequence 加一"]
   end
@@ -177,7 +177,7 @@ flowchart TB
 
 ### 4.3 谁持有什么
 
-- **CI**：源码、产物、该产品 Bearer。没有私钥，没有长期后端写密钥。只执行凭据文档中唯一 ingest 的绝对 URL `requests[]`，不知道本轮有几个后端。staged 只有 portable `release-policy.json`。
+- **CI**：源码、产物、该产品 Bearer。没有私钥，没有长期后端写密钥。只执行凭据文档中唯一 ingest 的绝对 URL `requests[]`，不知道本轮有几个后端。staged 只有 vNext 控制面五件套（`staged.pb` + `resolution.json` + `resolution-bundle.json` + `relkit.project.json` + `artifact-set.json`）。
 - **发布机**：签名私钥、长期后端凭据（填凭据文档、Promote、Materialize、写指针）、`/etc/relkit-agent/products/<product>.json`。不对外提供下载，大产物也不在盘上驻留。
 - **数据面**：`cas/` 是 **ingest 后端专有**的 inbox（不必匿名读，`Days=1` 清）。正式对象 `artifact` / `index` / `directory` 匿名 GET。长期写权限只属于发布机。
 - **客户端**：公钥、`entryUrls`、`product` / `channel`。只读。按签名文档验 size / sha256。看不见 `cas/`。
@@ -253,7 +253,7 @@ flowchart TB
 
 1. **发布机清 `casCredentials`**：字段虽被过渡版本接受并忽略，仍须先从全部 profile 删除。
 2. **内网 serve 先 GC**：先上线上传租约与 `gc.casGrace: "24h"`，确认 GC 不会清理刚上传但尚未发布的 CAS。
-3. **开写入面并迁 profile 后发版验证**：配置 `RELKIT_SERVE_TOKEN`，把内网后端改为 `relkit-compatible`，完成一次真实 `cas-put` / publish / verify。
+3. **开写入面并迁 profile 后发版验证**：配置 `RELKIT_SERVE_TOKEN`，把内网后端改为 `relkit-compatible`，完成一次真实 `relkit release --execute` / verify。
 4. **稳定后才部署删除类型版本**：最后再升级不含 `local` / `http-put` / `static-http` 的 agent/CLI。
 
 `casCredentials=sts`、GetFederationToken、临时钥与客户端 `sign` 只属于已废弃方案，不得用于新配置。
@@ -381,7 +381,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 
 同桶再挂二级域名**不是**第二 backend。验证期第二 backend 曾是成都桶 `relkit-updates-cd-1251882798` / `raw2.firoyang.com`。2026-09-04 按单独指令拆除：仓库与发布机 profile 去掉 `cos2`，证书续期 `targets` 去掉 `raw2`，对象清空后由发布机凭据 `DeleteBucket`（MCP 禁止该 API）。已装 1.13.55 客户端内嵌的 `raw2` entryUrl 会失败，主入口 `raw.` 不受影响。免费证书 `aXOYfCx6` 未自动续期，可在 SSL 控制台删除。
 
-发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令。产品侧用 `relkit_host.py`；换二进制用 `scripts/deploy/relkit.py upgrade`。
+发布机运维走 **SSH**（`~/.ssh/config` 的 Host，由 `dec pull` 落地），不要用云 API 代跑命令。产品侧发版走 vNext（`relkit stage` 出 staged 树、`relkit release` 提交事务），产品仓不再物化任何 host 脚本；换二进制用 `scripts/deploy/relkit.py upgrade`。
 
 凭据：`COS_SECRET_ID` / `COS_SECRET_KEY` 只进发布机环境（或 mise 私密配置），**禁止**写入仓库。
 
@@ -403,7 +403,7 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 - Directory 设计：[`bootstrap-directory.md`](bootstrap-directory.md)
 - 决策记录：[`../adr/0005-signed-bootstrap-directory.md`](../adr/0005-signed-bootstrap-directory.md)、[`../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md`](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)
 - 工具接口与后端表：[`CLI.md`](../../CLI.md) §6
-- 产品运维：`python scripts/host/relkit_host.py`
+- 产品运维：`relkit-ops agent policy`（vNext 接入与 token 运维）；`scripts/host/relkit_host.py` 已随 ADR 0019 §1 删除
 - 给人看的索引站：[`sites/updates-index/README.md`](../../sites/updates-index/README.md)
 - 实装参数：本文 §10
 - 发布 agent（含内网）：[`publish-agent.md`](publish-agent.md)

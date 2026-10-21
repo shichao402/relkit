@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-08
-- Amended: 2026-09-15（删除 `static-http`）；2026-09-23（协议 3 的 CAS 分片）
+- Amended: 2026-09-15（删除 `static-http`）；2026-09-23（协议 3 的 CAS 分片）；2026-10-21（`relkit cas-put` / `relkit staged-put` 子命令随 ADR 0019 §1 删除，职责并入 `relkit release --execute`；本文中的命令名指当年的客户端实现）
 - Supersedes: [SPEC.md §13.1](../../SPEC.md) 中「`local` 后端必须始终可用」及「`get` 不能用文档 URL 替代，因为 `local` 的 `baseUrl` 此刻通常不可解析」。路径型「上传前即可确定 URL」的分界仍然有效。ADR 0001–0007 的决策正文不变；[ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md) 继续用 `s3-compatible` 作备援桶。
 
 ## 背景

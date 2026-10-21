@@ -4,7 +4,8 @@ Official Node client SDK for RUP v2. Implements the client half of
 [`SPEC.md`](../../SPEC.md): discover a signed index, verify it, pick the next
 version, download and verify the artifact.
 
-Host wiring: product-repo `python scripts/host/relkit_host.py`.
+Host wiring: `relkit materialize` projects components into `.relkit/components/`;
+product repos no longer materialize host scripts (ADR 0019 §1).
 
 ## Requirements
 

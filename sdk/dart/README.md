@@ -5,7 +5,9 @@ signed index → version chain → hash-verified download (optional apply helper
 
 **This directory (`relkit/sdk/dart`) is the source of truth.**  
 Go peer SDK: `../` (`github.com/shichao402/relkit/sdk`).  
-Host wiring: product-repo `python scripts/host/relkit_host.py`.
+Host wiring: `relkit materialize` projects this component to
+`.relkit/components/sdk/dart`; product repos no longer materialize host scripts
+(ADR 0019 §1).
 
 Pure Dart (no Flutter SDK dependency).
 

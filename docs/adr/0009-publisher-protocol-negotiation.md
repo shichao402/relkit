@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-09
+- Amended: 2026-10-21（`relkit cas-put` / `relkit staged-put` 子命令随 ADR 0019 §1 删除，preflight 协商现由 `relkit release --execute` 的上传阶段执行；协议窗口 `[2,3]` 不变）
 - Supersedes: agent/serve 上「`declared >= min` 即放行」的单向门槛
 - Incident: [INC-2026-09-08](../incidents/2026-09-08-stale-publisher-put-root.md)
 

@@ -113,7 +113,7 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 
 `pointerTo` 未声明时等于 `artifactTo`。两个列表都必须 `Writable()`。
 
-**落地状态（2026-09-08）：** agent 侧 `PutArtifactCAS`、`POST /v1/cas/credentials`、绝对 URL `requests[]`、s3-compatible 长期钥 query 预签名、relkit-compatible 能力 URL、`relkit cas-put`、瘦 staged tar 与 **Materialize 已落地**。`casCredentials` 仅过渡接受并忽略；客户端不再接受 `sign`。**`artifactTo` / `pointerTo` 与已有外部 URL 申报仍未实现。** 现网 profile 仍只有 `publishTo`。AssumeRole 未接。
+**落地状态（2026-09-08）：** agent 侧 `PutArtifactCAS`、`POST /v1/cas/credentials`、绝对 URL `requests[]`、s3-compatible 长期钥 query 预签名、relkit-compatible 能力 URL、`relkit release --execute` 内联的 CAS 上传（原 `relkit cas-put`，已于 ADR 0019 §1 删除）、瘦 staged tar 与 **Materialize 已落地**。`casCredentials` 仅过渡接受并忽略；客户端不再接受 `sign`。**`artifactTo` / `pointerTo` 与已有外部 URL 申报仍未实现。** 现网 profile 仍只有 `publishTo`。AssumeRole 未接。
 
 - `artifactTo` / `pointerTo` 默认都由 `publishTo` 迁移而来（未声明即全等），保持旧 profile 可用。
 - 已有的 `directory.publishTo` 是 `pointerTo` 的雏形，**并进 `pointerTo`**，不要再加第三个目标列表。
@@ -127,7 +127,7 @@ agent **HEAD 比 size**，**不重算 sha256**。损坏的 CAS = 这一版装不
 
 #### 凭据文档（CI 唯一入口）
 
-`POST /v1/cas/credentials` 的响应按 blob 给出 `requests[]`。每个请求包含 `method`、**绝对** `url`、可选 `headers` 与 `expiresAt`；分片再加 `offset` / `length`。CI 与 `relkit cas-put` 逐项执行 HTTP 请求，不认识后端类型，不实现 SigV4 / TC3 / STS，也不接受 `sign`。
+`POST /v1/cas/credentials` 的响应按 blob 给出 `requests[]`。每个请求包含 `method`、**绝对** `url`、可选 `headers` 与 `expiresAt`；分片再加 `offset` / `length`。`relkit release --execute` 的上传阶段逐项执行 HTTP 请求，不认识后端类型，不实现 SigV4 / TC3 / STS，也不接受 `sign`。
 
 协商协议低于 3，或对象不大于片大小时，响应仍是一条 PUT、没有 `uploadId`。协议 3 且对象更大时，`s3-compatible` 返回 `uploadId` 和若干片 URL。客户端只上传对应字节，把每片 `ETag` `POST` 到 `/v1/cas/complete`；失败则 `POST /v1/cas/abort`。合并 XML 由 agent 签名，客户端不拼。片大小由凭据请求里的 `partSize` 给出，agent 夹到 `minPartSize` / `maxPartSize`。`relkit-compatible` 没有分片签发，协议 3 也仍是一条 PUT。进程在 abort 之前退出时，未完成的分片留在桶里，由 COS 生命周期清理。
 
@@ -215,7 +215,7 @@ GitHub → CNB（`git-cnb` 传 Release 附件再在 CNB CI 调 agent）实测比
 - `POST /v1/publish` — JSON：`product` / `version` / 可选 `to` / `dryRun` / `stagedSha256` / `idempotencyKey`
 - `POST /v1/cas/credentials` — 统一上传说明：每个待上传 blob 给绝对 URL 的 `requests[]`，目的地只有 **ingest 后端**一个。S3/COS 是长期钥 query 预签名，relkit-compatible 是 serve 能力 URL；CI 不按 Type 分支、不签名。
 
-CI 默认走 `relkit staged-put`：多连接并发 PUT 各片。片大小与并发由客户端 `--part-size` / `--concurrency`（或 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY`）决定，agent 配置夹取上限。同一 `bytes+sha256` 的未完成会话可续传。
+CI 的上传由 `relkit release --execute` 内联完成（原 `relkit staged-put` 子命令已于 ADR 0019 §1 删除）：多连接并发 PUT 各片。片大小与并发由 `RELKIT_UPLOAD_PART_SIZE` / `RELKIT_UPLOAD_CONCURRENCY` 决定，agent 配置夹取上限。同一 `bytes+sha256` 的未完成会话可续传。
 
 无 token 时写端点返回 405。Token 加载时 SHA-256，比较用 constant-time。所有写端点在鉴权通过后再校验 publisher 握手，不带 `X-Relkit-Publish-Protocol` 或版本过低返回 426。
 
@@ -276,7 +276,7 @@ relkit-ops agent policy --config <agent-cfg> --policy <relkit.agent-product-poli
 
 1. **发布机清 `casCredentials`。** 从全部 publish profile 删除该字段；过渡版本虽接受并忽略，但不得继续把 `sts` 当有效配置。
 2. **内网 serve 先部署 GC。** 先上线支持 CAS 上传租约与 `gc.casGrace`（默认 `24h`）的 relkit-store，并确认 GC 正常。
-3. **开写入面、迁 profile、发版验证。** 为 serve 配运营方 `RELKIT_SERVE_TOKEN`，把 profile 改成 `relkit-compatible`（`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`），完成一次 `cas-put` → publish → verify。
+3. **开写入面、迁 profile、发版验证。** 为 serve 配运营方 `RELKIT_SERVE_TOKEN`，把 profile 改成 `relkit-compatible`（`baseUrl`、可选 `uploadUrl`、必填 `tokenEnv`、可选 `timeoutSeconds`），完成一次 `relkit release --execute` → verify。
 4. **稳定后才部署删除类型版本。** 观察现网稳定后，最后升级到不再包含 `local` / `http-put` 的 agent/CLI；否则旧 profile 会直接报 unsupported backend type。
 
 现网升级用 `python scripts/deploy/relkit.py upgrade --host …`（先 `--plan` 再 `--apply --restart`），不要重跑首装。细节 [`scripts/deploy/README.md`](../../scripts/deploy/README.md)。
