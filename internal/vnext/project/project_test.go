@@ -136,3 +136,59 @@ func TestStrictLoadRejectsSecretAndVersionFields(t *testing.T) {
 		}
 	}
 }
+
+// TestSiteDeclaration: the vNext replacement for the legacy relkit.json "site"
+// block. Omitting it is a deliberate opt-out; declaring an empty block is a
+// typo and must fail closed, because a silently empty site block is exactly
+// how a product drops out of the rendered catalog without anyone noticing.
+func TestSiteDeclaration(t *testing.T) {
+	value := validDocument()
+	if value.Validate() != nil {
+		t.Fatalf("site is optional: %v", value.Validate())
+	}
+
+	value = validDocument()
+	value.Site = &Site{}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "site needs at least one") {
+		t.Fatalf("empty site block must fail closed, got %v", err)
+	}
+
+	value = validDocument()
+	value.Site = &Site{Title: "Demo"}
+	if err := value.Validate(); err != nil {
+		t.Fatalf("title-only site must be valid: %v", err)
+	}
+
+	value = validDocument()
+	value.Site = &Site{Homepage: "https://example.com/demo"}
+	if err := value.Validate(); err != nil {
+		t.Fatalf("homepage-only site must be valid: %v", err)
+	}
+}
+
+// TestSiteDecodesFromProjectDocument pins the on-disk spelling: products
+// declare site next to channels in relkit.project.json.
+func TestSiteDecodesFromProjectDocument(t *testing.T) {
+	data := `{
+		"schema":"relkit.project/1",
+		"product":"demo",
+		"operatorRef":"prod",
+		"trustFingerprint":"` + testFingerprint + `",
+		"roles":["updater-host"],
+		"site":{"title":"Demo","description":"A demo product.","homepage":"https://example.com/demo"},
+		"capabilityFingerprint":{
+			"osArch":["windows-amd64"],"facades":["rust"],"projections":[],"topology":"self-update",
+			"subscriptions":[],"requiredContracts":[]
+		}
+	}`
+	var value Document
+	if err := document.Decode([]byte(data), &value); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if value.Site == nil || value.Site.Title != "Demo" || value.Site.Description != "A demo product." {
+		t.Fatalf("site did not decode: %+v", value.Site)
+	}
+}

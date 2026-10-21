@@ -41,6 +41,23 @@ type RuntimeProfilePublication struct {
 	Recovery        map[string]any `json:"recovery,omitempty"`
 }
 
+// Site is the optional human-facing site declaration. It replaces the legacy
+// relkit.json "site" block for vNext products: omitting it is a deliberate
+// opt-out (the product publishes protocol documents only and never appears in
+// the rendered catalog), while declaring it makes every publish write the
+// site/<product>.json document the site rebuild reads.
+type Site struct {
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Homepage    string `json:"homepage,omitempty"`
+}
+
+// IsZero reports whether the declaration carries no displayable field, which
+// the publisher treats as an absent site document.
+func (s Site) IsZero() bool {
+	return s.Title == "" && s.Description == "" && s.Homepage == ""
+}
+
 type CapabilityFingerprint struct {
 	OSArch            []string               `json:"osArch"`
 	Facades           []string               `json:"facades"`
@@ -64,6 +81,7 @@ type Document struct {
 	RuntimeProfileSubscriptions []Subscription             `json:"runtimeProfileSubscriptions,omitempty"`
 	RuntimeProfilePublication   *RuntimeProfilePublication `json:"runtimeProfilePublication,omitempty"`
 	CapabilityFingerprint       CapabilityFingerprint      `json:"capabilityFingerprint"`
+	Site                        *Site                      `json:"site,omitempty"`
 }
 
 func Load(path string) (*Document, error) {
@@ -205,6 +223,11 @@ func (d Document) Validate() error {
 	vector := contracts.Vector{Requires: d.CapabilityFingerprint.RequiredContracts}
 	if err := vector.Validate(); err != nil {
 		return fmt.Errorf("capabilityFingerprint: %w", err)
+	}
+	// A declared site block must say something: an all-empty block is a
+	// typo, not an opt-out. Omitting the block entirely is the opt-out.
+	if d.Site != nil && d.Site.IsZero() {
+		return fmt.Errorf("site needs at least one of title / description / homepage")
 	}
 	return nil
 }

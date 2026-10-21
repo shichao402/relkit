@@ -992,6 +992,64 @@ func TestMergeVNextPublishConfigDerivesStandardDirectoryURLs(t *testing.T) {
 	}
 }
 
+// TestMergeVNextPublishConfigCarriesSite: the regression that made every
+// migrated product vanish from the rendered catalog. A vNext product has no
+// relkit.json, so this merge is the only place its site declaration can reach
+// the publisher. When it is dropped, publish.hasSiteCopy is false and
+// site/<product>.json stops being written while the protocol documents keep
+// flowing, which is invisible until someone opens the update page.
+func TestMergeVNextPublishConfigCarriesSite(t *testing.T) {
+	root := t.TempDir()
+	seed, err := keys.GenerateSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateDocument := keys.PrivateKeyDocument("k1", seed)
+	privateBytes, err := rupv2.MarshalPrivateKey(&privateDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "private.pb"), privateBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile := &config.PublishProfile{
+		Product: "demo",
+		Signing: config.PublishSigningProfile{KeyID: "k1", PrivateKeyPath: "private.pb"},
+		Backends: map[string]map[string]any{
+			"primary": {"type": "relkit-compatible", "baseUrl": "https://updates.example.invalid/root"},
+		},
+		PublishTo: []string{"primary"},
+		Directory: &config.PublishDirectoryProfile{
+			PublishTo: []string{"primary"},
+		},
+	}
+
+	declared := project.Document{
+		Schema: project.Schema, Product: "demo", Channels: []string{"dev", "stable"},
+		Site: &project.Site{Title: "Demo", Description: "A demo product.", Homepage: "https://example.com/demo"},
+	}
+	cfg, err := mergeVNextPublishConfig(&declared, profile, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Site.Title != "Demo" || cfg.Site.Description != "A demo product." || cfg.Site.Homepage != "https://example.com/demo" {
+		t.Fatalf("site did not reach the publish config: %+v", cfg.Site)
+	}
+
+	// A product that does not declare site must stay opted out, not inherit
+	// an empty block that publish would then have to second-guess.
+	optedOut := project.Document{
+		Schema: project.Schema, Product: "demo", Channels: []string{"dev", "stable"},
+	}
+	cfg, err = mergeVNextPublishConfig(&optedOut, profile, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Site.Title != "" || cfg.Site.Description != "" || cfg.Site.Homepage != "" {
+		t.Fatalf("undeclared site must stay empty: %+v", cfg.Site)
+	}
+}
+
 func TestAgentBootstrapsRuntimeProfileWithoutExposingPrivateKey(t *testing.T) {
 	fx := makeVNextAgentFixture(t, vNextFixtureOptions{runtimeProfile: true})
 	payload, err := json.Marshal(runtimeProfileRequest{

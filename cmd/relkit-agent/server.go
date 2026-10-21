@@ -954,6 +954,18 @@ func mergeVNextPublishConfig(
 		Backends:       cloneBackendConfig(profile.Backends),
 		PublishTo:      append([]string(nil), profile.PublishTo...),
 	}
+	// The vNext project document is the only site declaration a migrated
+	// product has: relkit.json is gone. Without this the publisher sees an
+	// empty SiteConfig, hasSiteCopy is always false, and site/<product>.json
+	// silently stops being written even though the product still appears in
+	// every protocol document. That is the 2026-10 site outage.
+	if productDocument.Site != nil {
+		cfg.Site = config.SiteConfig{
+			Title:       productDocument.Site.Title,
+			Description: productDocument.Site.Description,
+			Homepage:    productDocument.Site.Homepage,
+		}
+	}
 	signers, err := cfg.LoadSigners()
 	if err != nil {
 		return nil, fmt.Errorf("vNext publish signer: %w", err)
