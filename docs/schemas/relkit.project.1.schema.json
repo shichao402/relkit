@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.project/1",
+  "title": "relkit.project/1",
+  "description": "宿主项目唯一提交的控制面声明。只持有四样东西：服务器地址、根公钥、产品名，以及（配在 CI 密钥里而非本文件的）token。不含 relkit 版本、组件摘要、resolution、能力向量或产品签名密钥。对应 internal/vnext/project。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "product", "server", "rootPublicKey"],
+  "properties": {
+    "schema": { "const": "relkit.project/1" },
+    "product": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "description": "本项目发布时使用的产品名，也是服务器上 token 授权与版本索引的作用域。"
+    },
+    "server": {
+      "type": "string",
+      "description": "本项目对接的 agent 服务器基地址。绝对 http/https URL，不含用户凭据、query 与 fragment。relkit 组件与控制面文档也来自这里。",
+      "pattern": "^https?://[^/?#@]+(/[^?#]*)?$"
+    },
+    "rootPublicKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "该服务器的根公钥。接受 /v1/tools/root.pub 给出的 OpenSSH 行（ssh-ed25519 <base64>）与裸 base64 两种形式。同一字符串既是项目配置值，也是 CI 写入 allowed_signers 的内容，因此不需要任何二进制换算。",
+      "examples": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI..."]
+    },
+    "channels": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "本项目发布的渠道。发布事实，不是版本选择；服务器仍决定哪个版本是当前版本。"
+    },
+    "selectorDimensions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "本项目 artifacts 选择的维度名。由项目自由声明，代码里没有平台白名单。引擎只注入 os/arch（取 runtime.GOOS/GOARCH）并强制 apply=relkit-payload。"
+    },
+    "artifactProducer": { "$ref": "#/$defs/command" },
+    "versionProvider": { "$ref": "#/$defs/command" },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "可选的人页面声明。整块省略即 opted out：只发协议文档，不出现在渲染目录里。声明了就必须至少填一项。",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "homepage": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "extensionSchema": { "const": "relkit.extension/1" },
+        "timeoutSeconds": { "type": "integer", "minimum": 0 },
+        "envAllowlist": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "permissions": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["release"] },
+      { "required": ["relkitVersion"] },
+      { "required": ["token"] },
+      { "required": ["ssh"] },
+      { "required": ["uploadUrl"] },
+      { "required": ["operatorRef"] },
+      { "required": ["trustFingerprint"] },
+      { "required": ["resolution"] }
+    ]
+  }
+}

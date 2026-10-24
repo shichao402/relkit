@@ -1,33 +1,27 @@
 package project
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
-	"github.com/shichao402/relkit/internal/vnext/contracts"
 	"github.com/shichao402/relkit/internal/vnext/document"
 )
 
-const testFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+// testRootPublicKey is an opaque 32-byte key: the project declaration only
+// carries the server root it trusts, and nothing here verifies signatures.
+var testRootPublicKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
 
 func validDocument() Document {
 	return Document{
-		Schema:           Schema,
-		Product:          "example-product",
-		OperatorRef:      "production",
-		TrustFingerprint: testFingerprint,
-		Roles:            []Role{RolePublisher, RoleUpdaterHost},
+		Schema:        Schema,
+		Product:       "example-product",
+		Server:        "https://updates.example",
+		RootPublicKey: testRootPublicKey,
+		Channels:      []string{"stable", "beta"},
 		ArtifactProducer: &Command{
 			Command:         []string{"./scripts/build"},
 			ExtensionSchema: "relkit.extension/1",
-		},
-		CapabilityFingerprint: CapabilityFingerprint{
-			OSArch:   []string{"windows-amd64"},
-			Facades:  []string{"rust"},
-			Topology: "self-update",
-			RequiredContracts: []contracts.Capability{
-				{Domain: contracts.DomainUpdaterIPC, Peer: "updater", Min: 3, Max: 3},
-			},
 		},
 	}
 }
@@ -46,101 +40,113 @@ func TestValidateAndDigest(t *testing.T) {
 	}
 }
 
-func TestPublisherRequiresProducer(t *testing.T) {
+func TestServerAndRootKeyAreRequired(t *testing.T) {
 	value := validDocument()
-	value.ArtifactProducer = nil
-	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "requires artifactProducer") {
-		t.Fatalf("unexpected error: %v", err)
+	value.Server = ""
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "server must be an absolute") {
+		t.Fatalf("expected a server rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.Server = "ftp://updates.example"
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "http or https") {
+		t.Fatalf("expected a scheme rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.Server = "https://user:secret@updates.example"
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "must not contain credentials") {
+		t.Fatalf("expected a credentials rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.RootPublicKey = ""
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "rootPublicKey") {
+		t.Fatalf("expected a rootPublicKey rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.RootPublicKey = base64.StdEncoding.EncodeToString([]byte{1, 2, 3})
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "expected 32") {
+		t.Fatalf("expected a root key length rejection, got %v", err)
+	}
+
+	// The form the server publishes at /v1/tools/root.pub must load verbatim:
+	// a host copies that line, and CI reuses it for allowed_signers.
+	value = validDocument()
+	value.RootPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	if err := value.Validate(); err != nil {
+		t.Fatalf("an ssh-ed25519 public key line must be accepted, got %v", err)
+	}
+
+	value = validDocument()
+	value.RootPublicKey = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQ=="
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "expected ssh-ed25519") {
+		t.Fatalf("expected a key type rejection, got %v", err)
 	}
 }
 
-func TestRoleAndSubscriptionCombinationsFailClosed(t *testing.T) {
-	tests := []struct {
-		name  string
-		patch func(*Document)
-		want  string
-	}{
-		{
-			name: "updater host without facade",
-			patch: func(value *Document) {
-				value.CapabilityFingerprint.Facades = nil
-			},
-			want: "updater-host role requires at least one facade",
-		},
-		{
-			name: "projection role without projection",
-			patch: func(value *Document) {
-				value.Roles = append(value.Roles, RoleUpdaterProjection)
-			},
-			want: "updater-projection role requires at least one projection",
-		},
-		{
-			name: "runtime profile publication without publisher",
-			patch: func(value *Document) {
-				value.Roles = []Role{RoleUpdaterHost}
-				value.ArtifactProducer = nil
-				value.RuntimeProfilePublication = &RuntimeProfilePublication{
-					RootFingerprint: testFingerprint,
-					RUPSchemaSet:    "rup.v2",
-				}
-			},
-			want: "runtimeProfilePublication requires publisher role",
-		},
-		{
-			name: "subscription missing from capability fingerprint",
-			patch: func(value *Document) {
-				value.Roles = append(value.Roles, RoleSubscriber)
-				value.RuntimeProfileSubscriptions = []Subscription{{
-					ProductRef:      "managed-product",
-					RootFingerprint: testFingerprint,
-				}}
-			},
-			want: "capabilityFingerprint.subscriptions must match",
-		},
-		{
-			name: "fingerprint subscription without runtime profile",
-			patch: func(value *Document) {
-				value.CapabilityFingerprint.Subscriptions = []string{"managed-product"}
-			},
-			want: "capabilityFingerprint.subscriptions must match",
-		},
+func TestServerURLAndRootKeyAccessors(t *testing.T) {
+	value := validDocument()
+	server, err := value.ServerURL()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			value := validDocument()
-			test.patch(&value)
-			if err := value.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
+	if server != "https://updates.example" {
+		t.Fatalf("ServerURL = %q", server)
+	}
+	key, err := value.RootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(key) != 32 {
+		t.Fatalf("RootKey returned %d bytes", len(key))
 	}
 }
 
-func TestStrictLoadRejectsSecretAndVersionFields(t *testing.T) {
-	for _, field := range []string{`"token":"secret",`, `"relkitVersion":"v1.0.0",`} {
-		data := `{
-			"schema":"relkit.project/1",
-			"product":"demo",
-			"operatorRef":"prod",
-			"trustFingerprint":"` + testFingerprint + `",
-			` + field + `
-			"roles":["updater-host"],
-			"capabilityFingerprint":{
-				"osArch":[],"facades":[],"projections":[],"topology":"self-update",
-				"subscriptions":[],"requiredContracts":[]
-			}
-		}`
-		var value Document
-		if err := document.Decode([]byte(data), &value); err == nil {
-			t.Fatalf("field fragment %q unexpectedly accepted", field)
-		}
+func TestChannelsAndSelectorsRejectDuplicates(t *testing.T) {
+	value := validDocument()
+	value.Channels = []string{"stable", "stable"}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("expected a duplicate channel rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.SelectorDimensions = []string{"os-arch", ""}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "empty or duplicate") {
+		t.Fatalf("expected a selector rejection, got %v", err)
 	}
 }
 
-// TestSiteDeclaration: the vNext replacement for the legacy relkit.json "site"
-// block. Omitting it is a deliberate opt-out; declaring an empty block is a
-// typo and must fail closed, because a silently empty site block is exactly
-// how a product drops out of the rendered catalog without anyone noticing.
+func TestCommandsRejectEmptyAndBadSchema(t *testing.T) {
+	value := validDocument()
+	value.ArtifactProducer = &Command{}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "artifactProducer.command") {
+		t.Fatalf("expected an empty command rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.VersionProvider = &Command{Command: []string{"version"}, ExtensionSchema: "relkit.extension/2"}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "relkit.extension/1") {
+		t.Fatalf("expected an extension schema rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.ArtifactProducer.TimeoutSeconds = -1
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "timeoutSeconds") {
+		t.Fatalf("expected a timeout rejection, got %v", err)
+	}
+
+	value = validDocument()
+	value.ArtifactProducer.EnvAllowlist = []string{"TOKEN", "TOKEN"}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "envAllowlist") {
+		t.Fatalf("expected an env allowlist rejection, got %v", err)
+	}
+}
+
+// TestSiteDeclaration: omitting it is a deliberate opt-out; declaring an empty
+// block is a typo and must fail closed, because a silently empty site block is
+// exactly how a product drops out of the rendered catalog unnoticed.
 func TestSiteDeclaration(t *testing.T) {
 	value := validDocument()
 	if value.Validate() != nil {
@@ -166,20 +172,43 @@ func TestSiteDeclaration(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsRetiredControlPlaneFields pins the strict decoder: an old
+// project file that still names a token, a pinned relkit version, an operator
+// or a resolution must stop the load instead of being silently ignored.
+func TestLoadRejectsRetiredControlPlaneFields(t *testing.T) {
+	for _, field := range []string{
+		`"token":"secret",`,
+		`"relkitVersion":"v1.0.0",`,
+		`"operatorRef":"prod",`,
+		`"trustFingerprint":"` + testRootPublicKey + `",`,
+		`"roles":["updater-host"],`,
+		`"capabilityFingerprint":{"osArch":[]},`,
+	} {
+		data := `{
+			"schema":"relkit.project/1",
+			"product":"demo",
+			"server":"https://updates.example",
+			"rootPublicKey":"` + testRootPublicKey + `",
+			` + field + `
+			"channels":["stable"]
+		}`
+		var value Document
+		if err := document.Decode([]byte(data), &value); err == nil {
+			t.Fatalf("field fragment %q unexpectedly accepted", field)
+		}
+	}
+}
+
 // TestSiteDecodesFromProjectDocument pins the on-disk spelling: products
 // declare site next to channels in relkit.project.json.
 func TestSiteDecodesFromProjectDocument(t *testing.T) {
 	data := `{
 		"schema":"relkit.project/1",
 		"product":"demo",
-		"operatorRef":"prod",
-		"trustFingerprint":"` + testFingerprint + `",
-		"roles":["updater-host"],
-		"site":{"title":"Demo","description":"A demo product.","homepage":"https://example.com/demo"},
-		"capabilityFingerprint":{
-			"osArch":["windows-amd64"],"facades":["rust"],"projections":[],"topology":"self-update",
-			"subscriptions":[],"requiredContracts":[]
-		}
+		"server":"https://updates.example",
+		"rootPublicKey":"` + testRootPublicKey + `",
+		"channels":["stable"],
+		"site":{"title":"Demo","description":"A demo product.","homepage":"https://example.com/demo"}
 	}`
 	var value Document
 	if err := document.Decode([]byte(data), &value); err != nil {

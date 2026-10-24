@@ -26,68 +26,66 @@ func install(kind rupv2.ArtifactKind, id string, sels ...string) *rupv2.Artifact
 	}
 }
 
-// A manifest with no audience selectors at all keeps the full artifact list:
-// older products and test fixtures predate the convention, and the filter
-// must never empty a page that predates it.
-func TestArtifactsFromManifestNoAudienceKeepsAll(t *testing.T) {
+// The human-facing list is exactly what the manifest lists: every install
+// artifact, no selector-based filtering.
+func TestArtifactsFromManifestKeepsEveryInstallArtifact(t *testing.T) {
 	manifest := &rupv2.Manifest{
 		Schema: rupv2.SchemaManifest,
 		Artifacts: []*rupv2.Artifact{
 			install(rupv2.ArtifactKind_ARTIFACT_KIND_INSTALLER, "setup-exe", "os", "windows", "arch", "amd64"),
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_BINARY, "dec-darwin", "os", "darwin", "arch", "arm64"),
+			install(rupv2.ArtifactKind_ARTIFACT_KIND_BINARY, "app-darwin", "os", "darwin", "arch", "arm64"),
 			install(rupv2.ArtifactKind_ARTIFACT_KIND_BLOB, "manifest-blob", "component", "manifest"),
 		},
 	}
 	got := ArtifactsFromManifest(manifest)
 	if len(got) != 3 {
-		t.Fatalf("artifacts=%d want 3 (no-audience fallback keeps all)", len(got))
-	}
-}
-
-// When any artifact carries an audience selector, only audience=user
-// artifacts are projected: the web page lists what a human downloads
-// (dec: the console installers), not the runtime fleet behind the
-// update protocol.
-func TestArtifactsFromManifestAudienceFiltersRuntime(t *testing.T) {
-	manifest := &rupv2.Manifest{
-		Schema: rupv2.SchemaManifest,
-		Artifacts: []*rupv2.Artifact{
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_BINARY, "dec-windows", "os", "windows", "arch", "amd64", "component", "dec", "audience", "runtime"),
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_BINARY, "dec-darwin", "os", "darwin", "arch", "arm64", "component", "dec", "audience", "runtime"),
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_BLOB, "manifest-blob", "component", "manifest", "audience", "runtime"),
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_INSTALLER, "console-exe", "os", "windows", "arch", "amd64", "component", "console", "audience", "user"),
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_INSTALLER, "console-dmg", "os", "darwin", "arch", "arm64", "component", "console", "audience", "user"),
-			{Id: "payload", Kind: rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD, Selectors: selectors("audience", "user")},
-		},
-	}
-	got := ArtifactsFromManifest(manifest)
-	if len(got) != 2 {
-		t.Fatalf("artifacts=%d want 2 user-facing installers", len(got))
+		t.Fatalf("artifacts=%d want 3", len(got))
 	}
 	for _, a := range got {
-		if a.Selectors["audience"] != "user" {
-			t.Fatalf("projected artifact %s is not audience=user: %v", a.ID, a.Selectors)
-		}
 		if a.Kind == "payload" {
 			t.Fatalf("payload artifact %s leaked into the human-facing list", a.ID)
 		}
 	}
 }
 
-// A manifest that labels every artifact audience=runtime is a product with
-// nothing human-downloadable; the projection is an empty list, which is the
-// honest answer, not a bug. The unmarshal layer refuses empty lists for
-// latest/, so this shape only appears in release docs.
-func TestArtifactsFromManifestAllRuntimeYieldsEmpty(t *testing.T) {
+// Payloads are protocol-internal: the engine stages them, a human never
+// downloads them from the release page.
+func TestArtifactsFromManifestDropsPayloads(t *testing.T) {
 	manifest := &rupv2.Manifest{
 		Schema: rupv2.SchemaManifest,
 		Artifacts: []*rupv2.Artifact{
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_BINARY, "dec-windows", "os", "windows", "arch", "amd64", "audience", "runtime"),
-			install(rupv2.ArtifactKind_ARTIFACT_KIND_BLOB, "manifest-blob", "component", "manifest", "audience", "runtime"),
+			install(rupv2.ArtifactKind_ARTIFACT_KIND_BINARY, "app-windows", "os", "windows", "arch", "amd64"),
+			{Id: "payload", Kind: rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD, Selectors: selectors("os", "windows")},
+			{Id: "payload-2", Kind: rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD},
 		},
 	}
 	got := ArtifactsFromManifest(manifest)
-	if len(got) != 0 {
-		t.Fatalf("artifacts=%d want 0 for an all-runtime manifest", len(got))
+	if len(got) != 1 || got[0].ID != "app-windows" {
+		t.Fatalf("artifacts=%+v want only app-windows", got)
+	}
+}
+
+// An old "audience" selector in a manifest is inert data, not a filter: it is
+// carried through with the rest of the selectors and changes nothing.
+func TestArtifactsFromManifestIgnoresAudienceSelector(t *testing.T) {
+	manifest := &rupv2.Manifest{
+		Schema: rupv2.SchemaManifest,
+		Artifacts: []*rupv2.Artifact{
+			install(rupv2.ArtifactKind_ARTIFACT_KIND_BINARY, "app-windows", "os", "windows", "audience", "runtime"),
+			install(rupv2.ArtifactKind_ARTIFACT_KIND_INSTALLER, "setup-exe", "os", "windows", "audience", "user"),
+		},
+	}
+	got := ArtifactsFromManifest(manifest)
+	if len(got) != 2 {
+		t.Fatalf("artifacts=%d want 2: audience is no longer a filter", len(got))
+	}
+	if got[0].Selectors["audience"] != "runtime" {
+		t.Fatalf("selectors were not carried through: %v", got[0].Selectors)
+	}
+}
+
+func TestArtifactsFromManifestNilManifest(t *testing.T) {
+	if got := ArtifactsFromManifest(nil); got != nil {
+		t.Fatalf("nil manifest must project nothing, got %+v", got)
 	}
 }

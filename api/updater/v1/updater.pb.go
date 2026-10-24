@@ -47,6 +47,9 @@ const (
 	ErrorCode_ERROR_CODE_CANCELED            ErrorCode = 18
 	ErrorCode_ERROR_CODE_SIDECAR_NOT_FOUND   ErrorCode = 19
 	ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED  ErrorCode = 20
+	// The full-install handoff ran the verified installer and it exited with a
+	// non-zero code that does not mean "user cancelled".
+	ErrorCode_ERROR_CODE_INSTALLER_FAILED ErrorCode = 21
 )
 
 // Enum value maps for ErrorCode.
@@ -73,6 +76,7 @@ var (
 		18: "ERROR_CODE_CANCELED",
 		19: "ERROR_CODE_SIDECAR_NOT_FOUND",
 		20: "ERROR_CODE_LAYOUT_UNSUPPORTED",
+		21: "ERROR_CODE_INSTALLER_FAILED",
 	}
 	ErrorCode_value = map[string]int32{
 		"ERROR_CODE_UNSPECIFIED":         0,
@@ -96,6 +100,7 @@ var (
 		"ERROR_CODE_CANCELED":            18,
 		"ERROR_CODE_SIDECAR_NOT_FOUND":   19,
 		"ERROR_CODE_LAYOUT_UNSUPPORTED":  20,
+		"ERROR_CODE_INSTALLER_FAILED":    21,
 	}
 )
 
@@ -288,18 +293,18 @@ func (ApplyDisposition) EnumDescriptor() ([]byte, []int) {
 type Operation int32
 
 const (
-	Operation_OPERATION_UNSPECIFIED    Operation = 0
-	Operation_OPERATION_CHECK          Operation = 1
-	Operation_OPERATION_SKIP           Operation = 2
-	Operation_OPERATION_DOWNLOAD       Operation = 3
-	Operation_OPERATION_APPLY          Operation = 4
-	Operation_OPERATION_STATUS         Operation = 5
-	Operation_OPERATION_CLEANUP        Operation = 6
-	Operation_OPERATION_CANCEL         Operation = 7
-	Operation_OPERATION_SCHEDULER      Operation = 8
-	Operation_OPERATION_LIST_INSTALLED Operation = 9
-	Operation_OPERATION_SWITCH_ACTIVE  Operation = 10
-	Operation_OPERATION_ROLLBACK       Operation = 11
+	Operation_OPERATION_UNSPECIFIED      Operation = 0
+	Operation_OPERATION_CHECK            Operation = 1
+	Operation_OPERATION_SKIP             Operation = 2
+	Operation_OPERATION_DOWNLOAD         Operation = 3
+	Operation_OPERATION_APPLY            Operation = 4
+	Operation_OPERATION_STATUS           Operation = 5
+	Operation_OPERATION_CLEANUP          Operation = 6
+	Operation_OPERATION_CANCEL           Operation = 7
+	Operation_OPERATION_LIST_INSTALLED   Operation = 9
+	Operation_OPERATION_SWITCH_ACTIVE    Operation = 10
+	Operation_OPERATION_ROLLBACK         Operation = 11
+	Operation_OPERATION_DELETE_INSTALLED Operation = 12
 )
 
 // Enum value maps for Operation.
@@ -313,24 +318,24 @@ var (
 		5:  "OPERATION_STATUS",
 		6:  "OPERATION_CLEANUP",
 		7:  "OPERATION_CANCEL",
-		8:  "OPERATION_SCHEDULER",
 		9:  "OPERATION_LIST_INSTALLED",
 		10: "OPERATION_SWITCH_ACTIVE",
 		11: "OPERATION_ROLLBACK",
+		12: "OPERATION_DELETE_INSTALLED",
 	}
 	Operation_value = map[string]int32{
-		"OPERATION_UNSPECIFIED":    0,
-		"OPERATION_CHECK":          1,
-		"OPERATION_SKIP":           2,
-		"OPERATION_DOWNLOAD":       3,
-		"OPERATION_APPLY":          4,
-		"OPERATION_STATUS":         5,
-		"OPERATION_CLEANUP":        6,
-		"OPERATION_CANCEL":         7,
-		"OPERATION_SCHEDULER":      8,
-		"OPERATION_LIST_INSTALLED": 9,
-		"OPERATION_SWITCH_ACTIVE":  10,
-		"OPERATION_ROLLBACK":       11,
+		"OPERATION_UNSPECIFIED":      0,
+		"OPERATION_CHECK":            1,
+		"OPERATION_SKIP":             2,
+		"OPERATION_DOWNLOAD":         3,
+		"OPERATION_APPLY":            4,
+		"OPERATION_STATUS":           5,
+		"OPERATION_CLEANUP":          6,
+		"OPERATION_CANCEL":           7,
+		"OPERATION_LIST_INSTALLED":   9,
+		"OPERATION_SWITCH_ACTIVE":    10,
+		"OPERATION_ROLLBACK":         11,
+		"OPERATION_DELETE_INSTALLED": 12,
 	}
 )
 
@@ -581,6 +586,16 @@ func (x *RecoveryHelp) GetLinks() []*RecoveryLink {
 	return nil
 }
 
+// ClientProfile is what the engine needs to reach a server. In window 4 the
+// host no longer parses the embedded Runtime Bootstrap: it forwards the
+// document text verbatim and the engine validates it (requirement 3.8).
+//
+// When bootstrap is non-empty the engine derives product, allowed channels,
+// entry URLs and the trusted key from it, then checks that it agrees with
+// expected_product and with the channel in Runtime. Fields duplicated here
+// (product, allowed_channels, entry_urls, trusted_keys) stay for hosts that
+// speak window 4 without a bootstrap; the engine rejects disagreement rather
+// than silently picking one side.
 type ClientProfile struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Product         string                 `protobuf:"bytes,1,opt,name=product,proto3" json:"product,omitempty"`
@@ -590,6 +605,12 @@ type ClientProfile struct {
 	FallbackUrls    []string               `protobuf:"bytes,5,rep,name=fallback_urls,json=fallbackUrls,proto3" json:"fallback_urls,omitempty"`
 	TrustedKeys     []*TrustedKey          `protobuf:"bytes,6,rep,name=trusted_keys,json=trustedKeys,proto3" json:"trusted_keys,omitempty"`
 	Recovery        *RecoveryHelp          `protobuf:"bytes,7,opt,name=recovery,proto3" json:"recovery,omitempty"`
+	// Verbatim relkit.runtime-bootstrap/2 JSON. Empty means the host resolved
+	// the profile itself.
+	Bootstrap string `protobuf:"bytes,8,opt,name=bootstrap,proto3" json:"bootstrap,omitempty"`
+	// Product name the host believes it is. When bootstrap is set the engine
+	// requires this to equal the bootstrap product.
+	ExpectedProduct string `protobuf:"bytes,9,opt,name=expected_product,json=expectedProduct,proto3" json:"expected_product,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -673,6 +694,100 @@ func (x *ClientProfile) GetRecovery() *RecoveryHelp {
 	return nil
 }
 
+func (x *ClientProfile) GetBootstrap() string {
+	if x != nil {
+		return x.Bootstrap
+	}
+	return ""
+}
+
+func (x *ClientProfile) GetExpectedProduct() string {
+	if x != nil {
+		return x.ExpectedProduct
+	}
+	return ""
+}
+
+// HandshakeReport is what the engine learned while validating the client
+// profile. It rides on Capabilities so a host that forwards its Runtime
+// Bootstrap verbatim (requirement 3.8) never needs its own parser: the engine
+// tells it the product, the channels it may use, and which one to preselect.
+type HandshakeReport struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Product         string                 `protobuf:"bytes,1,opt,name=product,proto3" json:"product,omitempty"`
+	AllowedChannels []string               `protobuf:"bytes,2,rep,name=allowed_channels,json=allowedChannels,proto3" json:"allowed_channels,omitempty"`
+	DefaultChannel  string                 `protobuf:"bytes,3,opt,name=default_channel,json=defaultChannel,proto3" json:"default_channel,omitempty"`
+	RootKeyId       string                 `protobuf:"bytes,6,opt,name=root_key_id,json=rootKeyId,proto3" json:"root_key_id,omitempty"`
+	RootFingerprint string                 `protobuf:"bytes,7,opt,name=root_fingerprint,json=rootFingerprint,proto3" json:"root_fingerprint,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *HandshakeReport) Reset() {
+	*x = HandshakeReport{}
+	mi := &file_updater_v1_updater_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HandshakeReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HandshakeReport) ProtoMessage() {}
+
+func (x *HandshakeReport) ProtoReflect() protoreflect.Message {
+	mi := &file_updater_v1_updater_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HandshakeReport.ProtoReflect.Descriptor instead.
+func (*HandshakeReport) Descriptor() ([]byte, []int) {
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *HandshakeReport) GetProduct() string {
+	if x != nil {
+		return x.Product
+	}
+	return ""
+}
+
+func (x *HandshakeReport) GetAllowedChannels() []string {
+	if x != nil {
+		return x.AllowedChannels
+	}
+	return nil
+}
+
+func (x *HandshakeReport) GetDefaultChannel() string {
+	if x != nil {
+		return x.DefaultChannel
+	}
+	return ""
+}
+
+func (x *HandshakeReport) GetRootKeyId() string {
+	if x != nil {
+		return x.RootKeyId
+	}
+	return ""
+}
+
+func (x *HandshakeReport) GetRootFingerprint() string {
+	if x != nil {
+		return x.RootFingerprint
+	}
+	return ""
+}
+
 type LibraryPolicy struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Retain        int32                  `protobuf:"varint,1,opt,name=retain,proto3" json:"retain,omitempty"` // 0 means current + previous
@@ -683,7 +798,7 @@ type LibraryPolicy struct {
 
 func (x *LibraryPolicy) Reset() {
 	*x = LibraryPolicy{}
-	mi := &file_updater_v1_updater_proto_msgTypes[4]
+	mi := &file_updater_v1_updater_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +810,7 @@ func (x *LibraryPolicy) String() string {
 func (*LibraryPolicy) ProtoMessage() {}
 
 func (x *LibraryPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[4]
+	mi := &file_updater_v1_updater_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +823,7 @@ func (x *LibraryPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LibraryPolicy.ProtoReflect.Descriptor instead.
 func (*LibraryPolicy) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{4}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *LibraryPolicy) GetRetain() int32 {
@@ -740,7 +855,7 @@ type InstallSpec struct {
 
 func (x *InstallSpec) Reset() {
 	*x = InstallSpec{}
-	mi := &file_updater_v1_updater_proto_msgTypes[5]
+	mi := &file_updater_v1_updater_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -752,7 +867,7 @@ func (x *InstallSpec) String() string {
 func (*InstallSpec) ProtoMessage() {}
 
 func (x *InstallSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[5]
+	mi := &file_updater_v1_updater_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -765,7 +880,7 @@ func (x *InstallSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallSpec.ProtoReflect.Descriptor instead.
 func (*InstallSpec) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{5}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *InstallSpec) GetPlacement() Placement {
@@ -834,7 +949,7 @@ type Runtime struct {
 
 func (x *Runtime) Reset() {
 	*x = Runtime{}
-	mi := &file_updater_v1_updater_proto_msgTypes[6]
+	mi := &file_updater_v1_updater_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -846,7 +961,7 @@ func (x *Runtime) String() string {
 func (*Runtime) ProtoMessage() {}
 
 func (x *Runtime) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[6]
+	mi := &file_updater_v1_updater_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -859,7 +974,7 @@ func (x *Runtime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Runtime.ProtoReflect.Descriptor instead.
 func (*Runtime) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{6}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Runtime) GetChannel() string {
@@ -914,7 +1029,7 @@ type CheckPolicy struct {
 
 func (x *CheckPolicy) Reset() {
 	*x = CheckPolicy{}
-	mi := &file_updater_v1_updater_proto_msgTypes[7]
+	mi := &file_updater_v1_updater_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -926,7 +1041,7 @@ func (x *CheckPolicy) String() string {
 func (*CheckPolicy) ProtoMessage() {}
 
 func (x *CheckPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[7]
+	mi := &file_updater_v1_updater_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -939,7 +1054,7 @@ func (x *CheckPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckPolicy.ProtoReflect.Descriptor instead.
 func (*CheckPolicy) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{7}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CheckPolicy) GetAfterSuccess() *durationpb.Duration {
@@ -952,66 +1067,6 @@ func (x *CheckPolicy) GetAfterSuccess() *durationpb.Duration {
 func (x *CheckPolicy) GetAfterFailure() *durationpb.Duration {
 	if x != nil {
 		return x.AfterFailure
-	}
-	return nil
-}
-
-type SchedulerConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CheckOnStart  bool                   `protobuf:"varint,1,opt,name=check_on_start,json=checkOnStart,proto3" json:"check_on_start,omitempty"`
-	ForceOnStart  bool                   `protobuf:"varint,2,opt,name=force_on_start,json=forceOnStart,proto3" json:"force_on_start,omitempty"`
-	Policy        *CheckPolicy           `protobuf:"bytes,3,opt,name=policy,proto3" json:"policy,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SchedulerConfig) Reset() {
-	*x = SchedulerConfig{}
-	mi := &file_updater_v1_updater_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SchedulerConfig) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SchedulerConfig) ProtoMessage() {}
-
-func (x *SchedulerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SchedulerConfig.ProtoReflect.Descriptor instead.
-func (*SchedulerConfig) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *SchedulerConfig) GetCheckOnStart() bool {
-	if x != nil {
-		return x.CheckOnStart
-	}
-	return false
-}
-
-func (x *SchedulerConfig) GetForceOnStart() bool {
-	if x != nil {
-		return x.ForceOnStart
-	}
-	return false
-}
-
-func (x *SchedulerConfig) GetPolicy() *CheckPolicy {
-	if x != nil {
-		return x.Policy
 	}
 	return nil
 }
@@ -1076,8 +1131,11 @@ type Capabilities struct {
 	MinCheckInterval *durationpb.Duration   `protobuf:"bytes,4,opt,name=min_check_interval,json=minCheckInterval,proto3" json:"min_check_interval,omitempty"`
 	PlanTtl          *durationpb.Duration   `protobuf:"bytes,5,opt,name=plan_ttl,json=planTtl,proto3" json:"plan_ttl,omitempty"`
 	EngineVersion    string                 `protobuf:"bytes,6,opt,name=engine_version,json=engineVersion,proto3" json:"engine_version,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Present once the engine has validated a profile; absent in the
+	// capabilities-only probe (--capabilities) and before negotiation.
+	Handshake     *HandshakeReport `protobuf:"bytes,7,opt,name=handshake,proto3" json:"handshake,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Capabilities) Reset() {
@@ -1150,6 +1208,13 @@ func (x *Capabilities) GetEngineVersion() string {
 		return x.EngineVersion
 	}
 	return ""
+}
+
+func (x *Capabilities) GetHandshake() *HandshakeReport {
+	if x != nil {
+		return x.Handshake
+	}
+	return nil
 }
 
 type CheckOp struct {
@@ -1578,6 +1643,64 @@ func (*RollbackOp) Descriptor() ([]byte, []int) {
 	return file_updater_v1_updater_proto_rawDescGZIP(), []int{20}
 }
 
+// DeleteInstalledOp removes one installed version from a LIBRARY install root
+// (requirement 3.1). The engine refuses to delete the version active.json
+// points at and any version the host declares in use, renames the directory
+// out of versions/ before removing it, and holds .relkit-apply.lock so it can
+// never race an apply.
+type DeleteInstalledOp struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Code  int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	// Codes the host is currently running from, e.g. every open editor window.
+	InUseCodes    []int64 `protobuf:"varint,2,rep,packed,name=in_use_codes,json=inUseCodes,proto3" json:"in_use_codes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteInstalledOp) Reset() {
+	*x = DeleteInstalledOp{}
+	mi := &file_updater_v1_updater_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteInstalledOp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteInstalledOp) ProtoMessage() {}
+
+func (x *DeleteInstalledOp) ProtoReflect() protoreflect.Message {
+	mi := &file_updater_v1_updater_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteInstalledOp.ProtoReflect.Descriptor instead.
+func (*DeleteInstalledOp) Descriptor() ([]byte, []int) {
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *DeleteInstalledOp) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *DeleteInstalledOp) GetInUseCodes() []int64 {
+	if x != nil {
+		return x.InUseCodes
+	}
+	return nil
+}
+
 type InstalledVersion struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -1591,7 +1714,7 @@ type InstalledVersion struct {
 
 func (x *InstalledVersion) Reset() {
 	*x = InstalledVersion{}
-	mi := &file_updater_v1_updater_proto_msgTypes[21]
+	mi := &file_updater_v1_updater_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1603,7 +1726,7 @@ func (x *InstalledVersion) String() string {
 func (*InstalledVersion) ProtoMessage() {}
 
 func (x *InstalledVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[21]
+	mi := &file_updater_v1_updater_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1616,7 +1739,7 @@ func (x *InstalledVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstalledVersion.ProtoReflect.Descriptor instead.
 func (*InstalledVersion) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{21}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *InstalledVersion) GetCode() int64 {
@@ -1664,7 +1787,7 @@ type InstalledList struct {
 
 func (x *InstalledList) Reset() {
 	*x = InstalledList{}
-	mi := &file_updater_v1_updater_proto_msgTypes[22]
+	mi := &file_updater_v1_updater_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1676,7 +1799,7 @@ func (x *InstalledList) String() string {
 func (*InstalledList) ProtoMessage() {}
 
 func (x *InstalledList) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[22]
+	mi := &file_updater_v1_updater_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1689,7 +1812,7 @@ func (x *InstalledList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstalledList.ProtoReflect.Descriptor instead.
 func (*InstalledList) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{22}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *InstalledList) GetVersions() []*InstalledVersion {
@@ -1723,6 +1846,7 @@ type UpdaterRequest struct {
 	//	*UpdaterRequest_ListInstalled
 	//	*UpdaterRequest_SwitchActive
 	//	*UpdaterRequest_Rollback
+	//	*UpdaterRequest_DeleteInstalled
 	Op            isUpdaterRequest_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1730,7 +1854,7 @@ type UpdaterRequest struct {
 
 func (x *UpdaterRequest) Reset() {
 	*x = UpdaterRequest{}
-	mi := &file_updater_v1_updater_proto_msgTypes[23]
+	mi := &file_updater_v1_updater_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1742,7 +1866,7 @@ func (x *UpdaterRequest) String() string {
 func (*UpdaterRequest) ProtoMessage() {}
 
 func (x *UpdaterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[23]
+	mi := &file_updater_v1_updater_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1755,7 +1879,7 @@ func (x *UpdaterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdaterRequest.ProtoReflect.Descriptor instead.
 func (*UpdaterRequest) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{23}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UpdaterRequest) GetHello() *ClientHello {
@@ -1876,6 +2000,15 @@ func (x *UpdaterRequest) GetRollback() *RollbackOp {
 	return nil
 }
 
+func (x *UpdaterRequest) GetDeleteInstalled() *DeleteInstalledOp {
+	if x != nil {
+		if x, ok := x.Op.(*UpdaterRequest_DeleteInstalled); ok {
+			return x.DeleteInstalled
+		}
+	}
+	return nil
+}
+
 type isUpdaterRequest_Op interface {
 	isUpdaterRequest_Op()
 }
@@ -1920,6 +2053,10 @@ type UpdaterRequest_Rollback struct {
 	Rollback *RollbackOp `protobuf:"bytes,19,opt,name=rollback,proto3,oneof"`
 }
 
+type UpdaterRequest_DeleteInstalled struct {
+	DeleteInstalled *DeleteInstalledOp `protobuf:"bytes,20,opt,name=delete_installed,json=deleteInstalled,proto3,oneof"`
+}
+
 func (*UpdaterRequest_Check) isUpdaterRequest_Op() {}
 
 func (*UpdaterRequest_Skip) isUpdaterRequest_Op() {}
@@ -1940,6 +2077,8 @@ func (*UpdaterRequest_SwitchActive) isUpdaterRequest_Op() {}
 
 func (*UpdaterRequest_Rollback) isUpdaterRequest_Op() {}
 
+func (*UpdaterRequest_DeleteInstalled) isUpdaterRequest_Op() {}
+
 type Error struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=relkit.updater.v1.ErrorCode" json:"code,omitempty"`
@@ -1953,7 +2092,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_updater_v1_updater_proto_msgTypes[24]
+	mi := &file_updater_v1_updater_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1965,7 +2104,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[24]
+	mi := &file_updater_v1_updater_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1978,7 +2117,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{24}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *Error) GetCode() ErrorCode {
@@ -2028,7 +2167,7 @@ type PriorReleaseNotes struct {
 
 func (x *PriorReleaseNotes) Reset() {
 	*x = PriorReleaseNotes{}
-	mi := &file_updater_v1_updater_proto_msgTypes[25]
+	mi := &file_updater_v1_updater_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2040,7 +2179,7 @@ func (x *PriorReleaseNotes) String() string {
 func (*PriorReleaseNotes) ProtoMessage() {}
 
 func (x *PriorReleaseNotes) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[25]
+	mi := &file_updater_v1_updater_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2053,7 +2192,7 @@ func (x *PriorReleaseNotes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PriorReleaseNotes.ProtoReflect.Descriptor instead.
 func (*PriorReleaseNotes) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{25}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PriorReleaseNotes) GetVersion() string {
@@ -2095,7 +2234,7 @@ type ArtifactView struct {
 
 func (x *ArtifactView) Reset() {
 	*x = ArtifactView{}
-	mi := &file_updater_v1_updater_proto_msgTypes[26]
+	mi := &file_updater_v1_updater_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2107,7 +2246,7 @@ func (x *ArtifactView) String() string {
 func (*ArtifactView) ProtoMessage() {}
 
 func (x *ArtifactView) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[26]
+	mi := &file_updater_v1_updater_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2120,7 +2259,7 @@ func (x *ArtifactView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactView.ProtoReflect.Descriptor instead.
 func (*ArtifactView) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{26}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ArtifactView) GetName() string {
@@ -2154,7 +2293,7 @@ type UpToDate struct {
 
 func (x *UpToDate) Reset() {
 	*x = UpToDate{}
-	mi := &file_updater_v1_updater_proto_msgTypes[27]
+	mi := &file_updater_v1_updater_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2166,7 +2305,7 @@ func (x *UpToDate) String() string {
 func (*UpToDate) ProtoMessage() {}
 
 func (x *UpToDate) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[27]
+	mi := &file_updater_v1_updater_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2179,7 +2318,7 @@ func (x *UpToDate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpToDate.ProtoReflect.Descriptor instead.
 func (*UpToDate) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{27}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *UpToDate) GetSequence() int64 {
@@ -2216,7 +2355,7 @@ type UpdateAvailable struct {
 
 func (x *UpdateAvailable) Reset() {
 	*x = UpdateAvailable{}
-	mi := &file_updater_v1_updater_proto_msgTypes[28]
+	mi := &file_updater_v1_updater_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2228,7 +2367,7 @@ func (x *UpdateAvailable) String() string {
 func (*UpdateAvailable) ProtoMessage() {}
 
 func (x *UpdateAvailable) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[28]
+	mi := &file_updater_v1_updater_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2241,7 +2380,7 @@ func (x *UpdateAvailable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAvailable.ProtoReflect.Descriptor instead.
 func (*UpdateAvailable) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{28}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *UpdateAvailable) GetPlanId() string {
@@ -2343,7 +2482,7 @@ type FallbackRequired struct {
 
 func (x *FallbackRequired) Reset() {
 	*x = FallbackRequired{}
-	mi := &file_updater_v1_updater_proto_msgTypes[29]
+	mi := &file_updater_v1_updater_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2355,7 +2494,7 @@ func (x *FallbackRequired) String() string {
 func (*FallbackRequired) ProtoMessage() {}
 
 func (x *FallbackRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[29]
+	mi := &file_updater_v1_updater_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2368,7 +2507,7 @@ func (x *FallbackRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FallbackRequired.ProtoReflect.Descriptor instead.
 func (*FallbackRequired) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{29}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *FallbackRequired) GetPromptKey() string {
@@ -2429,7 +2568,7 @@ type Throttled struct {
 
 func (x *Throttled) Reset() {
 	*x = Throttled{}
-	mi := &file_updater_v1_updater_proto_msgTypes[30]
+	mi := &file_updater_v1_updater_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2441,7 +2580,7 @@ func (x *Throttled) String() string {
 func (*Throttled) ProtoMessage() {}
 
 func (x *Throttled) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[30]
+	mi := &file_updater_v1_updater_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2454,7 +2593,7 @@ func (x *Throttled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Throttled.ProtoReflect.Descriptor instead.
 func (*Throttled) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{30}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *Throttled) GetNextAllowedAt() *timestamppb.Timestamp {
@@ -2473,7 +2612,7 @@ type Failed struct {
 
 func (x *Failed) Reset() {
 	*x = Failed{}
-	mi := &file_updater_v1_updater_proto_msgTypes[31]
+	mi := &file_updater_v1_updater_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2485,7 +2624,7 @@ func (x *Failed) String() string {
 func (*Failed) ProtoMessage() {}
 
 func (x *Failed) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[31]
+	mi := &file_updater_v1_updater_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2498,7 +2637,7 @@ func (x *Failed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Failed.ProtoReflect.Descriptor instead.
 func (*Failed) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{31}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *Failed) GetError() *Error {
@@ -2524,7 +2663,7 @@ type CheckResult struct {
 
 func (x *CheckResult) Reset() {
 	*x = CheckResult{}
-	mi := &file_updater_v1_updater_proto_msgTypes[32]
+	mi := &file_updater_v1_updater_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2536,7 +2675,7 @@ func (x *CheckResult) String() string {
 func (*CheckResult) ProtoMessage() {}
 
 func (x *CheckResult) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[32]
+	mi := &file_updater_v1_updater_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2549,7 +2688,7 @@ func (x *CheckResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckResult.ProtoReflect.Descriptor instead.
 func (*CheckResult) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{32}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CheckResult) GetKind() isCheckResult_Kind {
@@ -2648,7 +2787,7 @@ type Downloaded struct {
 
 func (x *Downloaded) Reset() {
 	*x = Downloaded{}
-	mi := &file_updater_v1_updater_proto_msgTypes[33]
+	mi := &file_updater_v1_updater_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2660,7 +2799,7 @@ func (x *Downloaded) String() string {
 func (*Downloaded) ProtoMessage() {}
 
 func (x *Downloaded) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[33]
+	mi := &file_updater_v1_updater_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2673,7 +2812,7 @@ func (x *Downloaded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Downloaded.ProtoReflect.Descriptor instead.
 func (*Downloaded) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{33}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *Downloaded) GetPlanId() string {
@@ -2703,7 +2842,7 @@ type DownloadResult struct {
 
 func (x *DownloadResult) Reset() {
 	*x = DownloadResult{}
-	mi := &file_updater_v1_updater_proto_msgTypes[34]
+	mi := &file_updater_v1_updater_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2715,7 +2854,7 @@ func (x *DownloadResult) String() string {
 func (*DownloadResult) ProtoMessage() {}
 
 func (x *DownloadResult) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[34]
+	mi := &file_updater_v1_updater_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2728,7 +2867,7 @@ func (x *DownloadResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadResult.ProtoReflect.Descriptor instead.
 func (*DownloadResult) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{34}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *DownloadResult) GetKind() isDownloadResult_Kind {
@@ -2783,7 +2922,7 @@ type ApplyAccepted struct {
 
 func (x *ApplyAccepted) Reset() {
 	*x = ApplyAccepted{}
-	mi := &file_updater_v1_updater_proto_msgTypes[35]
+	mi := &file_updater_v1_updater_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2795,7 +2934,7 @@ func (x *ApplyAccepted) String() string {
 func (*ApplyAccepted) ProtoMessage() {}
 
 func (x *ApplyAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[35]
+	mi := &file_updater_v1_updater_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2808,7 +2947,7 @@ func (x *ApplyAccepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyAccepted.ProtoReflect.Descriptor instead.
 func (*ApplyAccepted) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{35}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ApplyAccepted) GetSessionId() string {
@@ -2845,7 +2984,7 @@ type ApplyResult struct {
 
 func (x *ApplyResult) Reset() {
 	*x = ApplyResult{}
-	mi := &file_updater_v1_updater_proto_msgTypes[36]
+	mi := &file_updater_v1_updater_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2857,7 +2996,7 @@ func (x *ApplyResult) String() string {
 func (*ApplyResult) ProtoMessage() {}
 
 func (x *ApplyResult) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[36]
+	mi := &file_updater_v1_updater_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2870,7 +3009,7 @@ func (x *ApplyResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyResult.ProtoReflect.Descriptor instead.
 func (*ApplyResult) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{36}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ApplyResult) GetKind() isApplyResult_Kind {
@@ -2922,7 +3061,7 @@ type Ok struct {
 
 func (x *Ok) Reset() {
 	*x = Ok{}
-	mi := &file_updater_v1_updater_proto_msgTypes[37]
+	mi := &file_updater_v1_updater_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2934,7 +3073,7 @@ func (x *Ok) String() string {
 func (*Ok) ProtoMessage() {}
 
 func (x *Ok) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[37]
+	mi := &file_updater_v1_updater_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2947,7 +3086,7 @@ func (x *Ok) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ok.ProtoReflect.Descriptor instead.
 func (*Ok) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{37}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{38}
 }
 
 type Result struct {
@@ -2963,7 +3102,7 @@ type Result struct {
 
 func (x *Result) Reset() {
 	*x = Result{}
-	mi := &file_updater_v1_updater_proto_msgTypes[38]
+	mi := &file_updater_v1_updater_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2975,7 +3114,7 @@ func (x *Result) String() string {
 func (*Result) ProtoMessage() {}
 
 func (x *Result) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[38]
+	mi := &file_updater_v1_updater_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2988,7 +3127,7 @@ func (x *Result) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Result.ProtoReflect.Descriptor instead.
 func (*Result) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{38}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *Result) GetKind() isResult_Kind {
@@ -3043,7 +3182,7 @@ type SidecarInfo struct {
 
 func (x *SidecarInfo) Reset() {
 	*x = SidecarInfo{}
-	mi := &file_updater_v1_updater_proto_msgTypes[39]
+	mi := &file_updater_v1_updater_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3055,7 +3194,7 @@ func (x *SidecarInfo) String() string {
 func (*SidecarInfo) ProtoMessage() {}
 
 func (x *SidecarInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[39]
+	mi := &file_updater_v1_updater_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3068,7 +3207,7 @@ func (x *SidecarInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SidecarInfo.ProtoReflect.Descriptor instead.
 func (*SidecarInfo) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{39}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *SidecarInfo) GetPath() string {
@@ -3105,7 +3244,7 @@ type SessionView struct {
 
 func (x *SessionView) Reset() {
 	*x = SessionView{}
-	mi := &file_updater_v1_updater_proto_msgTypes[40]
+	mi := &file_updater_v1_updater_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3117,7 +3256,7 @@ func (x *SessionView) String() string {
 func (*SessionView) ProtoMessage() {}
 
 func (x *SessionView) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[40]
+	mi := &file_updater_v1_updater_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3130,7 +3269,7 @@ func (x *SessionView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionView.ProtoReflect.Descriptor instead.
 func (*SessionView) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{40}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SessionView) GetSessionId() string {
@@ -3183,7 +3322,7 @@ type StatusSnapshot struct {
 
 func (x *StatusSnapshot) Reset() {
 	*x = StatusSnapshot{}
-	mi := &file_updater_v1_updater_proto_msgTypes[41]
+	mi := &file_updater_v1_updater_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3195,7 +3334,7 @@ func (x *StatusSnapshot) String() string {
 func (*StatusSnapshot) ProtoMessage() {}
 
 func (x *StatusSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[41]
+	mi := &file_updater_v1_updater_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3208,7 +3347,7 @@ func (x *StatusSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusSnapshot.ProtoReflect.Descriptor instead.
 func (*StatusSnapshot) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{41}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *StatusSnapshot) GetLastCheckAt() *timestamppb.Timestamp {
@@ -3271,7 +3410,7 @@ type Progress struct {
 
 func (x *Progress) Reset() {
 	*x = Progress{}
-	mi := &file_updater_v1_updater_proto_msgTypes[42]
+	mi := &file_updater_v1_updater_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3283,7 +3422,7 @@ func (x *Progress) String() string {
 func (*Progress) ProtoMessage() {}
 
 func (x *Progress) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[42]
+	mi := &file_updater_v1_updater_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3296,7 +3435,7 @@ func (x *Progress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Progress.ProtoReflect.Descriptor instead.
 func (*Progress) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{42}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *Progress) GetBytesReceived() int64 {
@@ -3330,7 +3469,7 @@ type ApplyProgress struct {
 
 func (x *ApplyProgress) Reset() {
 	*x = ApplyProgress{}
-	mi := &file_updater_v1_updater_proto_msgTypes[43]
+	mi := &file_updater_v1_updater_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3342,7 +3481,7 @@ func (x *ApplyProgress) String() string {
 func (*ApplyProgress) ProtoMessage() {}
 
 func (x *ApplyProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[43]
+	mi := &file_updater_v1_updater_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3355,7 +3494,7 @@ func (x *ApplyProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyProgress.ProtoReflect.Descriptor instead.
 func (*ApplyProgress) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{43}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ApplyProgress) GetSessionId() string {
@@ -3381,7 +3520,7 @@ type Log struct {
 
 func (x *Log) Reset() {
 	*x = Log{}
-	mi := &file_updater_v1_updater_proto_msgTypes[44]
+	mi := &file_updater_v1_updater_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3393,7 +3532,7 @@ func (x *Log) String() string {
 func (*Log) ProtoMessage() {}
 
 func (x *Log) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[44]
+	mi := &file_updater_v1_updater_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3406,7 +3545,7 @@ func (x *Log) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Log.ProtoReflect.Descriptor instead.
 func (*Log) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{44}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *Log) GetMessage() string {
@@ -3438,7 +3577,7 @@ type UpdaterEvent struct {
 
 func (x *UpdaterEvent) Reset() {
 	*x = UpdaterEvent{}
-	mi := &file_updater_v1_updater_proto_msgTypes[45]
+	mi := &file_updater_v1_updater_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3450,7 +3589,7 @@ func (x *UpdaterEvent) String() string {
 func (*UpdaterEvent) ProtoMessage() {}
 
 func (x *UpdaterEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[45]
+	mi := &file_updater_v1_updater_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3463,7 +3602,7 @@ func (x *UpdaterEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdaterEvent.ProtoReflect.Descriptor instead.
 func (*UpdaterEvent) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{45}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *UpdaterEvent) GetKind() isUpdaterEvent_Kind {
@@ -3652,7 +3791,7 @@ type ArtifactTarget struct {
 
 func (x *ArtifactTarget) Reset() {
 	*x = ArtifactTarget{}
-	mi := &file_updater_v1_updater_proto_msgTypes[46]
+	mi := &file_updater_v1_updater_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3664,7 +3803,7 @@ func (x *ArtifactTarget) String() string {
 func (*ArtifactTarget) ProtoMessage() {}
 
 func (x *ArtifactTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[46]
+	mi := &file_updater_v1_updater_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3677,7 +3816,7 @@ func (x *ArtifactTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactTarget.ProtoReflect.Descriptor instead.
 func (*ArtifactTarget) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{46}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ArtifactTarget) GetName() string {
@@ -3710,7 +3849,7 @@ type PlannedFile struct {
 
 func (x *PlannedFile) Reset() {
 	*x = PlannedFile{}
-	mi := &file_updater_v1_updater_proto_msgTypes[47]
+	mi := &file_updater_v1_updater_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3722,7 +3861,7 @@ func (x *PlannedFile) String() string {
 func (*PlannedFile) ProtoMessage() {}
 
 func (x *PlannedFile) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[47]
+	mi := &file_updater_v1_updater_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3735,7 +3874,7 @@ func (x *PlannedFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlannedFile.ProtoReflect.Descriptor instead.
 func (*PlannedFile) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{47}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *PlannedFile) GetName() string {
@@ -3817,7 +3956,7 @@ type UpdatePlan struct {
 
 func (x *UpdatePlan) Reset() {
 	*x = UpdatePlan{}
-	mi := &file_updater_v1_updater_proto_msgTypes[48]
+	mi := &file_updater_v1_updater_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3829,7 +3968,7 @@ func (x *UpdatePlan) String() string {
 func (*UpdatePlan) ProtoMessage() {}
 
 func (x *UpdatePlan) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[48]
+	mi := &file_updater_v1_updater_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3842,7 +3981,7 @@ func (x *UpdatePlan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdatePlan.ProtoReflect.Descriptor instead.
 func (*UpdatePlan) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{48}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *UpdatePlan) GetPlanId() string {
@@ -3964,7 +4103,7 @@ type PersistedState struct {
 
 func (x *PersistedState) Reset() {
 	*x = PersistedState{}
-	mi := &file_updater_v1_updater_proto_msgTypes[49]
+	mi := &file_updater_v1_updater_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3976,7 +4115,7 @@ func (x *PersistedState) String() string {
 func (*PersistedState) ProtoMessage() {}
 
 func (x *PersistedState) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[49]
+	mi := &file_updater_v1_updater_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3989,7 +4128,7 @@ func (x *PersistedState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistedState.ProtoReflect.Descriptor instead.
 func (*PersistedState) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{49}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *PersistedState) GetLastCheckAt() *timestamppb.Timestamp {
@@ -4055,13 +4194,18 @@ type ApplySessionRecord struct {
 	InstallOnly       bool                   `protobuf:"varint,19,opt,name=install_only,json=installOnly,proto3" json:"install_only,omitempty"`
 	RequiresHostExit  bool                   `protobuf:"varint,21,opt,name=requires_host_exit,json=requiresHostExit,proto3" json:"requires_host_exit,omitempty"`
 	Library           *LibraryPolicy         `protobuf:"bytes,22,opt,name=library,proto3" json:"library,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Carried into the worker so a FULL_INSTALL session runs the installer
+	// instead of unpacking a payload.
+	Disposition ApplyDisposition `protobuf:"varint,23,opt,name=disposition,proto3,enum=relkit.updater.v1.ApplyDisposition" json:"disposition,omitempty"`
+	// Relpath of the verified installer inside the staged root.
+	InstallerRelpath string `protobuf:"bytes,24,opt,name=installer_relpath,json=installerRelpath,proto3" json:"installer_relpath,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ApplySessionRecord) Reset() {
 	*x = ApplySessionRecord{}
-	mi := &file_updater_v1_updater_proto_msgTypes[50]
+	mi := &file_updater_v1_updater_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4073,7 +4217,7 @@ func (x *ApplySessionRecord) String() string {
 func (*ApplySessionRecord) ProtoMessage() {}
 
 func (x *ApplySessionRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[50]
+	mi := &file_updater_v1_updater_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4086,7 +4230,7 @@ func (x *ApplySessionRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplySessionRecord.ProtoReflect.Descriptor instead.
 func (*ApplySessionRecord) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{50}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ApplySessionRecord) GetSessionId() string {
@@ -4222,6 +4366,20 @@ func (x *ApplySessionRecord) GetLibrary() *LibraryPolicy {
 	return nil
 }
 
+func (x *ApplySessionRecord) GetDisposition() ApplyDisposition {
+	if x != nil {
+		return x.Disposition
+	}
+	return ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED
+}
+
+func (x *ApplySessionRecord) GetInstallerRelpath() string {
+	if x != nil {
+		return x.InstallerRelpath
+	}
+	return ""
+}
+
 type JournalEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DestPath      string                 `protobuf:"bytes,1,opt,name=dest_path,json=destPath,proto3" json:"dest_path,omitempty"`
@@ -4233,7 +4391,7 @@ type JournalEntry struct {
 
 func (x *JournalEntry) Reset() {
 	*x = JournalEntry{}
-	mi := &file_updater_v1_updater_proto_msgTypes[51]
+	mi := &file_updater_v1_updater_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4245,7 +4403,7 @@ func (x *JournalEntry) String() string {
 func (*JournalEntry) ProtoMessage() {}
 
 func (x *JournalEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[51]
+	mi := &file_updater_v1_updater_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4258,7 +4416,7 @@ func (x *JournalEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JournalEntry.ProtoReflect.Descriptor instead.
 func (*JournalEntry) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{51}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *JournalEntry) GetDestPath() string {
@@ -4293,7 +4451,7 @@ type ApplyJournal struct {
 
 func (x *ApplyJournal) Reset() {
 	*x = ApplyJournal{}
-	mi := &file_updater_v1_updater_proto_msgTypes[52]
+	mi := &file_updater_v1_updater_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4305,7 +4463,7 @@ func (x *ApplyJournal) String() string {
 func (*ApplyJournal) ProtoMessage() {}
 
 func (x *ApplyJournal) ProtoReflect() protoreflect.Message {
-	mi := &file_updater_v1_updater_proto_msgTypes[52]
+	mi := &file_updater_v1_updater_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4318,7 +4476,7 @@ func (x *ApplyJournal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyJournal.ProtoReflect.Descriptor instead.
 func (*ApplyJournal) Descriptor() ([]byte, []int) {
-	return file_updater_v1_updater_proto_rawDescGZIP(), []int{52}
+	return file_updater_v1_updater_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ApplyJournal) GetSessionId() string {
@@ -4357,7 +4515,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x03url\x18\x02 \x01(\tR\x03url\"_\n" +
 	"\fRecoveryHelp\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x125\n" +
-	"\x05links\x18\x02 \x03(\v2\x1f.relkit.updater.v1.RecoveryLinkR\x05links\"\xb6\x02\n" +
+	"\x05links\x18\x02 \x03(\v2\x1f.relkit.updater.v1.RecoveryLinkR\x05links\"\xff\x02\n" +
 	"\rClientProfile\x12\x18\n" +
 	"\aproduct\x18\x01 \x01(\tR\aproduct\x12)\n" +
 	"\x10allowed_channels\x18\x02 \x03(\tR\x0fallowedChannels\x12\x1d\n" +
@@ -4367,7 +4525,15 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"index_urls\x18\x04 \x03(\tR\tindexUrls\x12#\n" +
 	"\rfallback_urls\x18\x05 \x03(\tR\ffallbackUrls\x12@\n" +
 	"\ftrusted_keys\x18\x06 \x03(\v2\x1d.relkit.updater.v1.TrustedKeyR\vtrustedKeys\x12;\n" +
-	"\brecovery\x18\a \x01(\v2\x1f.relkit.updater.v1.RecoveryHelpR\brecovery\"N\n" +
+	"\brecovery\x18\a \x01(\v2\x1f.relkit.updater.v1.RecoveryHelpR\brecovery\x12\x1c\n" +
+	"\tbootstrap\x18\b \x01(\tR\tbootstrap\x12)\n" +
+	"\x10expected_product\x18\t \x01(\tR\x0fexpectedProduct\"\xd6\x01\n" +
+	"\x0fHandshakeReport\x12\x18\n" +
+	"\aproduct\x18\x01 \x01(\tR\aproduct\x12)\n" +
+	"\x10allowed_channels\x18\x02 \x03(\tR\x0fallowedChannels\x12'\n" +
+	"\x0fdefault_channel\x18\x03 \x01(\tR\x0edefaultChannel\x12\x1e\n" +
+	"\vroot_key_id\x18\x06 \x01(\tR\trootKeyId\x12)\n" +
+	"\x10root_fingerprint\x18\a \x01(\tR\x0frootFingerprintJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"N\n" +
 	"\rLibraryPolicy\x12\x16\n" +
 	"\x06retain\x18\x01 \x01(\x05R\x06retain\x12%\n" +
 	"\x0ereserved_codes\x18\x02 \x03(\x03R\rreservedCodes\"\xca\x02\n" +
@@ -4393,14 +4559,10 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8d\x01\n" +
 	"\vCheckPolicy\x12>\n" +
 	"\rafter_success\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fafterSuccess\x12>\n" +
-	"\rafter_failure\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\fafterFailure\"\x95\x01\n" +
-	"\x0fSchedulerConfig\x12$\n" +
-	"\x0echeck_on_start\x18\x01 \x01(\bR\fcheckOnStart\x12$\n" +
-	"\x0eforce_on_start\x18\x02 \x01(\bR\fforceOnStart\x126\n" +
-	"\x06policy\x18\x03 \x01(\v2\x1e.relkit.updater.v1.CheckPolicyR\x06policy\"?\n" +
+	"\rafter_failure\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\fafterFailure\"?\n" +
 	"\vClientHello\x12\x17\n" +
 	"\aipc_min\x18\x01 \x01(\rR\x06ipcMin\x12\x17\n" +
-	"\aipc_max\x18\x02 \x01(\rR\x06ipcMax\"\xc2\x02\n" +
+	"\aipc_max\x18\x02 \x01(\rR\x06ipcMax\"\x84\x03\n" +
 	"\fCapabilities\x12\x10\n" +
 	"\x03ipc\x18\x01 \x01(\rR\x03ipc\x12<\n" +
 	"\n" +
@@ -4411,7 +4573,8 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"placements\x12G\n" +
 	"\x12min_check_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x10minCheckInterval\x124\n" +
 	"\bplan_ttl\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\aplanTtl\x12%\n" +
-	"\x0eengine_version\x18\x06 \x01(\tR\rengineVersion\"v\n" +
+	"\x0eengine_version\x18\x06 \x01(\tR\rengineVersion\x12@\n" +
+	"\thandshake\x18\a \x01(\v2\".relkit.updater.v1.HandshakeReportR\thandshake\"v\n" +
 	"\aCheckOp\x12\x14\n" +
 	"\x05force\x18\x01 \x01(\bR\x05force\x12\x1d\n" +
 	"\n" +
@@ -4434,7 +4597,11 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x0eSwitchActiveOp\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\"\f\n" +
 	"\n" +
-	"RollbackOp\"\x8c\x01\n" +
+	"RollbackOp\"I\n" +
+	"\x11DeleteInstalledOp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12 \n" +
+	"\fin_use_codes\x18\x02 \x03(\x03R\n" +
+	"inUseCodes\"\x8c\x01\n" +
 	"\x10InstalledVersion\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
@@ -4446,7 +4613,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\rInstalledList\x12?\n" +
 	"\bversions\x18\x01 \x03(\v2#.relkit.updater.v1.InstalledVersionR\bversions\x12\x1f\n" +
 	"\vactive_code\x18\x02 \x01(\x03R\n" +
-	"activeCode\"\x90\x06\n" +
+	"activeCode\"\xe3\x06\n" +
 	"\x0eUpdaterRequest\x124\n" +
 	"\x05hello\x18\x01 \x01(\v2\x1e.relkit.updater.v1.ClientHelloR\x05hello\x12:\n" +
 	"\aprofile\x18\x02 \x01(\v2 .relkit.updater.v1.ClientProfileR\aprofile\x124\n" +
@@ -4461,7 +4628,8 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x06cancel\x18\x10 \x01(\v2\x1b.relkit.updater.v1.CancelOpH\x00R\x06cancel\x12K\n" +
 	"\x0elist_installed\x18\x11 \x01(\v2\".relkit.updater.v1.ListInstalledOpH\x00R\rlistInstalled\x12H\n" +
 	"\rswitch_active\x18\x12 \x01(\v2!.relkit.updater.v1.SwitchActiveOpH\x00R\fswitchActive\x12;\n" +
-	"\brollback\x18\x13 \x01(\v2\x1d.relkit.updater.v1.RollbackOpH\x00R\brollbackB\x04\n" +
+	"\brollback\x18\x13 \x01(\v2\x1d.relkit.updater.v1.RollbackOpH\x00R\brollback\x12Q\n" +
+	"\x10delete_installed\x18\x14 \x01(\v2$.relkit.updater.v1.DeleteInstalledOpH\x00R\x0fdeleteInstalledB\x04\n" +
 	"\x02op\"\xca\x01\n" +
 	"\x05Error\x120\n" +
 	"\x04code\x18\x01 \x01(\x0e2\x1c.relkit.updater.v1.ErrorCodeR\x04code\x12\x1c\n" +
@@ -4634,7 +4802,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x12last_seen_sequence\x18\x03 \x01(\x03R\x10lastSeenSequence\x12?\n" +
 	"\x1clast_seen_directory_sequence\x18\x04 \x01(\x03R\x19lastSeenDirectorySequence\x12=\n" +
 	"\x1blast_seen_fallback_sequence\x18\x05 \x01(\x03R\x18lastSeenFallbackSequence\x12#\n" +
-	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xb6\x06\n" +
+	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xaa\a\n" +
 	"\x12ApplySessionRecord\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
@@ -4659,7 +4827,9 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x0fsidecar_relpath\x18\x12 \x01(\tR\x0esidecarRelpath\x12!\n" +
 	"\finstall_only\x18\x13 \x01(\bR\vinstallOnly\x12,\n" +
 	"\x12requires_host_exit\x18\x15 \x01(\bR\x10requiresHostExit\x12:\n" +
-	"\alibrary\x18\x16 \x01(\v2 .relkit.updater.v1.LibraryPolicyR\alibraryJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
+	"\alibrary\x18\x16 \x01(\v2 .relkit.updater.v1.LibraryPolicyR\alibrary\x12E\n" +
+	"\vdisposition\x18\x17 \x01(\x0e2#.relkit.updater.v1.ApplyDispositionR\vdisposition\x12+\n" +
+	"\x11installer_relpath\x18\x18 \x01(\tR\x10installerRelpathJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
 	"\fJournalEntry\x12\x1b\n" +
 	"\tdest_path\x18\x01 \x01(\tR\bdestPath\x12\x1f\n" +
 	"\vbackup_path\x18\x02 \x01(\tR\n" +
@@ -4670,7 +4840,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x129\n" +
 	"\aentries\x18\x02 \x03(\v2\x1f.relkit.updater.v1.JournalEntryR\aentries\x12\x1c\n" +
-	"\tcommitted\x18\x03 \x01(\bR\tcommitted*\x89\x05\n" +
+	"\tcommitted\x18\x03 \x01(\bR\tcommitted*\xaa\x05\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ERROR_CODE_NETWORK\x10\x01\x12\x18\n" +
@@ -4693,7 +4863,8 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x1eERROR_CODE_CHANNEL_NOT_ALLOWED\x10\x11\x12\x17\n" +
 	"\x13ERROR_CODE_CANCELED\x10\x12\x12 \n" +
 	"\x1cERROR_CODE_SIDECAR_NOT_FOUND\x10\x13\x12!\n" +
-	"\x1dERROR_CODE_LAYOUT_UNSUPPORTED\x10\x14*\xd6\x01\n" +
+	"\x1dERROR_CODE_LAYOUT_UNSUPPORTED\x10\x14\x12\x1f\n" +
+	"\x1bERROR_CODE_INSTALLER_FAILED\x10\x15*\xd6\x01\n" +
 	"\n" +
 	"LastResult\x12\x1b\n" +
 	"\x17LAST_RESULT_UNSPECIFIED\x10\x00\x12\x1a\n" +
@@ -4710,7 +4881,7 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x10ApplyDisposition\x12!\n" +
 	"\x1dAPPLY_DISPOSITION_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aAPPLY_DISPOSITION_INTERNAL\x10\x01\x12\"\n" +
-	"\x1eAPPLY_DISPOSITION_FULL_INSTALL\x10\x02*\xab\x02\n" +
+	"\x1eAPPLY_DISPOSITION_FULL_INSTALL\x10\x02*\xb8\x02\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fOPERATION_CHECK\x10\x01\x12\x12\n" +
@@ -4719,12 +4890,12 @@ const file_updater_v1_updater_proto_rawDesc = "" +
 	"\x0fOPERATION_APPLY\x10\x04\x12\x14\n" +
 	"\x10OPERATION_STATUS\x10\x05\x12\x15\n" +
 	"\x11OPERATION_CLEANUP\x10\x06\x12\x14\n" +
-	"\x10OPERATION_CANCEL\x10\a\x12\x17\n" +
-	"\x13OPERATION_SCHEDULER\x10\b\x12\x1c\n" +
+	"\x10OPERATION_CANCEL\x10\a\x12\x1c\n" +
 	"\x18OPERATION_LIST_INSTALLED\x10\t\x12\x1b\n" +
 	"\x17OPERATION_SWITCH_ACTIVE\x10\n" +
 	"\x12\x16\n" +
-	"\x12OPERATION_ROLLBACK\x10\v*\x88\x02\n" +
+	"\x12OPERATION_ROLLBACK\x10\v\x12\x1e\n" +
+	"\x1aOPERATION_DELETE_INSTALLED\x10\f\"\x04\b\b\x10\b*\x88\x02\n" +
 	"\fSessionPhase\x12\x1d\n" +
 	"\x19SESSION_PHASE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eSESSION_PHASE_WAITING_FOR_EXIT\x10\x01\x12\x19\n" +
@@ -4749,7 +4920,7 @@ func file_updater_v1_updater_proto_rawDescGZIP() []byte {
 }
 
 var file_updater_v1_updater_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_updater_v1_updater_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
+var file_updater_v1_updater_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
 var file_updater_v1_updater_proto_goTypes = []any{
 	(ErrorCode)(0),                // 0: relkit.updater.v1.ErrorCode
 	(LastResult)(0),               // 1: relkit.updater.v1.LastResult
@@ -4761,11 +4932,11 @@ var file_updater_v1_updater_proto_goTypes = []any{
 	(*RecoveryLink)(nil),          // 7: relkit.updater.v1.RecoveryLink
 	(*RecoveryHelp)(nil),          // 8: relkit.updater.v1.RecoveryHelp
 	(*ClientProfile)(nil),         // 9: relkit.updater.v1.ClientProfile
-	(*LibraryPolicy)(nil),         // 10: relkit.updater.v1.LibraryPolicy
-	(*InstallSpec)(nil),           // 11: relkit.updater.v1.InstallSpec
-	(*Runtime)(nil),               // 12: relkit.updater.v1.Runtime
-	(*CheckPolicy)(nil),           // 13: relkit.updater.v1.CheckPolicy
-	(*SchedulerConfig)(nil),       // 14: relkit.updater.v1.SchedulerConfig
+	(*HandshakeReport)(nil),       // 10: relkit.updater.v1.HandshakeReport
+	(*LibraryPolicy)(nil),         // 11: relkit.updater.v1.LibraryPolicy
+	(*InstallSpec)(nil),           // 12: relkit.updater.v1.InstallSpec
+	(*Runtime)(nil),               // 13: relkit.updater.v1.Runtime
+	(*CheckPolicy)(nil),           // 14: relkit.updater.v1.CheckPolicy
 	(*ClientHello)(nil),           // 15: relkit.updater.v1.ClientHello
 	(*Capabilities)(nil),          // 16: relkit.updater.v1.Capabilities
 	(*CheckOp)(nil),               // 17: relkit.updater.v1.CheckOp
@@ -4778,63 +4949,64 @@ var file_updater_v1_updater_proto_goTypes = []any{
 	(*ListInstalledOp)(nil),       // 24: relkit.updater.v1.ListInstalledOp
 	(*SwitchActiveOp)(nil),        // 25: relkit.updater.v1.SwitchActiveOp
 	(*RollbackOp)(nil),            // 26: relkit.updater.v1.RollbackOp
-	(*InstalledVersion)(nil),      // 27: relkit.updater.v1.InstalledVersion
-	(*InstalledList)(nil),         // 28: relkit.updater.v1.InstalledList
-	(*UpdaterRequest)(nil),        // 29: relkit.updater.v1.UpdaterRequest
-	(*Error)(nil),                 // 30: relkit.updater.v1.Error
-	(*PriorReleaseNotes)(nil),     // 31: relkit.updater.v1.PriorReleaseNotes
-	(*ArtifactView)(nil),          // 32: relkit.updater.v1.ArtifactView
-	(*UpToDate)(nil),              // 33: relkit.updater.v1.UpToDate
-	(*UpdateAvailable)(nil),       // 34: relkit.updater.v1.UpdateAvailable
-	(*FallbackRequired)(nil),      // 35: relkit.updater.v1.FallbackRequired
-	(*Throttled)(nil),             // 36: relkit.updater.v1.Throttled
-	(*Failed)(nil),                // 37: relkit.updater.v1.Failed
-	(*CheckResult)(nil),           // 38: relkit.updater.v1.CheckResult
-	(*Downloaded)(nil),            // 39: relkit.updater.v1.Downloaded
-	(*DownloadResult)(nil),        // 40: relkit.updater.v1.DownloadResult
-	(*ApplyAccepted)(nil),         // 41: relkit.updater.v1.ApplyAccepted
-	(*ApplyResult)(nil),           // 42: relkit.updater.v1.ApplyResult
-	(*Ok)(nil),                    // 43: relkit.updater.v1.Ok
-	(*Result)(nil),                // 44: relkit.updater.v1.Result
-	(*SidecarInfo)(nil),           // 45: relkit.updater.v1.SidecarInfo
-	(*SessionView)(nil),           // 46: relkit.updater.v1.SessionView
-	(*StatusSnapshot)(nil),        // 47: relkit.updater.v1.StatusSnapshot
-	(*Progress)(nil),              // 48: relkit.updater.v1.Progress
-	(*ApplyProgress)(nil),         // 49: relkit.updater.v1.ApplyProgress
-	(*Log)(nil),                   // 50: relkit.updater.v1.Log
-	(*UpdaterEvent)(nil),          // 51: relkit.updater.v1.UpdaterEvent
-	(*ArtifactTarget)(nil),        // 52: relkit.updater.v1.ArtifactTarget
-	(*PlannedFile)(nil),           // 53: relkit.updater.v1.PlannedFile
-	(*UpdatePlan)(nil),            // 54: relkit.updater.v1.UpdatePlan
-	(*PersistedState)(nil),        // 55: relkit.updater.v1.PersistedState
-	(*ApplySessionRecord)(nil),    // 56: relkit.updater.v1.ApplySessionRecord
-	(*JournalEntry)(nil),          // 57: relkit.updater.v1.JournalEntry
-	(*ApplyJournal)(nil),          // 58: relkit.updater.v1.ApplyJournal
-	nil,                           // 59: relkit.updater.v1.Runtime.ClientSelectorsEntry
-	nil,                           // 60: relkit.updater.v1.ArtifactTarget.SelectorsEntry
-	(*durationpb.Duration)(nil),   // 61: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 62: google.protobuf.Timestamp
+	(*DeleteInstalledOp)(nil),     // 27: relkit.updater.v1.DeleteInstalledOp
+	(*InstalledVersion)(nil),      // 28: relkit.updater.v1.InstalledVersion
+	(*InstalledList)(nil),         // 29: relkit.updater.v1.InstalledList
+	(*UpdaterRequest)(nil),        // 30: relkit.updater.v1.UpdaterRequest
+	(*Error)(nil),                 // 31: relkit.updater.v1.Error
+	(*PriorReleaseNotes)(nil),     // 32: relkit.updater.v1.PriorReleaseNotes
+	(*ArtifactView)(nil),          // 33: relkit.updater.v1.ArtifactView
+	(*UpToDate)(nil),              // 34: relkit.updater.v1.UpToDate
+	(*UpdateAvailable)(nil),       // 35: relkit.updater.v1.UpdateAvailable
+	(*FallbackRequired)(nil),      // 36: relkit.updater.v1.FallbackRequired
+	(*Throttled)(nil),             // 37: relkit.updater.v1.Throttled
+	(*Failed)(nil),                // 38: relkit.updater.v1.Failed
+	(*CheckResult)(nil),           // 39: relkit.updater.v1.CheckResult
+	(*Downloaded)(nil),            // 40: relkit.updater.v1.Downloaded
+	(*DownloadResult)(nil),        // 41: relkit.updater.v1.DownloadResult
+	(*ApplyAccepted)(nil),         // 42: relkit.updater.v1.ApplyAccepted
+	(*ApplyResult)(nil),           // 43: relkit.updater.v1.ApplyResult
+	(*Ok)(nil),                    // 44: relkit.updater.v1.Ok
+	(*Result)(nil),                // 45: relkit.updater.v1.Result
+	(*SidecarInfo)(nil),           // 46: relkit.updater.v1.SidecarInfo
+	(*SessionView)(nil),           // 47: relkit.updater.v1.SessionView
+	(*StatusSnapshot)(nil),        // 48: relkit.updater.v1.StatusSnapshot
+	(*Progress)(nil),              // 49: relkit.updater.v1.Progress
+	(*ApplyProgress)(nil),         // 50: relkit.updater.v1.ApplyProgress
+	(*Log)(nil),                   // 51: relkit.updater.v1.Log
+	(*UpdaterEvent)(nil),          // 52: relkit.updater.v1.UpdaterEvent
+	(*ArtifactTarget)(nil),        // 53: relkit.updater.v1.ArtifactTarget
+	(*PlannedFile)(nil),           // 54: relkit.updater.v1.PlannedFile
+	(*UpdatePlan)(nil),            // 55: relkit.updater.v1.UpdatePlan
+	(*PersistedState)(nil),        // 56: relkit.updater.v1.PersistedState
+	(*ApplySessionRecord)(nil),    // 57: relkit.updater.v1.ApplySessionRecord
+	(*JournalEntry)(nil),          // 58: relkit.updater.v1.JournalEntry
+	(*ApplyJournal)(nil),          // 59: relkit.updater.v1.ApplyJournal
+	nil,                           // 60: relkit.updater.v1.Runtime.ClientSelectorsEntry
+	nil,                           // 61: relkit.updater.v1.ArtifactTarget.SelectorsEntry
+	(*durationpb.Duration)(nil),   // 62: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 63: google.protobuf.Timestamp
 }
 var file_updater_v1_updater_proto_depIdxs = []int32{
 	7,  // 0: relkit.updater.v1.RecoveryHelp.links:type_name -> relkit.updater.v1.RecoveryLink
 	6,  // 1: relkit.updater.v1.ClientProfile.trusted_keys:type_name -> relkit.updater.v1.TrustedKey
 	8,  // 2: relkit.updater.v1.ClientProfile.recovery:type_name -> relkit.updater.v1.RecoveryHelp
 	2,  // 3: relkit.updater.v1.InstallSpec.placement:type_name -> relkit.updater.v1.Placement
-	10, // 4: relkit.updater.v1.InstallSpec.library:type_name -> relkit.updater.v1.LibraryPolicy
-	59, // 5: relkit.updater.v1.Runtime.client_selectors:type_name -> relkit.updater.v1.Runtime.ClientSelectorsEntry
-	11, // 6: relkit.updater.v1.Runtime.install:type_name -> relkit.updater.v1.InstallSpec
-	61, // 7: relkit.updater.v1.CheckPolicy.after_success:type_name -> google.protobuf.Duration
-	61, // 8: relkit.updater.v1.CheckPolicy.after_failure:type_name -> google.protobuf.Duration
-	13, // 9: relkit.updater.v1.SchedulerConfig.policy:type_name -> relkit.updater.v1.CheckPolicy
-	4,  // 10: relkit.updater.v1.Capabilities.operations:type_name -> relkit.updater.v1.Operation
-	2,  // 11: relkit.updater.v1.Capabilities.placements:type_name -> relkit.updater.v1.Placement
-	61, // 12: relkit.updater.v1.Capabilities.min_check_interval:type_name -> google.protobuf.Duration
-	61, // 13: relkit.updater.v1.Capabilities.plan_ttl:type_name -> google.protobuf.Duration
-	13, // 14: relkit.updater.v1.CheckOp.policy:type_name -> relkit.updater.v1.CheckPolicy
-	27, // 15: relkit.updater.v1.InstalledList.versions:type_name -> relkit.updater.v1.InstalledVersion
+	11, // 4: relkit.updater.v1.InstallSpec.library:type_name -> relkit.updater.v1.LibraryPolicy
+	60, // 5: relkit.updater.v1.Runtime.client_selectors:type_name -> relkit.updater.v1.Runtime.ClientSelectorsEntry
+	12, // 6: relkit.updater.v1.Runtime.install:type_name -> relkit.updater.v1.InstallSpec
+	62, // 7: relkit.updater.v1.CheckPolicy.after_success:type_name -> google.protobuf.Duration
+	62, // 8: relkit.updater.v1.CheckPolicy.after_failure:type_name -> google.protobuf.Duration
+	4,  // 9: relkit.updater.v1.Capabilities.operations:type_name -> relkit.updater.v1.Operation
+	2,  // 10: relkit.updater.v1.Capabilities.placements:type_name -> relkit.updater.v1.Placement
+	62, // 11: relkit.updater.v1.Capabilities.min_check_interval:type_name -> google.protobuf.Duration
+	62, // 12: relkit.updater.v1.Capabilities.plan_ttl:type_name -> google.protobuf.Duration
+	10, // 13: relkit.updater.v1.Capabilities.handshake:type_name -> relkit.updater.v1.HandshakeReport
+	14, // 14: relkit.updater.v1.CheckOp.policy:type_name -> relkit.updater.v1.CheckPolicy
+	28, // 15: relkit.updater.v1.InstalledList.versions:type_name -> relkit.updater.v1.InstalledVersion
 	15, // 16: relkit.updater.v1.UpdaterRequest.hello:type_name -> relkit.updater.v1.ClientHello
 	9,  // 17: relkit.updater.v1.UpdaterRequest.profile:type_name -> relkit.updater.v1.ClientProfile
-	12, // 18: relkit.updater.v1.UpdaterRequest.runtime:type_name -> relkit.updater.v1.Runtime
+	13, // 18: relkit.updater.v1.UpdaterRequest.runtime:type_name -> relkit.updater.v1.Runtime
 	17, // 19: relkit.updater.v1.UpdaterRequest.check:type_name -> relkit.updater.v1.CheckOp
 	18, // 20: relkit.updater.v1.UpdaterRequest.skip:type_name -> relkit.updater.v1.SkipOp
 	19, // 21: relkit.updater.v1.UpdaterRequest.download:type_name -> relkit.updater.v1.DownloadOp
@@ -4845,63 +5017,65 @@ var file_updater_v1_updater_proto_depIdxs = []int32{
 	24, // 26: relkit.updater.v1.UpdaterRequest.list_installed:type_name -> relkit.updater.v1.ListInstalledOp
 	25, // 27: relkit.updater.v1.UpdaterRequest.switch_active:type_name -> relkit.updater.v1.SwitchActiveOp
 	26, // 28: relkit.updater.v1.UpdaterRequest.rollback:type_name -> relkit.updater.v1.RollbackOp
-	0,  // 29: relkit.updater.v1.Error.code:type_name -> relkit.updater.v1.ErrorCode
-	8,  // 30: relkit.updater.v1.Error.recovery:type_name -> relkit.updater.v1.RecoveryHelp
-	31, // 31: relkit.updater.v1.UpdateAvailable.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
-	32, // 32: relkit.updater.v1.UpdateAvailable.artifacts:type_name -> relkit.updater.v1.ArtifactView
-	3,  // 33: relkit.updater.v1.UpdateAvailable.apply_disposition:type_name -> relkit.updater.v1.ApplyDisposition
-	62, // 34: relkit.updater.v1.Throttled.next_allowed_at:type_name -> google.protobuf.Timestamp
-	30, // 35: relkit.updater.v1.Failed.error:type_name -> relkit.updater.v1.Error
-	33, // 36: relkit.updater.v1.CheckResult.up_to_date:type_name -> relkit.updater.v1.UpToDate
-	34, // 37: relkit.updater.v1.CheckResult.update_available:type_name -> relkit.updater.v1.UpdateAvailable
-	35, // 38: relkit.updater.v1.CheckResult.fallback_required:type_name -> relkit.updater.v1.FallbackRequired
-	36, // 39: relkit.updater.v1.CheckResult.throttled:type_name -> relkit.updater.v1.Throttled
-	37, // 40: relkit.updater.v1.CheckResult.failed:type_name -> relkit.updater.v1.Failed
-	39, // 41: relkit.updater.v1.DownloadResult.downloaded:type_name -> relkit.updater.v1.Downloaded
-	37, // 42: relkit.updater.v1.DownloadResult.failed:type_name -> relkit.updater.v1.Failed
-	41, // 43: relkit.updater.v1.ApplyResult.accepted:type_name -> relkit.updater.v1.ApplyAccepted
-	37, // 44: relkit.updater.v1.ApplyResult.failed:type_name -> relkit.updater.v1.Failed
-	43, // 45: relkit.updater.v1.Result.ok:type_name -> relkit.updater.v1.Ok
-	37, // 46: relkit.updater.v1.Result.failed:type_name -> relkit.updater.v1.Failed
-	5,  // 47: relkit.updater.v1.SessionView.phase:type_name -> relkit.updater.v1.SessionPhase
-	62, // 48: relkit.updater.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
-	30, // 49: relkit.updater.v1.SessionView.error:type_name -> relkit.updater.v1.Error
-	62, // 50: relkit.updater.v1.StatusSnapshot.last_check_at:type_name -> google.protobuf.Timestamp
-	1,  // 51: relkit.updater.v1.StatusSnapshot.last_result:type_name -> relkit.updater.v1.LastResult
-	62, // 52: relkit.updater.v1.StatusSnapshot.next_allowed_at:type_name -> google.protobuf.Timestamp
-	46, // 53: relkit.updater.v1.StatusSnapshot.active_session:type_name -> relkit.updater.v1.SessionView
-	45, // 54: relkit.updater.v1.StatusSnapshot.sidecar:type_name -> relkit.updater.v1.SidecarInfo
-	5,  // 55: relkit.updater.v1.ApplyProgress.phase:type_name -> relkit.updater.v1.SessionPhase
-	16, // 56: relkit.updater.v1.UpdaterEvent.capabilities:type_name -> relkit.updater.v1.Capabilities
-	48, // 57: relkit.updater.v1.UpdaterEvent.progress:type_name -> relkit.updater.v1.Progress
-	49, // 58: relkit.updater.v1.UpdaterEvent.apply_progress:type_name -> relkit.updater.v1.ApplyProgress
-	50, // 59: relkit.updater.v1.UpdaterEvent.log:type_name -> relkit.updater.v1.Log
-	38, // 60: relkit.updater.v1.UpdaterEvent.check:type_name -> relkit.updater.v1.CheckResult
-	40, // 61: relkit.updater.v1.UpdaterEvent.download:type_name -> relkit.updater.v1.DownloadResult
-	42, // 62: relkit.updater.v1.UpdaterEvent.apply:type_name -> relkit.updater.v1.ApplyResult
-	44, // 63: relkit.updater.v1.UpdaterEvent.result:type_name -> relkit.updater.v1.Result
-	47, // 64: relkit.updater.v1.UpdaterEvent.status:type_name -> relkit.updater.v1.StatusSnapshot
-	37, // 65: relkit.updater.v1.UpdaterEvent.failed:type_name -> relkit.updater.v1.Failed
-	28, // 66: relkit.updater.v1.UpdaterEvent.installed:type_name -> relkit.updater.v1.InstalledList
-	60, // 67: relkit.updater.v1.ArtifactTarget.selectors:type_name -> relkit.updater.v1.ArtifactTarget.SelectorsEntry
-	31, // 68: relkit.updater.v1.UpdatePlan.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
-	53, // 69: relkit.updater.v1.UpdatePlan.files:type_name -> relkit.updater.v1.PlannedFile
-	62, // 70: relkit.updater.v1.UpdatePlan.created_at:type_name -> google.protobuf.Timestamp
-	62, // 71: relkit.updater.v1.UpdatePlan.expires_at:type_name -> google.protobuf.Timestamp
-	62, // 72: relkit.updater.v1.PersistedState.last_check_at:type_name -> google.protobuf.Timestamp
-	1,  // 73: relkit.updater.v1.PersistedState.last_result:type_name -> relkit.updater.v1.LastResult
-	5,  // 74: relkit.updater.v1.ApplySessionRecord.phase:type_name -> relkit.updater.v1.SessionPhase
-	62, // 75: relkit.updater.v1.ApplySessionRecord.started_at:type_name -> google.protobuf.Timestamp
-	62, // 76: relkit.updater.v1.ApplySessionRecord.heartbeat_at:type_name -> google.protobuf.Timestamp
-	30, // 77: relkit.updater.v1.ApplySessionRecord.error:type_name -> relkit.updater.v1.Error
-	2,  // 78: relkit.updater.v1.ApplySessionRecord.placement:type_name -> relkit.updater.v1.Placement
-	10, // 79: relkit.updater.v1.ApplySessionRecord.library:type_name -> relkit.updater.v1.LibraryPolicy
-	57, // 80: relkit.updater.v1.ApplyJournal.entries:type_name -> relkit.updater.v1.JournalEntry
-	81, // [81:81] is the sub-list for method output_type
-	81, // [81:81] is the sub-list for method input_type
-	81, // [81:81] is the sub-list for extension type_name
-	81, // [81:81] is the sub-list for extension extendee
-	0,  // [0:81] is the sub-list for field type_name
+	27, // 29: relkit.updater.v1.UpdaterRequest.delete_installed:type_name -> relkit.updater.v1.DeleteInstalledOp
+	0,  // 30: relkit.updater.v1.Error.code:type_name -> relkit.updater.v1.ErrorCode
+	8,  // 31: relkit.updater.v1.Error.recovery:type_name -> relkit.updater.v1.RecoveryHelp
+	32, // 32: relkit.updater.v1.UpdateAvailable.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
+	33, // 33: relkit.updater.v1.UpdateAvailable.artifacts:type_name -> relkit.updater.v1.ArtifactView
+	3,  // 34: relkit.updater.v1.UpdateAvailable.apply_disposition:type_name -> relkit.updater.v1.ApplyDisposition
+	63, // 35: relkit.updater.v1.Throttled.next_allowed_at:type_name -> google.protobuf.Timestamp
+	31, // 36: relkit.updater.v1.Failed.error:type_name -> relkit.updater.v1.Error
+	34, // 37: relkit.updater.v1.CheckResult.up_to_date:type_name -> relkit.updater.v1.UpToDate
+	35, // 38: relkit.updater.v1.CheckResult.update_available:type_name -> relkit.updater.v1.UpdateAvailable
+	36, // 39: relkit.updater.v1.CheckResult.fallback_required:type_name -> relkit.updater.v1.FallbackRequired
+	37, // 40: relkit.updater.v1.CheckResult.throttled:type_name -> relkit.updater.v1.Throttled
+	38, // 41: relkit.updater.v1.CheckResult.failed:type_name -> relkit.updater.v1.Failed
+	40, // 42: relkit.updater.v1.DownloadResult.downloaded:type_name -> relkit.updater.v1.Downloaded
+	38, // 43: relkit.updater.v1.DownloadResult.failed:type_name -> relkit.updater.v1.Failed
+	42, // 44: relkit.updater.v1.ApplyResult.accepted:type_name -> relkit.updater.v1.ApplyAccepted
+	38, // 45: relkit.updater.v1.ApplyResult.failed:type_name -> relkit.updater.v1.Failed
+	44, // 46: relkit.updater.v1.Result.ok:type_name -> relkit.updater.v1.Ok
+	38, // 47: relkit.updater.v1.Result.failed:type_name -> relkit.updater.v1.Failed
+	5,  // 48: relkit.updater.v1.SessionView.phase:type_name -> relkit.updater.v1.SessionPhase
+	63, // 49: relkit.updater.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
+	31, // 50: relkit.updater.v1.SessionView.error:type_name -> relkit.updater.v1.Error
+	63, // 51: relkit.updater.v1.StatusSnapshot.last_check_at:type_name -> google.protobuf.Timestamp
+	1,  // 52: relkit.updater.v1.StatusSnapshot.last_result:type_name -> relkit.updater.v1.LastResult
+	63, // 53: relkit.updater.v1.StatusSnapshot.next_allowed_at:type_name -> google.protobuf.Timestamp
+	47, // 54: relkit.updater.v1.StatusSnapshot.active_session:type_name -> relkit.updater.v1.SessionView
+	46, // 55: relkit.updater.v1.StatusSnapshot.sidecar:type_name -> relkit.updater.v1.SidecarInfo
+	5,  // 56: relkit.updater.v1.ApplyProgress.phase:type_name -> relkit.updater.v1.SessionPhase
+	16, // 57: relkit.updater.v1.UpdaterEvent.capabilities:type_name -> relkit.updater.v1.Capabilities
+	49, // 58: relkit.updater.v1.UpdaterEvent.progress:type_name -> relkit.updater.v1.Progress
+	50, // 59: relkit.updater.v1.UpdaterEvent.apply_progress:type_name -> relkit.updater.v1.ApplyProgress
+	51, // 60: relkit.updater.v1.UpdaterEvent.log:type_name -> relkit.updater.v1.Log
+	39, // 61: relkit.updater.v1.UpdaterEvent.check:type_name -> relkit.updater.v1.CheckResult
+	41, // 62: relkit.updater.v1.UpdaterEvent.download:type_name -> relkit.updater.v1.DownloadResult
+	43, // 63: relkit.updater.v1.UpdaterEvent.apply:type_name -> relkit.updater.v1.ApplyResult
+	45, // 64: relkit.updater.v1.UpdaterEvent.result:type_name -> relkit.updater.v1.Result
+	48, // 65: relkit.updater.v1.UpdaterEvent.status:type_name -> relkit.updater.v1.StatusSnapshot
+	38, // 66: relkit.updater.v1.UpdaterEvent.failed:type_name -> relkit.updater.v1.Failed
+	29, // 67: relkit.updater.v1.UpdaterEvent.installed:type_name -> relkit.updater.v1.InstalledList
+	61, // 68: relkit.updater.v1.ArtifactTarget.selectors:type_name -> relkit.updater.v1.ArtifactTarget.SelectorsEntry
+	32, // 69: relkit.updater.v1.UpdatePlan.prior_release_notes:type_name -> relkit.updater.v1.PriorReleaseNotes
+	54, // 70: relkit.updater.v1.UpdatePlan.files:type_name -> relkit.updater.v1.PlannedFile
+	63, // 71: relkit.updater.v1.UpdatePlan.created_at:type_name -> google.protobuf.Timestamp
+	63, // 72: relkit.updater.v1.UpdatePlan.expires_at:type_name -> google.protobuf.Timestamp
+	63, // 73: relkit.updater.v1.PersistedState.last_check_at:type_name -> google.protobuf.Timestamp
+	1,  // 74: relkit.updater.v1.PersistedState.last_result:type_name -> relkit.updater.v1.LastResult
+	5,  // 75: relkit.updater.v1.ApplySessionRecord.phase:type_name -> relkit.updater.v1.SessionPhase
+	63, // 76: relkit.updater.v1.ApplySessionRecord.started_at:type_name -> google.protobuf.Timestamp
+	63, // 77: relkit.updater.v1.ApplySessionRecord.heartbeat_at:type_name -> google.protobuf.Timestamp
+	31, // 78: relkit.updater.v1.ApplySessionRecord.error:type_name -> relkit.updater.v1.Error
+	2,  // 79: relkit.updater.v1.ApplySessionRecord.placement:type_name -> relkit.updater.v1.Placement
+	11, // 80: relkit.updater.v1.ApplySessionRecord.library:type_name -> relkit.updater.v1.LibraryPolicy
+	3,  // 81: relkit.updater.v1.ApplySessionRecord.disposition:type_name -> relkit.updater.v1.ApplyDisposition
+	58, // 82: relkit.updater.v1.ApplyJournal.entries:type_name -> relkit.updater.v1.JournalEntry
+	83, // [83:83] is the sub-list for method output_type
+	83, // [83:83] is the sub-list for method input_type
+	83, // [83:83] is the sub-list for extension type_name
+	83, // [83:83] is the sub-list for extension extendee
+	0,  // [0:83] is the sub-list for field type_name
 }
 
 func init() { file_updater_v1_updater_proto_init() }
@@ -4909,7 +5083,7 @@ func file_updater_v1_updater_proto_init() {
 	if File_updater_v1_updater_proto != nil {
 		return
 	}
-	file_updater_v1_updater_proto_msgTypes[23].OneofWrappers = []any{
+	file_updater_v1_updater_proto_msgTypes[24].OneofWrappers = []any{
 		(*UpdaterRequest_Check)(nil),
 		(*UpdaterRequest_Skip)(nil),
 		(*UpdaterRequest_Download)(nil),
@@ -4920,27 +5094,28 @@ func file_updater_v1_updater_proto_init() {
 		(*UpdaterRequest_ListInstalled)(nil),
 		(*UpdaterRequest_SwitchActive)(nil),
 		(*UpdaterRequest_Rollback)(nil),
+		(*UpdaterRequest_DeleteInstalled)(nil),
 	}
-	file_updater_v1_updater_proto_msgTypes[32].OneofWrappers = []any{
+	file_updater_v1_updater_proto_msgTypes[33].OneofWrappers = []any{
 		(*CheckResult_UpToDate)(nil),
 		(*CheckResult_UpdateAvailable)(nil),
 		(*CheckResult_FallbackRequired)(nil),
 		(*CheckResult_Throttled)(nil),
 		(*CheckResult_Failed)(nil),
 	}
-	file_updater_v1_updater_proto_msgTypes[34].OneofWrappers = []any{
+	file_updater_v1_updater_proto_msgTypes[35].OneofWrappers = []any{
 		(*DownloadResult_Downloaded)(nil),
 		(*DownloadResult_Failed)(nil),
 	}
-	file_updater_v1_updater_proto_msgTypes[36].OneofWrappers = []any{
+	file_updater_v1_updater_proto_msgTypes[37].OneofWrappers = []any{
 		(*ApplyResult_Accepted)(nil),
 		(*ApplyResult_Failed)(nil),
 	}
-	file_updater_v1_updater_proto_msgTypes[38].OneofWrappers = []any{
+	file_updater_v1_updater_proto_msgTypes[39].OneofWrappers = []any{
 		(*Result_Ok)(nil),
 		(*Result_Failed)(nil),
 	}
-	file_updater_v1_updater_proto_msgTypes[45].OneofWrappers = []any{
+	file_updater_v1_updater_proto_msgTypes[46].OneofWrappers = []any{
 		(*UpdaterEvent_Capabilities)(nil),
 		(*UpdaterEvent_Progress)(nil),
 		(*UpdaterEvent_ApplyProgress)(nil),
@@ -4959,7 +5134,7 @@ func file_updater_v1_updater_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_updater_v1_updater_proto_rawDesc), len(file_updater_v1_updater_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   55,
+			NumMessages:   56,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

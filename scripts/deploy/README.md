@@ -1,5 +1,36 @@
 # deploy CLI
 
+## 服务器入口（内外网不可混用）
+
+| | 内网发布机 | 外网 CVM |
+| --- | --- | --- |
+| 连接 | `ssh -p 36000 root@update.devcloud.woa.com` | `ssh root@43.161.241.238` |
+| 端口 | 36000（默认 22 不通） | 22，专用密钥 |
+| 主机 | `VM-241-248-tencentos` / `9.134.241.248` | 云主机 |
+
+内网端口必须显式写 `-p 36000`。把外网 IP `43.161.241.238` 配上 36000 会落到 WOA 网关并返回 `HTTP/1.1 502 Bad Gateway`，看起来像 SSH 被拦，实际是走错了入口。
+
+内网三个 unit 与配置位置：
+
+- `relkit-agent`：unit `/etc/systemd/system/relkit-agent.service`，配置 `/etc/relkit-agent/relkit-agent.json`，监听 `127.0.0.1:8787`，stateDir `/data/relkit-agent`，凭据目录 `/etc/relkit-agent/tokens/`
+- `relkit-store`：监听 `:8080`
+- `relkit-console`：监听 `:8081`
+
+内网 nginx vhost 分工（`/etc/nginx/conf.d/`）：
+
+- `publish.devcloud.woa.com`：`/v1/` 转发到 agent（CI 写面）
+- `update-internal.devcloud.woa.com`：协议树转 store，另外必须把 `/v1/tools/` 与 `= /v1/catalog` 转发到 agent（示例见 `update-internal.example.conf`）。漏这条时工具发布会成功，但清单签出的下载 URL 在宿主机上全部 404。
+
+发布工具后必须核对一次（换成主机实际使用的域名与刚发布的版本）：
+
+```
+python scripts/deploy/verify-published-tools.py \
+  --base https://update-internal.devcloud.woa.com \
+  --version "0.7.0+db0e150109e3-dirty"
+```
+
+它会读 Catalog 确认版本在册且 `current` 指向它、取 `/v1/tools/root.pub`、逐个下载工具校验摘要、用 `ssh-keygen -Y verify`（namespace `relkit-tool`）验签，并核对 `/v1/tools/current/<component>/<platform>` 回传的文件名与摘要。任何一项不对就返回非零——发布侧报成功不代表宿主能装。
+
 本脚本只负责 Operator 机器的装机与换二进制。产品仓不再物化任何 Python 运维脚本（ADR 0019 §1）；产品侧的声明与策略走 `relkit.project.json` 与 `relkit-ops agent policy`。
 
 唯一入口：`python scripts/deploy/relkit.py`（仓库根目录执行；Linux 上也可用 `python3 scripts/deploy/relkit.py`）。Agent 流程见 [`DecAssets/skills/relkit-deploy/SKILL.md`](../../DecAssets/skills/relkit-deploy/SKILL.md)。

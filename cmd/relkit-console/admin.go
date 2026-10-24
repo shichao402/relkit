@@ -1,14 +1,20 @@
 package main
 
-// Operator-panel authentication.
+// Panel sessions, in front of the agent's management API.
 //
-// A freshly inited box has a one-shot bootstrap token (hash only on disk).
-// That token can create the first operator account and is consumed in the
-// same write; afterwards the panel is ordinary username/password plus a
-// signed cookie. Recovery is SSH: `relkit-console init -reset-admin`.
+// The epoch upgrade moved the authority for users, roles, products and tokens
+// into the agent (requirement 13.6). The panel therefore keeps no account
+// document of its own: it holds one signing key, so the browser can carry the
+// agent's session bearer in a cookie the panel can trust, and everything else is
+// an HTTP call.
 //
-// This is not a token-issuance API and does not protect the download tree.
-// Upload tokens stay PUT-only; adding products still requires SSH.
+// What the panel still owns is exactly two things: the cookie (so a page load
+// costs one agent request, not one per fragment) and the redirect rules for the
+// first-run screen. Both are presentation, not authority.
+//
+// A consequence worth stating because it used to be the opposite: `console init`
+// no longer mints a bootstrap. The agent does (requirement 13.2, 11.3), and the
+// panel simply renders the form that consumes it.
 
 import (
 	"context"
@@ -17,8 +23,8 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,12 +35,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	adminStateFileName = ".relkit-serve-admin.json"
+	// adminStateFileName holds the panel's cookie signing key and nothing else.
+	// It is panel state, not agent state: losing it signs everyone out.
+	adminStateFileName = ".relkit-console-panel.json"
 	adminCookieName    = "relkit_admin"
 	adminLoginPath     = "/-/admin/login"
 	adminSetupPath     = "/-/admin/setup"
@@ -46,34 +52,29 @@ const (
 type panelUserKey struct{}
 
 var (
-	passwordCost  = bcrypt.DefaultCost
 	authFailDelay = 400 * time.Millisecond
 )
 
-type adminUser struct {
-	Username     string `json:"username"`
-	PasswordHash string `json:"passwordHash"`
+// panelDoc is the whole of the panel's local state.
+type panelDoc struct {
+	SessionKey string `json:"sessionKey"`
 }
 
-type adminDoc struct {
-	SessionKey    string      `json:"sessionKey"`
-	BootstrapHash string      `json:"bootstrapHash,omitempty"`
-	Users         []adminUser `json:"users,omitempty"`
-}
-
-type adminAuth struct {
-	mu            sync.Mutex
-	path          string
-	serveKey      string
-	sessionKey    []byte
-	bootstrapHash []byte
-	users         []adminUser
+// panelSession is the panel's view of "who is signed in here": one signing key
+// plus the agent client that answers everything else.
+type panelSession struct {
+	mu       sync.Mutex
+	path     string
+	serveKey string
+	key      []byte
+	agent    *agentClient
 }
 
 type panelGate int
 
 const (
-	gateLocked panelGate = iota
+	gateUnavailable panelGate = iota
+	gateLocked
 	gateSetup
 	gateLogin
 )
@@ -83,6 +84,7 @@ type authPage struct {
 	Action string
 	Next   string
 	Error  string
+	Agent  string
 }
 
 func resolveAdminPath(rootPath, configPath, configured string) string {
@@ -106,47 +108,49 @@ func adminStateFileFrom(cfg *FileConfig) string {
 	return cfg.AdminStateFile
 }
 
+// reservedAdminKey hides the panel's own state file from the file tree. The
+// agent's admin document is not in this tree at all any more, but a box that
+// migrated still has the old name lying around, so both stay reserved.
 func reservedAdminKey(name string) bool {
 	base := path.Base(name)
 	return base == adminStateFileName ||
+		base == adminStateFileName+".tmp~" ||
+		base == legacyAdminStateFileName ||
 		base == "admin.json" ||
-		strings.HasPrefix(base, adminStateFileName+".") ||
+		strings.HasPrefix(base, legacyAdminStateFileName+".") ||
 		strings.HasPrefix(base, "admin.json.")
 }
 
-func hiddenAdminKey(name string, a *adminAuth) bool {
+// legacyAdminStateFileName is the serve-era account document. The console does
+// not read it; it is reserved so a leftover copy is never listed or served.
+const legacyAdminStateFileName = ".relkit-serve-admin.json"
+
+func hiddenAdminKey(name string, s *panelSession) bool {
 	if reservedAdminKey(name) {
 		return true
 	}
-	if a == nil || a.serveKey == "" {
+	if s == nil || s.serveKey == "" {
 		return false
 	}
-	return name == a.serveKey || name == a.serveKey+".tmp~"
+	return name == s.serveKey || name == s.serveKey+".tmp~"
 }
 
 // hiddenKey carries serve's hiding rule over the adapter boundary: the
-// counters file, the CAS key and the admin state are internal, not objects
-// the panel should list.
+// counters file, the CAS key and the panel state are internal, not objects the
+// panel should list.
 func (c *console) hiddenKey(name string) bool {
 	return hiddenServeKey(name, c.stats) || hiddenAdminKey(name, c.admin)
 }
 
-func mintAdminDoc() (plaintext string, doc adminDoc, err error) {
-	token, err := generateToken()
-	if err != nil {
-		return "", adminDoc{}, err
-	}
+func mintPanelDoc() (panelDoc, error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		return "", adminDoc{}, err
+		return panelDoc{}, err
 	}
-	return token, adminDoc{
-		SessionKey:    base64.RawURLEncoding.EncodeToString(key),
-		BootstrapHash: hex.EncodeToString(hashToken(token)),
-	}, nil
+	return panelDoc{SessionKey: base64.RawURLEncoding.EncodeToString(key)}, nil
 }
 
-func writeAdminDoc(path string, doc adminDoc) error {
+func writePanelDoc(path string, doc panelDoc) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -165,65 +169,49 @@ func writeAdminDoc(path string, doc adminDoc) error {
 	return nil
 }
 
-// writeNewAdminState prefers the serve directory (writable under the default
-// systemd unit). It will not create that directory: a typo in -dir must not
-// mkdir /srv/releases. If the serve dir is missing, it falls back next to
-// the config so `init` still produces a usable pair; the caller then records
-// adminStateFile so the running process can find it.
-func writeNewAdminState(serveDir, outDir string) (plaintext, written, relForConfig string, err error) {
-	token, doc, err := mintAdminDoc()
-	if err != nil {
-		return "", "", "", err
-	}
-	if info, statErr := os.Stat(serveDir); statErr == nil && info.IsDir() {
-		servePath := filepath.Join(serveDir, adminStateFileName)
-		if err := writeAdminDoc(servePath, doc); err == nil {
-			return token, servePath, "", nil
+// openPanelSession loads the signing key, minting one on first start so a fresh
+// box needs no hand-written secret. The agent connection is separate: a panel
+// with no agent configured still renders, it just cannot show any data.
+func openPanelSession(path, rootPath, agentURL string) (*panelSession, error) {
+	s := &panelSession{path: path, serveKey: statsServeKey(rootPath, path)}
+	if agentURL != "" {
+		agent, err := newAgentClient(agentURL)
+		if err != nil {
+			return nil, err
 		}
+		s.agent = agent
 	}
-	fallback := filepath.Join(outDir, "admin.json")
-	if err := writeAdminDoc(fallback, doc); err != nil {
-		return "", "", "", fmt.Errorf("admin state: %w", err)
-	}
-	return token, fallback, "admin.json", nil
-}
-
-func openAdminAuth(path, rootPath string) (*adminAuth, error) {
-	a := &adminAuth{path: path, serveKey: statsServeKey(rootPath, path)}
 	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return a, nil
+	if err == nil {
+		var doc panelDoc
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
 		}
+		key, err := decodeSessionKey(doc.SessionKey)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		s.key = key
+		return s, nil
+	}
+	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	var doc adminDoc
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+	doc, err := mintPanelDoc()
+	if err != nil {
+		return nil, err
 	}
-	if err := a.apply(doc); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+	if path != "" {
+		if err := writePanelDoc(path, doc); err != nil {
+			return nil, err
+		}
 	}
-	return a, nil
-}
-
-func (a *adminAuth) apply(doc adminDoc) error {
 	key, err := decodeSessionKey(doc.SessionKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var bootstrap []byte
-	if doc.BootstrapHash != "" {
-		sum, err := hex.DecodeString(doc.BootstrapHash)
-		if err != nil || len(sum) != sha256.Size {
-			return fmt.Errorf("bootstrapHash is not a sha256 hex digest")
-		}
-		bootstrap = sum
-	}
-	a.sessionKey = key
-	a.bootstrapHash = bootstrap
-	a.users = append([]adminUser(nil), doc.Users...)
-	return nil
+	s.key = key
+	return s, nil
 }
 
 func decodeSessionKey(raw string) ([]byte, error) {
@@ -234,183 +222,115 @@ func decodeSessionKey(raw string) ([]byte, error) {
 	return key, nil
 }
 
-func (a *adminAuth) snapshot() adminDoc {
-	doc := adminDoc{
-		SessionKey: base64.RawURLEncoding.EncodeToString(a.sessionKey),
-		Users:      append([]adminUser(nil), a.users...),
+// writeNewPanelState mints a fresh cookie key and writes it where the running
+// panel will look for it. It mirrors the old bootstrap writer's placement rule:
+// inside the release directory when that directory exists, next to the config
+// otherwise, so a box whose tree is not mounted yet can still be prepared.
+func writeNewPanelState(rootDir, configDir string) (string, string, error) {
+	doc, err := mintPanelDoc()
+	if err != nil {
+		return "", "", err
 	}
-	if len(a.bootstrapHash) == sha256.Size {
-		doc.BootstrapHash = hex.EncodeToString(a.bootstrapHash)
+	path := filepath.Join(rootDir, adminStateFileName)
+	rel := ""
+	if _, err := os.Stat(rootDir); err != nil {
+		if !os.IsNotExist(err) {
+			return "", "", err
+		}
+		path = filepath.Join(configDir, adminStateFileName)
+		rel = adminStateFileName
 	}
-	return doc
+	if err := writePanelDoc(path, doc); err != nil {
+		return "", "", err
+	}
+	return path, rel, nil
 }
 
-func (a *adminAuth) persistLocked() error {
-	if a.path == "" {
-		return fmt.Errorf("admin state path is empty")
+// agentClientOrNil keeps the "no agent configured" case explicit at call sites
+// instead of scattering nil checks through the handlers.
+func (s *panelSession) agentClient() *agentClient {
+	if s == nil {
+		return nil
 	}
-	return writeAdminDoc(a.path, a.snapshot())
+	return s.agent
 }
 
-func (a *adminAuth) gate() panelGate {
-	if a == nil {
-		return gateLocked
+// gate asks the agent whether this deployment still needs its first operator.
+// The answer is not cached: the whole point of the bootstrap state is that it
+// changes exactly once, and a stale cache would show the wrong screen at that
+// moment.
+func (s *panelSession) gate() panelGate {
+	agent := s.agentClient()
+	if agent == nil {
+		return gateUnavailable
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.gateLocked()
-}
-
-func (a *adminAuth) gateLocked() panelGate {
-	if len(a.users) > 0 {
-		return gateLogin
+	status, err := agent.Status()
+	if err != nil {
+		return gateUnavailable
 	}
-	if len(a.bootstrapHash) == sha256.Size {
+	if status.BootstrapLive {
 		return gateSetup
+	}
+	if status.OperatorExists {
+		return gateLogin
 	}
 	return gateLocked
 }
 
-func (a *adminAuth) statusLog() string {
-	switch a.gate() {
+func (s *panelSession) statusLog() string {
+	switch s.gate() {
 	case gateSetup:
-		return "waiting for first operator (bootstrap live)"
+		return "waiting for first operator (agent bootstrap live)"
 	case gateLogin:
-		n := 0
-		a.mu.Lock()
-		n = len(a.users)
-		a.mu.Unlock()
-		if n == 1 {
-			return "authenticated (1 operator)"
-		}
-		return fmt.Sprintf("authenticated (%d operators)", n)
+		return "ready (" + s.agentClient().base + ")"
+	case gateUnavailable:
+		return "agent unavailable: " + s.agentBase()
 	default:
-		return "locked (run relkit-console init -reset-admin)"
+		return "locked (no operator on the agent: run `relkit-agent init -bootstrap`)"
 	}
 }
 
-func (a *adminAuth) firstUsername() string {
-	if a == nil {
-		return ""
+func (s *panelSession) agentBase() string {
+	if agent := s.agentClient(); agent != nil {
+		return agent.base
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if len(a.users) == 0 {
-		return ""
-	}
-	return a.users[0].Username
+	return "(not configured)"
 }
 
-func hashPassword(password string) (string, error) {
-	raw, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+// signedSession is what the cookie carries: the agent's bearer plus the name to
+// display. Both are inside the MAC, so neither can be edited by the browser.
+type signedSession struct {
+	User    string `json:"u"`
+	Expiry  int64  `json:"x"`
+	Agent   string `json:"a"`
+	Display string `json:"d,omitempty"`
 }
 
-func normalizeUsername(raw string) (string, error) {
-	s := strings.TrimSpace(raw)
-	if len(s) < 2 || len(s) > 32 {
-		return "", fmt.Errorf("username must be 2–32 characters")
+func (s *panelSession) issueCookie(session signedSession) (*http.Cookie, error) {
+	if s == nil {
+		return nil, fmt.Errorf("panel state is not loaded")
 	}
-	for _, r := range s {
-		ok := r == '.' || r == '_' || r == '-' ||
-			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
-		if !ok {
-			return "", fmt.Errorf("username may contain letters, digits, '.', '_' and '-'")
-		}
-	}
-	return strings.ToLower(s), nil
-}
-
-func (a *adminAuth) createFirstOperator(bootstrap, username, password string) error {
-	name, err := normalizeUsername(username)
-	if err != nil {
-		return err
-	}
-	if len(password) < minAdminPassword {
-		return fmt.Errorf("password must be at least %d characters", minAdminPassword)
-	}
-	passHash, err := hashPassword(password)
-	if err != nil {
-		return err
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if len(a.users) > 0 {
-		return fmt.Errorf("an operator account already exists")
-	}
-	if len(a.bootstrapHash) != sha256.Size {
-		return fmt.Errorf("bootstrap is not live")
-	}
-	sum := hashToken(strings.TrimSpace(bootstrap))
-	if subtle.ConstantTimeCompare(sum, a.bootstrapHash) != 1 {
-		return fmt.Errorf("invalid bootstrap")
-	}
-	a.users = []adminUser{{Username: name, PasswordHash: passHash}}
-	a.bootstrapHash = nil
-	if err := a.persistLocked(); err != nil {
-		a.users = nil
-		a.bootstrapHash = sum
-		return err
-	}
-	return nil
-}
-
-func (a *adminAuth) lookupPasswordHash(username string) string {
-	name, err := normalizeUsername(username)
-	if err != nil {
-		return ""
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, user := range a.users {
-		if user.Username == name {
-			return user.PasswordHash
-		}
-	}
-	return ""
-}
-
-var (
-	dummyHashOnce sync.Once
-	dummyHash     []byte
-)
-
-func passwordOK(hash, password string) bool {
-	if hash == "" {
-		dummyHashOnce.Do(func() {
-			dummyHash, _ = bcrypt.GenerateFromPassword([]byte("timing-dummy"), passwordCost)
-		})
-		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
-		return false
-	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
-}
-
-func (a *adminAuth) issueCookie(username string, expiry time.Time) (*http.Cookie, error) {
-	if a == nil {
-		return nil, fmt.Errorf("admin state is not loaded")
-	}
-	a.mu.Lock()
-	key := append([]byte(nil), a.sessionKey...)
-	a.mu.Unlock()
+	s.mu.Lock()
+	key := append([]byte(nil), s.key...)
+	s.mu.Unlock()
 	if len(key) < 32 {
 		return nil, fmt.Errorf("session key is missing")
 	}
-	payload := username + "|" + fmt.Sprintf("%d", expiry.Unix())
-	mac := hmacSHA256(key, []byte("v1|"+payload))
-	value := "v1." +
-		base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
+	session.Expiry = time.Now().Add(adminSessionTTL).Unix()
+	payload, err := json.Marshal(session)
+	if err != nil {
+		return nil, err
+	}
+	mac := hmacSHA256(key, []byte("v2|"+string(payload)))
+	value := "v2." +
+		base64.RawURLEncoding.EncodeToString(payload) + "." +
 		base64.RawURLEncoding.EncodeToString(mac)
 	return &http.Cookie{
 		Name:     adminCookieName,
 		Value:    value,
 		Path:     "/-/",
-		Expires:  expiry,
-		MaxAge:   int(time.Until(expiry).Seconds()),
+		Expires:  time.Unix(session.Expiry, 0),
+		MaxAge:   int(time.Until(time.Unix(session.Expiry, 0)).Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	}, nil
@@ -422,59 +342,56 @@ func hmacSHA256(key, payload []byte) []byte {
 	return mac.Sum(nil)
 }
 
-func (a *adminAuth) sessionUser(r *http.Request) (string, bool) {
-	if a == nil || r == nil {
-		return "", false
+// session returns the agent bearer carried by this request, if the cookie is
+// intact and unexpired. It does not ask the agent: callers that need the user
+// record call Whoami, so a revoked session costs one request rather than being
+// trusted from the cookie forever.
+func (s *panelSession) session(r *http.Request) (signedSession, bool) {
+	if s == nil || r == nil {
+		return signedSession{}, false
 	}
 	cookie, err := r.Cookie(adminCookieName)
 	if err != nil || cookie.Value == "" {
-		return "", false
+		return signedSession{}, false
 	}
-	a.mu.Lock()
-	key := append([]byte(nil), a.sessionKey...)
-	users := append([]adminUser(nil), a.users...)
-	a.mu.Unlock()
+	s.mu.Lock()
+	key := append([]byte(nil), s.key...)
+	s.mu.Unlock()
 	if len(key) < 32 {
-		return "", false
+		return signedSession{}, false
 	}
-	user, ok := parseSessionCookie(cookie.Value, key, time.Now())
-	if !ok {
-		return "", false
+	session, ok := parseSessionCookie(cookie.Value, key, time.Now())
+	if !ok || session.Agent == "" {
+		return signedSession{}, false
 	}
-	for _, u := range users {
-		if u.Username == user {
-			return user, true
-		}
-	}
-	return "", false
+	return session, true
 }
 
-func parseSessionCookie(value string, key []byte, now time.Time) (string, bool) {
+func parseSessionCookie(value string, key []byte, now time.Time) (signedSession, bool) {
 	parts := strings.Split(value, ".")
-	if len(parts) != 3 || parts[0] != "v1" {
-		return "", false
+	if len(parts) != 3 || parts[0] != "v2" {
+		return signedSession{}, false
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", false
+		return signedSession{}, false
 	}
 	mac, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return "", false
+		return signedSession{}, false
 	}
-	want := hmacSHA256(key, []byte("v1|"+string(payload)))
+	want := hmacSHA256(key, []byte("v2|"+string(payload)))
 	if subtle.ConstantTimeCompare(mac, want) != 1 {
-		return "", false
+		return signedSession{}, false
 	}
-	user, stamp, ok := strings.Cut(string(payload), "|")
-	if !ok || user == "" {
-		return "", false
+	var session signedSession
+	if err := json.Unmarshal(payload, &session); err != nil {
+		return signedSession{}, false
 	}
-	var unix int64
-	if _, err := fmt.Sscan(stamp, &unix); err != nil || now.Unix() > unix {
-		return "", false
+	if session.User == "" || now.Unix() > session.Expiry {
+		return signedSession{}, false
 	}
-	return user, true
+	return session, true
 }
 
 func expireCookie() *http.Cookie {
@@ -494,6 +411,16 @@ func panelUsername(r *http.Request) string {
 	return u
 }
 
+// panelAgentSession is the bearer stored in the request context by
+// requirePanelAuth, so a page handler can call the agent without re-reading the
+// cookie.
+func panelAgentSession(r *http.Request) string {
+	session, _ := r.Context().Value(panelAgentKey{}).(string)
+	return session
+}
+
+type panelAgentKey struct{}
+
 func (c *console) stampChrome(r *http.Request, data any) {
 	user := panelUsername(r)
 	if user == "" {
@@ -512,14 +439,16 @@ func (c *console) stampChrome(r *http.Request, data any) {
 	case *authPage:
 		page.LoggedIn = true
 		page.Username = user
+	case *panelPage:
+		page.LoggedIn = true
+		page.Username = user
 	}
 }
 
 func (c *console) requirePanelAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if user, ok := c.admin.sessionUser(r); ok {
-			ctx := context.WithValue(r.Context(), panelUserKey{}, user)
-			next(w, r.WithContext(ctx))
+		if session, ok := c.admin.session(r); ok {
+			next(w, withPanel(r, session))
 			return
 		}
 		switch c.admin.gate() {
@@ -531,16 +460,25 @@ func (c *console) requirePanelAuth(next http.HandlerFunc) http.HandlerFunc {
 				target += "?next=" + url.QueryEscape(next)
 			}
 			http.Redirect(w, r, target, http.StatusFound)
+		case gateUnavailable:
+			c.serveAgentUnavailable(w, r)
 		default:
-			c.serveAdminLocked(w, r)
+			c.servePanelLocked(w, r)
 		}
 	}
 }
 
+// withPanel stamps the signed-in operator and the agent bearer onto the request
+// context, so page handlers can call the agent without re-reading the cookie.
+func withPanel(r *http.Request, session signedSession) *http.Request {
+	ctx := context.WithValue(r.Context(), panelUserKey{}, session.User)
+	ctx = context.WithValue(ctx, panelAgentKey{}, session.Agent)
+	return r.WithContext(ctx)
+}
+
 func (c *console) serveAdminLogin(w http.ResponseWriter, r *http.Request) {
-	if user, ok := c.admin.sessionUser(r); ok {
-		ctx := context.WithValue(r.Context(), panelUserKey{}, user)
-		http.Redirect(w, r.WithContext(ctx), safeNext(r.URL.Query().Get("next")), http.StatusFound)
+	if session, ok := c.admin.session(r); ok {
+		http.Redirect(w, withPanel(r, session), safeNext(r.URL.Query().Get("next")), http.StatusFound)
 		return
 	}
 	switch r.Method {
@@ -556,16 +494,18 @@ func (c *console) serveAdminLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		next := safeNext(r.FormValue("next"))
-		user := r.FormValue("username")
-		pass := r.FormValue("password")
-		hash := c.admin.lookupPasswordHash(user)
-		if !passwordOK(hash, pass) {
-			sleepAuthFail()
-			c.renderAuth(w, r, "login", "Wrong username or password.", next)
+		agent := c.admin.agentClient()
+		if agent == nil {
+			c.serveAgentUnavailable(w, r)
 			return
 		}
-		name, _ := normalizeUsername(user)
-		c.setSession(w, name)
+		login, err := agent.Login(r.FormValue("username"), r.FormValue("password"))
+		if err != nil {
+			sleepAuthFail()
+			c.renderAuth(w, r, "login", loginErrorText(err), next)
+			return
+		}
+		c.setSession(w, login)
 		http.Redirect(w, r, next, http.StatusFound)
 	default:
 		w.Header().Set("Allow", "GET, HEAD, POST")
@@ -574,17 +514,20 @@ func (c *console) serveAdminLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *console) serveAdminSetup(w http.ResponseWriter, r *http.Request) {
-	if user, ok := c.admin.sessionUser(r); ok {
-		ctx := context.WithValue(r.Context(), panelUserKey{}, user)
-		http.Redirect(w, r.WithContext(ctx), adminPath, http.StatusFound)
+	if session, ok := c.admin.session(r); ok {
+		http.Redirect(w, withPanel(r, session), adminPath, http.StatusFound)
 		return
 	}
-	if c.admin.gate() != gateSetup {
-		if c.admin.gate() == gateLogin {
-			http.Redirect(w, r, adminLoginPath, http.StatusFound)
-			return
-		}
-		c.serveAdminLocked(w, r)
+	switch c.admin.gate() {
+	case gateSetup:
+	case gateLogin:
+		http.Redirect(w, r, adminLoginPath, http.StatusFound)
+		return
+	case gateUnavailable:
+		c.serveAgentUnavailable(w, r)
+		return
+	default:
+		c.servePanelLocked(w, r)
 		return
 	}
 	switch r.Method {
@@ -603,24 +546,25 @@ func (c *console) serveAdminSetup(w http.ResponseWriter, r *http.Request) {
 			c.renderAuth(w, r, "setup", "Passwords do not match.", "")
 			return
 		}
-		err := c.admin.createFirstOperator(
+		agent := c.admin.agentClient()
+		if agent == nil {
+			c.serveAgentUnavailable(w, r)
+			return
+		}
+		login, err := agent.Bootstrap(
 			r.FormValue("bootstrap"),
 			r.FormValue("username"),
 			r.FormValue("password"),
 		)
 		if err != nil {
 			sleepAuthFail()
-			msg := err.Error()
-			if strings.Contains(msg, "invalid bootstrap") ||
-				strings.Contains(msg, "not live") ||
-				strings.Contains(msg, "already exists") {
-				msg = "Could not create the account."
-			}
-			c.renderAuth(w, r, "setup", msg, "")
+			// One message for every refusal: a wrong bootstrap and a consumed one
+			// look the same from outside, which is what keeps this form from
+			// becoming a probe for whether a credential is live.
+			c.renderAuth(w, r, "setup", "Could not create the account.", "")
 			return
 		}
-		name, _ := normalizeUsername(r.FormValue("username"))
-		c.setSession(w, name)
+		c.setSession(w, login)
 		http.Redirect(w, r, adminPath, http.StatusFound)
 	default:
 		w.Header().Set("Allow", "GET, HEAD, POST")
@@ -634,17 +578,35 @@ func (c *console) serveAdminLogout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Best effort: the agent session dies with the cookie either way, and a
+	// failed logout call must not leave the operator stuck signed in.
+	if session, ok := c.admin.session(r); ok {
+		if agent := c.admin.agentClient(); agent != nil {
+			_ = agent.Logout(session.Agent)
+		}
+	}
 	http.SetCookie(w, expireCookie())
 	http.Redirect(w, r, adminLoginPath, http.StatusFound)
 }
 
-func (c *console) serveAdminLocked(w http.ResponseWriter, r *http.Request) {
+func (c *console) servePanelLocked(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	c.renderAuth(w, r, "locked", "", "")
+}
+
+// serveAgentUnavailable is its own screen because the fix is different from
+// every other failure: the panel is fine, the server it manages is not.
+func (c *console) serveAgentUnavailable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	c.renderAuth(w, r, "unavailable", "", "")
 }
 
 func (c *console) renderAuth(w http.ResponseWriter, r *http.Request, mode, errMsg, next string) {
@@ -654,6 +616,8 @@ func (c *console) renderAuth(w http.ResponseWriter, r *http.Request, mode, errMs
 		title = "Create operator"
 	case "locked":
 		title = "Panel locked"
+	case "unavailable":
+		title = "Agent unavailable"
 	}
 	page := &authPage{
 		pageChrome: pageChrome{Title: title, Version: version},
@@ -661,15 +625,38 @@ func (c *console) renderAuth(w http.ResponseWriter, r *http.Request, mode, errMs
 		Next:       next,
 		Error:      errMsg,
 	}
+	if agent := c.admin.agentClient(); agent != nil {
+		page.Agent = agent.base
+	}
 	c.renderPage(w, r, mode, page)
 }
 
-func (c *console) setSession(w http.ResponseWriter, username string) {
-	cookie, err := c.admin.issueCookie(username, time.Now().Add(adminSessionTTL))
+func (c *console) setSession(w http.ResponseWriter, login agentLogin) {
+	cookie, err := c.admin.issueCookie(signedSession{
+		User:    login.User.Username,
+		Agent:   login.Session,
+		Display: string(login.User.Role),
+	})
 	if err != nil {
 		return
 	}
 	http.SetCookie(w, cookie)
+}
+
+// loginErrorText turns an agent refusal into something an operator can act on
+// without leaking whether the account exists.
+func loginErrorText(err error) string {
+	var refusal *agentError
+	if errors.As(err, &refusal) {
+		switch {
+		case refusal.Unauthorized():
+			return "Wrong username or password."
+		case refusal.StatusCode == http.StatusServiceUnavailable:
+			return "The agent has no admin state configured."
+		}
+		return refusal.Message
+	}
+	return "The agent is unreachable: " + err.Error()
 }
 
 func sleepAuthFail() {
@@ -708,9 +695,10 @@ func safeNext(raw string) string {
 	return u.RequestURI()
 }
 
-func printAdminBootstrap(out io.Writer, path, token string) {
-	fmt.Fprintf(out, "admin  %s (mode 0600, hash only)\n", path)
-	fmt.Fprintf(out, "\nOpen /-/admin and create the first operator with this one-shot bootstrap.\n")
-	fmt.Fprintf(out, "It is consumed the moment that account exists; do not store it:\n")
-	fmt.Fprintf(out, "  export RELKIT_ADMIN_BOOTSTRAP='%s'\n", token)
+func printPanelNote(out io.Writer, path string) {
+	fmt.Fprintf(out, "panel state %s (mode 0600, cookie signing key only)\n", path)
+	fmt.Fprintf(out, "Operators are managed by the agent: create the first one with\n")
+	fmt.Fprintf(out, "  relkit-agent init -bootstrap\n")
+	fmt.Fprintf(out, "then open /-/admin here and paste the value it prints.\n")
 }
+

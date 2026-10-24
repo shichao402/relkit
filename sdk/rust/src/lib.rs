@@ -1,24 +1,19 @@
-//! Rust host facade for `relkit.updater.v1`.
+﻿//! Rust host facade for `relkit.updater.v1`.
 //!
 //! The DTOs in [`proto`] are generated from `proto/updater/v1/updater.proto`
 //! by `build.rs`. WebView JSON goes through [`check_result_to_json`], not a
 //! handwritten DTO.
 
 mod json;
-mod runtime_bootstrap;
 
 pub use json::{check_result_from_json, check_result_to_json, JsonError};
-pub use runtime_bootstrap::{runtime_bootstrap_from_json, RuntimeBootstrap, RuntimeBootstrapError};
 
 use prost::Message;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime};
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/relkit.updater.v1.rs"));
@@ -29,14 +24,14 @@ use proto::updater_event;
 use proto::updater_request;
 use proto::{
     ApplyOp, ApplyResult, Capabilities, CheckOp, CheckPolicy, CheckResult, CleanupOp, ClientHello,
-    ClientProfile, DownloadOp, DownloadResult, Error, ErrorCode, Failed, InstalledList,
-    ListInstalledOp, Ok, Result as OperationResult, RollbackOp, Runtime, SchedulerConfig, SkipOp,
+    ClientProfile, DeleteInstalledOp, DownloadOp, DownloadResult, Error, ErrorCode, Failed,
+    InstalledList, ListInstalledOp, Ok, Result as OperationResult, RollbackOp, Runtime, SkipOp,
     StatusOp, StatusSnapshot, SwitchActiveOp, UpdaterEvent, UpdaterRequest,
 };
 
-pub const IPC_MIN: u32 = 3;
-pub const IPC_MAX: u32 = 3;
-pub const IPC_CURRENT: u32 = 3;
+pub const IPC_MIN: u32 = 4;
+pub const IPC_MAX: u32 = 4;
+pub const IPC_CURRENT: u32 = 4;
 const MAX_FRAME_SIZE: usize = 32 * 1024 * 1024;
 
 /// Prefixes one protobuf message with its 4-byte big-endian length.
@@ -217,42 +212,6 @@ impl Glue for DefaultGlue {
             child.lock().unwrap().kill()?;
         }
         Ok(())
-    }
-}
-
-/// This build's platform as relkit selectors, in the GOOS/GOARCH vocabulary the
-/// protocol reserves (SPEC.md §11.1): os=darwin/linux/windows, arch=amd64/arm64.
-///
-/// Rust reports its own vocabulary (`std::env::consts::OS` is "macos" where
-/// the protocol says "darwin"; `ARCH` is "x86_64" where it says "amd64") —
-/// exactly the mismatch that broke Dec Console's self-update. Hosts wiring
-/// `Runtime.client_selectors` by hand should build the platform part from
-/// this; the sidecar engine also injects the same keys at check time when a
-/// host leaves them unset, so both planes agree.
-pub fn platform_selectors() -> std::collections::HashMap<String, String> {
-    let mut selectors = std::collections::HashMap::with_capacity(2);
-    selectors.insert("os".to_string(), normalized_os().to_string());
-    selectors.insert("arch".to_string(), normalized_arch().to_string());
-    selectors
-}
-
-/// GOOS-style OS name: std::env::consts::OS says "macos", the protocol's
-/// reserved vocabulary says "darwin" (SPEC.md §11.1).
-fn normalized_os() -> &'static str {
-    match std::env::consts::OS {
-        "macos" => "darwin",
-        value => value,
-    }
-}
-
-/// GOARCH-style architecture name: std::env::consts::ARCH says "x86_64", the
-/// protocol's reserved vocabulary says "amd64" (SPEC.md §11.1).
-fn normalized_arch() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        "x86" => "386",
-        value => value,
     }
 }
 
@@ -516,130 +475,16 @@ impl Updater {
         operation_result(self.call(updater_request::Op::Rollback(RollbackOp {}), &mut |_| {}))
     }
 
-    pub fn scheduler<F>(&self, config: SchedulerConfig, on_event: F) -> Scheduler
-    where
-        F: Fn(SchedulerEvent) + Send + Sync + 'static,
-    {
-        Scheduler::new(self.clone(), config, Arc::new(on_event))
+    // Facade signature token: deleteInstalled
+    pub fn delete_installed(&self, code: i64, in_use_codes: &[i64]) -> OperationResult {
+        operation_result(self.call(
+            updater_request::Op::DeleteInstalled(DeleteInstalledOp {
+                code,
+                in_use_codes: in_use_codes.to_vec(),
+            }),
+            &mut |_| {},
+        ))
     }
-}
-
-#[derive(Clone)]
-pub enum SchedulerEvent {
-    Tick {
-        at: SystemTime,
-        force: bool,
-    },
-    Result {
-        at: SystemTime,
-        force: bool,
-        result: CheckResult,
-    },
-}
-
-pub struct Scheduler {
-    updater: Updater,
-    config: SchedulerConfig,
-    on_event: Arc<dyn Fn(SchedulerEvent) + Send + Sync>,
-    running: Arc<AtomicBool>,
-    worker: Mutex<Option<JoinHandle<()>>>,
-}
-
-impl Scheduler {
-    fn new(
-        updater: Updater,
-        config: SchedulerConfig,
-        on_event: Arc<dyn Fn(SchedulerEvent) + Send + Sync>,
-    ) -> Self {
-        Self {
-            updater,
-            config,
-            on_event,
-            running: Arc::new(AtomicBool::new(false)),
-            worker: Mutex::new(None),
-        }
-    }
-
-    pub fn start(&self) -> OperationResult {
-        if self.running.swap(true, Ordering::SeqCst) {
-            return ok_result();
-        }
-        let updater = self.updater.clone();
-        let config = self.config;
-        let on_event = Arc::clone(&self.on_event);
-        let running = Arc::clone(&self.running);
-        *self.worker.lock().unwrap() = Some(thread::spawn(move || {
-            let mut first = true;
-            while running.load(Ordering::SeqCst) {
-                if !first || config.check_on_start {
-                    let force = first && config.force_on_start;
-                    on_event(SchedulerEvent::Tick {
-                        at: SystemTime::now(),
-                        force,
-                    });
-                    let result = updater.check(force, 0, config.policy);
-                    on_event(SchedulerEvent::Result {
-                        at: SystemTime::now(),
-                        force,
-                        result,
-                    });
-                }
-                first = false;
-                let wait = scheduler_wait(config.policy.as_ref());
-                let slice = Duration::from_millis(100);
-                let mut elapsed = Duration::ZERO;
-                while elapsed < wait && running.load(Ordering::SeqCst) {
-                    let step = std::cmp::min(slice, wait - elapsed);
-                    thread::sleep(step);
-                    elapsed += step;
-                }
-            }
-        }));
-        ok_result()
-    }
-
-    pub fn stop(&self) -> OperationResult {
-        self.running.store(false, Ordering::SeqCst);
-        if let Some(worker) = self.worker.lock().unwrap().take() {
-            let _ = worker.join();
-        }
-        ok_result()
-    }
-
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
-    }
-}
-
-impl Drop for Scheduler {
-    fn drop(&mut self) {
-        self.running.store(false, Ordering::SeqCst);
-        if let Some(worker) = self.worker.get_mut().unwrap().take() {
-            let _ = worker.join();
-        }
-    }
-}
-
-fn scheduler_wait(policy: Option<&CheckPolicy>) -> Duration {
-    let minimum = Duration::from_secs(5 * 60);
-    let success = policy
-        .and_then(|p| p.after_success.as_ref())
-        .map(prost_duration)
-        .filter(|value| !value.is_zero())
-        .unwrap_or(Duration::from_secs(24 * 60 * 60));
-    let failure = policy
-        .and_then(|p| p.after_failure.as_ref())
-        .map(prost_duration)
-        .filter(|value| !value.is_zero())
-        .unwrap_or(Duration::from_secs(60 * 60));
-    std::cmp::max(minimum, std::cmp::min(success, failure))
-}
-
-fn prost_duration(value: &pbjson_types::Duration) -> Duration {
-    if value.seconds < 0 || value.nanos < 0 {
-        return Duration::ZERO;
-    }
-    Duration::new(value.seconds as u64, value.nanos as u32)
 }
 
 fn event_failure(event: &UpdaterEvent) -> Option<Error> {
@@ -704,7 +549,7 @@ fn operation_result(events: Vec<UpdaterEvent>) -> OperationResult {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     struct FakeGlue {
         runs: Mutex<Vec<Vec<u8>>>,
@@ -781,7 +626,7 @@ mod tests {
         ) -> io::Result<()> {
             match self.calls.fetch_add(1, Ordering::SeqCst) {
                 0 => {
-                    on_event(&capabilities(3));
+                    on_event(&capabilities(4));
                     Ok(())
                 }
                 1 => {
@@ -813,7 +658,7 @@ mod tests {
             on_event: &mut dyn FnMut(&UpdaterEvent),
         ) -> io::Result<()> {
             if args == ["-capabilities"] {
-                on_event(&capabilities(3));
+                on_event(&capabilities(4));
                 return Ok(());
             }
             on_event(&UpdaterEvent {
@@ -846,25 +691,6 @@ mod tests {
                 ..Default::default()
             })),
         }
-    }
-
-    #[test]
-    fn platform_selectors_use_reserved_vocabulary() {
-        // SPEC.md §11.1 reserves GOOS/GOARCH-style names. std::env::consts on
-        // macOS reports "macos"/"arm64"; the SDK must map to "darwin"/"arm64".
-        let selectors = platform_selectors();
-        let expected_os = if cfg!(target_os = "macos") {
-            "darwin"
-        } else if cfg!(target_os = "windows") {
-            "windows"
-        } else {
-            "linux"
-        };
-        assert_eq!(selectors.get("os").map(String::as_str), Some(expected_os));
-        assert!(matches!(
-            selectors.get("arch").map(String::as_str),
-            Some("amd64") | Some("arm64") | Some("386")
-        ));
     }
 
     #[test]
@@ -940,7 +766,7 @@ mod tests {
 
     #[test]
     fn handshake_enforces_window_and_call_writes_hello() {
-        for (ipc, expected) in [(2, ErrorCode::UpdaterTooOld), (4, ErrorCode::UpdaterTooNew)] {
+        for (ipc, expected) in [(3, ErrorCode::UpdaterTooOld), (5, ErrorCode::UpdaterTooNew)] {
             let result = Updater::open_with_glue(
                 ClientProfile::default(),
                 Runtime::default(),
@@ -953,7 +779,7 @@ mod tests {
         }
 
         let glue = Arc::new(FakeGlue::new(vec![
-            vec![capabilities(3)],
+            vec![capabilities(4)],
             vec![UpdaterEvent {
                 kind: Some(updater_event::Kind::Result(ok_result())),
             }],
@@ -969,8 +795,8 @@ mod tests {
         let size = u32::from_be_bytes(payload[..4].try_into().unwrap()) as usize;
         let request = UpdaterRequest::decode(&payload[4..4 + size]).unwrap();
         let hello = request.hello.unwrap();
-        assert_eq!(hello.ipc_min, 3);
-        assert_eq!(hello.ipc_max, 3);
+        assert_eq!(hello.ipc_min, 4);
+        assert_eq!(hello.ipc_max, 4);
     }
 
     #[test]
@@ -979,7 +805,7 @@ mod tests {
             ClientProfile::default(),
             Runtime::default(),
             Arc::new(ExitGlue {
-                events: vec![capabilities(3)],
+                events: vec![capabilities(4)],
             }),
         );
         match result {

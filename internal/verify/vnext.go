@@ -13,17 +13,18 @@ import (
 	"github.com/shichao402/relkit/internal/model"
 )
 
+// ReleasedHTTPOptions configures an independent read of consumer-visible RUP
+// documents. It carries no resolution or Operator identity: a server has one
+// root, and the documents are trusted because that root signed them
+// (requirements 10.6, 10.7).
 type ReleasedHTTPOptions struct {
-	Product              string
-	Channel              string
-	Version              string
-	ConsumerBaseURL      string
-	DirectoryURL         string // Base URL of the consumer-visible directory service.
-	TrustedProductRoots  map[string]ed25519.PublicKey
-	ResolutionDigest     string
-	OperatorDeploymentID string
-	ResolutionIdentity   string
-	Client               *http.Client
+	Product         string
+	Channel         string
+	Version         string
+	ConsumerBaseURL string
+	DirectoryURL    string // Base URL of the consumer-visible directory service.
+	TrustedRootKeys map[string]ed25519.PublicKey
+	Client          *http.Client
 }
 
 // RunReleasedHTTP independently reads consumer-visible RUP documents. It does
@@ -33,10 +34,10 @@ func RunReleasedHTTP(ctx context.Context, options ReleasedHTTPOptions) (*Finding
 		return nil, fmt.Errorf("product, channel, and version are required")
 	}
 	if options.ConsumerBaseURL == "" {
-		return nil, fmt.Errorf("signed Operator Profile has no consumer endpoint")
+		return nil, fmt.Errorf("consumer base URL is required")
 	}
-	if len(options.TrustedProductRoots) == 0 {
-		return nil, fmt.Errorf("no trusted product RUP root was provisioned")
+	if len(options.TrustedRootKeys) == 0 {
+		return nil, fmt.Errorf("no trusted server root was provided")
 	}
 	client := options.Client
 	if client == nil {
@@ -51,7 +52,7 @@ func RunReleasedHTTP(ctx context.Context, options ReleasedHTTPOptions) (*Finding
 	if err != nil {
 		return nil, fmt.Errorf("consumer index is invalid protobuf: %w", err)
 	}
-	index, err := envelope.OpenEnvelope(indexEnvelope, options.TrustedProductRoots)
+	index, err := envelope.OpenEnvelope(indexEnvelope, options.TrustedRootKeys)
 	if err != nil {
 		return nil, fmt.Errorf("consumer index is untrusted: %w", err)
 	}
@@ -65,7 +66,6 @@ func RunReleasedHTTP(ctx context.Context, options ReleasedHTTPOptions) (*Finding
 	if selected == nil {
 		findings.Error(fmt.Sprintf("version %s is absent from consumer index", options.Version))
 	} else {
-		checkHTTPProvenance("index", selected.ResolutionDigest, selected.OperatorDeploymentId, selected.ResolutionIdentity, options, findings)
 		manifestRaw, fetchErr := fetchConsumer(ctx, client, objectURL(options.ConsumerBaseURL, model.ManifestKey(options.Product, options.Version)))
 		if fetchErr != nil {
 			findings.Error(fetchErr.Error())
@@ -75,11 +75,8 @@ func RunReleasedHTTP(ctx context.Context, options ReleasedHTTPOptions) (*Finding
 				selected.Manifest.Size != int64(len(manifestRaw)) {
 				findings.Error("consumer manifest bytes do not match the signed index reference")
 			}
-			manifest, parseErr := rupv2.UnmarshalManifest(manifestRaw)
-			if parseErr != nil {
+			if _, parseErr := rupv2.UnmarshalManifest(manifestRaw); parseErr != nil {
 				findings.Error(fmt.Sprintf("consumer manifest is invalid: %v", parseErr))
-			} else {
-				checkHTTPProvenance("manifest", manifest.ResolutionDigest, manifest.OperatorDeploymentId, manifest.ResolutionIdentity, options, findings)
 			}
 		}
 	}
@@ -99,7 +96,7 @@ func RunReleasedHTTP(ctx context.Context, options ReleasedHTTPOptions) (*Finding
 		findings.Error(fmt.Sprintf("consumer directory is invalid protobuf: %v", err))
 		return findings, nil
 	}
-	directory, err := envelope.OpenDirectoryEnvelope(directoryEnvelope, options.TrustedProductRoots)
+	directory, err := envelope.OpenDirectoryEnvelope(directoryEnvelope, options.TrustedRootKeys)
 	if err != nil {
 		findings.Error(fmt.Sprintf("consumer directory is untrusted: %v", err))
 		return findings, nil
@@ -108,22 +105,6 @@ func RunReleasedHTTP(ctx context.Context, options ReleasedHTTPOptions) (*Finding
 		findings.Error(fmt.Sprintf("consumer directory has product %q", directory.Product))
 	}
 	return findings, nil
-}
-
-func checkHTTPProvenance(
-	name, resolutionDigest, operatorID, identity string,
-	options ReleasedHTTPOptions,
-	findings *Findings,
-) {
-	if resolutionDigest != options.ResolutionDigest {
-		findings.Error(fmt.Sprintf("%s resolution is %q, expected %q", name, resolutionDigest, options.ResolutionDigest))
-	}
-	if operatorID != options.OperatorDeploymentID {
-		findings.Error(fmt.Sprintf("%s Operator is %q, expected %q", name, operatorID, options.OperatorDeploymentID))
-	}
-	if identity != options.ResolutionIdentity {
-		findings.Error(fmt.Sprintf("%s identity is %q, expected %q", name, identity, options.ResolutionIdentity))
-	}
 }
 
 func fetchConsumer(ctx context.Context, client *http.Client, url string) ([]byte, error) {

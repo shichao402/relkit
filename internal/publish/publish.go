@@ -47,12 +47,9 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if err != nil {
 		return nil, err
 	}
-	// ADR 0019 §1 retired the release-policy.json sidecar. Publish refuses a
-	// staged tree with no vNext resolution digest: without it there is no proof
-	// of what the tree contains, and no policy to re-verify the index against.
-	if staged.ResolutionDigest == "" {
-		return nil, Error{Message: "staged release carries no vNext resolution digest; run 'relkit stage --artifact-set' (the release-policy.json control plane is retired)"}
-	}
+	// ADR 0019 §1 retired the release-policy.json sidecar. A staged tree is now
+	// just the staged document plus its project declaration and ArtifactSet;
+	// the agent validates those before publishing.
 	channel := staged.Channel
 	mismatches := stage.VerifyPresentStagedHashes(cfg, staged)
 	if len(mismatches) > 0 {
@@ -92,7 +89,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 
 	var signers []envelope.Signer
 	if !dryRun {
-		signers, err = cfg.LoadSigners()
+		signers, err = cfg.Signers()
 		if err != nil {
 			return nil, err
 		}

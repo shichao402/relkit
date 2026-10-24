@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shichao402/relkit/internal/vnext/contracts"
+	"github.com/shichao402/relkit/internal/vnext/canonical"
 )
 
 const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -16,60 +16,40 @@ func testCatalog(t *testing.T) (Document, ed25519.PublicKey) {
 	for i := range seed {
 		seed[i] = byte(i + 7)
 	}
-	makeDistribution := func(version string, state State, certification int64) Distribution {
-		return Distribution{
-			Version:               version,
-			Commit:                strings.Repeat("c", 40),
-			Digest:                digest,
-			State:                 state,
-			CertificationSequence: certification,
+	makeRelease := func(version string) Release {
+		return Release{
+			Version: version,
+			Commit:  strings.Repeat("c", 40),
 			Components: []Component{
 				{
 					Name:     "cli",
 					Version:  version,
 					Platform: "darwin-arm64",
 					SHA256:   digest,
-					Source:   Source{Kind: "release-asset", URL: "https://example.invalid/relkit"},
+					Source:   Source{Kind: "server", URL: "https://updates.example/tools/" + version + "/cli"},
 				},
-			},
-			Provides: []contracts.Capability{
-				{Domain: contracts.DomainPublishProtocol, Peer: "agent", Min: 2, Max: 3},
 			},
 		}
 	}
 	value := Document{
 		Schema:   Schema,
 		Sequence: 9,
-		Distributions: []Distribution{
-			makeDistribution("v1.3.0-rc.1", StateCertified, 7),
-			makeDistribution("v1.1.9", StateCertified, 5),
-			makeDistribution("v1.2.0", StateCertified, 6),
-			makeDistribution("v2.0.0", StateCandidate, 0),
+		Current:  "v1.2.0",
+		Releases: []Release{
+			makeRelease("v1.3.0-rc.1"),
+			makeRelease("v1.1.9"),
+			makeRelease("v1.2.0"),
 		},
 	}
-	if err := value.Sign("distribution-root", seed); err != nil {
+	if err := value.Sign("server-root", seed); err != nil {
 		t.Fatal(err)
 	}
 	return value, ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 }
 
-func TestProductionUsesSemVerAndExcludesPrerelease(t *testing.T) {
-	value, _ := testCatalog(t)
-	production, err := value.Production()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(production) != 2 {
-		t.Fatalf("got %d production distributions, want 2", len(production))
-	}
-	if production[0].Version != "v1.2.0" || production[1].Version != "v1.1.9" {
-		t.Fatalf("unexpected production order: %v, %v", production[0].Version, production[1].Version)
-	}
-}
-
 func TestCatalogSignatureDetectsMutation(t *testing.T) {
 	value, publicKey := testCatalog(t)
-	trusted := map[string]ed25519.PublicKey{"distribution-root": publicKey}
+	trusted := map[string]ed25519.PublicKey{"server-root": publicKey}
 	if err := value.Verify(trusted); err != nil {
 		t.Fatal(err)
 	}
@@ -79,21 +59,62 @@ func TestCatalogSignatureDetectsMutation(t *testing.T) {
 	}
 }
 
-func TestCatalogSupportsDualSignatureRotation(t *testing.T) {
-	value, publicKey := testCatalog(t)
-	nextSeed := make([]byte, ed25519.SeedSize)
-	for index := range nextSeed {
-		nextSeed[index] = byte(index + 90)
-	}
-	nextPublic := ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey)
-	if err := value.AddSignature("next-root", nextSeed); err != nil {
+func TestCurrentReleaseIsTheServedVersion(t *testing.T) {
+	value, _ := testCatalog(t)
+	release, err := value.CurrentRelease()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := value.Verify(map[string]ed25519.PublicKey{"distribution-root": publicKey}); err != nil {
-		t.Fatalf("old root could not verify overlap: %v", err)
+	if release.Version != "v1.2.0" {
+		t.Fatalf("current release = %q", release.Version)
 	}
-	if err := value.Verify(map[string]ed25519.PublicKey{"next-root": nextPublic}); err != nil {
-		t.Fatalf("new root could not verify overlap: %v", err)
+	if len(release.Components) != 1 || release.Components[0].Source.Kind != "server" {
+		t.Fatalf("components must be served by the server: %#v", release.Components)
+	}
+}
+
+func TestValidateRejectsUnknownCurrentAndForeignSource(t *testing.T) {
+	value, _ := testCatalog(t)
+	value.Current = "v9.9.9"
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "not one of the releases") {
+		t.Fatalf("expected an unknown current rejection, got %v", err)
+	}
+
+	value, _ = testCatalog(t)
+	value.Releases[0].Components[0].Source.Kind = "release-asset"
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "served by the server") {
+		t.Fatalf("expected a foreign source rejection, got %v", err)
+	}
+}
+
+func TestValidateRejectsDuplicateReleaseAndComponent(t *testing.T) {
+	value, _ := testCatalog(t)
+	value.Releases = append(value.Releases, value.Releases[0])
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate release version") {
+		t.Fatalf("expected a duplicate release rejection, got %v", err)
+	}
+
+	value, _ = testCatalog(t)
+	value.Releases[0].Components = append(value.Releases[0].Components, value.Releases[0].Components[0])
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate component") {
+		t.Fatalf("expected a duplicate component rejection, got %v", err)
+	}
+}
+
+// TestCatalogHasNoLifecycleState pins the epoch: a release either is the
+// version the server marks current or a historical entry, with no candidate /
+// certified split and no certification sequence.
+func TestCatalogHasNoLifecycleState(t *testing.T) {
+	value, _ := testCatalog(t)
+	unsigned, err := canonical.Bytes(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(unsigned)
+	for _, gone := range []string{"state", "certificationSequence", "lifecycle", "provides", "requires"} {
+		if strings.Contains(text, gone) {
+			t.Fatalf("catalog still serializes %q:\n%s", gone, text)
+		}
 	}
 }
 
@@ -113,47 +134,5 @@ func TestSemVerPrecedence(t *testing.T) {
 		if got >= 0 {
 			t.Fatalf("CompareVersions(%q, %q) = %d, want < 0", pair[0], pair[1], got)
 		}
-	}
-}
-
-func TestStateTransitions(t *testing.T) {
-	for _, transition := range [][2]State{
-		{StateCandidate, StateCertified},
-		{StateCertified, StateSuperseded},
-		{StateCertified, StateRevoked},
-		{StateSuperseded, StateRevoked},
-	} {
-		if err := ValidateTransition(transition[0], transition[1]); err != nil {
-			t.Fatalf("%v: %v", transition, err)
-		}
-	}
-	if err := ValidateTransition(StateRevoked, StateCertified); err == nil {
-		t.Fatal("revoked distribution unexpectedly returned to certified")
-	}
-}
-
-func TestDistributionIdentityExcludesLifecycleFields(t *testing.T) {
-	value, _ := testCatalog(t)
-	distribution := value.Distributions[1]
-	first, err := distribution.IdentityDigest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	distribution.State = StateSuperseded
-	distribution.CertificationSequence += 100
-	second, err := distribution.IdentityDigest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != second {
-		t.Fatalf("lifecycle transition changed immutable identity: %s != %s", first, second)
-	}
-	distribution.Components[0].Source.URL += "/mutated"
-	third, err := distribution.IdentityDigest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == third {
-		t.Fatal("immutable component mutation did not change distribution identity")
 	}
 }

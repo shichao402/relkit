@@ -6,10 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/keys"
 )
+
+func TestSkeletonDeclaresOneRoot(t *testing.T) {
+	doc := Skeleton("demo")
+	if _, ok := doc["signing"]; ok {
+		t.Fatalf("skeleton still declares a signing block: %+v", doc["signing"])
+	}
+	if doc["rootKeyId"] == "" {
+		t.Fatalf("skeleton rootKeyId = %v", doc["rootKeyId"])
+	}
+}
 
 func TestLoadRetainVersions(t *testing.T) {
 	dir := t.TempDir()
@@ -138,68 +145,7 @@ func TestLoadSiteSinksAlwaysRejected(t *testing.T) {
 	}
 }
 
-func TestLoadSignersIgnoresEnvironmentVariable(t *testing.T) {
-	t.Setenv("RELKIT_PRIVATE_KEY", "not-a-real-seed-but-must-be-ignored")
-	cfg := &Config{
-		Root: t.TempDir(),
-		Signing: map[string]any{
-			"keyId":         "k1",
-			"privateKeyEnv": "RELKIT_PRIVATE_KEY",
-		},
-	}
-	_, err := cfg.LoadSigners()
-	if err == nil {
-		t.Fatal("expected error when privateKeyPath is missing")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "privateKeyPath") {
-		t.Fatalf("error = %q, want mention of privateKeyPath", msg)
-	}
-	if strings.Contains(msg, "RELKIT_PRIVATE_KEY") {
-		t.Fatalf("error still points at the env var: %q", msg)
-	}
-}
 
-func TestLoadSignersSupportsRotationWindow(t *testing.T) {
-	root := t.TempDir()
-	var entries []any
-	for index, keyID := range []string{"old", "new"} {
-		seed := make([]byte, ed25519.SeedSize)
-		for offset := range seed {
-			seed[offset] = byte(index*40 + offset + 1)
-		}
-		value := keys.PrivateKeyDocument(keyID, seed)
-		data, err := rupv2.MarshalPrivateKey(&value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		path := filepath.Join(root, keyID+".private.pb")
-		if err := os.WriteFile(path, data, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		entries = append(entries, map[string]any{"keyId": keyID, "privateKeyPath": path})
-	}
-	cfg := &Config{Root: root, Signing: map[string]any{"keys": entries}}
-	signers, err := cfg.LoadSigners()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(signers) != 2 || signers[0].KeyID != "old" || signers[1].KeyID != "new" {
-		t.Fatalf("unexpected signers: %#v", signers)
-	}
-}
-
-func TestSkeletonHasNoPrivateKeyEnv(t *testing.T) {
-	doc := Skeleton("demo")
-	signing, _ := doc["signing"].(map[string]any)
-	if _, ok := signing["privateKeyEnv"]; ok {
-		t.Fatalf("skeleton still has privateKeyEnv: %+v", signing)
-	}
-	path, _ := signing["privateKeyPath"].(string)
-	if path == "" {
-		t.Fatalf("skeleton privateKeyPath = %q", path)
-	}
-}
 
 func TestLoadRetainVersionsRejectsNegative(t *testing.T) {
 	dir := t.TempDir()
@@ -276,5 +222,72 @@ func TestLoadVersionSyncScriptRejectsNonString(t *testing.T) {
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "version.syncScript") {
 		t.Fatalf("expected version.syncScript type rejection, got %v", err)
+	}
+}
+
+func TestSignersRequireResolvedRoot(t *testing.T) {
+	cfg := &Config{Root: t.TempDir(), RootKeyIDValue: "server-root"}
+	_, err := cfg.Signers()
+	if err == nil {
+		t.Fatal("expected an error when the root was never resolved")
+	}
+	if !strings.Contains(err.Error(), "server-root") || !strings.Contains(err.Error(), "not resolved") {
+		t.Fatalf("error = %q, want it to name the unresolved root", err.Error())
+	}
+	if _, err := cfg.TrustedPublicKeys(); err == nil {
+		t.Fatal("expected trusted keys to be unavailable without a root")
+	}
+}
+
+func TestSignersComeFromTheOneRoot(t *testing.T) {
+	seed := make([]byte, ed25519.SeedSize)
+	for offset := range seed {
+		seed[offset] = byte(offset + 11)
+	}
+	public := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	cfg := &Config{Root: t.TempDir(), RootKeyIDValue: "server-root"}
+	cfg.SetRoot(&RootKey{KeyID: "server-root", Seed: seed, PublicKey: public})
+
+	signers, err := cfg.Signers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(signers) != 1 || signers[0].KeyID != "server-root" {
+		t.Fatalf("unexpected signers: %#v", signers)
+	}
+	trusted, err := cfg.TrustedPublicKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trusted) != 1 || !trusted["server-root"].Equal(public) {
+		t.Fatalf("unexpected trusted keys: %#v", trusted)
+	}
+}
+
+func TestSignersRejectWrongSeedLength(t *testing.T) {
+	cfg := &Config{Root: t.TempDir(), RootKeyIDValue: "server-root"}
+	cfg.SetRoot(&RootKey{KeyID: "server-root", Seed: []byte{1, 2, 3}})
+	if _, err := cfg.Signers(); err == nil || !strings.Contains(err.Error(), "seed bytes") {
+		t.Fatalf("expected a seed length error, got %v", err)
+	}
+}
+
+func TestLoadRejectsSigningBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigName)
+	raw := `{
+  "product": "demo",
+  "rootKeyId": "server-root",
+  "signing": {"keyId": "k1", "privateKeyPath": "k1.private.pb"},
+  "backends": {
+    "serve": {"type": "relkit-compatible", "baseUrl": "https://example.invalid/", "tokenEnv": "RELKIT_SERVE_TOKEN"}
+  }
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "rootKeyId") {
+		t.Fatalf("expected the signing block to be rejected, got %v", err)
 	}
 }

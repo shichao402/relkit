@@ -1,5 +1,10 @@
-// Package release implements the vNext release path from verified ArtifactSet
-// to the existing frozen RUP wire documents.
+// Package release implements the release path from a verified ArtifactSet to
+// the frozen RUP wire documents the agent publishes.
+//
+// A stage no longer consumes a host-side resolution or a candidate bundle: the
+// server decides which relkit version is current (requirement 12.1), so staging
+// records only what the host actually built — its project declaration, the
+// ArtifactSet, and the resulting staged document.
 package release
 
 import (
@@ -15,77 +20,50 @@ import (
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	"github.com/shichao402/relkit/internal/vnext/document"
 	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/resolution"
 )
 
 const (
-	ResolutionFile       = "resolution.json"
-	ResolutionBundleFile = "resolution-bundle.json"
-	ProjectFile          = "relkit.project.json"
-	ArtifactSetFile      = "artifact-set.json"
+	ProjectFile     = "relkit.project.json"
+	ArtifactSetFile = "artifact-set.json"
 )
 
 type StageOptions struct {
-	ProjectRoot              string
-	ArtifactSetPath          string
-	ResolutionBundlePath     string
-	CandidateRootFingerprint string
-	Code                     int
-	MinFrom                  int
-	NotesURL                 string
+	ProjectRoot string
+	// ArtifactSetPath is the artifact-set.json the producer wrote. Its directory
+	// is the root the ArtifactSet paths are resolved against.
+	ArtifactSetPath string
+	Code            int
+	MinFrom         int
+	NotesURL        string
+	// RelkitVersion is the relkit component version the server currently marks
+	// as current. It is recorded for diagnostics only; the host does not pick
+	// it, the server does.
+	RelkitVersion string
 }
 
+// Stage writes an immutable staging tree for the ArtifactSet produced from the
+// given project document.
 func Stage(
 	product project.Document,
-	resolved resolution.Document,
 	artifacts artifactset.Document,
 	options StageOptions,
 ) (*model.StagedDocument, error) {
 	if err := product.Validate(); err != nil {
 		return nil, fmt.Errorf("project: %w", err)
 	}
-	if err := resolved.Validate(); err != nil {
-		return nil, fmt.Errorf("resolution: %w", err)
-	}
-	if options.ResolutionBundlePath == "" {
-		return nil, fmt.Errorf("resolution bundle path is required")
-	}
-	bundle, err := resolution.LoadBundle(options.ResolutionBundlePath)
-	if err != nil {
-		return nil, err
-	}
-	verifiedResolution, err := bundle.Verify(resolution.BundlePolicy{
-		DistributionRootFingerprint: product.TrustFingerprint,
-		CandidateRootFingerprint:    options.CandidateRootFingerprint,
-		OperatorDeploymentID:        resolved.Operator.DeploymentID,
-		Identity:                    resolved.Identity,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("resolution bundle: %w", err)
-	}
-	if verifiedResolution.Digest != resolved.Digest {
-		return nil, fmt.Errorf("resolution bundle digest does not match resolution")
-	}
 	if err := artifacts.Validate(); err != nil {
 		return nil, fmt.Errorf("artifact set: %w", err)
 	}
-	projectDigest, err := product.Digest()
-	if err != nil {
-		return nil, err
+	if artifacts.Product != product.Product {
+		return nil, fmt.Errorf("ArtifactSet product %q does not match project product %q", artifacts.Product, product.Product)
 	}
-	if resolved.ProjectDigest != projectDigest {
-		return nil, fmt.Errorf("resolution belongs to a different project document")
-	}
-	if artifacts.Product != product.Product || artifacts.ResolutionDigest != resolved.Digest {
-		return nil, fmt.Errorf("ArtifactSet product/resolution does not match the selected project and resolution")
+	if len(product.Channels) != 0 && !contains(product.Channels, artifacts.Channel) {
+		return nil, fmt.Errorf("project does not declare channel %q", artifacts.Channel)
 	}
 	if options.Code != 0 && options.Code != artifacts.ReleaseCode {
 		return nil, fmt.Errorf("stage code %d does not match ArtifactSet releaseCode %d", options.Code, artifacts.ReleaseCode)
 	}
 	releaseCode := artifacts.ReleaseCode
-	if !contains(resolved.AllowedChannels, artifacts.Channel) {
-		return nil, fmt.Errorf("resolution identity %s does not allow channel %q", resolved.Identity, artifacts.Channel)
-	}
 	root := options.ProjectRoot
 	if root == "" {
 		root = "."
@@ -164,13 +142,10 @@ func Stage(
 	if err != nil {
 		return nil, err
 	}
-	staged.ResolutionDigest = resolved.Digest
-	staged.OperatorDeploymentId = resolved.Operator.DeploymentID
-	staged.ResolutionIdentity = string(resolved.Identity)
 
 	finalDirectory := legacystage.StagingDir(absoluteRoot, artifacts.Version)
 	if _, err := os.Stat(finalDirectory); err == nil {
-		return nil, fmt.Errorf("staging tree %s already exists; vNext staged releases are immutable", finalDirectory)
+		return nil, fmt.Errorf("staging tree %s already exists; staged releases are immutable", finalDirectory)
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -197,12 +172,6 @@ func Stage(
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(temporary, "staged.pb"), stagedBytes, 0o644); err != nil {
-		return nil, err
-	}
-	if err := document.Write(filepath.Join(temporary, ResolutionFile), resolved); err != nil {
-		return nil, err
-	}
-	if err := document.Write(filepath.Join(temporary, ResolutionBundleFile), bundle); err != nil {
 		return nil, err
 	}
 	if err := document.Write(filepath.Join(temporary, ProjectFile), product); err != nil {

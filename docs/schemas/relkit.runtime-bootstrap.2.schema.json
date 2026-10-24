@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.runtime-bootstrap/2",
+  "title": "relkit.runtime-bootstrap/2",
+  "description": "宿主构建嵌进 updater 的输入文档：这个应用唯一信任的那台服务器的根公钥，以及由同一把根签名的 Runtime Profile。文档本身不签名——它携带的 Profile 已由内嵌公钥验证，签名在这里没有第二层可加。对应 internal/vnext/runtimebootstrap。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "rootKeyId", "rootPublicKey", "rootFingerprint", "product", "profile"],
+  "properties": {
+    "schema": { "const": "relkit.runtime-bootstrap/2" },
+    "rootKeyId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "服务器根的 keyId。一个应用只认一台服务器的一把根，因此这里是单值而不是 key 集合。"
+    },
+    "rootPublicKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "服务器根公钥的 OpenSSH 行形式（ssh-ed25519 <base64>）。与项目配置、allowed_signers 使用同一文本形式。"
+    },
+    "rootFingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "rootPublicKey 的 SHA-256 指纹。校验时必须与从公钥重新算出的值一致。"
+    },
+    "product": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "description": "本应用的产品名。非空时必须与 profile.product 一致。"
+    },
+    "profile": {
+      "$ref": "https://relkit.dev/schemas/relkit.runtime-profile/1",
+      "description": "由 rootKeyId 对应的根签名的 Runtime Profile。加载时验证签名。"
+    }
+  }
+}

@@ -41,7 +41,7 @@ func (s *Server) handleDrop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid filename", http.StatusBadRequest)
 		return
 	}
-	pc, ok := s.cfg.Products[product]
+	pc, ok := s.product(product)
 	if !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return

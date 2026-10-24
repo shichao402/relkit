@@ -29,7 +29,7 @@ type unpublishRequest struct {
 // plane: the vNext project document plus the machine publish profile is the
 // only authority, and it is readable whether or not the staged tree survives
 // because it lives in the product repository, not in .relkit/cache.
-func loadUnpublishConfig(pc ProductConfig, product, version string) (*config.Config, string, error) {
+func loadUnpublishConfig(pc ProductConfig, product, version string, root *config.RootKey) (*config.Config, string, error) {
 	if pc.Profile == "" {
 		return nil, "", fmt.Errorf("publish profile path is empty for product %q", product)
 	}
@@ -44,7 +44,7 @@ func loadUnpublishConfig(pc ProductConfig, product, version string) (*config.Con
 	if err != nil {
 		return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
 	}
-	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root)
+	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root, root)
 	if err != nil {
 		return nil, "", err
 	}
@@ -70,7 +70,7 @@ func (s *Server) handleUnpublish(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuthFor(w, r, req.Product) {
 		return
 	}
-	pc, ok := s.cfg.Products[req.Product]
+	pc, ok := s.product(req.Product)
 	if !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
@@ -83,7 +83,7 @@ func (s *Server) handleUnpublish(w http.ResponseWriter, r *http.Request) {
 	}
 	defer mu.Unlock()
 
-	cfg, source, err := loadUnpublishConfig(pc, req.Product, version)
+	cfg, source, err := loadUnpublishConfig(pc, req.Product, version, s.cfg.Root)
 	if err != nil {
 		http.Error(w, "load unpublish config: "+err.Error(), http.StatusInternalServerError)
 		return

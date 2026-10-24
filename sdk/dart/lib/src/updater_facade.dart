@@ -6,13 +6,13 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:fixnum/fixnum.dart';
-import 'package:protobuf/protobuf.dart';
 
 import 'gen/updater/v1/updater.pb.dart';
+import 'frame.dart';
 
-const int ipcMin = 3;
-const int ipcMax = 3;
-const int ipcCurrent = 3;
+const int ipcMin = 4;
+const int ipcMax = 4;
+const int ipcCurrent = 4;
 
 abstract class Glue {
   Future<String> locate(Runtime runtime);
@@ -54,37 +54,12 @@ class DefaultGlue implements Glue {
     proc.stdin.add(stdinBytes);
     await proc.stdin.close();
     proc.stderr.listen((_) {});
-    yield* _readFrames(proc.stdout);
+    yield* decodeFrames(proc.stdout);
     await proc.exitCode;
   }
 }
 
-Stream<UpdaterEvent> _readFrames(Stream<List<int>> stdout) async* {
-  final buf = BytesBuilder(copy: false);
-  await for (final chunk in stdout) {
-    buf.add(chunk);
-    while (true) {
-      final data = buf.toBytes();
-      if (data.length < 4) break;
-      final n = ByteData.sublistView(data).getUint32(0, Endian.big);
-      if (data.length < 4 + n) break;
-      final payload = data.sublist(4, 4 + n);
-      final rest = data.sublist(4 + n);
-      buf.clear();
-      buf.add(rest);
-      yield UpdaterEvent.fromBuffer(payload);
-    }
-  }
-}
 
-Uint8List _frame(GeneratedMessage msg) {
-  final payload = msg.writeToBuffer();
-  final out = BytesBuilder(copy: false);
-  final hdr = ByteData(4)..setUint32(0, payload.length, Endian.big);
-  out.add(hdr.buffer.asUint8List());
-  out.add(payload);
-  return out.takeBytes();
-}
 
 class OpenResult {
   OpenResult.opened(this.updater, this.capabilities)
@@ -151,7 +126,7 @@ class Updater {
     req.hello = ClientHello(ipcMin: ipcMin, ipcMax: ipcMax);
     req.profile = _profile;
     req.runtime = _runtime;
-    return _glue.run(_bin, const <String>[], _frame(req));
+    return _glue.run(_bin, const <String>[], encodeFrame(req));
   }
 
   /// protobuf.dart reserves `check` on GeneratedMessage, so the field is `check_10`.
@@ -248,6 +223,18 @@ class Updater {
 
   Future<Result> rollback() async {
     final req = UpdaterRequest()..rollback = RollbackOp();
+    await for (final ev in _call(req)) {
+      if (ev.hasResult()) return ev.result;
+    }
+    return Result()..ok = Ok();
+  }
+
+  /// Deletes one installed version from a LIBRARY install root.
+  /// [inUseCodes] carries the codes the host is running from right now; the
+  /// engine refuses those as well as the version active.json points at.
+  Future<Result> deleteInstalled(Int64 code, {List<Int64> inUseCodes = const []}) async {
+    final req = UpdaterRequest()
+      ..deleteInstalled = DeleteInstalledOp(code: code, inUseCodes: inUseCodes);
     await for (final ev in _call(req)) {
       if (ev.hasResult()) return ev.result;
     }

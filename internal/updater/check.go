@@ -1,4 +1,4 @@
-package updater
+﻿package updater
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
 	"github.com/shichao402/relkit/internal/inprocess"
 	"github.com/shichao402/relkit/internal/model"
-	"github.com/shichao402/relkit/sdk"
+	"github.com/shichao402/relkit/internal/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -64,7 +64,7 @@ func osReadPlanIDs(st store) ([]string, error) {
 // never have to spell correctly by hand.
 //
 // os and arch are injected (GOOS/GOARCH vocabulary: darwin/linux/windows,
-// amd64/arm64/386) when — and only when — the host left them unset. Hosts that
+// amd64/arm64/386) when 鈥?and only when 鈥?the host left them unset. Hosts that
 // declare their own values keep them verbatim, including non-canonical ones,
 // so a publisher's custom dimensions (arch=x64) keep working. This is the
 // protocol-plane fix for hosts like a Rust client reporting std::env::consts::OS

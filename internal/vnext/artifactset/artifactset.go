@@ -46,23 +46,21 @@ type Artifact struct {
 }
 
 type MergeIdentity struct {
-	Product          string `json:"product"`
-	Version          string `json:"version"`
-	Channel          string `json:"channel"`
-	ResolutionDigest string `json:"resolutionDigest"`
+	Product string `json:"product"`
+	Version string `json:"version"`
+	Channel string `json:"channel"`
 }
 
 type Document struct {
-	Schema           string         `json:"schema"`
-	ResolutionDigest string         `json:"resolutionDigest"`
-	Product          string         `json:"product"`
-	Version          string         `json:"version"`
-	ReleaseCode      int            `json:"releaseCode"`
-	Channel          string         `json:"channel"`
-	Changelog        string         `json:"changelog,omitempty"`
-	Display          map[string]any `json:"display,omitempty"`
-	MergeIdentity    *MergeIdentity `json:"mergeIdentity,omitempty"`
-	Artifacts        []Artifact     `json:"artifacts"`
+	Schema        string         `json:"schema"`
+	Product       string         `json:"product"`
+	Version       string         `json:"version"`
+	ReleaseCode   int            `json:"releaseCode"`
+	Channel       string         `json:"channel"`
+	Changelog     string         `json:"changelog,omitempty"`
+	Display       map[string]any `json:"display,omitempty"`
+	MergeIdentity *MergeIdentity `json:"mergeIdentity,omitempty"`
+	Artifacts     []Artifact     `json:"artifacts"`
 }
 
 func Load(path string) (*Document, error) {
@@ -80,9 +78,6 @@ func (d Document) Validate() error {
 	if d.Schema != Schema {
 		return fmt.Errorf("schema is %q, expected %q", d.Schema, Schema)
 	}
-	if err := canonical.ValidateDigest(d.ResolutionDigest); err != nil {
-		return fmt.Errorf("resolutionDigest: %w", err)
-	}
 	if d.Product == "" || d.Version == "" || d.Channel == "" {
 		return fmt.Errorf("product, version, and channel must not be empty")
 	}
@@ -95,8 +90,7 @@ func (d Document) Validate() error {
 	if d.MergeIdentity != nil {
 		if d.MergeIdentity.Product != d.Product ||
 			d.MergeIdentity.Version != d.Version ||
-			d.MergeIdentity.Channel != d.Channel ||
-			d.MergeIdentity.ResolutionDigest != d.ResolutionDigest {
+			d.MergeIdentity.Channel != d.Channel {
 			return fmt.Errorf("mergeIdentity does not match document identity")
 		}
 	}
@@ -219,8 +213,7 @@ func (d Document) VerifyFiles(outputRoot string, selectorDimensions []string) er
 	return nil
 }
 
-// Merge combines independently built platform drops. The identity and
-// resolution must be byte-for-byte equivalent; platform asymmetry is allowed.
+
 func Merge(documents ...Document) (*Document, error) {
 	if len(documents) == 0 {
 		return nil, fmt.Errorf("at least one artifact set is required")
@@ -244,9 +237,8 @@ func Merge(documents ...Document) (*Document, error) {
 		if candidate.Product != base.Product ||
 			candidate.Version != base.Version ||
 			candidate.ReleaseCode != base.ReleaseCode ||
-			candidate.Channel != base.Channel ||
-			candidate.ResolutionDigest != base.ResolutionDigest {
-			return nil, fmt.Errorf("artifact set %d has a different product/version/releaseCode/channel/resolution identity", index)
+			candidate.Channel != base.Channel {
+			return nil, fmt.Errorf("artifact set %d has a different product/version/releaseCode/channel identity", index)
 		}
 		if len(documents) > 1 && candidate.MergeIdentity == nil {
 			return nil, fmt.Errorf("artifact set %d is missing mergeIdentity", index)

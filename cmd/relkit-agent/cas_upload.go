@@ -73,7 +73,7 @@ func (s *Server) handleCASCredentials(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "product and blobs required", http.StatusBadRequest)
 		return
 	}
-	if _, ok := s.cfg.Products[req.Product]; !ok {
+	if _, ok := s.product(req.Product); !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
 	}
@@ -127,7 +127,10 @@ func (s *Server) handleCASCredentials(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) productIngest(product string) (backends.Backend, backends.Ingest, error) {
-	pc := s.cfg.Products[product]
+	pc, ok := s.product(product)
+	if !ok {
+		return nil, nil, fmt.Errorf("product %q is not registered", product)
+	}
 	profile, err := config.LoadPublishProfile(pc.Profile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("profile %s: %w", pc.Profile, err)
@@ -284,7 +287,7 @@ func (s *Server) beginCASMultipart(w http.ResponseWriter, r *http.Request) (casM
 	if !s.requireAuthFor(w, r, finish.Product) {
 		return casMultipartFinish{}, nil, "", false
 	}
-	if _, ok := s.cfg.Products[finish.Product]; !ok {
+	if _, ok := s.product(finish.Product); !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return casMultipartFinish{}, nil, "", false
 	}

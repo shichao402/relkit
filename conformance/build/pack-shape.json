@@ -25,36 +25,7 @@
         "build.rs",
         "proto/updater/v1/updater.proto",
         "src/json.rs",
-        "src/lib.rs",
-        "src/runtime_bootstrap.rs"
-      ]
-    },
-    {
-      "name": "sdk-go-go-deps-shape",
-      "description": "sdk-go packs go.mod/go.sum plus module-internal packages resolved by go list -deps, test files excluded, only the entrypoint packages' own directories.",
-      "component": "sdk-go",
-      "expectEntries": [
-        "api/rup/v2/codec.go",
-        "api/rup/v2/envelope.pb.go",
-        "api/rup/v2/http.pb.go",
-        "api/rup/v2/keys.pb.go",
-        "api/rup/v2/objects.pb.go",
-        "api/updater/v1/payload.pb.go",
-        "api/updater/v1/updater.pb.go",
-        "go.mod",
-        "go.sum",
-        "internal/ipc/frame.go",
-        "sdk/code.go",
-        "sdk/doc.go",
-        "sdk/download.go",
-        "sdk/fetch.go",
-        "sdk/keys.go",
-        "sdk/policy.go",
-        "sdk/preference.go",
-        "sdk/runtime_bootstrap.go",
-        "sdk/state.go",
-        "sdk/updaterfacade/facade.go",
-        "sdk/updaterfacade/ipc.go"
+        "src/lib.rs"
       ]
     },
     {

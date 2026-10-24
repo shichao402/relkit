@@ -2,7 +2,8 @@
 .relkit/onboarding.json
 .relkit/drop-incoming/
 /dist/
-scripts/deploy/.venv/
+/dist-tools/
+/scripts/deploy/.venv/
 tmp/
 *.exe
 *.private.json

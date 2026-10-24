@@ -1,5 +1,5 @@
-// Package producer runs the only product-build extension accepted by the
-// vNext release core and verifies its ArtifactSet before any staging occurs.
+// Package producer runs the only product-build extension the release core
+// accepts and verifies its ArtifactSet before any staging occurs.
 package producer
 
 import (
@@ -13,51 +13,38 @@ import (
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	"github.com/shichao402/relkit/internal/vnext/extension"
 	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/resolution"
-	"github.com/shichao402/relkit/internal/vnext/runtimebootstrap"
 )
 
-const InputSchema = "relkit.artifact-producer-input/1"
+const InputSchema = "relkit.artifact-producer-input/2"
 
+// Input is the JSON document handed to the product's artifact-producer on
+// stdin. It no longer carries a resolution digest: the server, not the host
+// repository, decides which relkit version runs (requirement 12.1).
 type Input struct {
-	Schema            string                               `json:"schema"`
-	ResolutionDigest  string                               `json:"resolutionDigest"`
-	Product           string                               `json:"product"`
-	Version           string                               `json:"version"`
-	Channel           string                               `json:"channel"`
-	Target            string                               `json:"target"`
-	OutputDirectory   string                               `json:"outputDirectory"`
-	RuntimeBootstraps map[string]runtimebootstrap.Document `json:"runtimeBootstraps,omitempty"`
+	Schema          string `json:"schema"`
+	Product         string `json:"product"`
+	Version         string `json:"version"`
+	Channel         string `json:"channel"`
+	Target          string `json:"target"`
+	OutputDirectory string `json:"outputDirectory"`
 }
 
 type Options struct {
-	ProjectRoot       string
-	OutputDir         string
-	Version           string
-	Channel           string
-	Target            string
-	ProtectedPaths    []string
-	RuntimeBootstraps map[string]runtimebootstrap.Document
+	ProjectRoot    string
+	OutputDir      string
+	Version        string
+	Channel        string
+	Target         string
+	ProtectedPaths []string
 }
 
 func Run(
 	ctx context.Context,
 	product project.Document,
-	resolved resolution.Document,
 	options Options,
 ) (*artifactset.Document, error) {
 	if err := product.Validate(); err != nil {
 		return nil, fmt.Errorf("project: %w", err)
-	}
-	if err := resolved.Validate(); err != nil {
-		return nil, fmt.Errorf("resolution: %w", err)
-	}
-	projectDigest, err := product.Digest()
-	if err != nil {
-		return nil, err
-	}
-	if resolved.ProjectDigest != projectDigest {
-		return nil, fmt.Errorf("resolution belongs to project digest %s, current project is %s", resolved.ProjectDigest, projectDigest)
 	}
 	if product.ArtifactProducer == nil {
 		return nil, fmt.Errorf("project has no artifactProducer")
@@ -65,14 +52,11 @@ func Run(
 	if options.Version == "" || options.Channel == "" || options.Target == "" {
 		return nil, fmt.Errorf("version, channel, and target are required")
 	}
-	if !slices.Contains(resolved.AllowedChannels, options.Channel) {
-		return nil, fmt.Errorf("resolution identity %s does not allow channel %q", resolved.Identity, options.Channel)
+	if len(product.Channels) != 0 && !slices.Contains(product.Channels, options.Channel) {
+		return nil, fmt.Errorf("project does not declare channel %q", options.Channel)
 	}
-	if !slices.Contains(product.CapabilityFingerprint.OSArch, options.Target) {
-		return nil, fmt.Errorf("target %q is not declared by the project", options.Target)
-	}
-	if err := validateRuntimeBootstraps(product, resolved, options.RuntimeBootstraps); err != nil {
-		return nil, err
+	if len(product.SelectorDimensions) != 0 && !slices.Contains(product.SelectorDimensions, "os-arch") {
+		return nil, fmt.Errorf("project selectorDimensions must include os-arch for targeted builds")
 	}
 	root := options.ProjectRoot
 	if root == "" {
@@ -111,14 +95,12 @@ func Run(
 		Permissions:      append([]string(nil), command.Permissions...),
 	}
 	input := Input{
-		Schema:            InputSchema,
-		ResolutionDigest:  resolved.Digest,
-		Product:           product.Product,
-		Version:           options.Version,
-		Channel:           options.Channel,
-		Target:            options.Target,
-		OutputDirectory:   outputDir,
-		RuntimeBootstraps: options.RuntimeBootstraps,
+		Schema:          InputSchema,
+		Product:         product.Product,
+		Version:         options.Version,
+		Channel:         options.Channel,
+		Target:          options.Target,
+		OutputDirectory: outputDir,
 	}
 	var output artifactset.Document
 	runErr := extension.Run(ctx, spec, input, &output)
@@ -130,50 +112,13 @@ func Run(
 	}
 	if output.Product != product.Product ||
 		output.Version != options.Version ||
-		output.Channel != options.Channel ||
-		output.ResolutionDigest != resolved.Digest {
-		return nil, fmt.Errorf("artifact producer returned a different product/version/channel/resolution identity")
+		output.Channel != options.Channel {
+		return nil, fmt.Errorf("artifact producer returned a different product/version/channel")
 	}
 	if err := output.VerifyFiles(outputDir, product.SelectorDimensions); err != nil {
 		return nil, err
 	}
 	return &output, nil
-}
-
-func validateRuntimeBootstraps(
-	product project.Document,
-	resolved resolution.Document,
-	values map[string]runtimebootstrap.Document,
-) error {
-	declared := make(map[string]project.Subscription, len(product.RuntimeProfileSubscriptions))
-	for _, subscription := range product.RuntimeProfileSubscriptions {
-		declared[subscription.ProductRef] = subscription
-		value, ok := values[subscription.ProductRef]
-		if !ok {
-			return fmt.Errorf("runtime bootstrap %q is required by the project", subscription.ProductRef)
-		}
-		if err := value.Validate(); err != nil {
-			return fmt.Errorf("runtime bootstrap %q: %w", subscription.ProductRef, err)
-		}
-		if value.ResolutionDigest != resolved.Digest {
-			return fmt.Errorf("runtime bootstrap %q belongs to resolution %s, current resolution is %s", subscription.ProductRef, value.ResolutionDigest, resolved.Digest)
-		}
-		if value.Profile.Product != subscription.ProductRef {
-			return fmt.Errorf("runtime bootstrap %q embeds product %q", subscription.ProductRef, value.Profile.Product)
-		}
-		if value.RootFingerprint != subscription.RootFingerprint {
-			return fmt.Errorf("runtime bootstrap %q root fingerprint does not match project", subscription.ProductRef)
-		}
-		if digest := resolved.RuntimeProfileDigests[subscription.ProductRef]; digest != value.ProfileDigest {
-			return fmt.Errorf("runtime bootstrap %q profile digest %s does not match resolution %s", subscription.ProductRef, value.ProfileDigest, digest)
-		}
-	}
-	for productRef := range values {
-		if _, ok := declared[productRef]; !ok {
-			return fmt.Errorf("runtime bootstrap %q was provided but is not declared by the project", productRef)
-		}
-	}
-	return nil
 }
 
 func requireInside(root, candidate string) error {

@@ -29,7 +29,27 @@ def _repo_root() -> Path:
 
 
 REPO_ROOT = _repo_root()
-REGISTRY_PATH = REPO_ROOT / "internal" / "vnext" / "registry" / "components.json"
+
+
+def _registry_path() -> Path:
+    """Locate the component registry for both supported layouts.
+
+    Locally the registry lives at `<repo>/internal/vnext/registry/components.json`
+    and the module is imported from `<repo>/scripts/deploy`. A remote deploy
+    bootstrap copies this module next to the remote CLI, where nothing above it
+    has a go.mod, so `_repo_root()` cannot find the repository and the registry
+    is shipped as a sibling instead.
+    """
+    canonical = REPO_ROOT / "internal" / "vnext" / "registry" / "components.json"
+    if canonical.is_file():
+        return canonical
+    sibling = DEPLOY_DIR / "components.json"
+    if sibling.is_file():
+        return sibling
+    return canonical
+
+
+REGISTRY_PATH = _registry_path()
 SCHEMA = "relkit.component-registry/1"
 
 # Role names the deploy CLI has always used, mapped onto the vNext registry's
@@ -58,8 +78,6 @@ class Component:
     pack_exclude_parts: tuple[str, ...] = ()
     pack_exclude_suffixes: tuple[str, ...] = ()
     pack_exclude_paths: tuple[str, ...] = ()
-    go_entrypoints: tuple[str, ...] = ()
-    go_module: str = ""
     updater_process: Optional[str] = None
     facade_paths: tuple[str, ...] = ()
     install_names: tuple[tuple[str, str], ...] = ()
@@ -114,8 +132,6 @@ def _component(raw: dict[str, Any]) -> Component:
         pack_exclude_parts=_strings(pack.get("excludeParts")),
         pack_exclude_suffixes=_strings(pack.get("excludeSuffixes")),
         pack_exclude_paths=_strings(pack.get("excludePaths")),
-        go_entrypoints=_strings(pack.get("goEntrypoints")),
-        go_module=str(pack.get("goModule") or ""),
         updater_process=build.get("updaterProcess") or None,
         facade_paths=_strings(build.get("facadePaths")),
         install_names=tuple(

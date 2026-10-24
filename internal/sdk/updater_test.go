@@ -1,4 +1,4 @@
-package sdk_test
+﻿package sdk_test
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/inprocess"
-	"github.com/shichao402/relkit/sdk"
+	"github.com/shichao402/relkit/internal/sdk"
 )
 
 func TestCheckAndDownload(t *testing.T) {

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.runtime-profile/1",
+  "title": "relkit.runtime-profile/1",
+  "description": "一台 agent 服务器的身份说明：服务器是谁、端点在哪、允许哪些渠道。由该服务器根密钥在部署与发布时自动签发，不存在人工签发入口。订阅方（如 Loom-Launcher）通过它找到另一个产品的更新入口，而不抄 URL 或公钥。对应 internal/vnext/runtimeprofile。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "product",
+    "profileVersion",
+    "allowedChannels",
+    "directoryBootstrap",
+    "rupSchemaSet",
+    "digest",
+    "signatures"
+  ],
+  "properties": {
+    "schema": { "const": "relkit.runtime-profile/1" },
+    "product": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "description": "这份 Profile 描述的产品（即该服务器上以此名登记的宿主产品）。"
+    },
+    "profileVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Profile 内容版本，重签时递增。信息性字段，不用作防回滚判据。"
+    },
+    "allowedChannels": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "该产品允许发布的渠道。"
+    },
+    "directoryBootstrap": {
+      "type": "object",
+      "required": ["entryUrls"],
+      "additionalProperties": false,
+      "properties": {
+        "entryUrls": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "签名端点：客户端按这里的地址找服务。取值规则是按消费方实测可达的 scheme + 端口签，不是按域名听起来该用什么协议签。"
+        },
+        "recovery": { "type": "object" }
+      }
+    },
+    "rupSchemaSet": {
+      "type": "string",
+      "minLength": 1,
+      "description": "引擎构建属性，不是逐项目选择。当前值 rup.v2。宿主不再协商协议。"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "schema/product/profileVersion/allowedChannels/directoryBootstrap/rupSchemaSet 六字段的 canonical JSON 摘要。"
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "description": "服务器根密钥签名。keyId 必须是订阅方或 updater 外部已知的服务器根；profile 不得用自身携带的 key 自证。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keyId", "algorithm", "value"],
+        "properties": {
+          "keyId": { "type": "string", "minLength": 1 },
+          "algorithm": { "const": "ed25519" },
+          "value": {
+            "type": "string",
+            "description": "base64 编码的 64 字节 Ed25519 签名。"
+          }
+        }
+      }
+    }
+  }
+}

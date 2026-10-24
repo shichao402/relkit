@@ -1,20 +1,19 @@
-package sdk_test
+﻿package sdk_test
 
 import (
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/shichao402/relkit/internal/inprocess"
-	"github.com/shichao402/relkit/sdk"
+	"github.com/shichao402/relkit/internal/sdk"
+	"github.com/shichao402/relkit/internal/testutil"
 )
 
 func TestConformanceOfflineRecovery(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	path := filepath.Join(filepath.Dir(file), "..", "conformance", "recovery", "offline.json")
+	path := filepath.Join(testutil.ConformanceRoot(t), "recovery", "offline.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

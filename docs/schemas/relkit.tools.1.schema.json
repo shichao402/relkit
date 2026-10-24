@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.tools/1",
+  "title": "relkit.tools/1",
+  "description": "一台 agent 服务器发给宿主 CI 的工具清单。宿主 CI 用它决定下载哪个文件、校验什么摘要；清单本身由服务器根签名，每个工具文件另有 SSHSIG 签名供 ssh-keygen -Y verify 校验。Catalog 由这份清单投影，两者不会漂移。对应 internal/vnext/tools。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "commit", "rootKeyId", "rootPublicKey", "rootFingerprint", "tools", "signatures"],
+  "properties": {
+    "schema": { "const": "relkit.tools/1" },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "这份清单描述的 relkit 版本。每个 tool 的 version 必须与之相同。"
+    },
+    "commit": { "type": "string" },
+    "rootKeyId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "签这份清单的服务器根 keyId。宿主据此找对应公钥，而不是逐个试。"
+    },
+    "rootPublicKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "服务器根公钥本身（OpenSSH 行或裸 base64）。宿主项目持有的是公钥，不是指纹。"
+    },
+    "rootFingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "信息性字段。验签始终用公钥。"
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component", "name", "version", "platform", "os", "arch", "size", "sha256", "url", "signatureUrl"],
+        "properties": {
+          "component": {
+            "type": "string",
+            "minLength": 1,
+            "description": "relkit 组件名。Catalog 由这些名字聚合，宿主不需要从文件名反推自己下载到了什么。"
+          },
+          "name": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 },
+          "platform": { "type": "string", "minLength": 1 },
+          "os": { "type": "string", "minLength": 1 },
+          "arch": { "type": "string", "minLength": 1 },
+          "size": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "url": {
+            "type": "string",
+            "pattern": "^https?://",
+            "description": "绝对 URL。宿主 CI 直接下载，不猜路径布局，也不需要知道文件名。"
+          },
+          "signatureUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "该工具文件的 SSHSIG 签名（namespace 固定 relkit-tool）的下载地址。"
+          }
+        }
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "description": "服务器根密钥签名，覆盖 schema/version/commit/rootKeyId/rootPublicKey/rootFingerprint/tools 七字段的 canonical JSON。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keyId", "algorithm", "value"],
+        "properties": {
+          "keyId": { "type": "string", "minLength": 1 },
+          "algorithm": { "const": "ed25519" },
+          "value": { "type": "string" }
+        }
+      }
+    }
+  }
+}

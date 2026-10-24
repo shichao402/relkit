@@ -1,0 +1,261 @@
+{{define "panelTabs"}}<nav class="tabs">
+<a href="/-/admin/panel/users" class="{{if eq .Tab "users"}}on{{end}}">Users</a>
+<a href="/-/admin/panel/roles" class="{{if eq .Tab "roles"}}on{{end}}">Roles</a>
+<a href="/-/admin/panel/products" class="{{if eq .Tab "products"}}on{{end}}">Products</a>
+<a href="/-/admin/panel/tokens" class="{{if eq .Tab "tokens"}}on{{end}}">Tokens</a>
+</nav>{{end}}
+
+{{define "panelIssued"}}{{if .Issued}}
+<section class="card issued">
+<div class="cardhead"><h2>{{if .Issued.Plaintext}}New credential{{else}}Token {{.Issued.TokenID}}{{end}}</h2><span class="push"></span>{{if .Issued.Product}}<span class="chip">{{.Issued.Product}}</span>{{end}}</div>
+{{if .Issued.Plaintext}}
+<p class="desc">This value is shown once. It is not stored anywhere on this box, so a refresh will not bring it back. Put it in the host CI secret now.</p>
+<pre class="mono token">{{.Issued.Plaintext}}</pre>
+{{end}}
+{{if .Issued.ConnectJSON}}
+<p class="desc">Project configuration for this product. It carries no secret.</p>
+<pre class="mono token">{{.Issued.ConnectJSON}}</pre>
+{{end}}
+</section>
+{{end}}{{end}}
+
+{{define "panel_users"}}{{template "head" .}}
+<header class="site">
+<h1>{{.Heading}}</h1>
+<p class="sub">{{.Sub}}</p>
+</header>
+{{template "panelTabs" .}}
+{{if .Error}}<p class="warn">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="note">{{.Notice}}</p>{{end}}
+{{template "panelIssued" .}}
+<section class="card">
+<div class="cardhead"><h2>Accounts</h2><span class="push"></span><span class="chip">{{len .Users}}</span></div>
+{{if .Users}}
+<table>
+<thead><tr><th>Username</th><th>Role</th><th>Products</th><th class="num">Created</th><th class="num">Actions</th></tr></thead>
+<tbody>
+{{range .Users}}<tr>
+<td class="mono">{{.Username}}</td>
+<td><span class="chip">{{.RoleLabel}}</span></td>
+<td>{{if .Products}}{{range $i, $p := .Products}}{{if $i}}, {{end}}{{$p}}{{end}}{{else}}-{{end}}</td>
+<td class="num">{{.Created}}</td>
+<td class="num"><form method="post" action="/-/admin/panel/users" class="inline">
+<input type="hidden" name="action" value="delete-user">
+<input type="hidden" name="username" value="{{.Username}}">
+<button type="submit" class="link">delete</button>
+</form></td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="note">No accounts yet. The first one is created with the agent's bootstrap.</p>{{end}}
+</section>
+<section class="card">
+<div class="cardhead"><h2>Add account</h2></div>
+<form method="post" action="/-/admin/panel/users" class="stack">
+<input type="hidden" name="action" value="add-user">
+<label for="nu">Username</label>
+<input id="nu" name="username" autocomplete="off" required>
+<label for="np">Password</label>
+<input id="np" name="password" type="password" autocomplete="new-password" minlength="8" required>
+<label for="nr">Role</label>
+<select id="nr" name="role">
+<option value="owner">Product owner</option>
+<option value="admin">Administrator</option>
+</select>
+<label for="nprod">Products this account may manage</label>
+<select id="nprod" name="products" multiple size="{{if .ProductList}}{{len .ProductList}}{{else}}1{{end}}">
+{{range .ProductList}}<option value="{{.}}">{{.}}</option>{{end}}
+</select>
+<p class="note">Only product owners need a product. An administrator covers every product.</p>
+<button type="submit">Create account</button>
+</form>
+</section>
+<section class="card">
+<div class="cardhead"><h2>Change a password</h2></div>
+<form method="post" action="/-/admin/panel/users" class="stack">
+<input type="hidden" name="action" value="set-password">
+<label for="pu">Username</label>
+<input id="pu" name="username" autocomplete="off" required>
+<label for="pp">New password</label>
+<input id="pp" name="password" type="password" autocomplete="new-password" minlength="8" required>
+<button type="submit">Set password</button>
+</form>
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "panel_roles"}}{{template "head" .}}
+<header class="site">
+<h1>{{.Heading}}</h1>
+<p class="sub">{{.Sub}}</p>
+</header>
+{{template "panelTabs" .}}
+{{if .Error}}<p class="warn">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="note">{{.Notice}}</p>{{end}}
+<section class="card">
+<div class="cardhead"><h2>Roles</h2></div>
+<table>
+<thead><tr><th>Role</th><th>What it can do</th><th class="num">Members</th></tr></thead>
+<tbody>
+{{range .Roles}}<tr>
+<td><span class="chip">{{.Name}}</span></td>
+<td>{{.Description}}</td>
+<td class="num">{{.Members}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+</section>
+<section class="card">
+<div class="cardhead"><h2>Assignments</h2></div>
+{{if .Users}}
+<table>
+<thead><tr><th>Username</th><th>Role</th><th>Products</th></tr></thead>
+<tbody>
+{{range .Users}}<tr>
+<td class="mono">{{.Username}}</td>
+<td><span class="chip">{{.RoleLabel}}</span></td>
+<td>{{if .Products}}{{range $i, $p := .Products}}{{if $i}}, {{end}}{{$p}}{{end}}{{else}}-{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="note">No accounts yet.</p>{{end}}
+</section>
+<section class="card">
+<div class="cardhead"><h2>Change a role</h2></div>
+<form method="post" action="/-/admin/panel/roles" class="stack">
+<input type="hidden" name="action" value="set-role">
+<label for="ru">Username</label>
+<input id="ru" name="username" autocomplete="off" required>
+<label for="rr">Role</label>
+<select id="rr" name="role">
+<option value="owner">Product owner</option>
+<option value="admin">Administrator</option>
+</select>
+<label for="rprod">Products, for a product owner</label>
+<select id="rprod" name="products" multiple size="{{if .ProductList}}{{len .ProductList}}{{else}}1{{end}}">
+{{range .ProductList}}<option value="{{.}}">{{.}}</option>{{end}}
+</select>
+<p class="note">Demoting an administrator requires naming the products it will own. The agent refuses a change that does not say which.</p>
+<button type="submit">Change role</button>
+</form>
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "panel_products"}}{{template "head" .}}
+<header class="site">
+<h1>{{.Heading}}</h1>
+<p class="sub">{{.Sub}}</p>
+</header>
+{{template "panelTabs" .}}
+{{if .Error}}<p class="warn">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="note">{{.Notice}}</p>{{end}}
+{{template "panelIssued" .}}
+{{range .Products}}
+<section class="card">
+<div class="cardhead"><h2>{{.ID}}</h2><span class="push"></span>{{if .Created}}<span class="chip">added {{.Created}}</span>{{end}}</div>
+<table>
+<tbody>
+{{if .Server}}<tr><th>Server</th><td class="mono">{{.Server}}</td></tr>{{end}}
+{{if .RootKeyID}}<tr><th>Root key</th><td class="mono">{{.RootKeyID}}</td></tr>{{end}}
+{{if .RootPublicKey}}<tr><th>Root public key</th><td class="mono">{{.RootPublicKey}}</td></tr>{{end}}
+{{if .Fingerprint}}<tr><th>Fingerprint</th><td class="mono">{{.Fingerprint}}</td></tr>{{end}}
+{{if .Root}}<tr><th>Product root</th><td class="mono">{{.Root}}</td></tr>{{end}}
+{{if .Profile}}<tr><th>Publish profile</th><td class="mono">{{.Profile}}</td></tr>{{end}}
+</tbody>
+</table>
+{{if .ConnectJSON}}<p class="desc">Project configuration, paste into the host repo:</p><pre class="mono token">{{.ConnectJSON}}</pre>{{end}}
+<div class="cardhead"><a href="/-/admin/panel/tokens?product={{.ID}}">Manage tokens</a><span class="push"></span><form method="post" action="/-/admin/panel/products" class="inline">
+<input type="hidden" name="action" value="delete-product">
+<input type="hidden" name="product" value="{{.ID}}">
+<button type="submit" class="link danger">retire this product</button>
+</form></div>
+<p class="note">Retiring deletes every version, the site page and the tokens. It is the whole retirement, not a label.</p>
+</section>
+{{end}}
+{{if not .Products}}<p class="note">No products registered on this server yet.</p>{{end}}
+<section class="card">
+<div class="cardhead"><h2>Register a product</h2></div>
+<form method="post" action="/-/admin/panel/products" class="stack">
+<input type="hidden" name="action" value="add-product">
+<label for="pid">Product name</label>
+<input id="pid" name="product" autocomplete="off" required>
+<label for="proot">Product root (optional)</label>
+<input id="proot" name="root" autocomplete="off" placeholder="/srv/relkit/&lt;product&gt;">
+<label for="pprofile">Publish profile (optional)</label>
+<input id="pprofile" name="profile" autocomplete="off" placeholder="products/&lt;product&gt;.json">
+<label for="plabel">First token label</label>
+<input id="plabel" name="label" autocomplete="off" placeholder="ci">
+<p class="note">Registering issues the first token. Its plaintext is shown once, in the response to this form. No product signing key is generated: the server root signs everything.</p>
+<button type="submit">Register and issue a token</button>
+</form>
+</section>
+{{template "foot" .}}{{end}}
+
+{{define "panel_tokens"}}{{template "head" .}}
+<header class="site">
+<h1>{{.Heading}}</h1>
+<p class="sub">{{.Sub}}</p>
+</header>
+{{template "panelTabs" .}}
+{{if .Error}}<p class="warn">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="note">{{.Notice}}</p>{{end}}
+{{template "panelIssued" .}}
+{{if .ProductList}}
+<form method="get" action="/-/admin/panel/tokens" class="stack narrow">
+<label for="tp">Product</label>
+<select id="tp" name="product" onchange="this.form.submit()">
+{{range .ProductList}}<option value="{{.}}"{{if eq . $.Product}} selected{{end}}>{{.}}</option>{{end}}
+</select>
+<noscript><button type="submit">Show</button></noscript>
+</form>
+{{end}}
+{{range $product := .Products}}
+<section class="card">
+<div class="cardhead"><h2>{{$product.ID}}</h2><span class="push"></span>{{if $product.Server}}<span class="chip">{{$product.Server}}</span>{{end}}</div>
+{{if $product.TokenError}}<p class="warn">{{$product.TokenError}}</p>{{end}}
+{{if $product.Tokens}}
+<table>
+<thead><tr><th>Token</th><th>Label</th><th>Created</th><th>Rotated</th><th>State</th><th class="num">Actions</th></tr></thead>
+<tbody>
+{{range .Tokens}}<tr>
+<td class="mono">{{.ID}}</td>
+<td>{{if .Label}}{{.Label}}{{else}}-{{end}}</td>
+<td>{{.Created}}</td>
+<td>{{if .Rotated}}{{.Rotated}}{{else}}-{{end}}</td>
+<td>{{if .RevokedFlag}}<span class="chip warn">revoked {{.Revoked}}</span>{{else}}<span class="chip">live</span>{{end}}</td>
+<td class="num">
+{{if not .RevokedFlag}}
+<form method="post" action="/-/admin/panel/tokens" class="inline">
+<input type="hidden" name="action" value="rotate-token">
+<input type="hidden" name="product" value="{{$product.ID}}">
+<input type="hidden" name="token" value="{{.ID}}">
+<button type="submit" class="link">rotate</button>
+</form>
+<form method="post" action="/-/admin/panel/tokens" class="inline">
+<input type="hidden" name="action" value="revoke-token">
+<input type="hidden" name="product" value="{{$product.ID}}">
+<input type="hidden" name="token" value="{{.ID}}">
+<button type="submit" class="link danger">revoke</button>
+</form>
+{{else}}-{{end}}
+</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="note">No tokens for this product. That means nothing can publish to it.</p>{{end}}
+</section>
+{{end}}
+{{if .Products}}
+<section class="card">
+<div class="cardhead"><h2>Issue a token</h2></div>
+{{range $product := .Products}}
+<form method="post" action="/-/admin/panel/tokens" class="stack narrow">
+<input type="hidden" name="action" value="issue-token">
+<input type="hidden" name="product" value="{{$product.ID}}">
+<label for="tl-{{$product.ID}}">Label for {{$product.ID}}</label>
+<input id="tl-{{$product.ID}}" name="label" autocomplete="off" placeholder="ci">
+<button type="submit">Issue</button>
+</form>
+{{end}}
+</section>
+{{end}}
+{{template "foot" .}}{{end}}

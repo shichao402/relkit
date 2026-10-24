@@ -20,7 +20,6 @@ func writeProfile(t *testing.T, dir, product string, backends map[string]any) st
 	}
 	raw := map[string]any{
 		"product":   product,
-		"signing":   map[string]any{"keyId": "k1"},
 		"backends":  backends,
 		"publishTo": names,
 	}
@@ -43,7 +42,7 @@ func writeProfile(t *testing.T, dir, product string, backends map[string]any) st
 // rebuild, which silently froze the public site for two weeks.
 func TestSinkIgnoresBackendDeclaredOnlyByUnservedProduct(t *testing.T) {
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0", "stable")
+	putWebmeta(t, shared, "loom", "1.0.0", "stable")
 
 	type plane struct {
 		product string
@@ -63,7 +62,7 @@ func TestSinkIgnoresBackendDeclaredOnlyByUnservedProduct(t *testing.T) {
 	t.Cleanup(func() { createBackend = oldFactory })
 
 	dir := t.TempDir()
-	servedProfile := writeProfile(t, dir, "dec", map[string]any{
+	servedProfile := writeProfile(t, dir, "loom", map[string]any{
 		"serve": map[string]any{"type": "relkit-compatible", "baseUrl": "https://update-internal.example.com/"},
 	})
 	// A registered but never-published product pointing at a different plane.
@@ -72,7 +71,7 @@ func TestSinkIgnoresBackendDeclaredOnlyByUnservedProduct(t *testing.T) {
 	})
 
 	products := []Product{
-		{ID: "dec", Root: dir, Profile: servedProfile},
+		{ID: "loom", Root: dir, Profile: servedProfile},
 		{ID: "sim-s1", Root: dir, Profile: strayProfile},
 	}
 	cfg := Config{
@@ -108,8 +107,8 @@ func TestSinkIgnoresBackendDeclaredOnlyByUnservedProduct(t *testing.T) {
 // anonymous "products define it as different data planes".
 func TestSinkAmbiguityNamesTheOffendingProducts(t *testing.T) {
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0", "stable")
-	putWebmeta(t, shared, "cronkit", "1.0.0", "stable")
+	putWebmeta(t, shared, "loom", "1.0.0", "stable")
+	putWebmeta(t, shared, "svn-auto-merge", "1.0.0", "stable")
 
 	oldFactory := createBackend
 	createBackend = func(name string, cfg *config.Config, _ string) (backends.Backend, error) {
@@ -122,16 +121,16 @@ func TestSinkAmbiguityNamesTheOffendingProducts(t *testing.T) {
 	t.Cleanup(func() { createBackend = oldFactory })
 
 	dir := t.TempDir()
-	firstProfile := writeProfile(t, dir, "dec", map[string]any{
+	firstProfile := writeProfile(t, dir, "loom", map[string]any{
 		"serve": map[string]any{"type": "relkit-compatible", "baseUrl": "https://update-internal.example.com/"},
 	})
-	secondProfile := writeProfile(t, dir, "cronkit", map[string]any{
+	secondProfile := writeProfile(t, dir, "svn-auto-merge", map[string]any{
 		"serve": map[string]any{"type": "relkit-compatible", "baseUrl": "https://other-internal.example.com/"},
 	})
 
 	products := []Product{
-		{ID: "dec", Root: dir, Profile: firstProfile},
-		{ID: "cronkit", Root: dir, Profile: secondProfile},
+		{ID: "loom", Root: dir, Profile: firstProfile},
+		{ID: "svn-auto-merge", Root: dir, Profile: secondProfile},
 	}
 	cfg := Config{
 		StateDir: t.TempDir(),
@@ -142,7 +141,7 @@ func TestSinkAmbiguityNamesTheOffendingProducts(t *testing.T) {
 		t.Fatal("expected an ambiguity error")
 	}
 	message := err.Error()
-	for _, want := range []string{"ambiguous", "dec", "cronkit", "update-internal.example.com", "other-internal.example.com"} {
+	for _, want := range []string{"ambiguous", "loom", "svn-auto-merge", "update-internal.example.com", "other-internal.example.com"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("ambiguity error %q does not mention %q", message, want)
 		}

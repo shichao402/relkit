@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
 
 	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
 	"github.com/shichao402/relkit/internal/ipc"
@@ -269,6 +268,18 @@ func (u *Updater) Rollback(ctx context.Context) *updaterv1.Result {
 	return lastResult(u.call(ctx, &updaterv1.UpdaterRequest{Op: &updaterv1.UpdaterRequest_Rollback{Rollback: &updaterv1.RollbackOp{}}}, nil))
 }
 
+// DeleteInstalled removes one installed version from a LIBRARY install root.
+// inUseCodes carries the codes the host is running from right now (open editor
+// windows); the engine refuses those as well as the active version.
+func (u *Updater) DeleteInstalled(ctx context.Context, code int64, inUseCodes []int64) *updaterv1.Result {
+	return lastResult(u.call(ctx, &updaterv1.UpdaterRequest{
+		Op: &updaterv1.UpdaterRequest_DeleteInstalled{DeleteInstalled: &updaterv1.DeleteInstalledOp{
+			Code:       code,
+			InUseCodes: inUseCodes,
+		}},
+	}, nil))
+}
+
 func (u *Updater) Cancel() *updaterv1.Result {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -288,115 +299,4 @@ func lastResult(evs []*updaterv1.UpdaterEvent) *updaterv1.Result {
 		}
 	}
 	return &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}
-}
-
-type Scheduler struct {
-	u       *Updater
-	cfg     *updaterv1.SchedulerConfig
-	onEvent func(*SchedulerEvent)
-	stop    chan struct{}
-	running bool
-	mu      sync.Mutex
-}
-
-type SchedulerEvent struct {
-	Kind   string // tick | result
-	At     time.Time
-	Force  bool
-	Result *updaterv1.CheckResult
-}
-
-func (u *Updater) Scheduler(cfg *updaterv1.SchedulerConfig, onEvent func(*SchedulerEvent)) *Scheduler {
-	if cfg == nil {
-		cfg = &updaterv1.SchedulerConfig{CheckOnStart: true, ForceOnStart: true}
-	}
-	return &Scheduler{u: u, cfg: cfg, onEvent: onEvent, stop: make(chan struct{})}
-}
-
-func (s *Scheduler) Start() *updaterv1.Result {
-	s.mu.Lock()
-	if s.running {
-		s.mu.Unlock()
-		return &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}
-	}
-	s.running = true
-	s.stop = make(chan struct{})
-	s.mu.Unlock()
-	go s.loop()
-	return &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}
-}
-
-func (s *Scheduler) Stop() *updaterv1.Result {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.running {
-		close(s.stop)
-		s.running = false
-	}
-	return &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}
-}
-
-func (s *Scheduler) IsRunning() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.running
-}
-
-func (s *Scheduler) loop() {
-	first := true
-	for {
-		force := false
-		if first {
-			if !s.cfg.CheckOnStart {
-				first = false
-			} else {
-				force = s.cfg.ForceOnStart
-			}
-		}
-		if first && s.cfg.CheckOnStart {
-			s.tick(force)
-			first = false
-		}
-		wait := updaterMinWait(s.cfg.Policy)
-		timer := time.NewTimer(wait)
-		select {
-		case <-s.stop:
-			timer.Stop()
-			return
-		case <-timer.C:
-			s.tick(false)
-		}
-	}
-}
-
-func (s *Scheduler) tick(force bool) {
-	if s.onEvent != nil {
-		s.onEvent(&SchedulerEvent{Kind: "tick", At: time.Now(), Force: force})
-	}
-	res := s.u.Check(context.Background(), force, 0, s.cfg.Policy)
-	if s.onEvent != nil {
-		s.onEvent(&SchedulerEvent{Kind: "result", At: time.Now(), Force: force, Result: res})
-	}
-}
-
-func updaterMinWait(p *updaterv1.CheckPolicy) time.Duration {
-	s, f := time.Hour*24, time.Hour
-	if p != nil {
-		if p.AfterSuccess != nil && p.AfterSuccess.AsDuration() > 0 {
-			s = p.AfterSuccess.AsDuration()
-		}
-		if p.AfterFailure != nil && p.AfterFailure.AsDuration() > 0 {
-			f = p.AfterFailure.AsDuration()
-		}
-	}
-	if s < 5*time.Minute {
-		s = 5 * time.Minute
-	}
-	if f < 5*time.Minute {
-		f = 5 * time.Minute
-	}
-	if f < s {
-		return f
-	}
-	return s
 }

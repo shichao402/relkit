@@ -1,3 +1,12 @@
+// Command relkit-ops runs the deployment operations a server administrator
+// needs after the epoch: read the deployed state, plan and apply an upgrade,
+// rotate a credential, and manage the server root key material.
+//
+// Everything that existed only to serve host-side resolution (certify, impact,
+// escape, bundle, distribution, artifact-set, runtime-profile, catalog,
+// operator, agent policy) is gone (requirements 14.5, 14.6, 14.7): the server
+// signs its own Catalog and Profile when it deploys, so there is no manual
+// signing entry point any more.
 package main
 
 import (
@@ -7,16 +16,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/shichao402/relkit/internal/jsonio"
-	"github.com/shichao402/relkit/internal/vnext/catalog"
 	"github.com/shichao402/relkit/internal/vnext/diag"
 	"github.com/shichao402/relkit/internal/vnext/document"
-	"github.com/shichao402/relkit/internal/vnext/offlinebundle"
 	"github.com/shichao402/relkit/internal/vnext/ops"
-	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/resolution"
 )
 
 func main() {
@@ -28,7 +32,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|impact|certify|bootstrap|bundle|distribution|catalog|operator|runtime-profile|artifact-set|agent|key|escape> [flags]")
+		return fmt.Errorf("usage: relkit-ops <status|plan|upgrade|rotate|key> [flags]")
 	}
 	switch args[0] {
 	case "status":
@@ -39,232 +43,16 @@ func run(ctx context.Context, args []string) error {
 		return cmdUpgrade(ctx, args[1:])
 	case "rotate":
 		return cmdRotate(ctx, args[1:])
-	case "certify":
-		return cmdCertify(ctx, args[1:])
-	case "impact":
-		return cmdImpact(args[1:])
-	case "bootstrap":
-		return cmdBootstrap(args[1:])
-	case "bundle":
-		return cmdBundle(args[1:])
-	case "distribution":
-		return cmdDistribution(ctx, args[1:])
-	case "catalog":
-		return cmdCatalog(args[1:])
-	case "operator":
-		return cmdOperator(args[1:])
-	case "runtime-profile":
-		return cmdRuntimeProfile(ctx, args[1:])
-	case "artifact-set":
-		return cmdArtifactSet(ctx, args[1:])
-	case "agent":
-		return cmdAgent(args[1:])
 	case "key":
 		return cmdKey(args[1:])
-	case "escape":
-		return cmdEscape(args[1:])
 	default:
 		return fmt.Errorf("unknown relkit-ops command %q", args[0])
 	}
 }
 
-func cmdEscape(args []string) error {
-	if len(args) == 0 || args[0] != "audit" {
-		return fmt.Errorf("escape requires audit")
-	}
-	flags := flag.NewFlagSet("escape audit", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	registry := flags.String("registry", "conformance/production-escapes", "production escape registry directory")
-	repoRoot := flags.String("repo-root", ".", "repository root containing regression evidence")
-	baselineRef := flags.String("baseline-ref", "", "Git ref whose registered escape codes must remain present")
-	release := flags.String("release", "", "release tag requiring every covered escape to be closed")
-	execute := flags.Bool("execute", false, "execute every referenced regression test")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	report, auditErr := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
-		Registry:    *registry,
-		RepoRoot:    *repoRoot,
-		BaselineRef: *baselineRef,
-		Release:     *release,
-		Execute:     *execute,
-	})
-	if *jsonOutput {
-		if err := printJSON(report); err != nil {
-			return err
-		}
-	} else if report.OK {
-		fmt.Printf(
-			"production escape registry (%s): covered=%d open=%d closed=%d evidence=%d executed=%d deferred=%d\n",
-			report.Mode, report.Covered, report.Open, report.Closed,
-			report.Evidence, report.Executed, report.Deferred,
-		)
-	} else {
-		for _, finding := range report.Findings {
-			fmt.Fprintf(os.Stderr, "%s: %s: %s\n", finding.Code, finding.Path, finding.Message)
-		}
-	}
-	return auditErr
-}
-
-func cmdAgent(args []string) error {
-	if len(args) == 0 || args[0] != "policy" {
-		return fmt.Errorf("agent requires policy")
-	}
-	flags := flag.NewFlagSet("agent policy", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	configPath := flags.String("config", "", "existing relkit-agent JSON config")
-	policyPath := flags.String("policy", "", "relkit.agent-product-policy/1 document")
-	backupPath := flags.String("backup", "", "new rollback backup path")
-	execute := flags.Bool("execute", false, "atomically apply the reviewed policy")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	result, err := ops.ApplyAgentPolicy(ops.AgentPolicyOptions{
-		Config: *configPath, Policy: *policyPath, Backup: *backupPath, Execute: *execute,
-	})
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return printJSON(result)
-	}
-	if !*execute {
-		fmt.Printf("plan only: changed=%t products=%v; pass --execute with --backup to apply\n",
-			result.Changed, result.ChangedProducts)
-		return nil
-	}
-	fmt.Printf("agent policy applied: changed=%t products=%v backup=%s\n",
-		result.Changed, result.ChangedProducts, result.Backup)
-	return nil
-}
-
-func cmdDistribution(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("distribution requires create or mirror")
-	}
-	switch args[0] {
-	case "create":
-		flags := flag.NewFlagSet("distribution create", flag.ContinueOnError)
-		flags.SetOutput(os.Stderr)
-		version := flags.String("version", "", "immutable release version, for example v0.6.1")
-		manifest := flags.String("manifest", "", "relkit.release/1 manifest")
-		assets := flags.String("assets", "", "directory containing downloaded release assets")
-		sourceBase := flags.String("source-base", "", "immutable release asset URL prefix")
-		output := flags.String("out", "", "new distribution row JSON")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		value, err := ops.BuildDistribution(ops.BuildDistributionOptions{
-			Version: *version, ManifestPath: *manifest, Assets: *assets,
-			SourceBase: *sourceBase, Output: *output,
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(value)
-		}
-		fmt.Printf("created distribution %s (%s) -> %s\n", value.Version, value.Digest, *output)
-		return nil
-	case "mirror":
-		flags := flag.NewFlagSet("distribution mirror", flag.ContinueOnError)
-		flags.SetOutput(os.Stderr)
-		distribution := flags.String("distribution", "", "immutable distribution row JSON")
-		mirrorRoot := flags.String("mirror-root", "", "content-addressed mirror root")
-		releaseAssetsBase := flags.String("release-assets-base", "", "immutable HTTPS base URL for every releaseAssets file")
-		usernameEnv := flags.String("username-env", "MIRRORS_USERNAME", "environment variable containing upload username")
-		passwordEnv := flags.String("password-env", "MIRRORS_PASSWORD", "environment variable containing upload password")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		result, err := ops.MirrorDistribution(ctx, ops.MirrorDistributionOptions{
-			DistributionPath:  *distribution,
-			MirrorRoot:        *mirrorRoot,
-			ReleaseAssetsBase: *releaseAssetsBase,
-			Username:          os.Getenv(*usernameEnv),
-			Password:          os.Getenv(*passwordEnv),
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(result)
-		}
-		fmt.Printf("mirrored distribution %s (%s): %d assets -> %s\n",
-			result.Version, result.DistributionDigest, len(result.Assets), result.MirrorRoot)
-		return nil
-	default:
-		return fmt.Errorf("unknown distribution command %q", args[0])
-	}
-}
-
-func cmdArtifactSet(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("artifact-set requires push or pull")
-	}
-	switch args[0] {
-	case "push":
-		flags := flag.NewFlagSet("artifact-set push", flag.ContinueOnError)
-		flags.SetOutput(os.Stderr)
-		projectPath := flags.String("project", "relkit.project.json", "project declaration")
-		artifactSetPath := flags.String("artifact-set", "", "ArtifactSet JSON")
-		rawURL := flags.String("url", "", "immutable CI transfer URL")
-		usernameEnv := flags.String("username-env", "MIRRORS_USERNAME", "environment variable containing upload username")
-		passwordEnv := flags.String("password-env", "MIRRORS_PASSWORD", "environment variable containing upload password")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		result, err := ops.PushArtifactSet(ctx, ops.PushArtifactSetOptions{
-			ProjectPath: *projectPath, ArtifactSetPath: *artifactSetPath, URL: *rawURL,
-			Username: os.Getenv(*usernameEnv), Password: os.Getenv(*passwordEnv),
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(result)
-		}
-		fmt.Printf("uploaded %s %s (%s)\n", result.Product, result.Version, result.ArchiveSHA256)
-		return nil
-	case "pull":
-		flags := flag.NewFlagSet("artifact-set pull", flag.ContinueOnError)
-		flags.SetOutput(os.Stderr)
-		projectPath := flags.String("project", "relkit.project.json", "project declaration")
-		rawURL := flags.String("url", "", "immutable CI transfer URL")
-		digest := flags.String("sha256", "", "expected sha256:... archive digest")
-		output := flags.String("out-dir", "", "new ArtifactSet output directory")
-		usernameEnv := flags.String("username-env", "MIRRORS_USERNAME", "optional environment variable containing read username")
-		passwordEnv := flags.String("password-env", "MIRRORS_PASSWORD", "optional environment variable containing read password")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		result, err := ops.PullArtifactSet(ctx, ops.PullArtifactSetOptions{
-			ProjectPath: *projectPath, URL: *rawURL, ExpectedSHA256: *digest,
-			OutputDirectory: *output, Username: os.Getenv(*usernameEnv), Password: os.Getenv(*passwordEnv),
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(result)
-		}
-		fmt.Printf("downloaded %s %s (%s) -> %s\n", result.Product, result.Version, result.ArchiveSHA256, result.OutputDirectory)
-		return nil
-	default:
-		return fmt.Errorf("unknown artifact-set command %q", args[0])
-	}
-}
-
 func cmdKey(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("key requires generate or fingerprint")
+		return fmt.Errorf("key requires generate, fingerprint or rename")
 	}
 	switch args[0] {
 	case "generate":
@@ -304,370 +92,31 @@ func cmdKey(args []string) error {
 		}
 		fmt.Printf("%s %s\n", result.KeyID, result.Fingerprint)
 		return nil
-	default:
-		return fmt.Errorf("unknown key command %q", args[0])
-	}
-}
-
-func cmdRuntimeProfile(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("runtime-profile requires create or publish")
-	}
-	if args[0] == "publish" {
-		flags := flag.NewFlagSet("runtime-profile publish", flag.ContinueOnError)
+	case "rename":
+		flags := flag.NewFlagSet("key rename", flag.ContinueOnError)
 		flags.SetOutput(os.Stderr)
-		projectPath := flags.String("project", "relkit.project.json", "project declaration")
-		agentURL := flags.String("agent", os.Getenv("RELKIT_AGENT_URL"), "product agent URL")
-		tokenFile := flags.String("token-file", "", "file containing the product upload token")
-		output := flags.String("out", "", "signed Runtime Profile JSON")
-		replace := flags.Bool("replace", false, "atomically replace an existing output")
-		dryRun := flags.Bool("dry-run", false, "sign and validate without publishing")
+		oldKeyID := flags.String("old-key-id", "", "existing key identifier (verified against the document)")
+		newKeyID := flags.String("new-key-id", "", "new key identifier")
+		oldPrivate := flags.String("old-private", "", "existing private key document")
+		privatePath := flags.String("private", "", "new private key document")
+		publicPath := flags.String("public", "", "new public key document")
 		jsonOutput := flags.Bool("json", false, "print JSON")
-		var targets stringList
-		flags.Var(&targets, "to", "publication backend (repeatable)")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		token := strings.TrimSpace(os.Getenv("RELKIT_UPLOAD_TOKEN"))
-		if *tokenFile != "" {
-			raw, err := os.ReadFile(*tokenFile)
-			if err != nil {
-				return err
-			}
-			token = strings.TrimSpace(string(raw))
-		}
-		result, err := ops.PublishRuntimeProfile(ctx, ops.PublishRuntimeProfileOptions{
-			ProjectPath: *projectPath, AgentURL: *agentURL, Token: token, To: targets,
-			DryRun: *dryRun, Output: *output, Replace: *replace,
-		})
+		result, err := ops.ReissueKeyPair(*oldKeyID, *newKeyID, *oldPrivate, *privatePath, *publicPath)
 		if err != nil {
 			return err
 		}
 		if *jsonOutput {
 			return printJSON(result)
 		}
-		for _, line := range result.Log {
-			fmt.Println(line)
-		}
-		if *dryRun {
-			fmt.Printf("validated Runtime Profile %s sequence %d (dry run)\n", result.Profile.Digest, result.Profile.ProfileVersion)
-		} else {
-			fmt.Printf("published Runtime Profile %s sequence %d -> %s\n", result.Profile.Digest, result.Profile.ProfileVersion, *output)
-		}
-		return nil
-	}
-	if args[0] != "create" {
-		return fmt.Errorf("unknown runtime-profile command %q", args[0])
-	}
-	flags := flag.NewFlagSet("runtime-profile create", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	projectPath := flags.String("project", "relkit.project.json", "project declaration")
-	version := flags.Int64("profile-version", 1, "monotonic Runtime Profile version")
-	output := flags.String("out", "", "signed Runtime Profile JSON")
-	replace := flags.Bool("replace", false, "atomically replace an existing output")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	var entryURLs stringList
-	var keys stringList
-	flags.Var(&entryURLs, "entry-url", "consumer-visible RUP directory URL (repeatable)")
-	flags.Var(&keys, "key", "product private key document (repeatable for rotation)")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	value, err := ops.CreateRuntimeProfile(ops.CreateRuntimeProfileOptions{
-		ProjectPath: *projectPath, EntryURLs: entryURLs, ProfileVersion: *version,
-		KeyPaths: keys, Output: *output, Replace: *replace,
-	})
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return printJSON(value)
-	}
-	fmt.Printf("created Runtime Profile %s sequence %d -> %s\n", value.Digest, value.ProfileVersion, *output)
-	return nil
-}
-
-func cmdImpact(args []string) error {
-	if len(args) == 0 || args[0] != "generate" {
-		return fmt.Errorf("impact requires generate")
-	}
-	flags := flag.NewFlagSet("impact generate", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	productionCatalog := flags.String("production-catalog", "", "signed production catalog")
-	candidateCatalog := flags.String("candidate-catalog", "", "signed candidate catalog")
-	candidateProfile := flags.String("candidate-profile", "", "signed candidate Operator Profile")
-	candidateDigest := flags.String("candidate", "", "candidate distribution digest")
-	candidateRoot := flags.String("candidate-root-fingerprint", "", "Candidate Root fingerprint")
-	risk := flags.String("risk", "", "documentation, single-capability, contract, or cross-cutting")
-	output := flags.String("out", "", "immutable impact manifest")
-	escapeRegistry := flags.String("escape-registry", "conformance/production-escapes", "production escape registry")
-	repoRoot := flags.String("repo-root", ".", "repository root containing production escape evidence")
-	var productionTrust stringList
-	var candidateTrust stringList
-	flags.Var(&productionTrust, "production-trust-key", "Distribution Root public key (repeatable)")
-	flags.Var(&candidateTrust, "candidate-trust-key", "Candidate Root public key (repeatable)")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	escapeReport, err := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
-		Registry:         *escapeRegistry,
-		RepoRoot:         *repoRoot,
-		RequireGitSource: true,
-	})
-	if err != nil {
-		return fmt.Errorf("production escape coverage: %w", err)
-	}
-	impact, err := ops.GenerateImpact(ops.GenerateImpactOptions{
-		ProductionCatalogPath: *productionCatalog, CandidateCatalogPath: *candidateCatalog,
-		ProductionTrustKeyPaths: productionTrust, CandidateTrustKeyPaths: candidateTrust,
-		CandidateDigest: *candidateDigest, CandidateProfilePath: *candidateProfile,
-		CandidateRootFingerprint: *candidateRoot, Risk: ops.Risk(*risk),
-		ProductionEscapeDigest: escapeReport.CoverageDigest,
-	})
-	if err != nil {
-		return err
-	}
-	if escapeReport.SourceCommit != impact.CandidateCommit {
-		return fmt.Errorf(
-			"candidate distribution commit %s does not match production escape source %s",
-			impact.CandidateCommit,
-			escapeReport.SourceCommit,
-		)
-	}
-	if *output != "" {
-		if err := document.WriteNew(*output, impact); err != nil {
-			return err
-		}
-	}
-	if *jsonOutput {
-		return printJSON(impact)
-	}
-	fmt.Printf("candidate %s impacts %d components and %d contracts (%s)\n",
-		impact.CandidateDigest, len(impact.AffectedComponents), len(impact.AffectedCapabilities), impact.Risk)
-	return nil
-}
-
-func cmdCertify(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("certify", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	fleetPath := flags.String("fleet", "", "fleet registration")
-	impactPath := flags.String("impact", "", "candidate impact manifest")
-	output := flags.String("out", "", "immutable certification report")
-	full := flags.Bool("full", false, "select every active registered host")
-	escapeRegistry := flags.String("escape-registry", "conformance/production-escapes", "production escape registry")
-	repoRoot := flags.String("repo-root", ".", "repository root containing production escape evidence")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if *fleetPath == "" || *impactPath == "" {
-		return fmt.Errorf("--fleet and --impact are required")
-	}
-	fleet, err := ops.LoadFleet(*fleetPath)
-	if err != nil {
-		return err
-	}
-	impact, err := ops.LoadImpact(*impactPath)
-	if err != nil {
-		return err
-	}
-	escapeReport, err := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
-		Registry:         *escapeRegistry,
-		RepoRoot:         *repoRoot,
-		Execute:          true,
-		RequireGitSource: true,
-	})
-	if err != nil {
-		return fmt.Errorf("production escape regressions: %w", err)
-	}
-	if escapeReport.CoverageDigest != impact.ProductionEscapeDigest {
-		return fmt.Errorf(
-			"production escape coverage changed after impact generation: impact=%s current=%s",
-			impact.ProductionEscapeDigest,
-			escapeReport.CoverageDigest,
-		)
-	}
-	if escapeReport.SourceCommit != impact.CandidateCommit {
-		return fmt.Errorf(
-			"candidate commit changed after impact generation: impact=%s current=%s",
-			impact.CandidateCommit,
-			escapeReport.SourceCommit,
-		)
-	}
-	report, err := ops.RunCertification(ctx, *fleet, *impact, *full)
-	if err != nil {
-		return err
-	}
-	if *output != "" {
-		if err := document.WriteNew(*output, report); err != nil {
-			return err
-		}
-	}
-	return emitCertificationReport(report, *jsonOutput)
-}
-
-func emitCertificationReport(report *ops.CertificationReport, jsonOutput bool) error {
-	if jsonOutput {
-		if err := printJSON(report); err != nil {
-			return err
-		}
-	} else {
-		fmt.Printf("candidate %s: passed=%t, hosts=%d, checks=%d\n",
-			report.CandidateDigest, report.Passed, len(report.SelectedHosts), len(report.Results))
-	}
-	if !report.Passed {
-		return fmt.Errorf("candidate certification did not pass")
-	}
-	return nil
-}
-
-func cmdBundle(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("bundle requires create, verify, or install")
-	}
-	switch args[0] {
-	case "create":
-		flags := flag.NewFlagSet("bundle create", flag.ContinueOnError)
-		bundlePath := flags.String("resolution-bundle", "", "signed resolution bundle")
-		projectPath := flags.String("project", "relkit.project.json", "external project declaration")
-		output := flags.String("out", "", "new distribution bundle directory")
-		candidateRoot := flags.String("candidate-root-fingerprint", "", "authorized Candidate Root fingerprint")
-		var assets keyValueList
-		flags.Var(&assets, "asset", "digest=path (repeat for every distribution file)")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		product, bundle, policy, err := bundleInputs(*projectPath, *bundlePath, *candidateRoot)
-		if err != nil {
-			return err
-		}
-		_ = product
-		manifest, err := offlinebundle.Create(offlinebundle.CreateOptions{
-			ResolutionBundle: *bundle,
-			Policy:           policy,
-			Assets:           assets,
-			OutputDirectory:  *output,
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(manifest)
-		}
-		fmt.Printf("created complete distribution bundle %s for %s\n", *output, manifest.ResolutionDigest)
-		return nil
-	case "verify":
-		flags := flag.NewFlagSet("bundle verify", flag.ContinueOnError)
-		directory := flags.String("bundle", "", "distribution bundle directory")
-		projectPath := flags.String("project", "relkit.project.json", "external project declaration")
-		candidateRoot := flags.String("candidate-root-fingerprint", "", "authorized Candidate Root fingerprint")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		product, err := project.Load(*projectPath)
-		if err != nil {
-			return err
-		}
-		manifest, bundle, err := offlinebundle.Verify(*directory, resolution.BundlePolicy{
-			DistributionRootFingerprint: product.TrustFingerprint,
-			CandidateRootFingerprint:    *candidateRoot,
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(map[string]any{
-				"schema":   "relkit.ops-bundle-verify-result/1",
-				"ok":       true,
-				"manifest": manifest,
-				"identity": bundle.Resolution.Identity,
-			})
-		}
-		fmt.Printf("verified bundle %s (%s)\n", manifest.ResolutionDigest, bundle.Resolution.Identity)
-		return nil
-	case "install":
-		flags := flag.NewFlagSet("bundle install", flag.ContinueOnError)
-		directory := flags.String("bundle", "", "distribution bundle directory")
-		projectPath := flags.String("project", "relkit.project.json", "project declaration")
-		projectRoot := flags.String("project-root", "", "project checkout root")
-		home := flags.String("home", "", "Relkit user configuration root")
-		target := flags.String("target", "", "target platform")
-		candidateRoot := flags.String("candidate-root-fingerprint", "", "authorized Candidate Root fingerprint")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		resolved, err := offlinebundle.Install(offlinebundle.InstallOptions{
-			Directory: *directory, ProjectPath: *projectPath, ProjectRoot: *projectRoot,
-			RelkitHome: *home, Target: *target, CandidateRootFingerprint: *candidateRoot,
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(map[string]any{
-				"schema":     "relkit.ops-bundle-install-result/1",
-				"ok":         true,
-				"resolution": resolved,
-			})
-		}
-		fmt.Printf("installed offline resolution %s\n", resolved.Digest)
+		fmt.Printf("renamed %s -> %s (%s)\npublic: %s\nprivate: %s\n",
+			*oldKeyID, result.KeyID, result.Fingerprint, result.PublicPath, result.PrivatePath)
 		return nil
 	default:
-		return fmt.Errorf("unknown bundle command %q", args[0])
+		return fmt.Errorf("unknown key command %q", args[0])
 	}
-}
-
-func bundleInputs(projectPath, bundlePath, candidateRoot string) (*project.Document, *resolution.Bundle, resolution.BundlePolicy, error) {
-	product, err := project.Load(projectPath)
-	if err != nil {
-		return nil, nil, resolution.BundlePolicy{}, err
-	}
-	bundle, err := resolution.LoadBundle(bundlePath)
-	if err != nil {
-		return nil, nil, resolution.BundlePolicy{}, err
-	}
-	policy := resolution.BundlePolicy{
-		DistributionRootFingerprint: product.TrustFingerprint,
-		CandidateRootFingerprint:    candidateRoot,
-		OperatorDeploymentID:        bundle.Operator.DeploymentID,
-		Identity:                    bundle.Resolution.Identity,
-	}
-	return product, bundle, policy, nil
-}
-
-func cmdBootstrap(args []string) error {
-	if len(args) == 0 || args[0] != "provision" {
-		return fmt.Errorf("bootstrap requires provision")
-	}
-	flags := flag.NewFlagSet("bootstrap provision", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	inventoryPath := flags.String("inventory", "", "Operator inventory")
-	home := flags.String("home", "", "Relkit user configuration root")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	inventory, err := loadInventory(*inventoryPath)
-	if err != nil {
-		return err
-	}
-	path, err := ops.ProvisionBootstrap(*inventory, *home)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return printJSON(map[string]any{
-			"schema": "relkit.ops-bootstrap-result/1",
-			"ok":     true,
-			"path":   path,
-		})
-	}
-	fmt.Println("provisioned " + path)
-	return nil
 }
 
 func cmdStatus(args []string) error {
@@ -689,11 +138,12 @@ func cmdStatus(args []string) error {
 	if *jsonOutput {
 		return printJSON(status)
 	}
-	fmt.Printf("operator: %s\nactive: %s (%s)\ncatalog sequence: %d\nupgrade available: %t\n",
+	fmt.Printf("operator: %s\nactive: %s (%s)\ncatalog sequence: %d\ncatalog current: %s\nupgrade available: %t\n",
 		status.Operator,
 		status.Profile.ServerRelease.Version,
-		status.Profile.ServerRelease.DistributionDigest,
+		status.Profile.ServerRelease.Commit,
 		status.CatalogSequence,
+		status.CatalogCurrent,
 		status.UpgradeAvailable,
 	)
 	if len(status.IncompleteOperations) > 0 {
@@ -706,7 +156,7 @@ func cmdPlan(args []string) error {
 	flags := flag.NewFlagSet("plan", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	inventoryPath := flags.String("inventory", "", "Operator inventory")
-	to := flags.String("to", "latest", "certified version or latest")
+	to := flags.String("to", "latest", "release version or latest")
 	output := flags.String("out", "", "write immutable plan")
 	jsonOutput := flags.Bool("json", false, "print JSON")
 	if err := flags.Parse(args); err != nil {
@@ -729,7 +179,7 @@ func cmdPlan(args []string) error {
 		return printJSON(plan)
 	}
 	fmt.Printf("operator: %s\ntarget: %s (%s)\noperation: %s\n",
-		plan.Operator, plan.Target.Version, plan.Target.Digest, plan.OperationID)
+		plan.Operator, plan.Target.Version, plan.Target.Commit, plan.OperationID)
 	return nil
 }
 
@@ -742,7 +192,7 @@ func cmdUpgrade(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	inventoryPath := flags.String("inventory", "", "Operator inventory")
-	to := flags.String("to", "latest", "certified version or latest")
+	to := flags.String("to", "latest", "release version or latest")
 	planPath := flags.String("plan", "", "previously written immutable plan")
 	execute := flags.Bool("execute", false, "execute the planned transaction")
 	jsonOutput := flags.Bool("json", false, "print JSON")
@@ -781,7 +231,7 @@ func cmdUpgrade(ctx context.Context, args []string) error {
 	}
 	if *jsonOutput {
 		return printJSON(map[string]any{
-			"schema":      "relkit.ops-upgrade-result/1",
+			"schema":      "relkit.ops-upgrade-result/2",
 			"ok":          true,
 			"operationId": plan.OperationID,
 			"profile":     profile,
@@ -824,139 +274,6 @@ func cmdRotate(ctx context.Context, args []string) error {
 		})
 	}
 	fmt.Printf("rotated %s for %s; profile sequence %d is active\n", credential, profile.DeploymentID, profile.Sequence)
-	return nil
-}
-
-func cmdCatalog(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("catalog requires put, sign, or transition")
-	}
-	switch args[0] {
-	case "put":
-		flags := flag.NewFlagSet("catalog put", flag.ContinueOnError)
-		current := flags.String("catalog", "", "existing signed catalog (omit for initial catalog)")
-		distribution := flags.String("distribution", "", "distribution row JSON")
-		output := flags.String("out", "", "updated signed catalog JSON")
-		key := flags.String("key", "", "private key document")
-		authority := flags.String("authority", string(ops.AuthorityProduction), "production or candidate")
-		var trust stringList
-		flags.Var(&trust, "trust-key", "trusted public key document (repeatable)")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		value, err := ops.PutDistribution(ops.PutDistributionOptions{
-			CatalogPath: *current, Distribution: *distribution, Output: *output,
-			KeyPath: *key, TrustKeyPaths: trust, Authority: ops.CatalogAuthority(*authority),
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(value)
-		}
-		fmt.Printf("catalog sequence %d includes distribution %s\n", value.Sequence, *distribution)
-		return nil
-	case "sign":
-		flags := flag.NewFlagSet("catalog sign", flag.ContinueOnError)
-		input := flags.String("input", "", "catalog JSON")
-		output := flags.String("out", "", "signed catalog JSON")
-		key := flags.String("key", "", "private key document")
-		authority := flags.String("authority", string(ops.AuthorityProduction), "production or candidate")
-		add := flags.Bool("add-signature", false, "preserve signatures and add one")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		value, err := ops.SignCatalog(ops.SignCatalogOptions{
-			Input: *input, Output: *output, KeyPath: *key, Add: *add, Authority: ops.CatalogAuthority(*authority),
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(value)
-		}
-		fmt.Printf("signed catalog sequence %d -> %s\n", value.Sequence, *output)
-		return nil
-	case "transition":
-		flags := flag.NewFlagSet("catalog transition", flag.ContinueOnError)
-		input := flags.String("input", "", "signed catalog JSON")
-		output := flags.String("out", "", "updated catalog JSON")
-		key := flags.String("key", "", "private key document")
-		digest := flags.String("distribution", "", "immutable distribution digest")
-		state := flags.String("state", "", "candidate, certified, superseded, or revoked")
-		certificationReport := flags.String("certification-report", "", "passing relkit.certification-report/2")
-		impactPath := flags.String("impact", "", "relkit.impact/2 manifest bound to the certification report")
-		fleetPath := flags.String("fleet", "", "fleet registration used to select certification hosts")
-		escapeRegistry := flags.String("escape-registry", "conformance/production-escapes", "production escape registry")
-		repoRoot := flags.String("repo-root", ".", "repository root containing production escape evidence")
-		authority := flags.String("authority", string(ops.AuthorityProduction), "production or candidate")
-		var trust stringList
-		flags.Var(&trust, "trust-key", "trusted public key document (repeatable)")
-		jsonOutput := flags.Bool("json", false, "print JSON")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		productionEscapeDigest := ""
-		productionEscapeCommit := ""
-		if catalog.State(*state) == catalog.StateCertified {
-			escapeReport, err := ops.AuditProductionEscapeRegistry(ops.ProductionEscapeAuditOptions{
-				Registry:         *escapeRegistry,
-				RepoRoot:         *repoRoot,
-				RequireGitSource: true,
-			})
-			if err != nil {
-				return fmt.Errorf("production escape coverage: %w", err)
-			}
-			productionEscapeDigest = escapeReport.CoverageDigest
-			productionEscapeCommit = escapeReport.SourceCommit
-		}
-		value, err := ops.TransitionCatalog(ops.TransitionCatalogOptions{
-			Input: *input, Output: *output, Distribution: *digest, State: catalog.State(*state),
-			KeyPath: *key, TrustKeyPaths: trust, Authority: ops.CatalogAuthority(*authority),
-			CertificationReportPath: *certificationReport,
-			ImpactPath:              *impactPath,
-			FleetPath:               *fleetPath,
-			ProductionEscapeDigest:  productionEscapeDigest,
-			ProductionEscapeCommit:  productionEscapeCommit,
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return printJSON(value)
-		}
-		fmt.Printf("catalog sequence %d: %s -> %s\n", value.Sequence, *digest, *state)
-		return nil
-	default:
-		return fmt.Errorf("unknown catalog command %q", args[0])
-	}
-}
-
-func cmdOperator(args []string) error {
-	if len(args) == 0 || args[0] != "sign" {
-		return fmt.Errorf("operator requires sign")
-	}
-	flags := flag.NewFlagSet("operator sign", flag.ContinueOnError)
-	input := flags.String("input", "", "Operator Profile JSON")
-	output := flags.String("out", "", "signed Operator Profile JSON")
-	key := flags.String("key", "", "private key document")
-	add := flags.Bool("add-signature", false, "preserve signatures and add one")
-	jsonOutput := flags.Bool("json", false, "print JSON")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	value, err := ops.SignOperator(ops.SignOperatorOptions{
-		Input: *input, Output: *output, KeyPath: *key, Add: *add,
-	})
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return printJSON(value)
-	}
-	fmt.Printf("signed Operator Profile %s sequence %d -> %s\n", value.DeploymentID, value.Sequence, *output)
 	return nil
 }
 
@@ -1010,30 +327,4 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-type stringList []string
-
-func (s *stringList) String() string { return fmt.Sprint([]string(*s)) }
-func (s *stringList) Set(value string) error {
-	*s = append(*s, value)
-	return nil
-}
-
-type keyValueList map[string]string
-
-func (k *keyValueList) String() string { return fmt.Sprint(map[string]string(*k)) }
-func (k *keyValueList) Set(value string) error {
-	key, path, ok := strings.Cut(value, "=")
-	if !ok || key == "" || path == "" {
-		return fmt.Errorf("expected digest=path")
-	}
-	if *k == nil {
-		*k = map[string]string{}
-	}
-	if _, exists := (*k)[key]; exists {
-		return fmt.Errorf("duplicate asset %s", key)
-	}
-	(*k)[key] = path
-	return nil
 }

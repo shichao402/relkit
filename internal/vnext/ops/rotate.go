@@ -27,7 +27,7 @@ func RotateCredential(ctx context.Context, inventory Inventory, credential strin
 	if !ok {
 		return nil, operationError("rotate.credential_unknown", "rotate-plan", "Credential is not declared in Operator inventory", map[string]any{"credential": credential}, nil)
 	}
-	profile, _, _, err := loadTrustedState(inventory)
+	profile, _, err := loadTrustedState(inventory)
 	if err != nil {
 		return nil, operationError("operator.control_plane_invalid", "rotate-plan", "Operator control plane is not trusted", nil, err)
 	}
@@ -101,16 +101,16 @@ func RotateCredential(ctx context.Context, inventory Inventory, credential strin
 			target.SecretRefs = cloneStrings(profile.SecretRefs)
 			target.SecretRefs[credential] = newRef
 			target.Sequence = profile.Sequence + 1
-			keyID, seed, signErr := loadSigningKey(inventory.SigningKeyPath)
-			if signErr == nil {
-				signErr = target.Sign(keyID, seed)
+			root, rootErr := inventory.root()
+			if rootErr == nil {
+				rootErr = target.Sign(root.KeyID, root.Seed)
 			}
-			if signErr != nil {
-				recordOperationFailure(statePath, &state, "rotate.profile_sign_failed", "sign-profile", signErr)
-				return nil, operationError("rotate.profile_sign_failed", "sign-profile", "New credential was minted but the next Operator Profile could not be signed; the old credential remains active", nil, signErr)
+			if rootErr != nil {
+				recordOperationFailure(statePath, &state, "rotate.profile_sign_failed", "sign-profile", rootErr)
+				return nil, operationError("rotate.profile_sign_failed", "sign-profile", "New credential was minted but the next Operator Profile could not be signed; the old credential remains active", nil, rootErr)
 			}
 			stagedProfile := filepath.Join(inventory.StateDirectory, "operations", operationID+".profile.json")
-			if signErr = document.WriteNew(stagedProfile, target); signErr != nil {
+			if signErr := document.WriteNew(stagedProfile, target); signErr != nil {
 				recordOperationFailure(statePath, &state, "rotate.profile_stage_failed", "stage-profile", signErr)
 				return nil, operationError("rotate.profile_stage_failed", "stage-profile", "New credential was minted but the next Operator Profile could not be staged; the old credential remains active", nil, signErr)
 			}

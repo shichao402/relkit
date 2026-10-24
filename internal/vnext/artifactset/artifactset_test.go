@@ -13,17 +13,15 @@ const artifactDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 func platformSet(platform string, artifacts []Artifact) Document {
 	return Document{
-		Schema:           Schema,
-		ResolutionDigest: artifactDigest,
-		Product:          "demo",
-		Version:          "1.2.3",
-		ReleaseCode:      12,
-		Channel:          "stable",
+		Schema:      Schema,
+		Product:     "demo",
+		Version:     "1.2.3",
+		ReleaseCode: 12,
+		Channel:     "stable",
 		MergeIdentity: &MergeIdentity{
-			Product:          "demo",
-			Version:          "1.2.3",
-			Channel:          "stable",
-			ResolutionDigest: artifactDigest,
+			Product: "demo",
+			Version: "1.2.3",
+			Channel: "stable",
 		},
 		Artifacts: artifacts,
 	}
@@ -46,15 +44,15 @@ func TestMergeAllowsPlatformAsymmetry(t *testing.T) {
 	}
 }
 
-func TestMergeRejectsResolutionDrift(t *testing.T) {
+func TestMergeRejectsIdentityDrift(t *testing.T) {
 	left := platformSet("windows-amd64", []Artifact{
 		{ID: "windows-installer", Path: "a", Kind: KindInstaller, Platform: "windows-amd64", SHA256: artifactDigest, Size: 1},
 	})
 	right := platformSet("darwin-arm64", []Artifact{
 		{ID: "macos-installer", Path: "b", Kind: KindInstaller, Platform: "darwin-arm64", SHA256: artifactDigest, Size: 1},
 	})
-	right.ResolutionDigest = "sha256:" + strings.Repeat("b", 64)
-	right.MergeIdentity.ResolutionDigest = right.ResolutionDigest
+	right.Version = "1.2.4"
+	right.MergeIdentity.Version = "1.2.4"
 	if _, err := Merge(left, right); err == nil || !strings.Contains(err.Error(), "different") {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -10,25 +10,27 @@ import (
 	"strings"
 
 	"github.com/shichao402/relkit/internal/agentpublish"
-	"github.com/shichao402/relkit/internal/vnext/contracts"
+	"github.com/shichao402/relkit/internal/custody"
 	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/resolution"
 )
 
-// cmdRelease implements `relkit release`: the publish-side gate for a vNext
-// ArtifactSet that has already been staged. ADR 0019 §1 retired the legacy
-// release-policy path (relkit.json control plane, releasegate reconcile,
-// Python install/upgrade/ci-release faces); the signed resolution plus
-// `relkit.project.json` is the only accepted input shape.
+// cmdRelease implements `relkit release`: it publishes an already staged tree
+// to the project's agent server.
 //
-// Execute remains CI-only: it requires RELKIT_RELEASE_VIA_CI=1 and the
-// Operator secret referenced by the signed profile.
+// Inputs are the project declaration and a token, and nothing else
+// (requirement 14.9 / M9). There is no resolution, no Operator Profile file,
+// and no bundle: the server address comes from `relkit.project.json`, and the
+// token comes from the host CI copy of the credential manifest by keyId
+// (requirement 15).
+//
+// Execute remains CI-only: it requires RELKIT_RELEASE_VIA_CI=1.
 func cmdRelease(args []string) error {
 	execute := false
 	asJSON := false
 	allowBackfill := false
 	projectPath := defaultProjectPath
-	resolutionPath := selectedResolutionPath()
+	manifestPath := ""
+	tokenKeyID := ""
 	version := ""
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -41,9 +43,12 @@ func cmdRelease(args []string) error {
 		case "--project":
 			i++
 			projectPath = mustValue(args, i, "--project")
-		case "--resolution":
+		case "--custody":
 			i++
-			resolutionPath = mustValue(args, i, "--resolution")
+			manifestPath = mustValue(args, i, "--custody")
+		case "--token-key":
+			i++
+			tokenKeyID = mustValue(args, i, "--token-key")
 		case "--version":
 			i++
 			version = mustValue(args, i, "--version")
@@ -51,72 +56,60 @@ func cmdRelease(args []string) error {
 			return fmt.Errorf("unknown flag %q for release", args[i])
 		}
 	}
-	return releaseVNext(projectPath, resolutionPath, version, execute, allowBackfill, asJSON)
+	return releaseVNext(releaseOptions{
+		projectPath:   projectPath,
+		manifestPath:  manifestPath,
+		tokenKeyID:    tokenKeyID,
+		version:       version,
+		execute:       execute,
+		allowBackfill: allowBackfill,
+		asJSON:        asJSON,
+	})
 }
 
-func releaseVNext(
-	projectPath string,
-	resolutionPath string,
-	version string,
-	execute bool,
-	allowBackfill bool,
-	asJSON bool,
-) error {
-	if version == "" {
-		return fmt.Errorf("vNext release requires --version")
+type releaseOptions struct {
+	projectPath   string
+	manifestPath  string
+	tokenKeyID    string
+	version       string
+	execute       bool
+	allowBackfill bool
+	asJSON        bool
+}
+
+func releaseVNext(options releaseOptions) error {
+	if options.version == "" {
+		return fmt.Errorf("release requires --version")
 	}
-	if execute && os.Getenv("RELKIT_RELEASE_VIA_CI") != "1" {
+	if options.execute && os.Getenv("RELKIT_RELEASE_VIA_CI") != "1" {
 		return fmt.Errorf("release --execute requires RELKIT_RELEASE_VIA_CI=1")
 	}
-	productDocument, err := project.Load(projectPath)
+	productDocument, err := project.Load(options.projectPath)
 	if err != nil {
 		return err
 	}
-	resolved, err := resolution.Load(resolutionPath)
+	serverURL, err := productDocument.ServerURL()
 	if err != nil {
 		return err
 	}
-	bundlePath := filepath.Join(filepath.Dir(resolutionPath), "resolution-bundle.json")
-	bundle, err := resolution.LoadBundle(bundlePath)
+	agentURL, err := vNextAgentTransportURL(serverURL, options.execute)
 	if err != nil {
 		return err
 	}
-	verified, err := bundle.Verify(resolution.BundlePolicy{
-		DistributionRootFingerprint: productDocument.TrustFingerprint,
-		CandidateRootFingerprint:    os.Getenv("RELKIT_CANDIDATE_ROOT_FINGERPRINT"),
-		OperatorDeploymentID:        resolved.Operator.DeploymentID,
-		Identity:                    resolved.Identity,
-	})
-	if err != nil {
-		return fmt.Errorf("resolution bundle: %w", err)
-	}
-	if verified.Digest != resolved.Digest {
-		return fmt.Errorf("resolution bundle digest does not match %s", resolutionPath)
-	}
-	if !hasPublishContract(resolved.Contracts) {
-		return fmt.Errorf("selected distribution does not provide the publishProtocol/agent contract")
-	}
-	agentURL, err := vNextAgentTransportURL(bundle.Operator.Endpoints["agent"], execute)
+	token, err := releaseToken(options.manifestPath, options.tokenKeyID, options.execute)
 	if err != nil {
 		return err
 	}
-	secretRef := bundle.Operator.SecretRefs["agentBearer"]
-	if secretRef == "" {
-		secretRef = bundle.Operator.SecretRefs["upload"]
-	}
-	token, err := operatorSecret(secretRef, execute)
-	if err != nil {
-		return err
-	}
-	root := filepath.Dir(projectPath)
+	root := filepath.Dir(options.projectPath)
 	if root == "" {
 		root = "."
 	}
 	result, err := agentpublish.Run(context.Background(), agentpublish.Options{
-		Root: root, Product: productDocument.Product, Version: version,
-		AgentURL: agentURL, Token: token, Execute: execute, AllowBackfill: allowBackfill,
+		Root: root, Product: productDocument.Product, Version: options.version,
+		AgentURL: agentURL, Token: token, Execute: options.execute,
+		AllowBackfill: options.allowBackfill,
 		Log: func(line string) {
-			if !asJSON {
+			if !options.asJSON {
 				fmt.Fprintln(os.Stderr, line)
 			}
 		},
@@ -124,7 +117,7 @@ func releaseVNext(
 	if err != nil {
 		return err
 	}
-	if asJSON {
+	if options.asJSON {
 		data, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
 			return err
@@ -132,46 +125,92 @@ func releaseVNext(
 		fmt.Println(string(data))
 		return nil
 	}
-	if !execute {
-		fmt.Printf("release plan: %s/%s via signed Operator %s\n",
-			productDocument.Product, version, bundle.Operator.DeploymentID)
+	if !options.execute {
+		fmt.Printf("release plan: %s/%s via %s\n", productDocument.Product, options.version, agentURL)
 		return nil
 	}
-	fmt.Printf("released %s/%s resolution=%s staged=%s\n",
-		productDocument.Product, version, resolved.Digest, result.StagedSHA256)
+	fmt.Printf("released %s/%s server=%s staged=%s\n",
+		productDocument.Product, options.version, agentURL, result.StagedSHA256)
 	return nil
 }
 
-func hasPublishContract(values []contracts.Capability) bool {
-	for _, value := range values {
-		if value.Domain == contracts.DomainPublishProtocol && value.Peer == "agent" &&
-			value.Min <= 3 && value.Max >= 3 {
-			return true
+// releaseToken reads the agent token from the host CI copy of the credential
+// manifest. A dry run tolerates a missing token so a plan can be produced on a
+// machine that does not hold CI secrets.
+func releaseToken(manifestPath, keyID string, required bool) (string, error) {
+	if manifestPath == "" {
+		manifestPath = strings.TrimSpace(os.Getenv("RELKIT_CUSTODY_MANIFEST"))
+	}
+	if manifestPath == "" {
+		if required {
+			return "", fmt.Errorf("release requires --custody <manifest> or RELKIT_CUSTODY_MANIFEST")
+		}
+		return "", nil
+	}
+	manifest, err := custody.Load(manifestPath)
+	if err != nil {
+		if !required {
+			return "", nil
+		}
+		return "", err
+	}
+	if keyID == "" {
+		resolved, resolveErr := singleTokenKeyID(manifest)
+		if resolveErr != nil {
+			if !required {
+				return "", nil
+			}
+			return "", resolveErr
+		}
+		keyID = resolved
+	}
+	token, err := manifest.Token(keyID)
+	if err != nil {
+		if !required {
+			return "", nil
+		}
+		return "", err
+	}
+	return token, nil
+}
+
+func singleTokenKeyID(manifest *custody.Manifest) (string, error) {
+	var found []string
+	for _, entry := range manifest.Keys {
+		if entry.Kind == custody.KindTokenRef {
+			found = append(found, entry.KeyID)
 		}
 	}
-	return false
+	switch len(found) {
+	case 0:
+		return "", fmt.Errorf("credential manifest %s registers no token; pass --token-key", manifest.Scope)
+	case 1:
+		return found[0], nil
+	default:
+		return "", fmt.Errorf("credential manifest registers %d tokens; pass --token-key", len(found))
+	}
 }
 
 // vNextAgentTransportURL resolves the agent endpoint used by an execute-mode
-// release. The signed Operator endpoint stays the default authority. In CI the
+// release. The project-declared server stays the default authority. In CI the
 // transport may be overridden by RELKIT_AGENT_TRANSPORT_URL because a build
 // network can reach the same publish service through a different scheme, port,
-// or host name than the one baked into the signed profile.
+// or host name than the one written in the project file.
 //
 // The override is a plain explicit endpoint configuration, not a topology
-// assertion: it is never compared against the signed endpoint's host or IP, so
+// assertion: it is never compared against the declared server's host or IP, so
 // the same configuration works whether the service instance happens to run on
 // the same machine or a different one. What is still enforced is configuration
 // hygiene (absolute http/https URL, no credentials, no query, no fragment) and
 // the CI gate (the variable is only meaningful when RELKIT_RELEASE_VIA_CI=1).
-func vNextAgentTransportURL(signedURL string, execute bool) (string, error) {
-	signedURL = strings.TrimSpace(signedURL)
+func vNextAgentTransportURL(declaredURL string, execute bool) (string, error) {
+	declaredURL = strings.TrimSpace(declaredURL)
 	if !execute {
-		return signedURL, nil
+		return declaredURL, nil
 	}
 	override := strings.TrimSpace(os.Getenv("RELKIT_AGENT_TRANSPORT_URL"))
 	if override == "" {
-		return signedURL, nil
+		return declaredURL, nil
 	}
 	if os.Getenv("RELKIT_RELEASE_VIA_CI") != "1" {
 		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL requires RELKIT_RELEASE_VIA_CI=1")
@@ -187,33 +226,4 @@ func vNextAgentTransportURL(signedURL string, execute bool) (string, error) {
 		return "", fmt.Errorf("RELKIT_AGENT_TRANSPORT_URL must not contain credentials, query, or fragment")
 	}
 	return override, nil
-}
-
-func operatorSecret(reference string, required bool) (string, error) {
-	if reference == "" {
-		if required {
-			return "", fmt.Errorf("signed Operator Profile has no agentBearer secret reference")
-		}
-		return "", nil
-	}
-	name := ""
-	switch {
-	case strings.HasPrefix(reference, "env://"):
-		name = strings.TrimPrefix(reference, "env://")
-	case strings.HasPrefix(reference, "environment://"):
-		name = strings.TrimPrefix(reference, "environment://")
-	default:
-		if required {
-			return "", fmt.Errorf("unsupported Operator secret reference %q", reference)
-		}
-		return "", nil
-	}
-	if name == "" || strings.ContainsAny(name, " \t\r\n/\\") {
-		return "", fmt.Errorf("invalid Operator environment secret reference")
-	}
-	value := strings.TrimSpace(os.Getenv(name))
-	if required && value == "" {
-		return "", fmt.Errorf("Operator credential %s is unavailable", name)
-	}
-	return value, nil
 }

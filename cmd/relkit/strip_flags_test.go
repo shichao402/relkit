@@ -11,7 +11,7 @@ func TestStripGlobalVersionOnlyBeforeCommand(t *testing.T) {
 		t.Fatalf("relkit --version: show=%v rest=%v err=%v", show, rest, err)
 	}
 
-	show, rest, err = stripGlobalFlags([]string{"release", "staged.tar.gz", "--version", "0.0.999", "--product", "dec"})
+	show, rest, err = stripGlobalFlags([]string{"release", "staged.tar.gz", "--version", "0.0.999", "--product", "loom"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -56,8 +56,6 @@ type ReleasedOptions struct {
 	To                       []string
 	Deep                     bool
 	Version                  string
-	ResolutionDigest         string
-	OperatorDeploymentID     string
 	MinimumIndexSequence     int64
 	MinimumDirectorySequence int64
 	RuntimeProfileSHA256     string
@@ -131,15 +129,6 @@ func RunReleased(cfg *config.Config, options ReleasedOptions, printer Printer) (
 			findings.Error(fmt.Sprintf("version %s is absent from released index on %s", options.Version, name))
 			continue
 		}
-		checkProvenance(
-			"index",
-			name,
-			selected.ResolutionDigest,
-			selected.OperatorDeploymentId,
-			selected.ResolutionIdentity,
-			options,
-			findings,
-		)
 		manifestRaw, getErr := backend.Get(model.ManifestKey(cfg.Product, options.Version))
 		if getErr != nil || manifestRaw == nil {
 			findings.Error(fmt.Sprintf("released manifest %s is unavailable on %s", options.Version, name))
@@ -150,41 +139,21 @@ func RunReleased(cfg *config.Config, options ReleasedOptions, printer Printer) (
 			findings.Error(fmt.Sprintf("released manifest %s on %s is invalid: %v", options.Version, name, parseErr))
 			continue
 		}
-		checkProvenance(
-			"manifest",
-			name,
-			manifest.ResolutionDigest,
-			manifest.OperatorDeploymentId,
-			manifest.ResolutionIdentity,
-			options,
-			findings,
-		)
+		if manifest.Product != cfg.Product || manifest.Version != options.Version {
+			findings.Error(fmt.Sprintf("released manifest on %s declares %s/%s, expected %s/%s",
+				name, manifest.Product, manifest.Version, cfg.Product, options.Version))
+		}
+		if selected.Manifest != nil {
+			if digest := model.Sha256Bytes(manifestRaw); digest != selected.Manifest.Sha256 || int64(len(manifestRaw)) != selected.Manifest.Size {
+				findings.Error(fmt.Sprintf("released manifest %s on %s does not match the signed index reference", options.Version, name))
+			}
+		}
 	}
 	verifyReleasedDirectory(cfg, options, trusted, findings, printer)
 	if findings.OK() {
-		printer(fmt.Sprintf("released verification passed for %s at resolution %s", options.Version, options.ResolutionDigest))
+		printer(fmt.Sprintf("released verification passed for %s", options.Version))
 	}
 	return findings, nil
-}
-
-func checkProvenance(
-	documentName string,
-	backendName string,
-	resolutionDigest string,
-	deploymentID string,
-	identity string,
-	options ReleasedOptions,
-	findings *Findings,
-) {
-	if options.ResolutionDigest != "" && resolutionDigest != options.ResolutionDigest {
-		findings.Error(fmt.Sprintf("%s provenance on %s has resolution %q, expected %q", documentName, backendName, resolutionDigest, options.ResolutionDigest))
-	}
-	if options.OperatorDeploymentID != "" && deploymentID != options.OperatorDeploymentID {
-		findings.Error(fmt.Sprintf("%s provenance on %s has Operator %q, expected %q", documentName, backendName, deploymentID, options.OperatorDeploymentID))
-	}
-	if options.ResolutionDigest != "" && identity == "" {
-		findings.Error(fmt.Sprintf("%s provenance on %s has no resolution identity", documentName, backendName))
-	}
 }
 
 func verifyReleasedDirectory(

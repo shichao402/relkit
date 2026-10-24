@@ -23,15 +23,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	// Only the clients that own a facade are locked: Dart (SvnMergeTool) and
+	// Rust (Loom-Launcher). The Go facade moved into internal/ and is no longer
+	// published (requirement 4.2); bindings/ts ships generated types only.
 	files := []string{
-		filepath.Join(root, "sdk", "updaterfacade", "facade.go"),
 		filepath.Join(root, "sdk", "dart", "lib", "src", "updater_facade.dart"),
-		filepath.Join(root, "sdk", "node", "src", "updater_facade.ts"),
 		filepath.Join(root, "sdk", "rust", "src", "lib.rs"),
 	}
 	required := []string{
 		"check", "skip", "download", "apply", "status", "cleanup", "cancel",
 		"capabilities", "open", "listInstalled", "switchActive", "rollback",
+		"deleteInstalled",
 	}
 	for _, f := range files {
 		raw, err := os.ReadFile(f)
@@ -50,8 +52,8 @@ func main() {
 	fmt.Println("wrote", out)
 }
 
-const signatures = `methods: open capabilities check skip download apply status cleanup cancel scheduler listInstalled switchActive rollback
+const signatures = `methods: open capabilities check skip download apply status cleanup cancel listInstalled switchActive rollback deleteInstalled
 results: upToDate updateAvailable fallbackRequired throttled failed
-errors: network signature rollbackRejected selectorNoMatch disk permissionDenied occupied protocolMismatch updaterTooOld updaterTooNew planTampered planExpired planUnknown planNotDownloaded skipDenied profileInvalid channelNotAllowed canceled sidecarNotFound layoutUnsupported
-ipc: 3
+errors: network signature rollbackRejected selectorNoMatch disk permissionDenied occupied protocolMismatch updaterTooOld updaterTooNew planTampered planExpired planUnknown planNotDownloaded skipDenied profileInvalid channelNotAllowed canceled sidecarNotFound layoutUnsupported installerFailed
+ipc: 4
 `

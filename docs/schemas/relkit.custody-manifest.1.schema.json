@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.custody-manifest/1",
+  "title": "relkit.custody-manifest/1",
+  "description": "凭据清单：代码取钥匙的唯一入口。登记 keyId、种类、用途、载体与公钥指纹，本身不存任何秘密。每个持有钥匙的地方各有一份，格式相同、读取代码相同。对应 internal/custody。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "scope", "keys"],
+  "properties": {
+    "schema": { "const": "relkit.custody-manifest/1" },
+    "scope": {
+      "type": "string",
+      "enum": ["server", "host-ci", "archive"],
+      "description": "server = 服务器上的副本（含根私钥与 token 存储位置）；host-ci = 随项目配置提交的副本（只写 keyId 与环境变量名，不含秘密）；archive = 离线备份处的副本。"
+    },
+    "note": { "type": "string" },
+    "updatedAt": { "type": "string" },
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "description": "按 keyId 登记。同一份清单内 keyId 不得重复。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keyId", "kind", "carrier", "path"],
+        "properties": {
+          "keyId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["root", "token", "mirror-credential"],
+            "description": "root = agent 服务器根密钥对（服务器签名，宿主与客户端验证服务器）；token = 指向 token 哈希的存储位置（服务器侧）或注入 token 的环境变量（宿主 CI 侧）；mirror-credential = mirrors 用户名/密码，仅 CI 中转文件使用。"
+          },
+          "purpose": {
+            "type": "string",
+            "description": "给人看的说明：这把钥匙做什么用、谁在用。"
+          },
+          "carrier": {
+            "type": "string",
+            "enum": ["file", "env"],
+            "description": "载体类型。载体只说明怎么取值，不存值本身。root 必须用 file。"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "载体地址：绝对路径、相对清单所在目录的路径，或环境变量名。"
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "公钥半边的 SHA-256 指纹。非对称种类（root）必填，是这把钥匙的权威身份。"
+          },
+          "publicPath": {
+            "type": "string",
+            "description": "公钥半边的存放位置（相对清单目录或绝对路径）。"
+          },
+          "format": {
+            "type": "string",
+            "description": "提示读取方：该载体装的是 token 或凭据，而不是 Ed25519 文档。"
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "root" } }, "required": ["kind"] },
+            "then": {
+              "required": ["fingerprint"],
+              "properties": { "carrier": { "const": "file" } }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

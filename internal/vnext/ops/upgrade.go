@@ -10,7 +10,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/shichao402/relkit/internal/vnext/canonical"
 	"github.com/shichao402/relkit/internal/vnext/catalog"
 	"github.com/shichao402/relkit/internal/vnext/diag"
 	"github.com/shichao402/relkit/internal/vnext/document"
@@ -19,18 +18,17 @@ import (
 )
 
 type UpgradePlan struct {
-	Schema               string               `json:"schema"`
-	OperationID          string               `json:"operationId"`
-	Operator             string               `json:"operator"`
-	CurrentProfileDigest string               `json:"currentProfileDigest"`
-	CurrentSequence      int64                `json:"currentSequence"`
-	CatalogDigest        string               `json:"catalogDigest"`
-	CatalogSequence      int64                `json:"catalogSequence"`
-	Target               catalog.Distribution `json:"target"`
-	Services             []string             `json:"services,omitempty"`
-	Mirrors              []string             `json:"mirrors,omitempty"`
-	ContractChanges      map[string]any       `json:"contractChanges"`
-	RequiredPhases       []string             `json:"requiredPhases"`
+	Schema               string           `json:"schema"`
+	OperationID          string           `json:"operationId"`
+	Operator             string           `json:"operator"`
+	CurrentProfileDigest string           `json:"currentProfileDigest"`
+	CurrentSequence      int64            `json:"currentSequence"`
+	CatalogDigest        string           `json:"catalogDigest"`
+	CatalogSequence      int64            `json:"catalogSequence"`
+	Target               catalog.Release  `json:"target"`
+	Services             []string         `json:"services,omitempty"`
+	Mirrors              []string         `json:"mirrors,omitempty"`
+	RequiredPhases       []string         `json:"requiredPhases"`
 }
 
 func (p UpgradePlan) Validate() error {
@@ -43,26 +41,29 @@ func (p UpgradePlan) Validate() error {
 	if p.Operator == "" || p.CurrentProfileDigest == "" || p.CatalogDigest == "" {
 		return fmt.Errorf("operator and control-plane digests are required")
 	}
-	if p.Target.State != catalog.StateCertified {
-		return fmt.Errorf("target distribution is not certified")
+	if p.Target.Version == "" {
+		return fmt.Errorf("target release version is required")
 	}
 	return nil
 }
 
+// PlanUpgrade picks the release the server currently marks as current. There is
+// no certified/candidate gate to clear any more: the server's Catalog says what
+// it serves, and an upgrade moves the operator onto it (requirements 12.6, 14.5).
 func PlanUpgrade(inventory Inventory, to string) (*UpgradePlan, error) {
-	profile, distributions, _, err := loadTrustedState(inventory)
+	profile, value, err := loadTrustedState(inventory)
 	if err != nil {
 		return nil, operationError("operator.control_plane_invalid", "upgrade-plan", "Operator control plane is not trusted", nil, err)
 	}
-	target, err := selectUpgradeTarget(*distributions, to)
+	target, err := selectUpgradeTarget(*value, to)
 	if err != nil {
-		return nil, operationError("operator.target_unavailable", "upgrade-plan", "No certified upgrade target satisfies the request", map[string]any{"to": to}, err)
+		return nil, operationError("operator.target_unavailable", "upgrade-plan", "No upgrade target satisfies the request", map[string]any{"to": to}, err)
 	}
 	profileDigest, err := profile.Digest()
 	if err != nil {
 		return nil, err
 	}
-	catalogDigest, err := distributions.Digest()
+	catalogDigest, err := value.Digest()
 	if err != nil {
 		return nil, err
 	}
@@ -77,15 +78,11 @@ func PlanUpgrade(inventory Inventory, to string) (*UpgradePlan, error) {
 		CurrentProfileDigest: profileDigest,
 		CurrentSequence:      profile.Sequence,
 		CatalogDigest:        catalogDigest,
-		CatalogSequence:      distributions.Sequence,
+		CatalogSequence:      value.Sequence,
 		Target:               target,
 		Services:             append([]string(nil), inventory.Services...),
 		Mirrors:              append([]string(nil), inventory.Mirrors...),
-		ContractChanges: map[string]any{
-			"from": profile.Provides,
-			"to":   target.Provides,
-		},
-		RequiredPhases: []string{"candidate", "sync", "deploy", "verify", "activate"},
+		RequiredPhases:       []string{"sync", "deploy", "verify", "activate"},
 	}
 	if err := plan.Validate(); err != nil {
 		return nil, err
@@ -101,15 +98,15 @@ func WriteUpgradePlan(path string, plan UpgradePlan) error {
 }
 
 type UpgradeStepInput struct {
-	Schema             string               `json:"schema"`
-	OperationID        string               `json:"operationId"`
-	Phase              string               `json:"phase"`
-	Operator           string               `json:"operator"`
-	Mirrors            []string             `json:"mirrors,omitempty"`
-	CurrentProfile     operator.Document    `json:"currentProfile"`
-	TargetDistribution catalog.Distribution `json:"targetDistribution"`
-	TargetProfilePath  string               `json:"targetProfilePath,omitempty"`
-	PriorEvidence      map[string]any       `json:"priorEvidence,omitempty"`
+	Schema         string          `json:"schema"`
+	OperationID    string          `json:"operationId"`
+	Phase          string          `json:"phase"`
+	Operator       string          `json:"operator"`
+	Mirrors        []string        `json:"mirrors,omitempty"`
+	CurrentProfile operator.Document `json:"currentProfile"`
+	TargetRelease  catalog.Release `json:"targetRelease"`
+	TargetProfilePath string       `json:"targetProfilePath,omitempty"`
+	PriorEvidence  map[string]any  `json:"priorEvidence,omitempty"`
 }
 
 type OperationState struct {
@@ -129,7 +126,7 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 	if err := plan.Validate(); err != nil {
 		return nil, err
 	}
-	profile, distributions, _, err := loadTrustedState(inventory)
+	profile, value, err := loadTrustedState(inventory)
 	if err != nil {
 		return nil, operationError("operator.control_plane_invalid", "upgrade", "Operator control plane is not trusted", nil, err)
 	}
@@ -151,7 +148,7 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 		)
 	}
 	profileDigest, _ := profile.Digest()
-	catalogDigest, _ := distributions.Digest()
+	catalogDigest, _ := value.Digest()
 	if profileDigest != plan.CurrentProfileDigest || catalogDigest != plan.CatalogDigest {
 		return nil, operationError(
 			"operator.plan_stale",
@@ -166,14 +163,12 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 			nil,
 		)
 	}
-	target, err := findDistribution(*distributions, plan.Target.Digest)
-	if err != nil || target.State != catalog.StateCertified {
-		return nil, operationError("operator.target_changed", "upgrade", "Planned target is no longer certified", map[string]any{"digest": plan.Target.Digest}, err)
+	target, ok := value.ReleaseByVersion(plan.Target.Version)
+	if !ok {
+		return nil, operationError("operator.target_changed", "upgrade", "Planned target is no longer in the catalog", map[string]any{"version": plan.Target.Version}, nil)
 	}
-	targetDigest, _ := canonical.Digest(target)
-	plannedDigest, _ := canonical.Digest(plan.Target)
-	if targetDigest != plannedDigest {
-		return nil, operationError("operator.target_changed", "upgrade", "Planned target metadata changed", map[string]any{"digest": plan.Target.Digest}, nil)
+	if target.Commit != plan.Target.Commit {
+		return nil, operationError("operator.target_changed", "upgrade", "Planned target metadata changed", map[string]any{"version": plan.Target.Version}, nil)
 	}
 
 	state := OperationState{
@@ -182,7 +177,7 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 		Kind:        "upgrade",
 		Operator:    inventory.Operator,
 		Status:      "running",
-		Phase:       "candidate",
+		Phase:       "sync",
 		StartedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 		Evidence:    map[string]map[string]any{},
 	}
@@ -196,24 +191,28 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 		name string
 		spec extension.Spec
 	}{
-		{"candidate", inventory.Upgrade.Candidate},
 		{"sync", inventory.Upgrade.Sync},
 		{"deploy", inventory.Upgrade.Deploy},
 		{"verify", inventory.Upgrade.Verify},
 	}
 	deployed := false
 	for _, step := range steps {
+		// A missing adapter means this deployment has nothing to do in that
+		// phase; a single server with no mirror skips sync entirely.
+		if step.spec.Command == nil {
+			continue
+		}
 		state.Phase = step.name
 		_ = document.WriteAtomic(statePath, state)
 		input := UpgradeStepInput{
-			Schema:             UpgradeInputSchema,
-			OperationID:        plan.OperationID,
-			Phase:              step.name,
-			Operator:           inventory.Operator,
-			Mirrors:            append([]string(nil), plan.Mirrors...),
-			CurrentProfile:     *profile,
-			TargetDistribution: target,
-			PriorEvidence:      cloneEvidence(prior),
+			Schema:         UpgradeInputSchema,
+			OperationID:    plan.OperationID,
+			Phase:          step.name,
+			Operator:       inventory.Operator,
+			Mirrors:        append([]string(nil), plan.Mirrors...),
+			CurrentProfile: *profile,
+			TargetRelease:  target,
+			PriorEvidence:  cloneEvidence(prior),
 		}
 		result, stepErr := runStep(ctx, step.name, step.spec, input)
 		if stepErr != nil {
@@ -230,22 +229,18 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 		state.Evidence[step.name] = result.Evidence
 	}
 
+	root, err := inventory.root()
+	if err != nil {
+		recordOperationFailure(statePath, &state, "operator.profile_sign_failed", "sign-profile", err)
+		return nil, operationError("operator.profile_sign_failed", "sign-profile", "Server root is unavailable; new Operator Profile could not be signed", nil, err)
+	}
 	targetProfile := *profile
 	targetProfile.ServerRelease = operator.ServerRelease{
-		Version:            target.Version,
-		Commit:             target.Commit,
-		DistributionDigest: target.Digest,
+		Version: target.Version,
+		Commit:  target.Commit,
 	}
-	targetProfile.Provides = append(targetProfile.Provides[:0:0], target.Provides...)
-	targetProfile.Sources.Mirrors = append([]string(nil), plan.Mirrors...)
 	targetProfile.Sequence = profile.Sequence + 1
-	keyID, seed, err := loadSigningKey(inventory.SigningKeyPath)
-	if err != nil {
-		err = rollbackUpgrade(ctx, inventory, plan, *profile, target, prior, err)
-		recordOperationFailure(statePath, &state, "operator.profile_sign_failed", "sign-profile", err)
-		return nil, operationError("operator.profile_sign_failed", "sign-profile", "New Operator Profile could not be signed", nil, err)
-	}
-	if err := targetProfile.Sign(keyID, seed); err != nil {
+	if err := targetProfile.Sign(root.KeyID, root.Seed); err != nil {
 		err = rollbackUpgrade(ctx, inventory, plan, *profile, target, prior, err)
 		recordOperationFailure(statePath, &state, "operator.profile_sign_failed", "sign-profile", err)
 		return nil, operationError("operator.profile_sign_failed", "sign-profile", "New Operator Profile could not be signed", nil, err)
@@ -260,15 +255,15 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 	state.Phase = "activate"
 	_ = document.WriteAtomic(statePath, state)
 	activateResult, err := runStep(ctx, "activate", inventory.Upgrade.Activate, UpgradeStepInput{
-		Schema:             UpgradeInputSchema,
-		OperationID:        plan.OperationID,
-		Phase:              "activate",
-		Operator:           inventory.Operator,
-		Mirrors:            append([]string(nil), plan.Mirrors...),
-		CurrentProfile:     *profile,
-		TargetDistribution: target,
-		TargetProfilePath:  stagedProfile,
-		PriorEvidence:      cloneEvidence(prior),
+		Schema:            UpgradeInputSchema,
+		OperationID:       plan.OperationID,
+		Phase:             "activate",
+		Operator:          inventory.Operator,
+		Mirrors:           append([]string(nil), plan.Mirrors...),
+		CurrentProfile:    *profile,
+		TargetRelease:     target,
+		TargetProfilePath: stagedProfile,
+		PriorEvidence:     cloneEvidence(prior),
 	})
 	if err != nil {
 		err = rollbackUpgrade(ctx, inventory, plan, *profile, target, prior, err)
@@ -290,41 +285,15 @@ func ApplyUpgrade(ctx context.Context, inventory Inventory, plan UpgradePlan) (*
 	return &targetProfile, nil
 }
 
-func selectUpgradeTarget(distributions catalog.Document, to string) (catalog.Distribution, error) {
+func selectUpgradeTarget(value catalog.Document, to string) (catalog.Release, error) {
 	if to == "" || to == "latest" {
-		production, err := distributions.Production()
-		if err != nil {
-			return catalog.Distribution{}, err
-		}
-		if len(production) == 0 {
-			return catalog.Distribution{}, fmt.Errorf("catalog has no certified production distribution")
-		}
-		return production[0], nil
+		return value.CurrentRelease()
 	}
-	var found *catalog.Distribution
-	for index := range distributions.Distributions {
-		candidate := &distributions.Distributions[index]
-		if candidate.Version != to || candidate.State != catalog.StateCertified {
-			continue
-		}
-		if found != nil {
-			return catalog.Distribution{}, fmt.Errorf("certified version %s is ambiguous; select by immutable digest", to)
-		}
-		found = candidate
+	release, ok := value.ReleaseByVersion(to)
+	if !ok {
+		return catalog.Release{}, fmt.Errorf("release %s is not present in the catalog", to)
 	}
-	if found == nil {
-		return catalog.Distribution{}, fmt.Errorf("certified version %s is not present", to)
-	}
-	return *found, nil
-}
-
-func findDistribution(distributions catalog.Document, digest string) (catalog.Distribution, error) {
-	for _, distribution := range distributions.Distributions {
-		if distribution.Digest == digest {
-			return distribution, nil
-		}
-	}
-	return catalog.Distribution{}, fmt.Errorf("distribution %s is not present", digest)
+	return release, nil
 }
 
 func rollbackUpgrade(
@@ -332,19 +301,22 @@ func rollbackUpgrade(
 	inventory Inventory,
 	plan UpgradePlan,
 	profile operator.Document,
-	target catalog.Distribution,
+	target catalog.Release,
 	prior map[string]any,
 	cause error,
 ) error {
+	if inventory.Upgrade.Rollback.Command == nil {
+		return cause
+	}
 	_, rollbackErr := runStep(ctx, "rollback", inventory.Upgrade.Rollback, UpgradeStepInput{
-		Schema:             UpgradeInputSchema,
-		OperationID:        plan.OperationID,
-		Phase:              "rollback",
-		Operator:           inventory.Operator,
-		Mirrors:            append([]string(nil), plan.Mirrors...),
-		CurrentProfile:     profile,
-		TargetDistribution: target,
-		PriorEvidence:      cloneEvidence(prior),
+		Schema:         UpgradeInputSchema,
+		OperationID:    plan.OperationID,
+		Phase:          "rollback",
+		Operator:       inventory.Operator,
+		Mirrors:        append([]string(nil), plan.Mirrors...),
+		CurrentProfile: profile,
+		TargetRelease:  target,
+		PriorEvidence:  cloneEvidence(prior),
 	})
 	if rollbackErr != nil {
 		return operationError(

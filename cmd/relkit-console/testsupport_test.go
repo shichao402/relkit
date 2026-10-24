@@ -3,13 +3,13 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 )
@@ -33,16 +33,37 @@ func rememberPanelCookie(tb testing.TB, srv *httptest.Server, c *console) {
 	if c == nil || c.admin == nil {
 		return
 	}
-	user := c.admin.firstUsername()
-	if user == "" {
-		return
-	}
-	cookie, err := c.admin.issueCookie(user, time.Now().Add(time.Hour))
+	// The cookie carries the agent bearer; these read-only page tests never
+	// spend it, so a placeholder is enough to get past requirePanelAuth.
+	cookie, err := c.admin.issueCookie(signedSession{User: testPanelUser, Agent: "test-bearer"})
 	if err != nil {
 		tb.Fatal(err)
 	}
 	testPanelCookies.Store(srv.URL, cookie)
 	tb.Cleanup(func() { testPanelCookies.Delete(srv.URL) })
+}
+
+// jarClient is a client that keeps cookies, so a login lands and later GETs
+// carry the session the panel issued.
+func jarClient(t *testing.T, srv *httptest.Server) *http.Client {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := srv.Client()
+	client.Jar = jar
+	return client
+}
+
+// noRedirectClient reports the redirect itself, which is how the gate tests
+// tell "sent to login" from "rendered the page".
+func noRedirectClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func testGet(t *testing.T, rawURL string) *http.Response {

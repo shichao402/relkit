@@ -2,57 +2,45 @@ package runtimeprofile
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
-	"github.com/shichao402/relkit/internal/keys"
 	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/trust"
 )
 
-func TestCreateBootstrapsSignedRuntimeProfile(t *testing.T) {
+func testSigner() envelope.Signer {
 	seed := make([]byte, ed25519.SeedSize)
 	for index := range seed {
 		seed[index] = byte(index + 7)
 	}
-	signer := envelope.Signer{KeyID: "product-root", Seed: seed}
-	fingerprint, err := trust.Fingerprint(signer.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	productDocument := project.Document{
-		Schema:           project.Schema,
-		Product:          "demo",
-		Channels:         []string{"dev", "stable"},
-		OperatorRef:      "prod",
-		TrustFingerprint: "sha256:" + strings.Repeat("a", 64),
-		Roles:            []project.Role{project.RolePublisher},
-		ArtifactProducer: &project.Command{Command: []string{"fixture"}},
-		RuntimeProfilePublication: &project.RuntimeProfilePublication{
-			RootFingerprint: fingerprint,
-			RUPSchemaSet:    "rup.v2",
-			Recovery:        map[string]any{"message": "manual install"},
-		},
-		CapabilityFingerprint: project.CapabilityFingerprint{
-			OSArch:   []string{"darwin-arm64"},
-			Topology: "producer-only",
-		},
-	}
+	return envelope.Signer{KeyID: "server-root", Seed: seed}
+}
 
+func testProduct() project.Document {
+	signer := testSigner()
+	return project.Document{
+		Schema:        project.Schema,
+		Product:       "demo",
+		Server:        "https://updates.example",
+		RootPublicKey: base64.StdEncoding.EncodeToString(signer.PublicKey()),
+		Channels:      []string{"dev", "stable"},
+	}
+}
+
+func TestCreateSignsWithTheServerRoot(t *testing.T) {
+	signer := testSigner()
 	profile, err := Create(
-		productDocument,
+		testProduct(),
 		[]string{"https://updates.example/directory/demo.pb"},
 		1,
-		[]envelope.Signer{signer},
+		signer,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -60,8 +48,18 @@ func TestCreateBootstrapsSignedRuntimeProfile(t *testing.T) {
 	if profile.Product != "demo" || profile.ProfileVersion != 1 || profile.Digest == "" {
 		t.Fatalf("incomplete Runtime Profile: %#v", profile)
 	}
+	if len(profile.Signatures) != 1 || profile.Signatures[0].KeyID != signer.KeyID {
+		t.Fatalf("Runtime Profile is not signed by exactly the server root: %#v", profile.Signatures)
+	}
 	if err := profile.Verify(map[string]ed25519.PublicKey{signer.KeyID: signer.PublicKey()}); err != nil {
 		t.Fatalf("created Runtime Profile is not verifiable: %v", err)
+	}
+}
+
+func TestCreateRequiresEntryURLs(t *testing.T) {
+	if _, err := Create(testProduct(), nil, 1, testSigner()); err == nil ||
+		!strings.Contains(err.Error(), "entry URLs") {
+		t.Fatalf("expected a missing entry URL rejection, got %v", err)
 	}
 }
 
@@ -91,29 +89,12 @@ func TestPublishWritesAndReadsSignedRuntimeProfile(t *testing.T) {
 	defer server.Close()
 	t.Setenv("RELKIT_TEST_STORE_TOKEN", "token")
 
-	seed := make([]byte, ed25519.SeedSize)
-	for index := range seed {
-		seed[index] = byte(index + 3)
-	}
-	publicKey := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	fingerprint, err := trust.Fingerprint(publicKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	privateDocument := keys.PrivateKeyDocument("product-root", seed)
-	privateBytes, err := rupv2.MarshalPrivateKey(&privateDocument)
-	if err != nil {
-		t.Fatal(err)
-	}
+	signer := testSigner()
 	root := t.TempDir()
-	privatePath := filepath.Join(root, "product.private.pb")
-	if err := os.WriteFile(privatePath, privateBytes, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	cfg := &config.Config{
-		Root:    root,
-		Product: "demo",
-		Signing: map[string]any{"keyId": "product-root", "privateKeyPath": privatePath},
+		Root:      root,
+		Product:   "demo",
+		Raw:       map[string]any{},
 		Backends: map[string]map[string]any{
 			"serve": {
 				"type":      "relkit-compatible",
@@ -128,24 +109,9 @@ func TestPublishWritesAndReadsSignedRuntimeProfile(t *testing.T) {
 			EntryURLs: []string{server.URL + "/directory/demo.pb"},
 		},
 	}
-	productDocument := project.Document{
-		Schema:           project.Schema,
-		Product:          "demo",
-		Channels:         []string{"dev", "stable"},
-		OperatorRef:      "prod",
-		TrustFingerprint: "sha256:" + strings.Repeat("a", 64),
-		Roles:            []project.Role{project.RolePublisher},
-		ArtifactProducer: &project.Command{Command: []string{"fixture"}},
-		RuntimeProfilePublication: &project.RuntimeProfilePublication{
-			RootFingerprint: fingerprint,
-			RUPSchemaSet:    "rup.v2",
-		},
-		CapabilityFingerprint: project.CapabilityFingerprint{
-			OSArch:   []string{"darwin-arm64"},
-			Topology: "producer-only",
-		},
-	}
-	result, err := Publish(cfg, productDocument, PublishOptions{ProfileVersion: 3}, nil)
+	cfg.SetRoot(&config.RootKey{KeyID: signer.KeyID, Seed: signer.Seed, PublicKey: signer.PublicKey()})
+
+	result, err := Publish(cfg, testProduct(), PublishOptions{ProfileVersion: 3, Signer: signer}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,5 +120,25 @@ func TestPublishWritesAndReadsSignedRuntimeProfile(t *testing.T) {
 	}
 	if _, ok := objects[result.Key]; !ok {
 		t.Fatalf("Runtime Profile was not stored at %s", result.Key)
+	}
+	if err := result.Profile.Verify(map[string]ed25519.PublicKey{signer.KeyID: signer.PublicKey()}); err != nil {
+		t.Fatalf("published Runtime Profile is not verifiable: %v", err)
+	}
+}
+
+func TestPublishRequiresTheServerRootSigner(t *testing.T) {
+	cfg := &config.Config{
+		Root:      t.TempDir(),
+		Product:   "demo",
+		Raw:       map[string]any{},
+		PublishTo: []string{"serve"},
+		Directory: &config.DirectoryConfig{
+			PublishTo: []string{"serve"},
+			EntryURLs: []string{"https://updates.example/directory/demo.pb"},
+		},
+	}
+	if _, err := Publish(cfg, testProduct(), PublishOptions{ProfileVersion: 1}, nil); err == nil ||
+		!strings.Contains(err.Error(), "server root signer") {
+		t.Fatalf("expected a missing signer rejection, got %v", err)
 	}
 }

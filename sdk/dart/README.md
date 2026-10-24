@@ -1,15 +1,14 @@
-# rup_client (Dart RUP SDK)
+# rup_client
 
-Official Dart client for [RUP](https://github.com/shichao402/relkit) protobuf v2:
-signed index → version chain → hash-verified download (optional apply helpers).
+Thin Dart client for the `relkit-updater` engine. The package spawns the engine
+and speaks the `relkit.updater.v1` IPC protocol with it; it contains no update
+logic of its own.
 
-**This directory (`relkit/sdk/dart`) is the source of truth.**  
-Go peer SDK: `../` (`github.com/shichao402/relkit/sdk`).  
-Host wiring: `relkit materialize` projects this component to
-`.relkit/components/sdk/dart`; product repos no longer materialize host scripts
-(ADR 0019 §1).
+`relkit/sdk/dart` is the source of truth. Host wiring: SvnMergeTool consumes this
+package directly (requirement 4.1); there is no client-side materialization step
+any more.
 
-Pure Dart (no Flutter SDK dependency).
+Pure Dart, no Flutter SDK dependency.
 
 ## Install
 
@@ -32,80 +31,55 @@ dependencies:
       ref: main   # or a release tag
 ```
 
-Internal CI that cannot reach GitHub should **mirror** this tree into the host
-repo and document the sync command (do not treat the mirror as upstream).
+Internal CI that cannot reach GitHub should mirror this tree into the host repo
+and document the sync command (do not treat the mirror as upstream).
 
-## Wire format
+## What this package contains
 
-- Envelope schema `rup.envelope/2`; payload = Index protobuf bytes
-- Ed25519 over those payload bytes
-- Manifest / artifact integrity via size + sha256
-- Selectors are repeated `Selector { key, value }`
+- `lib/src/updater_facade.dart` — the hand-written facade: spawn the engine,
+  frame protobuf messages on stdio, expose `check`, `download`, `apply`,
+  `status`, `cancel`, `cleanup`, `listInstalled`, `deleteInstalled`,
+  `switchActive`, `rollback`.
+- `lib/src/gen/updater/v1/` — generated protobuf types for the IPC protocol.
+- `lib/rup_client.dart` and `lib/updater_v1.dart` — export surfaces.
 
-Generated types: `lib/src/gen/rup/v2/` (re-exported by `package:rup_client/rup_client.dart`).
+Nothing else. Signature verification, index/manifest/envelope parsing, selector
+matching, version comparison, artifact download and file replacement all live in
+the engine (requirement 4.3). If a host needs a decision, it asks the engine.
 
-## Cross-implementation gate
-
-`test/interop_test.dart` reads `test/fixtures/interop-index.json`, which holds an
-envelope sealed by the Go control plane through the same path `publish.Run` uses.
-The Dart side verifies the signature, parses the index and runs chain selection on
-those exact bytes; `internal/envelope` re-seals on every `go test` run so the
-checked-in bytes cannot drift from what relkit actually emits.
-
-Do not edit the fixture by hand. After an intentional wire change:
-
-```
-go test ./internal/envelope -run TestSdkInteropFixtureIsNotStale -update-sdk-interop-fixture
-```
-
-
-## What it does
-
-- `Updater` (facade) — spawn `relkit-updater` for check/download/apply
-- protocol helpers — envelope, chain, selectors, hash-verified download
-
-In-process `RupUpdater` / `UpdateScheduler` stay in this repo for engine tests
-and are not exported or packed into host zips.
-
-The package does not decide UI, prompts, or silent installs.
+## Opening the engine
 
 ```dart
-final runtime = UpdateRuntimeConfig.fromJson(jsonDecode(await rootBundle.loadString(...)));
+final opened = await Updater.open(bootstrapJson, runtime: UpdateRuntime.detect(product: 'svnmergetool'));
+final updater = switch (opened) {
+  OpenResult.open(:final updater) => updater,
+  OpenResult.failed(:final reason) => throw StateError('updates unavailable: $reason'),
+};
 ```
 
-Manual checks from settings should call `updater.check(force: true)` directly.
+`bootstrapJson` is the runtime bootstrap document, passed through verbatim. The
+engine validates it, checks the product matches, and reports back the allowed
+channels, the default channel, and the root key it trusts. A bootstrap the engine
+rejects is a hard startup failure, so the host should close its update UI rather
+than fall back to a degraded mode.
 
-## Checking for an update
+Manual checks from a settings screen call `updater.check(force: true)`.
 
-```dart
-final updater = RupUpdater(
-  product: 'demo',
-  channel: 'stable',
-  currentCode: 21,
-  indexUrls: [
-    Uri.parse('https://releases.example.com/index/demo/stable.pb'),
-  ],
-  trustedKeys: TrustedKeys.fromBase64({
-    'release-2026': 'oKbk9wV4...',
-  }),
-  clientSelectors: const {'os': 'windows', 'arch': 'x64'},
-  stateStore: FileUpdateStateStore(
-    directory: Directory(supportDir),
-    product: 'demo',
-    channel: 'stable',
-  ),
-);
+## IPC baseline
 
-switch (await updater.check()) {
-  case UpToDate():
-    break;
-  case UpdateAvailable(:final target):
-    print('next: ${target.version}');
-  case CheckFailed(:final reason):
-    print(reason);
-  case CheckThrottled():
-    break;
-}
+`ipcMin`, `ipcMax` and `ipcCurrent` are compile-time constants and all equal `4`.
+An engine and a client from different sides of the boundary refuse each other
+with an explicit `UPDATER_TOO_OLD` / `UPDATER_TOO_NEW`. There is no negotiation
+window and no compatibility shim: this is the epoch boundary.
+
+## Generated code
+
+`lib/src/gen/updater/v1/` is produced by `proto/buf.gen.dart.yaml`, which
+generates the updater surface only. RUP wire types are Go-side and are not
+generated for Dart, because a thin client never parses them.
+
+Regenerate from the repository root:
+
 ```
-
-See `example/check_update.dart` for a check-flow sample.
+pwsh scripts/gen-proto.ps1
+```

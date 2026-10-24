@@ -1,11 +1,11 @@
-package sdk_test
+﻿package sdk_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/shichao402/relkit/internal/inprocess"
-	"github.com/shichao402/relkit/sdk"
+	"github.com/shichao402/relkit/internal/sdk"
 )
 
 func TestCheckAttachesRecoveryWhenRemoteFails(t *testing.T) {

@@ -49,7 +49,7 @@ func productProfiles(t *testing.T, ids ...string) []Product {
 		dir := t.TempDir()
 		profile := filepath.Join(dir, "profile.json")
 		raw := map[string]any{
-			"product": id, "signing": map[string]any{"keyId": "k1"},
+			"product":   id,
 			"backends":  map[string]any{"prod": map[string]any{"type": "s3-compatible"}},
 			"publishTo": []string{"prod"},
 		}
@@ -74,10 +74,10 @@ func readServed(t *testing.T, dir, rel string) string {
 // TestUpdatePageIsServableAndListsPublishedProducts is the missing acceptance
 // test: open the page the way a person does and confirm the products are on it.
 func TestUpdatePageIsServableAndListsPublishedProducts(t *testing.T) {
-	products := productProfiles(t, "dec", "cronkit")
+	products := productProfiles(t, "loom", "svn-auto-merge")
 	dir := buildSiteDir(t, products, func(shared map[string][]byte) {
-		putWebmeta(t, shared, "dec", "1.13.125", "stable")
-		putWebmeta(t, shared, "cronkit", "0.1.0+36", "stable")
+		putWebmeta(t, shared, "loom", "1.13.125", "stable")
+		putWebmeta(t, shared, "svn-auto-merge", "0.1.0+36", "stable")
 	})
 
 	// 1. The document root must serve a real shell, not an empty file.
@@ -107,7 +107,7 @@ func TestUpdatePageIsServableAndListsPublishedProducts(t *testing.T) {
 	for _, product := range catalog.Products {
 		listed[product.ID] = product
 	}
-	for _, want := range []string{"cronkit", "dec"} {
+	for _, want := range []string{"svn-auto-merge", "loom"} {
 		product, ok := listed[want]
 		if !ok {
 			t.Fatalf("product %q missing from catalog: %+v", want, catalog.Products)
@@ -116,17 +116,17 @@ func TestUpdatePageIsServableAndListsPublishedProducts(t *testing.T) {
 			t.Fatalf("product %q has no channels on the page", want)
 		}
 	}
-	if got := listed["dec"].Channels[0].Version; got != "1.13.125" {
-		t.Fatalf("dec channel version on page = %q, want 1.13.125", got)
+	if got := listed["loom"].Channels[0].Version; got != "1.13.125" {
+		t.Fatalf("loom channel version on page = %q, want 1.13.125", got)
 	}
 
 	// 4. The data documents the SPA fetches at runtime must ship with the dump,
 	//    otherwise the page renders and then fails to show any release.
-	if body := readServed(t, dir, webmeta.SiteKey("dec")); !strings.Contains(body, `"product": "dec"`) {
-		t.Fatalf("site document for dec is missing or wrong:\n%s", body)
+	if body := readServed(t, dir, webmeta.SiteKey("loom")); !strings.Contains(body, `"product": "loom"`) {
+		t.Fatalf("site document for loom is missing or wrong:\n%s", body)
 	}
-	if body := readServed(t, dir, webmeta.ChannelKey("dec", "stable")); !strings.Contains(body, "1.13.125") {
-		t.Fatalf("channel document for dec/stable is missing the version:\n%s", body)
+	if body := readServed(t, dir, webmeta.ChannelKey("loom", "stable")); !strings.Contains(body, "1.13.125") {
+		t.Fatalf("channel document for loom/stable is missing the version:\n%s", body)
 	}
 }
 
@@ -136,10 +136,10 @@ func TestUpdatePageIsServableAndListsPublishedProducts(t *testing.T) {
 // protocol documents but has no site declaration is a regression, and the
 // rebuild has to fail loudly instead of serving a page that quietly omits it.
 func TestUpdatePageRefusesToDropAProduct(t *testing.T) {
-	products := productProfiles(t, "dec", "cronkit")
+	products := productProfiles(t, "loom", "svn-auto-merge")
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0", "stable")
-	putWebmeta(t, shared, "cronkit", "2.0.0", "stable")
+	putWebmeta(t, shared, "loom", "1.0.0", "stable")
+	putWebmeta(t, shared, "svn-auto-merge", "2.0.0", "stable")
 
 	oldFactory := createBackend
 	createBackend = func(_ string, cfg *config.Config, _ string) (backends.Backend, error) {
@@ -152,15 +152,15 @@ func TestUpdatePageRefusesToDropAProduct(t *testing.T) {
 		t.Fatalf("first rebuild: %v", err)
 	}
 
-	// dec keeps publishing protocol data but its site document disappears,
+	// loom keeps publishing protocol data but its site document disappears,
 	// which is precisely what a product losing its site block looks like.
-	delete(shared, webmeta.SiteKey("dec"))
+	delete(shared, webmeta.SiteKey("loom"))
 	changed, err := Rebuild(cfg, products, nil)
 	if err == nil {
-		t.Fatalf("rebuild accepted a catalog that dropped dec (changed=%v)", changed)
+		t.Fatalf("rebuild accepted a catalog that dropped loom (changed=%v)", changed)
 	}
-	if !strings.Contains(err.Error(), "incomplete snapshot") && !strings.Contains(err.Error(), "dec") {
-		t.Fatalf("unexpected error, want an explicit refusal naming dec: %v", err)
+	if !strings.Contains(err.Error(), "incomplete snapshot") && !strings.Contains(err.Error(), "loom") {
+		t.Fatalf("unexpected error, want an explicit refusal naming loom: %v", err)
 	}
 }
 
@@ -168,11 +168,11 @@ func TestUpdatePageRefusesToDropAProduct(t *testing.T) {
 // a configured product that never published a site document is skipped, not an
 // error. Products that only ship protocol documents are legitimate (a managed
 // component that is never offered for manual download). The distinction from
-// the test above is that dec had already appeared on the page.
+// the test above is that loom had already appeared on the page.
 func TestUpdatePageSkipsProductWithoutSiteDocument(t *testing.T) {
-	products := productProfiles(t, "dec", "internal-component")
+	products := productProfiles(t, "loom", "internal-component")
 	dir := buildSiteDir(t, products, func(shared map[string][]byte) {
-		putWebmeta(t, shared, "dec", "1.0.0", "stable")
+		putWebmeta(t, shared, "loom", "1.0.0", "stable")
 	})
 
 	var log []string
@@ -181,7 +181,7 @@ func TestUpdatePageSkipsProductWithoutSiteDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Products) != 1 || catalog.Products[0].ID != "dec" {
-		t.Fatalf("catalog=%+v, want only dec", catalog.Products)
+	if len(catalog.Products) != 1 || catalog.Products[0].ID != "loom" {
+		t.Fatalf("catalog=%+v, want only loom", catalog.Products)
 	}
 }

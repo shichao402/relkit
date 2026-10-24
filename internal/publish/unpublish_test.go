@@ -1,7 +1,6 @@
 package publish
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -53,8 +52,9 @@ func (b *unpublishMem) Delete(key string) error {
 
 var _ backends.Deleter = (*unpublishMem)(nil)
 
-// newUnpublishFixture writes a product relkit.json with a real signing key and
-// returns the loaded config. The config declares a "mem" backend that tests
+// newUnpublishFixture writes a product relkit.json that names its server root
+// and injects the resolved root, mirroring how the custody manifest hands a
+// keyId back to the publisher. The config declares a "mem" backend that tests
 // replace before calling the internal kernel below, because the mem type is
 // not in the backends.Create registry.
 func newUnpublishFixture(t *testing.T) (*config.Config, string) {
@@ -64,29 +64,12 @@ func newUnpublishFixture(t *testing.T) (*config.Config, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	privDoc := keys.PrivateKeyDocument("k1", seed)
-	privBytes, err := rupv2.MarshalPrivateKey(&privDoc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	privPath := filepath.Join(dir, "k1.private.pb")
-	if err := os.WriteFile(privPath, privBytes, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	public := keys.PublicKey(seed)
 	cfgDoc := map[string]any{
 		"product":        "demo",
 		"defaultChannel": "stable",
 		"channels":       []any{"stable"},
 		"codeStrategy":   "explicit",
-		"signing": map[string]any{
-			"keyId":          "k1",
-			"privateKeyPath": "k1.private.pb",
-			"publicKeys": []any{map[string]any{
-				"keyId":           "k1",
-				"publicKeyBase64": base64.StdEncoding.EncodeToString(public),
-			}},
-		},
+		"rootKeyId":      "k1",
 		"backends": map[string]any{
 			"mem": map[string]any{"type": "mem"},
 		},
@@ -103,6 +86,7 @@ func newUnpublishFixture(t *testing.T) (*config.Config, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.SetRoot(&config.RootKey{KeyID: "k1", Seed: seed, PublicKey: keys.PublicKey(seed)})
 	return cfg, dir
 }
 
@@ -129,7 +113,7 @@ func seedSignedIndex(t *testing.T, backend *unpublishMem, cfg *config.Config, se
 	if err != nil {
 		t.Fatal(err)
 	}
-	signers, err := cfg.LoadSigners()
+	signers, err := cfg.Signers()
 	if err != nil {
 		t.Fatal(err)
 	}

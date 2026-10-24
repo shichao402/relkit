@@ -229,6 +229,16 @@ class RecoveryHelp extends $pb.GeneratedMessage {
   $pb.PbList<RecoveryLink> get links => $_getList(1);
 }
 
+/// ClientProfile is what the engine needs to reach a server. In window 4 the
+/// host no longer parses the embedded Runtime Bootstrap: it forwards the
+/// document text verbatim and the engine validates it (requirement 3.8).
+///
+/// When bootstrap is non-empty the engine derives product, allowed channels,
+/// entry URLs and the trusted key from it, then checks that it agrees with
+/// expected_product and with the channel in Runtime. Fields duplicated here
+/// (product, allowed_channels, entry_urls, trusted_keys) stay for hosts that
+/// speak window 4 without a bootstrap; the engine rejects disagreement rather
+/// than silently picking one side.
 class ClientProfile extends $pb.GeneratedMessage {
   factory ClientProfile({
     $core.String? product,
@@ -238,6 +248,8 @@ class ClientProfile extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? fallbackUrls,
     $core.Iterable<TrustedKey>? trustedKeys,
     RecoveryHelp? recovery,
+    $core.String? bootstrap,
+    $core.String? expectedProduct,
   }) {
     final result = ClientProfile._();
     if (product != null) result.product = product;
@@ -247,6 +259,8 @@ class ClientProfile extends $pb.GeneratedMessage {
     if (fallbackUrls != null) result.fallbackUrls.addAll(fallbackUrls);
     if (trustedKeys != null) result.trustedKeys.addAll(trustedKeys);
     if (recovery != null) result.recovery = recovery;
+    if (bootstrap != null) result.bootstrap = bootstrap;
+    if (expectedProduct != null) result.expectedProduct = expectedProduct;
     return result;
   }
 
@@ -273,6 +287,8 @@ class ClientProfile extends $pb.GeneratedMessage {
         subBuilder: TrustedKey.$_createMessage)
     ..aOM<RecoveryHelp>(7, _omitFieldNames ? '' : 'recovery',
         subBuilder: RecoveryHelp.$_createMessage)
+    ..aOS(8, _omitFieldNames ? '' : 'bootstrap')
+    ..aOS(9, _omitFieldNames ? '' : 'expectedProduct')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -331,6 +347,132 @@ class ClientProfile extends $pb.GeneratedMessage {
   void clearRecovery() => $_clearField(7);
   @$pb.TagNumber(7)
   RecoveryHelp ensureRecovery() => $_ensure(6);
+
+  /// Verbatim relkit.runtime-bootstrap/2 JSON. Empty means the host resolved
+  /// the profile itself.
+  @$pb.TagNumber(8)
+  $core.String get bootstrap => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set bootstrap($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasBootstrap() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearBootstrap() => $_clearField(8);
+
+  /// Product name the host believes it is. When bootstrap is set the engine
+  /// requires this to equal the bootstrap product.
+  @$pb.TagNumber(9)
+  $core.String get expectedProduct => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set expectedProduct($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasExpectedProduct() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearExpectedProduct() => $_clearField(9);
+}
+
+/// HandshakeReport is what the engine learned while validating the client
+/// profile. It rides on Capabilities so a host that forwards its Runtime
+/// Bootstrap verbatim (requirement 3.8) never needs its own parser: the engine
+/// tells it the product, the channels it may use, and which one to preselect.
+class HandshakeReport extends $pb.GeneratedMessage {
+  factory HandshakeReport({
+    $core.String? product,
+    $core.Iterable<$core.String>? allowedChannels,
+    $core.String? defaultChannel,
+    $core.String? rootKeyId,
+    $core.String? rootFingerprint,
+  }) {
+    final result = HandshakeReport._();
+    if (product != null) result.product = product;
+    if (allowedChannels != null) result.allowedChannels.addAll(allowedChannels);
+    if (defaultChannel != null) result.defaultChannel = defaultChannel;
+    if (rootKeyId != null) result.rootKeyId = rootKeyId;
+    if (rootFingerprint != null) result.rootFingerprint = rootFingerprint;
+    return result;
+  }
+
+  HandshakeReport._();
+
+  factory HandshakeReport.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      HandshakeReport()..mergeFromBuffer(data, registry);
+  factory HandshakeReport.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      HandshakeReport()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'HandshakeReport',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
+      createEmptyInstance: HandshakeReport.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'product')
+    ..pPS(2, _omitFieldNames ? '' : 'allowedChannels')
+    ..aOS(3, _omitFieldNames ? '' : 'defaultChannel')
+    ..aOS(6, _omitFieldNames ? '' : 'rootKeyId')
+    ..aOS(7, _omitFieldNames ? '' : 'rootFingerprint')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  HandshakeReport clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  HandshakeReport copyWith(void Function(HandshakeReport) updates) =>
+      super.copyWith((message) => updates(message as HandshakeReport))
+          as HandshakeReport;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use HandshakeReport() / HandshakeReport.new instead')
+  static HandshakeReport create() => HandshakeReport._();
+  static $pb.GeneratedMessage $_createMessage() => HandshakeReport._();
+  @$core.override
+  HandshakeReport createEmptyInstance() => HandshakeReport._();
+  @$core.pragma('dart2js:noInline')
+  static HandshakeReport getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<HandshakeReport>(
+          HandshakeReport.$_createMessage);
+  static HandshakeReport? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get product => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set product($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasProduct() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearProduct() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.String> get allowedChannels => $_getList(1);
+
+  @$pb.TagNumber(3)
+  $core.String get defaultChannel => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set defaultChannel($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDefaultChannel() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDefaultChannel() => $_clearField(3);
+
+  @$pb.TagNumber(6)
+  $core.String get rootKeyId => $_getSZ(3);
+  @$pb.TagNumber(6)
+  set rootKeyId($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(6)
+  $core.bool hasRootKeyId() => $_has(3);
+  @$pb.TagNumber(6)
+  void clearRootKeyId() => $_clearField(6);
+
+  @$pb.TagNumber(7)
+  $core.String get rootFingerprint => $_getSZ(4);
+  @$pb.TagNumber(7)
+  set rootFingerprint($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(7)
+  $core.bool hasRootFingerprint() => $_has(4);
+  @$pb.TagNumber(7)
+  void clearRootFingerprint() => $_clearField(7);
 }
 
 class LibraryPolicy extends $pb.GeneratedMessage {
@@ -723,91 +865,6 @@ class CheckPolicy extends $pb.GeneratedMessage {
   $0.Duration ensureAfterFailure() => $_ensure(1);
 }
 
-class SchedulerConfig extends $pb.GeneratedMessage {
-  factory SchedulerConfig({
-    $core.bool? checkOnStart,
-    $core.bool? forceOnStart,
-    CheckPolicy? policy,
-  }) {
-    final result = SchedulerConfig._();
-    if (checkOnStart != null) result.checkOnStart = checkOnStart;
-    if (forceOnStart != null) result.forceOnStart = forceOnStart;
-    if (policy != null) result.policy = policy;
-    return result;
-  }
-
-  SchedulerConfig._();
-
-  factory SchedulerConfig.fromBuffer($core.List<$core.int> data,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      SchedulerConfig()..mergeFromBuffer(data, registry);
-  factory SchedulerConfig.fromJson($core.String json,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      SchedulerConfig()..mergeFromJson(json, registry);
-
-  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'SchedulerConfig',
-      package:
-          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
-      createEmptyInstance: SchedulerConfig.$_createMessage)
-    ..aOB(1, _omitFieldNames ? '' : 'checkOnStart')
-    ..aOB(2, _omitFieldNames ? '' : 'forceOnStart')
-    ..aOM<CheckPolicy>(3, _omitFieldNames ? '' : 'policy',
-        subBuilder: CheckPolicy.$_createMessage)
-    ..hasRequiredFields = false;
-
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  SchedulerConfig clone() => deepCopy();
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  SchedulerConfig copyWith(void Function(SchedulerConfig) updates) =>
-      super.copyWith((message) => updates(message as SchedulerConfig))
-          as SchedulerConfig;
-
-  @$core.override
-  $pb.BuilderInfo get info_ => _i;
-
-  @$core.pragma('dart2js:noInline')
-  @$core.Deprecated('Use SchedulerConfig() / SchedulerConfig.new instead')
-  static SchedulerConfig create() => SchedulerConfig._();
-  static $pb.GeneratedMessage $_createMessage() => SchedulerConfig._();
-  @$core.override
-  SchedulerConfig createEmptyInstance() => SchedulerConfig._();
-  @$core.pragma('dart2js:noInline')
-  static SchedulerConfig getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SchedulerConfig>(
-          SchedulerConfig.$_createMessage);
-  static SchedulerConfig? _defaultInstance;
-
-  @$pb.TagNumber(1)
-  $core.bool get checkOnStart => $_getBF(0);
-  @$pb.TagNumber(1)
-  set checkOnStart($core.bool value) => $_setBool(0, value);
-  @$pb.TagNumber(1)
-  $core.bool hasCheckOnStart() => $_has(0);
-  @$pb.TagNumber(1)
-  void clearCheckOnStart() => $_clearField(1);
-
-  @$pb.TagNumber(2)
-  $core.bool get forceOnStart => $_getBF(1);
-  @$pb.TagNumber(2)
-  set forceOnStart($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasForceOnStart() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearForceOnStart() => $_clearField(2);
-
-  @$pb.TagNumber(3)
-  CheckPolicy get policy => $_getN(2);
-  @$pb.TagNumber(3)
-  set policy(CheckPolicy value) => $_setField(3, value);
-  @$pb.TagNumber(3)
-  $core.bool hasPolicy() => $_has(2);
-  @$pb.TagNumber(3)
-  void clearPolicy() => $_clearField(3);
-  @$pb.TagNumber(3)
-  CheckPolicy ensurePolicy() => $_ensure(2);
-}
-
 class ClientHello extends $pb.GeneratedMessage {
   factory ClientHello({
     $core.int? ipcMin,
@@ -886,6 +943,7 @@ class Capabilities extends $pb.GeneratedMessage {
     $0.Duration? minCheckInterval,
     $0.Duration? planTtl,
     $core.String? engineVersion,
+    HandshakeReport? handshake,
   }) {
     final result = Capabilities._();
     if (ipc != null) result.ipc = ipc;
@@ -894,6 +952,7 @@ class Capabilities extends $pb.GeneratedMessage {
     if (minCheckInterval != null) result.minCheckInterval = minCheckInterval;
     if (planTtl != null) result.planTtl = planTtl;
     if (engineVersion != null) result.engineVersion = engineVersion;
+    if (handshake != null) result.handshake = handshake;
     return result;
   }
 
@@ -925,6 +984,8 @@ class Capabilities extends $pb.GeneratedMessage {
     ..aOM<$0.Duration>(5, _omitFieldNames ? '' : 'planTtl',
         subBuilder: $0.Duration.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'engineVersion')
+    ..aOM<HandshakeReport>(7, _omitFieldNames ? '' : 'handshake',
+        subBuilder: HandshakeReport.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -994,6 +1055,19 @@ class Capabilities extends $pb.GeneratedMessage {
   $core.bool hasEngineVersion() => $_has(5);
   @$pb.TagNumber(6)
   void clearEngineVersion() => $_clearField(6);
+
+  /// Present once the engine has validated a profile; absent in the
+  /// capabilities-only probe (--capabilities) and before negotiation.
+  @$pb.TagNumber(7)
+  HandshakeReport get handshake => $_getN(6);
+  @$pb.TagNumber(7)
+  set handshake(HandshakeReport value) => $_setField(7, value);
+  @$pb.TagNumber(7)
+  $core.bool hasHandshake() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearHandshake() => $_clearField(7);
+  @$pb.TagNumber(7)
+  HandshakeReport ensureHandshake() => $_ensure(6);
 }
 
 class CheckOp extends $pb.GeneratedMessage {
@@ -1521,6 +1595,77 @@ class RollbackOp extends $pb.GeneratedMessage {
   static RollbackOp? _defaultInstance;
 }
 
+/// DeleteInstalledOp removes one installed version from a LIBRARY install root
+/// (requirement 3.1). The engine refuses to delete the version active.json
+/// points at and any version the host declares in use, renames the directory
+/// out of versions/ before removing it, and holds .relkit-apply.lock so it can
+/// never race an apply.
+class DeleteInstalledOp extends $pb.GeneratedMessage {
+  factory DeleteInstalledOp({
+    $fixnum.Int64? code,
+    $core.Iterable<$fixnum.Int64>? inUseCodes,
+  }) {
+    final result = DeleteInstalledOp._();
+    if (code != null) result.code = code;
+    if (inUseCodes != null) result.inUseCodes.addAll(inUseCodes);
+    return result;
+  }
+
+  DeleteInstalledOp._();
+
+  factory DeleteInstalledOp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeleteInstalledOp()..mergeFromBuffer(data, registry);
+  factory DeleteInstalledOp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeleteInstalledOp()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DeleteInstalledOp',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
+      createEmptyInstance: DeleteInstalledOp.$_createMessage)
+    ..aInt64(1, _omitFieldNames ? '' : 'code')
+    ..p<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'inUseCodes', $pb.PbFieldType.K6)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeleteInstalledOp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeleteInstalledOp copyWith(void Function(DeleteInstalledOp) updates) =>
+      super.copyWith((message) => updates(message as DeleteInstalledOp))
+          as DeleteInstalledOp;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DeleteInstalledOp() / DeleteInstalledOp.new instead')
+  static DeleteInstalledOp create() => DeleteInstalledOp._();
+  static $pb.GeneratedMessage $_createMessage() => DeleteInstalledOp._();
+  @$core.override
+  DeleteInstalledOp createEmptyInstance() => DeleteInstalledOp._();
+  @$core.pragma('dart2js:noInline')
+  static DeleteInstalledOp getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<DeleteInstalledOp>(
+          DeleteInstalledOp.$_createMessage);
+  static DeleteInstalledOp? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get code => $_getI64(0);
+  @$pb.TagNumber(1)
+  set code($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCode() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCode() => $_clearField(1);
+
+  /// Codes the host is currently running from, e.g. every open editor window.
+  @$pb.TagNumber(2)
+  $pb.PbList<$fixnum.Int64> get inUseCodes => $_getList(1);
+}
+
 class InstalledVersion extends $pb.GeneratedMessage {
   factory InstalledVersion({
     $fixnum.Int64? code,
@@ -1703,6 +1848,7 @@ enum UpdaterRequest_Op {
   listInstalled,
   switchActive,
   rollback,
+  deleteInstalled,
   notSet
 }
 
@@ -1721,6 +1867,7 @@ class UpdaterRequest extends $pb.GeneratedMessage {
     ListInstalledOp? listInstalled,
     SwitchActiveOp? switchActive,
     RollbackOp? rollback,
+    DeleteInstalledOp? deleteInstalled,
   }) {
     final result = UpdaterRequest._();
     if (hello != null) result.hello = hello;
@@ -1736,6 +1883,7 @@ class UpdaterRequest extends $pb.GeneratedMessage {
     if (listInstalled != null) result.listInstalled = listInstalled;
     if (switchActive != null) result.switchActive = switchActive;
     if (rollback != null) result.rollback = rollback;
+    if (deleteInstalled != null) result.deleteInstalled = deleteInstalled;
     return result;
   }
 
@@ -1760,6 +1908,7 @@ class UpdaterRequest extends $pb.GeneratedMessage {
     17: UpdaterRequest_Op.listInstalled,
     18: UpdaterRequest_Op.switchActive,
     19: UpdaterRequest_Op.rollback,
+    20: UpdaterRequest_Op.deleteInstalled,
     0: UpdaterRequest_Op.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
@@ -1767,7 +1916,7 @@ class UpdaterRequest extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'relkit.updater.v1'),
       createEmptyInstance: UpdaterRequest.$_createMessage)
-    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19])
+    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: ClientHello.$_createMessage)
     ..aOM<ClientProfile>(2, _omitFieldNames ? '' : 'profile',
@@ -1794,6 +1943,8 @@ class UpdaterRequest extends $pb.GeneratedMessage {
         subBuilder: SwitchActiveOp.$_createMessage)
     ..aOM<RollbackOp>(19, _omitFieldNames ? '' : 'rollback',
         subBuilder: RollbackOp.$_createMessage)
+    ..aOM<DeleteInstalledOp>(20, _omitFieldNames ? '' : 'deleteInstalled',
+        subBuilder: DeleteInstalledOp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1828,6 +1979,7 @@ class UpdaterRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(17)
   @$pb.TagNumber(18)
   @$pb.TagNumber(19)
+  @$pb.TagNumber(20)
   UpdaterRequest_Op whichOp() => _UpdaterRequest_OpByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(10)
   @$pb.TagNumber(11)
@@ -1839,6 +1991,7 @@ class UpdaterRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(17)
   @$pb.TagNumber(18)
   @$pb.TagNumber(19)
+  @$pb.TagNumber(20)
   void clearOp() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1983,6 +2136,17 @@ class UpdaterRequest extends $pb.GeneratedMessage {
   void clearRollback() => $_clearField(19);
   @$pb.TagNumber(19)
   RollbackOp ensureRollback() => $_ensure(12);
+
+  @$pb.TagNumber(20)
+  DeleteInstalledOp get deleteInstalled => $_getN(13);
+  @$pb.TagNumber(20)
+  set deleteInstalled(DeleteInstalledOp value) => $_setField(20, value);
+  @$pb.TagNumber(20)
+  $core.bool hasDeleteInstalled() => $_has(13);
+  @$pb.TagNumber(20)
+  void clearDeleteInstalled() => $_clearField(20);
+  @$pb.TagNumber(20)
+  DeleteInstalledOp ensureDeleteInstalled() => $_ensure(13);
 }
 
 class Error extends $pb.GeneratedMessage {
@@ -4750,6 +4914,8 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     $core.bool? installOnly,
     $core.bool? requiresHostExit,
     LibraryPolicy? library,
+    ApplyDisposition? disposition,
+    $core.String? installerRelpath,
   }) {
     final result = ApplySessionRecord._();
     if (sessionId != null) result.sessionId = sessionId;
@@ -4771,6 +4937,8 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     if (installOnly != null) result.installOnly = installOnly;
     if (requiresHostExit != null) result.requiresHostExit = requiresHostExit;
     if (library != null) result.library = library;
+    if (disposition != null) result.disposition = disposition;
+    if (installerRelpath != null) result.installerRelpath = installerRelpath;
     return result;
   }
 
@@ -4813,6 +4981,9 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
     ..aOB(21, _omitFieldNames ? '' : 'requiresHostExit')
     ..aOM<LibraryPolicy>(22, _omitFieldNames ? '' : 'library',
         subBuilder: LibraryPolicy.$_createMessage)
+    ..aE<ApplyDisposition>(23, _omitFieldNames ? '' : 'disposition',
+        enumValues: ApplyDisposition.values)
+    ..aOS(24, _omitFieldNames ? '' : 'installerRelpath')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -5009,6 +5180,27 @@ class ApplySessionRecord extends $pb.GeneratedMessage {
   void clearLibrary() => $_clearField(22);
   @$pb.TagNumber(22)
   LibraryPolicy ensureLibrary() => $_ensure(18);
+
+  /// Carried into the worker so a FULL_INSTALL session runs the installer
+  /// instead of unpacking a payload.
+  @$pb.TagNumber(23)
+  ApplyDisposition get disposition => $_getN(19);
+  @$pb.TagNumber(23)
+  set disposition(ApplyDisposition value) => $_setField(23, value);
+  @$pb.TagNumber(23)
+  $core.bool hasDisposition() => $_has(19);
+  @$pb.TagNumber(23)
+  void clearDisposition() => $_clearField(23);
+
+  /// Relpath of the verified installer inside the staged root.
+  @$pb.TagNumber(24)
+  $core.String get installerRelpath => $_getSZ(20);
+  @$pb.TagNumber(24)
+  set installerRelpath($core.String value) => $_setString(20, value);
+  @$pb.TagNumber(24)
+  $core.bool hasInstallerRelpath() => $_has(20);
+  @$pb.TagNumber(24)
+  void clearInstallerRelpath() => $_clearField(24);
 }
 
 class JournalEntry extends $pb.GeneratedMessage {

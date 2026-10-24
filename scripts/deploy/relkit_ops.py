@@ -290,6 +290,12 @@ def migrate_profile(
     notes: list[str] = []
     if n:
         notes.append(f"removed casCredentials x{n}")
+    if "signing" in cfg:
+        cfg.pop("signing", None)
+        notes.append(
+            "removed signing: a server signs every document with its one root "
+            "(requirement 10.5); the profile keeps backends only"
+        )
     if "site" in cfg:
         cfg.pop("site", None)
         notes.append("removed product-owned site config; configure site.sinks in relkit-agent.json")
@@ -309,6 +315,147 @@ def migrate_profile(
             notes.extend(f"{name}: {item}" for item in more)
         cfg["backends"] = new_backends
     return cfg, notes
+
+
+def epoch_split_agent_config(
+    agent_cfg: dict[str, Any],
+    *,
+    product_roots: Optional[dict[str, str]] = None,
+    token_hashes: Optional[dict[str, str]] = None,
+    root_key_id: str = "",
+    custody_manifest: str = "",
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Split a pre-epoch agent config into (config file, admin document, notes).
+
+    Before the epoch the config file carried `products` and `uploadTokens`, and
+    each product profile carried its own signing key. The epoch moved product
+    registration and token hashes into the admin document, and moved signing to
+    the server's one root (requirements 11.3, 13.6, 10.1). There is no reader
+    for the old spelling any more: the agent refuses to start rather than
+    silently authorize nobody, so the deploy pipeline has to perform the split
+    instead of leaving an operator to hand-edit a server.
+
+    Everything here is derived from data already on the box. A token's plaintext
+    exists only in the file it was issued into, so the caller passes the sha256
+    of that file's trimmed content; nothing is regenerated, which is what keeps
+    an existing publisher working across the upgrade.
+    """
+    cfg, notes = migrate_agent_config(agent_cfg)
+    product_roots = product_roots or {}
+    token_hashes = token_hashes or {}
+    admin: dict[str, Any] = {"schema": "relkit.agent-admin/1", "products": [], "tokens": []}
+    created = "1970-01-01T00:00:00Z"
+
+    products = cfg.pop("products", None)
+    if isinstance(products, dict):
+        for product_id in sorted(products):
+            entry = products[product_id]
+            if not isinstance(entry, dict):
+                raise ValueError(f"agent products.{product_id} is not an object")
+            root = str(entry.get("root") or product_roots.get(product_id) or "").strip()
+            if not root:
+                raise ValueError(
+                    f"agent products.{product_id} has no root; pass the tree so the "
+                    "registration can be migrated"
+                )
+            profile = str(entry.get("profile") or "").strip()
+            registered: dict[str, Any] = {"id": product_id, "root": root, "createdAt": created}
+            if profile:
+                registered["profile"] = profile
+            admin["products"].append(registered)
+        notes.append(
+            f"moved products ({', '.join(sorted(products))}) out of the config file "
+            "into the admin document (requirements 11.3, 13.6)"
+        )
+        dropped = sorted(
+            key
+            for entry in products.values()
+            if isinstance(entry, dict)
+            for key in entry
+            if key not in {"root", "profile"}
+        )
+        if dropped:
+            # candidateRootFingerprint / distributionRootFingerprint / lane /
+            # operatorDeploymentId were the multi-root control plane. The epoch
+            # deleted it (requirement 10.2, 10.3); keeping the values would
+            # suggest they still mean something.
+            notes.append(
+                "dropped retired product fields: " + ", ".join(sorted(set(dropped)))
+            )
+
+    tokens = cfg.pop("uploadTokens", None)
+    if isinstance(tokens, list):
+        for index, entry in enumerate(tokens):
+            if not isinstance(entry, dict):
+                raise ValueError(f"agent uploadTokens[{index}] is not an object")
+            carrier = str(entry.get("file") or "").strip()
+            digest = token_hashes.get(carrier) or token_hashes.get(str(index)) or ""
+            if not digest:
+                raise ValueError(
+                    f"agent uploadTokens[{index}] ({carrier or 'no file'}) has no token hash; "
+                    "read the token file on the host and pass its sha256 so the existing "
+                    "credential keeps working"
+                )
+            for product_id in entry.get("products") or []:
+                admin["tokens"].append(
+                    {
+                        "id": f"tok_{index}_{product_id}",
+                        "product": product_id,
+                        "label": carrier or "migrated",
+                        "hash": digest,
+                        "createdAt": created,
+                    }
+                )
+        notes.append(
+            f"moved {len(admin['tokens'])} product token authorization(s) out of the config "
+            "file into the admin document; the plaintext and its hash are unchanged"
+        )
+
+    if root_key_id:
+        cfg["rootKeyId"] = root_key_id
+        notes.append(f"set rootKeyId={root_key_id}")
+    if custody_manifest:
+        cfg["custodyManifest"] = custody_manifest
+        notes.append(f"set custodyManifest={custody_manifest}")
+    return cfg, admin, notes
+
+
+def admin_merge(existing: dict[str, Any], incoming: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Merge a migrated admin document into whatever the server already has.
+
+    A server that already finished the epoch has real accounts and possibly
+    hand-issued tokens; the migration must add registrations without dropping
+    them. Existing entries win, because the live document is the newer truth.
+    """
+    notes: list[str] = []
+    merged = deepcopy(existing)
+    merged.setdefault("schema", "relkit.agent-admin/1")
+    if merged.get("schema") != "relkit.agent-admin/1":
+        raise ValueError(f"admin document schema is {merged.get('schema')!r}, expected relkit.agent-admin/1")
+
+    products = {entry.get("id"): entry for entry in merged.get("products") or [] if isinstance(entry, dict)}
+    added_products = []
+    for entry in incoming.get("products") or []:
+        product_id = entry.get("id")
+        if product_id in products:
+            continue
+        products[product_id] = entry
+        added_products.append(product_id)
+    merged["products"] = [products[key] for key in sorted(products)]
+    if added_products:
+        notes.append("registered: " + ", ".join(added_products))
+
+    seen = {(entry.get("product"), entry.get("hash")) for entry in merged.get("tokens") or [] if isinstance(entry, dict)}
+    added_tokens = 0
+    for entry in incoming.get("tokens") or []:
+        if (entry.get("product"), entry.get("hash")) in seen:
+            continue
+        seen.add((entry.get("product"), entry.get("hash")))
+        merged.setdefault("tokens", []).append(entry)
+        added_tokens += 1
+    if added_tokens:
+        notes.append(f"authorized {added_tokens} token(s)")
+    return merged, notes
 
 
 def migrate_agent_config(agent_cfg: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:

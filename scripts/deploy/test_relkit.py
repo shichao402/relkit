@@ -17,6 +17,51 @@ from pathlib import Path
 DEPLOY = Path(__file__).resolve().parent
 sys.path.insert(0, str(DEPLOY))
 
+# Tests create temporary trees constantly, and on this Windows host a
+# TemporaryDirectory under %TEMP% intermittently cannot be chmod'ed by Python
+# 3.13 (tempfile._resetperms -> WinError 5), which fails tests whose logic is
+# unrelated, and only when the suite runs as a whole. A scratch directory inside
+# the repository is writable by the account running the tests, so the location
+# is pinned here rather than left to the ambient TMP setting.
+_SCRATCH = DEPLOY.parent.parent / ".tmp-test"
+# Leftovers from earlier runs make this host refuse operations on newly created
+# directories, so the scratch area starts empty on every run. Leftovers would
+# otherwise accumulate, since the temporary directories below are never deleted.
+if _SCRATCH.is_dir():
+    shutil.rmtree(_SCRATCH, ignore_errors=True)
+_SCRATCH.mkdir(parents=True, exist_ok=True)
+tempfile.tempdir = str(_SCRATCH)
+
+
+class _TempDir:
+    """A temporary directory that this host can actually use.
+
+    tempfile.TemporaryDirectory is unusable here: Python 3.13 tightens the new
+    directory to 0700 and re-scans it on cleanup, and this host intermittently
+    refuses both (WinError 5) for a directory it has just created. That failure
+    lands on whichever test happens to be running, several at a time, and only
+    when the suite runs as a whole, which makes it look like the code under test
+    is broken. Creating the directory here under a unique name and never
+    deleting it keeps the isolation the tests need without cleanup work that can
+    fail; leftovers accumulate only inside the repository's scratch area.
+    """
+
+    _counter = 0
+
+    def __init__(self) -> None:
+        type(self)._counter += 1
+        self.name = str(_SCRATCH / f"t{os.getpid()}-{type(self)._counter:05d}")
+        os.makedirs(self.name)
+
+    def __enter__(self) -> str:
+        return self.name
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+tempfile.TemporaryDirectory = _TempDir
+
 import relkit_ops as ops  # noqa: E402
 import relkit as deploy_cli  # noqa: E402
 from components import (
@@ -307,6 +352,171 @@ class MigrateTests(unittest.TestCase):
             )
 
 
+class EpochSplitTests(unittest.TestCase):
+    """The epoch agent has no reader for `products` or `uploadTokens`.
+
+    The deploy pipeline therefore performs the split on the box: registrations
+    and token hashes move into the admin document, signing moves to the server's
+    one root. These tests pin the two properties that make the upgrade safe: an
+    existing credential keeps working (its hash is derived from the file it was
+    issued into, never reissued), and the retired multi-root fields are dropped
+    instead of being carried forward as if they still meant something.
+    """
+
+    LEGACY_AGENT = {
+        "addr": "127.0.0.1:8787",
+        "products": {
+            "loom": {
+                "root": "/data/relkit/loom",
+                "profile": "products/loom.json",
+                "candidateRootFingerprint": "sha256:aaa",
+                "distributionRootFingerprint": "sha256:bbb",
+                "lane": "candidate",
+                "operatorDeploymentId": "tencent-internal",
+            },
+            "svn-auto-merge": {"root": "/data/relkit/svn-auto-merge"},
+        },
+        "uploadTokens": [
+            {"file": "tokens/shared.token", "products": ["loom", "svn-auto-merge"]}
+        ],
+        "stateDir": "/data/relkit-agent",
+    }
+
+    def test_products_move_into_admin_with_root_and_profile(self):
+        cfg, admin, notes = ops.epoch_split_agent_config(
+            self.LEGACY_AGENT, token_hashes={"tokens/shared.token": "f" * 64}
+        )
+        self.assertNotIn("products", cfg)
+        by_id = {entry["id"]: entry for entry in admin["products"]}
+        self.assertEqual(by_id["loom"]["root"], "/data/relkit/loom")
+        self.assertEqual(by_id["loom"]["profile"], "products/loom.json")
+        self.assertEqual(by_id["svn-auto-merge"]["root"], "/data/relkit/svn-auto-merge")
+        self.assertNotIn("profile", by_id["svn-auto-merge"])
+        self.assertTrue(any("into the admin document" in item for item in notes))
+
+    def test_retired_multi_root_fields_are_dropped(self):
+        _, admin, notes = ops.epoch_split_agent_config(
+            self.LEGACY_AGENT, token_hashes={"tokens/shared.token": "f" * 64}
+        )
+        for entry in admin["products"]:
+            self.assertEqual(set(entry) & {"candidateRootFingerprint", "lane", "operatorDeploymentId"}, set())
+        self.assertTrue(any("dropped retired product fields" in item for item in notes))
+
+    def test_one_token_entry_per_product_authorization(self):
+        _, admin, _ = ops.epoch_split_agent_config(
+            self.LEGACY_AGENT, token_hashes={"tokens/shared.token": "f" * 64}
+        )
+        self.assertEqual(len(admin["tokens"]), 2)
+        self.assertEqual({entry["product"] for entry in admin["tokens"]}, {"loom", "svn-auto-merge"})
+        for entry in admin["tokens"]:
+            self.assertEqual(entry["hash"], "f" * 64)
+
+    def test_token_authorization_needs_a_hash(self):
+        # Reissuing would break every publisher's CI, so a missing hash is a
+        # hard error: the caller must read the token file on the box.
+        with self.assertRaises(ValueError) as ctx:
+            ops.epoch_split_agent_config(self.LEGACY_AGENT)
+        self.assertIn("tokens/shared.token", str(ctx.exception))
+
+    def test_product_without_root_raises(self):
+        with self.assertRaises(ValueError):
+            ops.epoch_split_agent_config(
+                {"products": {"loom": {"profile": "products/loom.json"}}},
+                token_hashes={},
+            )
+
+    def test_root_key_and_manifest_are_written(self):
+        cfg, _, notes = ops.epoch_split_agent_config(
+            self.LEGACY_AGENT,
+            token_hashes={"tokens/shared.token": "f" * 64},
+            root_key_id="intranet-server-root",
+            custody_manifest="/etc/relkit-agent/custody-manifest.json",
+        )
+        self.assertEqual(cfg["rootKeyId"], "intranet-server-root")
+        self.assertEqual(cfg["custodyManifest"], "/etc/relkit-agent/custody-manifest.json")
+        self.assertTrue(any("set rootKeyId=intranet-server-root" in item for item in notes))
+        self.assertTrue(any("set custodyManifest=" in item for item in notes))
+
+    def test_deployment_knobs_survive_the_split(self):
+        cfg, _, _ = ops.epoch_split_agent_config(
+            self.LEGACY_AGENT,
+            token_hashes={"tokens/shared.token": "f" * 64},
+            root_key_id="k",
+            custody_manifest="/etc/relkit-agent/custody-manifest.json",
+        )
+        self.assertEqual(cfg["addr"], "127.0.0.1:8787")
+        self.assertEqual(cfg["stateDir"], "/data/relkit-agent")
+
+    def test_site_sinks_survive_the_split(self):
+        data = dict(self.LEGACY_AGENT)
+        data["site"] = {"sinks": [{"type": "backend", "backend": "intranet"}]}
+        cfg, _, _ = ops.epoch_split_agent_config(
+            data, token_hashes={"tokens/shared.token": "f" * 64}
+        )
+        self.assertEqual(cfg["site"]["sinks"], [{"type": "backend", "backend": "intranet"}])
+
+
+class AdminMergeTests(unittest.TestCase):
+    """The migration must not clobber a document the server already owns."""
+
+    def test_registers_missing_products_and_keeps_existing(self):
+        existing = {
+            "schema": "relkit.agent-admin/1",
+            "users": [{"id": "u1", "role": "owner"}],
+            "products": [{"id": "loom", "root": "/srv/loom", "createdAt": "2026-01-01T00:00:00Z"}],
+            "tokens": [],
+        }
+        incoming = {
+            "schema": "relkit.agent-admin/1",
+            "products": [
+                {"id": "loom", "root": "/other/loom", "createdAt": "1970-01-01T00:00:00Z"},
+                {"id": "svn-auto-merge", "root": "/data/relkit/svn-auto-merge", "createdAt": "1970-01-01T00:00:00Z"},
+            ],
+            "tokens": [],
+        }
+        merged, notes = ops.admin_merge(existing, incoming)
+        by_id = {entry["id"]: entry for entry in merged["products"]}
+        self.assertEqual(by_id["loom"]["root"], "/srv/loom", "the live document is the newer truth")
+        self.assertEqual(by_id["svn-auto-merge"]["root"], "/data/relkit/svn-auto-merge")
+        self.assertEqual(merged["users"], existing["users"])
+        self.assertTrue(any("svn-auto-merge" in item for item in notes))
+
+    def test_dedupes_token_authorizations(self):
+        existing = {
+            "schema": "relkit.agent-admin/1",
+            "products": [],
+            "tokens": [{"id": "t1", "product": "loom", "hash": "a" * 64}],
+        }
+        incoming = {
+            "schema": "relkit.agent-admin/1",
+            "products": [],
+            "tokens": [
+                {"id": "t2", "product": "loom", "hash": "a" * 64},
+                {"id": "t3", "product": "loom", "hash": "b" * 64},
+            ],
+        }
+        merged, _ = ops.admin_merge(existing, incoming)
+        self.assertEqual(len(merged["tokens"]), 2)
+        self.assertEqual([entry["id"] for entry in merged["tokens"]], ["t1", "t3"])
+
+    def test_second_run_is_idempotent(self):
+        incoming = {
+            "schema": "relkit.agent-admin/1",
+            "products": [{"id": "loom", "root": "/srv/loom", "createdAt": "1970-01-01T00:00:00Z"}],
+            "tokens": [{"id": "t1", "product": "loom", "hash": "a" * 64}],
+        }
+        once, _ = ops.admin_merge({}, incoming)
+        twice, notes = ops.admin_merge(once, incoming)
+        self.assertEqual(once, twice)
+        self.assertEqual(notes, [])
+
+    def test_rejects_foreign_schema(self):
+        with self.assertRaises(ValueError):
+            ops.admin_merge({"schema": "something/else"}, {"products": [], "tokens": []})
+
+
+
+
 class MissingTargetTests(unittest.TestCase):
     AGENT_ONLY_HOST = {
         "serve": {
@@ -378,6 +588,22 @@ class MissingTargetTests(unittest.TestCase):
         for path, _dest in sources:
             self.assertTrue(path.is_file(), path)
 
+    def test_remote_bootstrap_carries_the_component_registry(self):
+        """components.py reads the registry at import time.
+
+        A remote bootstrap lands in /tmp with no repository above it, so
+        `_repo_root()` falls back to /tmp and the canonical
+        `internal/vnext/registry/components.json` cannot be found. Shipping the
+        table as a sibling is what keeps `relkit.py remote probe` importable.
+        """
+        names = [(path.name, dest) for path, dest in deploy_cli.remote_bootstrap_sources()]
+        self.assertIn(("components.json", ""), names)
+        bundled = [path for path, _ in deploy_cli.remote_bootstrap_sources() if path.name == "components.json"]
+        self.assertEqual(len(bundled), 1)
+        self.assertEqual(bundled[0].read_text(encoding="utf-8")[:1], "{")
+        self.assertEqual(bundled[0].name, "components.json")
+        self.assertTrue(bundled[0].is_file())
+
 
 class TokenPermTests(unittest.TestCase):
     def test_0600_ok_0640_rejected(self):
@@ -424,13 +650,15 @@ class CliParseTests(unittest.TestCase):
         self.assertIn("pack_kind()", source)
 
     def test_registry_pack_covers_required_archive_paths(self):
-        # ADR 0019 §1 retired the host-scripts product-tree, so the remaining
-        # zipped components are the three SDK facades plus the TS projection.
-        self.assertEqual(BY_NAME["sdk-go"].pack_kind(), "go-deps")
+        # The epoch upgrade ships no Go SDK: the Go packages move into
+        # internal/ and host Go code stops being a relkit artifact, so the
+        # go-deps pack kind went with it (requirement 135 keeps pack-shape and
+        # the component table in step).
         self.assertEqual(BY_NAME["sdk-rust"].pack_kind(), "tracked-tree")
         self.assertEqual(BY_NAME["bindings-ts"].pack_kind(), "listed-files")
         self.assertEqual(BY_NAME["sdk-dart"].pack_kind(), "tracked-tree")
         self.assertNotIn("host-scripts", BY_NAME)
+        self.assertNotIn("sdk-go", BY_NAME)
         for row in deploy_cli.registry_components("product-tree"):
             names = {name for _, name in deploy_cli.component_entries(row.name)}
             self.assertTrue(names, f"{row.name} packed no files")
@@ -440,13 +668,6 @@ class CliParseTests(unittest.TestCase):
         self.assertNotIn("lib/src/updater.dart", dart)
         self.assertNotIn("lib/src/scheduler.dart", dart)
         self.assertFalse(any(name.startswith("test/") for name in dart))
-        go = {name for _, name in deploy_cli.component_entries("sdk-go")}
-        self.assertNotIn("sdk/updater.go", go)
-        self.assertFalse(any(name.startswith("internal/inprocess/") for name in go))
-        self.assertFalse(any(name.startswith("internal/updater/") for name in go))
-        self.assertTrue(any(name.startswith("sdk/") for name in go))
-        self.assertTrue(any(name.startswith("sdk/updaterfacade/") for name in go))
-        self.assertTrue(any(name.startswith("internal/ipc/") for name in go))
         # The retired source-grep gate is gone; what remains enforceable is that
         # every declared facade path really is inside its archive.
         for row in deploy_cli.registry_components("product-tree"):
@@ -498,7 +719,7 @@ class CliParseTests(unittest.TestCase):
         trees = deploy_cli.registry_components("product-tree")
         self.assertEqual(
             [row.name for row in trees],
-            ["sdk-dart", "sdk-go", "sdk-rust", "bindings-ts"],
+            ["sdk-dart", "sdk-rust", "bindings-ts"],
         )
         for row in trees:
             self.assertTrue(row.build_flag)
@@ -655,6 +876,257 @@ class ConsoleInstallTests(unittest.TestCase):
         self.assertIn("relkit-store.service", names)
 
 
+class ConsoleAdminPathTests(unittest.TestCase):
+    """The panel writes one file; the unit has to be allowed to write there.
+
+    A serve-era config carried a relative adminStateFile. The console resolves
+    that against the *config directory*, so on a box with ProtectSystem=strict
+    the panel died writing /etc/...tmp~ while a perfectly good session key sat
+    in the release tree.
+    """
+
+    def test_unset_setting_lands_in_the_release_tree(self):
+        cfg = {"dir": "/data/relkit-serve"}
+        self.assertEqual(
+            deploy_cli.console_admin_path(cfg, "/etc/relkit-console/relkit-console.json"),
+            Path("/data/relkit-serve") / deploy_cli.CONSOLE_PANEL_FILE,
+        )
+
+    def test_relative_setting_follows_the_config_directory(self):
+        """This is the bug, stated as a test: relative means beside the config."""
+        cfg = {"dir": "/data/relkit-serve", "adminStateFile": ".relkit-serve-admin.json"}
+        self.assertEqual(
+            deploy_cli.console_admin_path(cfg, "/etc/relkit-console/relkit-console.json"),
+            Path("/etc/relkit-console/.relkit-serve-admin.json"),
+        )
+
+    def test_absolute_setting_is_used_as_is(self):
+        cfg = {"dir": "/data/relkit-serve", "adminStateFile": "/var/lib/relkit-console/panel.json"}
+        self.assertEqual(
+            deploy_cli.console_admin_path(cfg, "/etc/relkit-console/relkit-console.json"),
+            Path("/var/lib/relkit-console/panel.json"),
+        )
+
+    def test_legacy_panel_file_is_opened_in_place(self):
+        """A migrated box keeps its session key, so nobody is signed out."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            legacy = tree / ".relkit-serve-admin.json"
+            legacy.write_text('{"sessionKey":"x"}\n', encoding="utf-8")
+            self.assertEqual(deploy_cli.console_panel_file(tree), legacy)
+
+    def test_fresh_tree_gets_the_current_panel_file_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            self.assertEqual(
+                deploy_cli.console_panel_file(tree),
+                tree / deploy_cli.CONSOLE_PANEL_FILE,
+            )
+
+    def test_read_write_paths_cover_the_state_file_directory(self):
+        cfg = {"dir": "/data/relkit-serve", "adminStateFile": ".relkit-serve-admin.json"}
+        paths = deploy_cli.console_read_write_paths(cfg, "/etc/relkit-console/relkit-console.json")
+        self.assertIn("/data/relkit-serve", paths)
+        # The resolved location is /etc, which the unit cannot write; the deploy
+        # path lists it anyway rather than silently leaving the panel unable to
+        # start. apply_console_upgrade rewrites the value so this stays unused.
+        self.assertIn("/etc/relkit-console", paths)
+
+    def test_read_write_paths_do_not_repeat_the_tree(self):
+        cfg = {"dir": "/data/relkit-serve"}
+        paths = deploy_cli.console_read_write_paths(cfg, "/etc/relkit-console/relkit-console.json")
+        self.assertEqual(paths, ["/data/relkit-serve"])
+
+    def test_upgrade_parser_exposes_console_switches(self):
+        args = deploy_cli.build_parser().parse_args(["upgrade", "--host", "box", "--apply"])
+        self.assertEqual(args.console_binary, "dist/relkit-console-linux-amd64")
+        self.assertFalse(args.no_console)
+
+
+class ConsoleAdminNormalizeTests(unittest.TestCase):
+    """The rewrite must produce an absolute path, or nothing changes at all.
+
+    Writing back a bare file name looked like a fix but resolved to the same
+    read-only /etc directory, so the panel kept crash-looping.
+    """
+
+    def test_relative_name_becomes_absolute_in_the_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "relkit-serve"
+            tree.mkdir()
+            cfg = {"dir": str(tree), "adminStateFile": ".relkit-serve-admin.json"}
+            updated, note = deploy_cli.normalize_console_admin_config(
+                cfg, str(Path(tmp) / "etc" / "relkit-console.json")
+            )
+            self.assertTrue(note)
+            self.assertEqual(
+                updated["adminStateFile"], str(tree / ".relkit-console-panel.json")
+            )
+            self.assertTrue(Path(updated["adminStateFile"]).is_absolute())
+
+    def test_legacy_file_in_the_tree_is_kept_under_its_old_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "relkit-serve"
+            tree.mkdir()
+            legacy = tree / ".relkit-serve-admin.json"
+            legacy.write_text('{"sessionKey":"keepme"}\n', encoding="utf-8")
+            cfg = {"dir": str(tree), "adminStateFile": ".relkit-serve-admin.json"}
+            updated, _ = deploy_cli.normalize_console_admin_config(
+                cfg, str(Path(tmp) / "etc" / "relkit-console.json")
+            )
+            self.assertEqual(updated["adminStateFile"], str(legacy))
+
+    def test_already_correct_config_is_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            target = tree / deploy_cli.CONSOLE_PANEL_FILE
+            cfg = {"dir": str(tree), "adminStateFile": str(target)}
+            updated, note = deploy_cli.normalize_console_admin_config(
+                cfg, str(Path(tmp) / "relkit-console.json")
+            )
+            self.assertEqual(note, "")
+            self.assertIs(updated, cfg)
+
+    def test_second_run_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "tree"
+            tree.mkdir()
+            cfg = {"dir": str(tree), "adminStateFile": ".relkit-serve-admin.json"}
+            config_path = str(Path(tmp) / "etc" / "relkit-console.json")
+            once, _ = deploy_cli.normalize_console_admin_config(cfg, config_path)
+            twice, note = deploy_cli.normalize_console_admin_config(once, config_path)
+            self.assertEqual(note, "")
+            self.assertEqual(once, twice)
+
+
+class ListenerOwnershipTests(unittest.TestCase):
+    """A green health check must not come from a different process.
+
+    relkit-store crash-looped on "address already in use" while a retired
+    relkit-serve process answered every probe. Curling the port returned 200 the
+    whole time, so the upgrade reported success against a dead service.
+    """
+
+    def _ss_output(self, lines):
+        return subprocess.CompletedProcess(args=["ss"], returncode=0, stdout="\n".join(lines), stderr="")
+
+    def test_listener_pid_reads_the_socket_owner(self):
+        fake = self._ss_output(
+            [
+                'LISTEN 0 4096 *:8080 *:* users:(("relkit-serve",pid=67135,fd=7))',
+                'LISTEN 0 511 127.0.0.1:18080 0.0.0.0:* users:(("node",pid=3773622,fd=18))',
+            ]
+        )
+        original = deploy_cli.run
+        deploy_cli.run = lambda *a, **k: fake
+        try:
+            self.assertEqual(deploy_cli.listener_pid("8080"), "67135")
+        finally:
+            deploy_cli.run = original
+
+    def test_listener_pid_is_empty_when_nothing_listens(self):
+        fake = self._ss_output(['LISTEN 0 511 127.0.0.1:18080 0.0.0.0:* users:(("node",pid=1,fd=18))'])
+        original = deploy_cli.run
+        deploy_cli.run = lambda *a, **k: fake
+        try:
+            self.assertEqual(deploy_cli.listener_pid("8080"), "")
+        finally:
+            deploy_cli.run = original
+
+    def test_foreign_process_on_the_port_is_rejected(self):
+        original_run = deploy_cli.run
+        original_state = deploy_cli.unit_state
+        calls = {"ss": 0}
+
+        def fake_run(argv, **kwargs):
+            if argv[:3] == ["ss", "-lntpH"]:
+                return self._ss_output(['LISTEN 0 4096 *:8080 *:* users:(("relkit-serve",pid=67135,fd=7))'])
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="/usr/local/bin/relkit-serve -config x", stderr="")
+
+        deploy_cli.run = fake_run
+        deploy_cli.unit_state = lambda unit: {"MainPID": "999", "ActiveState": "activating"}
+        try:
+            with self.assertRaises(ops.Fail if hasattr(ops, "Fail") else Exception) as caught:
+                deploy_cli.require_listener_belongs_to("relkit-store", ":8080")
+            self.assertIn("67135", str(caught.exception))
+        finally:
+            deploy_cli.run = original_run
+            deploy_cli.unit_state = original_state
+
+    def test_own_process_on_the_port_passes(self):
+        original_run = deploy_cli.run
+        original_state = deploy_cli.unit_state
+
+        def fake_run(argv, **kwargs):
+            return self._ss_output(['LISTEN 0 4096 *:8080 *:* users:(("relkit-store",pid=4242,fd=7))'])
+
+        deploy_cli.run = fake_run
+        deploy_cli.unit_state = lambda unit: {"MainPID": "4242", "ActiveState": "active"}
+        try:
+            deploy_cli.require_listener_belongs_to("relkit-store", ":8080")
+        finally:
+            deploy_cli.run = original_run
+            deploy_cli.unit_state = original_state
+
+    def test_listener_is_polled_until_the_socket_binds(self):
+        """A process reaches "active" before it binds; an instant read would lie."""
+        original_run = deploy_cli.run
+        original_state = deploy_cli.unit_state
+        original_sleep = deploy_cli.time.sleep
+        reads = {"count": 0}
+
+        def fake_run(argv, **kwargs):
+            reads["count"] += 1
+            if reads["count"] < 3:
+                return self._ss_output([])  # nothing bound yet
+            return self._ss_output(['LISTEN 0 4096 *:8080 *:* users:(("relkit-store",pid=4242,fd=7))'])
+
+        deploy_cli.run = fake_run
+        deploy_cli.unit_state = lambda unit: {"MainPID": "4242", "ActiveState": "active"}
+        deploy_cli.time.sleep = lambda seconds: None
+        try:
+            deploy_cli.require_listener_belongs_to("relkit-store", ":8080")
+            self.assertGreaterEqual(reads["count"], 3)
+        finally:
+            deploy_cli.run = original_run
+            deploy_cli.unit_state = original_state
+            deploy_cli.time.sleep = original_sleep
+
+    def test_a_port_that_never_binds_is_reported(self):
+        original_run = deploy_cli.run
+        original_state = deploy_cli.unit_state
+        original_sleep = deploy_cli.time.sleep
+        deploy_cli.run = lambda argv, **kwargs: self._ss_output([])
+        deploy_cli.unit_state = lambda unit: {"MainPID": "4242", "ActiveState": "active"}
+        deploy_cli.time.sleep = lambda seconds: None
+        try:
+            with self.assertRaises(Exception) as caught:
+                deploy_cli.require_listener_belongs_to("relkit-store", ":8080")
+            self.assertIn("nothing is listening", str(caught.exception))
+        finally:
+            deploy_cli.run = original_run
+            deploy_cli.unit_state = original_state
+            deploy_cli.time.sleep = original_sleep
+
+    def test_crash_looping_unit_is_not_reported_running(self):
+        original_state = deploy_cli.unit_state
+        original_sleep = deploy_cli.time.sleep
+        deploy_cli.unit_state = lambda unit: {
+            "ActiveState": "activating",
+            "SubState": "auto-restart",
+            "MainPID": "0",
+            "NRestarts": "30",
+        }
+        deploy_cli.time.sleep = lambda seconds: None
+        try:
+            with self.assertRaises(Exception) as caught:
+                deploy_cli.require_unit_running("relkit-store")
+            self.assertIn("activating", str(caught.exception))
+        finally:
+            deploy_cli.unit_state = original_state
+            deploy_cli.time.sleep = original_sleep
+
+
 class BackupRotationTests(unittest.TestCase):
     def test_backup_skips_regenerable_staged_cache(self):
         """An upgrade snapshot must not carry the publish payload artifacts.
@@ -780,6 +1252,124 @@ class BackupRotationTests(unittest.TestCase):
         args = deploy_cli.build_parser().parse_args(["prune-backups", "--host", "box", "--keep", "3", "--dry-run"])
         self.assertEqual(args.keep, 3)
         self.assertTrue(args.dry_run)
+
+
+class ToolPublishTests(unittest.TestCase):
+    """Requirement 12.6: a release ships tools, and the server signs them."""
+
+    def test_upgrade_publishes_tools_by_default(self):
+        args = deploy_cli.build_parser().parse_args(["upgrade", "--host", "box", "--plan"])
+        self.assertFalse(args.no_tools, "publishing tools must be the default; opting out is the exception")
+
+    def test_no_tools_flag_opts_out(self):
+        args = deploy_cli.build_parser().parse_args(["upgrade", "--host", "box", "--no-tools"])
+        self.assertTrue(args.no_tools)
+
+    def test_tools_publish_accepts_a_public_base_url(self):
+        args = deploy_cli.build_parser().parse_args(
+            ["tools", "publish", "--server", "http://127.0.0.1:8787", "--base-url", "http://update-internal.example"]
+        )
+        self.assertEqual(args.base_url, "http://update-internal.example")
+
+    def test_token_path_sits_beside_the_agent_config(self):
+        path = deploy_cli.tool_publish_token_path(Path("/etc/relkit-agent"))
+        self.assertEqual(path.as_posix(), "/etc/relkit-agent/tools-publish.token")
+
+    def test_token_is_minted_once_and_then_reused(self):
+        """A working release pipeline must keep working across upgrades."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp)
+            path, token, minted = deploy_cli.ensure_tool_publish_token(config_dir, user="")
+            self.assertTrue(minted)
+            self.assertEqual(path.read_text(encoding="utf-8").strip(), token)
+            self.assertGreaterEqual(len(token), 32)
+            again, token2, minted2 = deploy_cli.ensure_tool_publish_token(config_dir, user="")
+            self.assertFalse(minted2)
+            self.assertEqual(token2, token, "an existing credential must be reused, not rotated")
+            self.assertEqual(again, path)
+
+    def test_rotation_replaces_the_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp)
+            _, first, _ = deploy_cli.ensure_tool_publish_token(config_dir, user="")
+            _, second, minted = deploy_cli.ensure_tool_publish_token(config_dir, user="", rotate=True)
+            self.assertTrue(minted)
+            self.assertNotEqual(first, second)
+
+    def test_token_file_is_not_world_readable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _, _ = deploy_cli.ensure_tool_publish_token(Path(tmp), user="")
+            if os.name == "nt":
+                self.skipTest("POSIX modes are not reported on Windows")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_no_leftover_temp_file(self):
+        """The write must be atomic: a crash must not leave a half-written token."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp)
+            deploy_cli.ensure_tool_publish_token(config_dir, user="")
+            self.assertEqual([p.name for p in config_dir.iterdir()], ["tools-publish.token"])
+
+    def test_publishing_refuses_a_loopback_download_url(self):
+        """Signing 127.0.0.1 into the manifest would break every host's bootstrap."""
+        with tempfile.TemporaryDirectory() as tmp:
+            staged = Path(tmp) / "cli-linux-amd64"
+            staged.write_bytes(b"binary")
+            with self.assertRaises(deploy_cli.Fail):
+                deploy_cli.publish_release_tools(
+                    files=[{"path": str(staged), "component": "cli", "os": "linux", "arch": "amd64"}],
+                    version="0.7.0+abc",
+                    commit="abc",
+                    public_base="http://127.0.0.1:8787",
+                    user="",
+                    restart=False,
+                )
+
+    def test_publishing_refuses_an_empty_base_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            staged = Path(tmp) / "cli-linux-amd64"
+            staged.write_bytes(b"binary")
+            with self.assertRaises(deploy_cli.Fail):
+                deploy_cli.publish_release_tools(
+                    files=[{"path": str(staged), "component": "cli", "os": "linux", "arch": "amd64"}],
+                    version="0.7.0+abc",
+                    commit="abc",
+                    public_base="",
+                    user="",
+                    restart=False,
+                )
+
+    def test_publishing_a_missing_artifact_fails_loudly(self):
+        with self.assertRaises(deploy_cli.Fail):
+            deploy_cli.publish_release_tools(
+                files=[{"path": "/nonexistent/cli-linux-amd64", "component": "cli"}],
+                version="0.7.0+abc",
+                commit="abc",
+                public_base="http://update-internal.example",
+                user="",
+                restart=False,
+            )
+
+    def test_no_tool_files_means_no_work(self):
+        self.assertEqual(
+            deploy_cli.publish_release_tools(
+                files=[], version="", commit="", public_base="", user="", restart=False
+            ),
+            [],
+        )
+
+    def test_publish_helper_ships_with_the_remote_cli(self):
+        """The helper runs on the server, so it must travel with the CLI."""
+        names = [dest for _, dest in deploy_cli.remote_bootstrap_sources()]
+        sources = [str(Path(src).name) if not hasattr(src, "name") else src.name for src, _ in deploy_cli.remote_bootstrap_sources()]
+        self.assertIn("relkit_tools_publish.py", sources)
+
+
+class BuildAppendTests(unittest.TestCase):
+    def test_build_accepts_append(self):
+        args = deploy_cli.build_parser().parse_args(["build", "--cli", "--append", "--os", "linux"])
+        self.assertTrue(args.append)
+        self.assertTrue(args.cli)
 
 
 if __name__ == "__main__":

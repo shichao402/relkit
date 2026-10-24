@@ -1,5 +1,11 @@
-// Package ops owns machine-side Operator workflows. Product repositories do
-// not import this package and never receive its credentials or inventory.
+// Package ops owns machine-side Operator workflows: the deployment operations a
+// server administrator runs. Product repositories do not import this package
+// and never receive its credentials or inventory.
+//
+// After the epoch there is exactly one signing identity per server (the root
+// resolved from the custody manifest), so this package no longer carries a
+// distribution trust key set, a candidate lane, or a product root table
+// (requirements 10.5, 14.5).
 package ops
 
 import (
@@ -7,13 +13,10 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/keys"
-	"github.com/shichao402/relkit/internal/vnext/bootstrap"
+	"github.com/shichao402/relkit/internal/custody"
 	"github.com/shichao402/relkit/internal/vnext/catalog"
 	"github.com/shichao402/relkit/internal/vnext/document"
 	"github.com/shichao402/relkit/internal/vnext/extension"
@@ -21,21 +24,20 @@ import (
 )
 
 const (
-	InventorySchema      = "relkit.ops-inventory/1"
+	InventorySchema      = "relkit.ops-inventory/2"
 	StepResultSchema     = "relkit.ops-step-result/1"
-	UpgradeInputSchema   = "relkit.ops-upgrade-step/1"
+	UpgradeInputSchema   = "relkit.ops-upgrade-step/2"
 	RotateInputSchema    = "relkit.ops-rotate-step/1"
-	UpgradePlanSchema    = "relkit.ops-upgrade-plan/1"
+	UpgradePlanSchema    = "relkit.ops-upgrade-plan/2"
 	OperationStateSchema = "relkit.ops-operation-state/1"
 )
 
 type UpgradeAdapters struct {
-	Candidate extension.Spec `json:"candidate"`
-	Sync      extension.Spec `json:"sync"`
-	Deploy    extension.Spec `json:"deploy"`
-	Verify    extension.Spec `json:"verify"`
-	Activate  extension.Spec `json:"activate"`
-	Rollback  extension.Spec `json:"rollback"`
+	Sync     extension.Spec `json:"sync"`
+	Deploy   extension.Spec `json:"deploy"`
+	Verify   extension.Spec `json:"verify"`
+	Activate extension.Spec `json:"activate"`
+	Rollback extension.Spec `json:"rollback"`
 }
 
 type RotateAdapters struct {
@@ -48,21 +50,17 @@ type RotateAdapters struct {
 }
 
 type Inventory struct {
-	Schema            string                              `json:"schema"`
-	Operator          string                              `json:"operator"`
-	ActiveProfilePath string                              `json:"activeProfilePath"`
-	CatalogPath       string                              `json:"catalogPath"`
-	TrustKeyPaths     []string                            `json:"trustKeyPaths"`
-	SigningKeyPath    string                              `json:"signingKeyPath"`
-	StateDirectory    string                              `json:"stateDirectory"`
-	Services          []string                            `json:"services,omitempty"`
-	Mirrors           []string                            `json:"mirrors,omitempty"`
-	RuntimeProfiles   map[string]bootstrap.RuntimeProfile `json:"runtimeProfiles,omitempty"`
-	ProductRoots      map[string][]string                 `json:"productRoots,omitempty"`
-	AssetRoots        []string                            `json:"assetRoots,omitempty"`
-	BootstrapBinaries map[string]string                   `json:"bootstrapBinaries,omitempty"`
-	Upgrade           UpgradeAdapters                     `json:"upgrade"`
-	Rotate            map[string]RotateAdapters           `json:"rotate,omitempty"`
+	Schema            string                    `json:"schema"`
+	Operator          string                    `json:"operator"`
+	ActiveProfilePath string                    `json:"activeProfilePath"`
+	CatalogPath       string                    `json:"catalogPath"`
+	CustodyManifest   string                    `json:"custodyManifest"`
+	RootKeyID         string                    `json:"rootKeyId"`
+	StateDirectory    string                    `json:"stateDirectory"`
+	Services          []string                  `json:"services,omitempty"`
+	Mirrors           []string                  `json:"mirrors,omitempty"`
+	Upgrade           UpgradeAdapters           `json:"upgrade"`
+	Rotate            map[string]RotateAdapters `json:"rotate,omitempty"`
 }
 
 func LoadInventory(path string) (*Inventory, error) {
@@ -73,37 +71,14 @@ func LoadInventory(path string) (*Inventory, error) {
 	base := filepath.Dir(path)
 	value.ActiveProfilePath = resolvePath(base, value.ActiveProfilePath)
 	value.CatalogPath = resolvePath(base, value.CatalogPath)
-	value.SigningKeyPath = resolvePath(base, value.SigningKeyPath)
+	value.CustodyManifest = resolvePath(base, value.CustodyManifest)
 	value.StateDirectory = resolvePath(base, value.StateDirectory)
-	for index := range value.TrustKeyPaths {
-		value.TrustKeyPaths[index] = resolvePath(base, value.TrustKeyPaths[index])
-	}
-	for product, profile := range value.RuntimeProfiles {
-		profile.Profile = resolvePath(base, profile.Profile)
-		for index := range profile.Roots {
-			profile.Roots[index] = resolvePath(base, profile.Roots[index])
-		}
-		value.RuntimeProfiles[product] = profile
-	}
-	for product, roots := range value.ProductRoots {
-		for index := range roots {
-			roots[index] = resolvePath(base, roots[index])
-		}
-		value.ProductRoots[product] = roots
-	}
-	for index := range value.AssetRoots {
-		value.AssetRoots[index] = resolvePath(base, value.AssetRoots[index])
-	}
-	for target, binary := range value.BootstrapBinaries {
-		value.BootstrapBinaries[target] = resolvePath(base, binary)
-	}
 	resolveSpec := func(spec *extension.Spec) {
 		if spec.WorkingDirectory != "" {
 			spec.WorkingDirectory = resolvePath(base, spec.WorkingDirectory)
 		}
 	}
 	for _, spec := range []*extension.Spec{
-		&value.Upgrade.Candidate,
 		&value.Upgrade.Sync,
 		&value.Upgrade.Deploy,
 		&value.Upgrade.Verify,
@@ -136,11 +111,8 @@ func (i Inventory) Validate() error {
 		return fmt.Errorf("schema is %q, expected %q", i.Schema, InventorySchema)
 	}
 	if i.Operator == "" || i.ActiveProfilePath == "" || i.CatalogPath == "" ||
-		i.SigningKeyPath == "" || i.StateDirectory == "" {
-		return fmt.Errorf("operator, activeProfilePath, catalogPath, signingKeyPath, and stateDirectory are required")
-	}
-	if len(i.TrustKeyPaths) == 0 {
-		return fmt.Errorf("trustKeyPaths must not be empty")
+		i.CustodyManifest == "" || i.RootKeyID == "" || i.StateDirectory == "" {
+		return fmt.Errorf("operator, activeProfilePath, catalogPath, custodyManifest, rootKeyId, and stateDirectory are required")
 	}
 	if err := validateUniqueEntries("services", i.Services); err != nil {
 		return err
@@ -153,26 +125,6 @@ func (i Inventory) Validate() error {
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
 			parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return fmt.Errorf("mirrors entry must be an HTTP(S) URL without credentials, query, or fragment")
-		}
-	}
-	for product, profile := range i.RuntimeProfiles {
-		if product == "" || profile.Profile == "" || len(profile.Roots) == 0 {
-			return fmt.Errorf("runtimeProfiles entries require product, profile, and roots")
-		}
-	}
-	for product, roots := range i.ProductRoots {
-		if product == "" || len(roots) == 0 {
-			return fmt.Errorf("productRoots entries require product and roots")
-		}
-		for _, root := range roots {
-			if root == "" {
-				return fmt.Errorf("productRoots[%s] contains an empty root", product)
-			}
-		}
-	}
-	for target, binary := range i.BootstrapBinaries {
-		if target == "" || binary == "" {
-			return fmt.Errorf("bootstrapBinaries contains an empty target or path")
 		}
 	}
 	if err := validateUpgradeAdapters(i.Upgrade); err != nil {
@@ -204,18 +156,23 @@ func validateUpgradeAdapters(adapters UpgradeAdapters) error {
 	rows := []struct {
 		name string
 		spec extension.Spec
-		kind extension.Kind
 	}{
-		{"candidate", adapters.Candidate, extension.KindCIAdapter},
-		{"sync", adapters.Sync, extension.KindMirrorProducer},
-		{"deploy", adapters.Deploy, extension.KindDeployAdapter},
-		{"verify", adapters.Verify, extension.KindDeployAdapter},
-		{"activate", adapters.Activate, extension.KindDeployAdapter},
-		{"rollback", adapters.Rollback, extension.KindDeployAdapter},
+		{"sync", adapters.Sync},
+		{"deploy", adapters.Deploy},
+		{"verify", adapters.Verify},
+		{"activate", adapters.Activate},
+		{"rollback", adapters.Rollback},
 	}
 	for _, row := range rows {
-		if err := validateAdapter(row.name, row.spec, row.kind, UpgradeInputSchema); err != nil {
+		if err := validateAdapter(row.name, row.spec, extension.KindDeployAdapter, UpgradeInputSchema); err != nil {
 			return fmt.Errorf("upgrade.%s: %w", row.name, err)
+		}
+	}
+	// The mirror sync adapter is optional: a single-server deployment with no
+	// mirror has nothing to synchronise.
+	if adapters.Sync.Kind != "" {
+		if err := validateAdapter("sync", adapters.Sync, extension.KindMirrorProducer, UpgradeInputSchema); err != nil {
+			return fmt.Errorf("upgrade.sync: %w", err)
 		}
 	}
 	return nil
@@ -275,71 +232,57 @@ func runStep(ctx context.Context, phase string, spec extension.Spec, input any) 
 	return &result, nil
 }
 
-func loadSigningKey(path string) (string, []byte, error) {
-	data, err := os.ReadFile(path)
+// root resolves the one signing identity this server holds. Key material comes
+// from the custody manifest by keyId; nothing is read from the inventory
+// (requirements 15.1, 15.3).
+func (i Inventory) root() (*custody.Root, error) {
+	manifest, err := custody.Load(i.CustodyManifest)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	value, err := rupv2.UnmarshalPrivateKey(data)
+	root, err := manifest.Root(i.RootKeyID)
 	if err != nil {
-		return "", nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
-	seed, err := keys.LoadPrivateSeed(*value, path)
-	if err != nil {
-		return "", nil, err
+	if root.Fingerprint == "" {
+		return nil, fmt.Errorf("custody entry %q has no registered fingerprint", i.RootKeyID)
 	}
-	if value.KeyId == "" {
-		return "", nil, fmt.Errorf("%s has no keyId", path)
-	}
-	return value.KeyId, seed, nil
+	return root, nil
 }
 
-func loadTrustKeys(paths []string) (map[string]ed25519.PublicKey, error) {
-	result := make(map[string]ed25519.PublicKey, len(paths))
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		value, err := rupv2.UnmarshalPublicKey(data)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		publicKey, err := keys.LoadPublicKey(*value, path)
-		if err != nil {
-			return nil, err
-		}
-		if _, exists := result[value.KeyId]; exists {
-			return nil, fmt.Errorf("duplicate trust keyId %q", value.KeyId)
-		}
-		result[value.KeyId] = publicKey
+// trustedRoot returns the single public key both the Operator Profile and the
+// Catalog must verify against.
+func (i Inventory) trustedRoot() (map[string]ed25519.PublicKey, error) {
+	root, err := i.root()
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+	return map[string]ed25519.PublicKey{root.KeyID: root.PublicKey}, nil
 }
 
-func loadTrustedState(inventory Inventory) (*operator.Document, *catalog.Document, map[string]ed25519.PublicKey, error) {
-	trusted, err := loadTrustKeys(inventory.TrustKeyPaths)
+func loadTrustedState(inventory Inventory) (*operator.Document, *catalog.Document, error) {
+	trusted, err := inventory.trustedRoot()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	profile, err := operator.Load(inventory.ActiveProfilePath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	if profile.DeploymentID != inventory.Operator {
-		return nil, nil, nil, fmt.Errorf("active profile deploymentId %q does not match inventory operator %q", profile.DeploymentID, inventory.Operator)
+		return nil, nil, fmt.Errorf("active profile deploymentId %q does not match inventory operator %q", profile.DeploymentID, inventory.Operator)
 	}
 	if err := profile.Verify(trusted); err != nil {
-		return nil, nil, nil, fmt.Errorf("active profile: %w", err)
+		return nil, nil, fmt.Errorf("active profile: %w", err)
 	}
-	distributions, err := catalog.Load(inventory.CatalogPath)
+	value, err := catalog.Load(inventory.CatalogPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	if err := distributions.Verify(trusted); err != nil {
-		return nil, nil, nil, fmt.Errorf("catalog: %w", err)
+	if err := value.Verify(trusted); err != nil {
+		return nil, nil, fmt.Errorf("catalog: %w", err)
 	}
-	return profile, distributions, trusted, nil
+	return profile, value, nil
 }
 
 func resolvePath(base, value string) string {

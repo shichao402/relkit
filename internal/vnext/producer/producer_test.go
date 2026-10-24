@@ -3,6 +3,7 @@ package producer
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,10 +12,7 @@ import (
 	"testing"
 
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
-	"github.com/shichao402/relkit/internal/vnext/contracts"
-	"github.com/shichao402/relkit/internal/vnext/operator"
 	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/resolution"
 )
 
 func TestArtifactProducerHelperProcess(t *testing.T) {
@@ -25,18 +23,22 @@ func TestArtifactProducerHelperProcess(t *testing.T) {
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
 		os.Exit(81)
 	}
+	// The producer input no longer carries a resolution: it describes what the
+	// build produced, nothing about which relkit version consumes it.
+	if input.Schema != InputSchema {
+		os.Exit(84)
+	}
 	content := []byte("verified candidate")
 	if err := os.WriteFile(filepath.Join(input.OutputDirectory, "demo.zip"), content, 0o644); err != nil {
 		os.Exit(82)
 	}
 	sum := sha256.Sum256(content)
 	output := artifactset.Document{
-		Schema:           artifactset.Schema,
-		ResolutionDigest: input.ResolutionDigest,
-		Product:          input.Product,
-		Version:          input.Version,
-		ReleaseCode:      12,
-		Channel:          input.Channel,
+		Schema:      artifactset.Schema,
+		Product:     input.Product,
+		Version:     input.Version,
+		ReleaseCode: 12,
+		Channel:     input.Channel,
 		Artifacts: []artifactset.Artifact{
 			{
 				ID:        "desktop-payload",
@@ -55,10 +57,33 @@ func TestArtifactProducerHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func producerFixture(t *testing.T, root string) project.Document {
+	t.Helper()
+	productDocument := project.Document{
+		Schema:             project.Schema,
+		Product:            "demo",
+		Server:             "https://updates.example",
+		RootPublicKey:      base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		Channels:           []string{"dev", "stable"},
+		SelectorDimensions: []string{"audience", "os-arch"},
+		ArtifactProducer: &project.Command{
+			Command:         []string{os.Args[0], "-test.run=TestArtifactProducerHelperProcess"},
+			ExtensionSchema: "relkit.extension/1",
+			EnvAllowlist:    []string{"RELKIT_PRODUCER_HELPER"},
+			Permissions:     []string{"read-workspace", "write-out-dir", "exec-self"},
+		},
+	}
+	if err := productDocument.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RELKIT_PRODUCER_HELPER", "1")
+	return productDocument
+}
+
 func TestRunVerifiesProducerOutput(t *testing.T) {
 	root := t.TempDir()
-	productDocument, resolved := producerFixture(t, root)
-	output, err := Run(context.Background(), productDocument, resolved, Options{
+	productDocument := producerFixture(t, root)
+	output, err := Run(context.Background(), productDocument, Options{
 		ProjectRoot: root,
 		Version:     "1.2.3",
 		Channel:     "dev",
@@ -70,81 +95,51 @@ func TestRunVerifiesProducerOutput(t *testing.T) {
 	if len(output.Artifacts) != 1 || output.Artifacts[0].Path != "demo.zip" {
 		t.Fatalf("unexpected ArtifactSet: %#v", output)
 	}
+	if output.Channel != "dev" || output.Version != "1.2.3" {
+		t.Fatalf("unexpected ArtifactSet identity: %#v", output)
+	}
 }
 
-func TestCandidateCannotProduceStableArtifacts(t *testing.T) {
+func TestRunRejectsUndeclaredChannel(t *testing.T) {
 	root := t.TempDir()
-	productDocument, resolved := producerFixture(t, root)
-	resolved.Identity = resolution.IdentityCandidate
-	resolved.AllowedChannels = []string{"dev"}
-	if err := resolved.Finalize(); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Run(context.Background(), productDocument, resolved, Options{
+	productDocument := producerFixture(t, root)
+	productDocument.Channels = []string{"dev"}
+	_, err := Run(context.Background(), productDocument, Options{
 		ProjectRoot: root,
 		Version:     "1.2.3",
 		Channel:     "stable",
 		Target:      "darwin-arm64",
 	})
-	if err == nil || !strings.Contains(err.Error(), "does not allow channel") {
+	if err == nil || !strings.Contains(err.Error(), "does not declare channel") {
 		t.Fatalf("unexpected result: %v", err)
 	}
 }
 
-func producerFixture(t *testing.T, root string) (project.Document, resolution.Document) {
-	t.Helper()
-	controlDigest := "sha256:" + strings.Repeat("a", 64)
-	productDocument := project.Document{
-		Schema:           project.Schema,
-		Product:          "demo",
-		Channels:         []string{"dev", "stable"},
-		OperatorRef:      "prod",
-		TrustFingerprint: controlDigest,
-		Roles:            []project.Role{project.RolePublisher},
-		ArtifactProducer: &project.Command{
-			Command:         []string{os.Args[0], "-test.run=TestArtifactProducerHelperProcess"},
-			ExtensionSchema: "relkit.extension/1",
-			EnvAllowlist:    []string{"RELKIT_PRODUCER_HELPER"},
-			Permissions:     []string{"read-workspace", "write-out-dir", "exec-self"},
-		},
-		SelectorDimensions: []string{"audience"},
-		CapabilityFingerprint: project.CapabilityFingerprint{
-			OSArch:   []string{"darwin-arm64"},
-			Topology: "producer-only",
-		},
+func TestRunRequiresTheProducerCommand(t *testing.T) {
+	root := t.TempDir()
+	productDocument := producerFixture(t, root)
+	productDocument.ArtifactProducer = nil
+	if _, err := Run(context.Background(), productDocument, Options{
+		ProjectRoot: root,
+		Version:     "1.2.3",
+		Channel:     "dev",
+		Target:      "darwin-arm64",
+	}); err == nil || !strings.Contains(err.Error(), "no artifactProducer") {
+		t.Fatalf("unexpected result: %v", err)
 	}
-	t.Setenv("RELKIT_PRODUCER_HELPER", "1")
-	projectDigest, err := productDocument.Digest()
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestRunRejectsEscapeFromProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	productDocument := producerFixture(t, root)
+	outside := filepath.Join(filepath.Dir(root), "outside")
+	if _, err := Run(context.Background(), productDocument, Options{
+		ProjectRoot: root,
+		OutputDir:   outside,
+		Version:     "1.2.3",
+		Channel:     "dev",
+		Target:      "darwin-arm64",
+	}); err == nil || !strings.Contains(err.Error(), "outside project root") {
+		t.Fatalf("unexpected result: %v", err)
 	}
-	resolved := resolution.Document{
-		Schema:               resolution.Schema,
-		Identity:             resolution.IdentityProduction,
-		AuthorityFingerprint: controlDigest,
-		AllowedChannels:      []string{"dev", "stable"},
-		ProjectDigest:        projectDigest,
-		Operator: resolution.OperatorProof{
-			DeploymentID:    "prod",
-			ProfileDigest:   controlDigest,
-			Sequence:        1,
-			SelectionPolicy: operator.SelectionExact,
-		},
-		CatalogSnapshotDigest: controlDigest,
-		SelectedDistribution: resolution.SelectedDistribution{
-			Version: "v1.0.0",
-			Commit:  strings.Repeat("b", 40),
-			Digest:  controlDigest,
-		},
-		Components: []resolution.Component{
-			{Name: "cli", Version: "v1.0.0", Platform: "darwin-arm64", SHA256: controlDigest, Source: "release-asset", Locator: "fixture"},
-		},
-		Contracts: []contracts.Capability{
-			{Domain: contracts.DomainArtifactSet, Peer: "producer", ID: artifactset.Schema},
-		},
-	}
-	if err := resolved.Finalize(); err != nil {
-		t.Fatal(err)
-	}
-	return productDocument, resolved
 }

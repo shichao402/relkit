@@ -171,96 +171,6 @@ func (c *RepoContext) listedFileEntries(source string, names []string, component
 	return entries, nil
 }
 
-// goDepPackages resolves the module-internal packages a Go host needs via
-// `go list -deps`. Asking the compiler keeps the artifact honest when sdk/
-// grows a dependency; a hand-written list would only surface the gap at the
-// host's build.
-func (c *RepoContext) goDepPackages(module string, entrypoints []string) ([]string, error) {
-	args := append([]string{"list", "-deps"}, entrypoints...)
-	command := exec.Command("go", args...)
-	command.Dir = c.Root
-	out, err := command.Output()
-	if err != nil {
-		return nil, fmt.Errorf("go list -deps failed: %w", err)
-	}
-	prefix := module + "/"
-	seen := map[string]bool{}
-	var packages []string
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			pkg := line[len(prefix):]
-			if pkg == "" {
-				continue
-			}
-			if !seen[pkg] {
-				seen[pkg] = true
-				packages = append(packages, pkg)
-			}
-		}
-	}
-	if len(packages) == 0 {
-		return nil, fmt.Errorf("go list resolved no relkit packages for the Go SDK artifact")
-	}
-	sort.Strings(packages)
-	return packages, nil
-}
-
-// goDepsEntries implements pack kind go-deps: listed files plus every
-// module-internal package's non-test sources, archived relative to source.
-func (c *RepoContext) goDepsEntries(source, module string, entrypoints, files, excludeSuffixes []string) ([]Entry, error) {
-	entries, err := c.listedFileEntries(source, files, "sdk-go")
-	if err != nil {
-		return nil, err
-	}
-	packages, err := c.goDepPackages(module, entrypoints)
-	if err != nil {
-		return nil, err
-	}
-	for _, pkg := range packages {
-		tracked := pkg
-		if source != "." {
-			tracked = source + "/" + pkg
-		}
-		sources, err := c.releaseSourcePaths(tracked)
-		if err != nil {
-			return nil, err
-		}
-		var kept []string
-		for _, item := range sources {
-			if !strings.HasSuffix(item, ".go") {
-				continue
-			}
-			excluded := false
-			for _, suffix := range excludeSuffixes {
-				if strings.HasSuffix(item, suffix) {
-					excluded = true
-					break
-				}
-			}
-			if excluded {
-				continue
-			}
-			if filepath.ToSlash(filepath.Dir(item)) != tracked {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(c.Root, filepath.FromSlash(item))); err != nil {
-				continue
-			}
-			kept = append(kept, item)
-		}
-		if len(kept) == 0 {
-			return nil, fmt.Errorf("Go SDK package %s has no tracked sources", pkg)
-		}
-		for _, item := range kept {
-			full := filepath.Join(c.Root, filepath.FromSlash(item))
-			sourceRoot := filepath.Join(c.Root, filepath.FromSlash(source))
-			entries = append(entries, Entry{Source: full, ArchiveName: relWithin(sourceRoot, full)})
-		}
-	}
-	return entries, nil
-}
-
 // ComponentEntries derives the full entry list for one product-tree
 // component: pack kind dispatch, pack extras, exclude paths, and the host
 // surface check for updater-carrying components. The pack shape is declared in
@@ -288,8 +198,6 @@ func (c *RepoContext) ComponentEntries(document *vnextregistry.Document, name st
 		entries, err = c.listedFileEntries(row.Build.Source, pack.Files, row.Name)
 	case vnextregistry.PackWorkingTree:
 		entries, err = c.workingTreeEntries(row.Build.Source, pack.ExcludeParts)
-	case vnextregistry.PackGoDeps:
-		entries, err = c.goDepsEntries(row.Build.Source, pack.GoModule, pack.GoEntrypoints, pack.Files, pack.ExcludeSuffixes)
 	case vnextregistry.PackTrackedTree:
 		entries, err = c.treeEntries(row.Build.Source)
 	default:

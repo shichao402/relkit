@@ -605,14 +605,12 @@ func buildThinArchive(root, version string, staged *model.StagedDocument) (strin
 	}
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
-	if staged.ResolutionDigest == "" {
-		return cleanup(fmt.Errorf("staged release carries no vNext resolution digest; nothing to upload (the release-policy.json control plane is retired)"))
+	if staged == nil {
+		return cleanup(fmt.Errorf("staged release is required"))
 	}
 	stagingRoot := stage.StagingDir(root, version)
 	sources := []string{stage.StagedPath(root, version)}
 	for _, name := range []string{
-		vnextrelease.ResolutionFile,
-		vnextrelease.ResolutionBundleFile,
 		vnextrelease.ProjectFile,
 		vnextrelease.ArtifactSetFile,
 	} {

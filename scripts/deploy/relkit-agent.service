@@ -12,8 +12,9 @@ Restart=on-failure
 RestartSec=3
 EnvironmentFile=-/etc/relkit-agent/env
 # COS credentials live in EnvironmentFile, never in the unit.
-# Signing keys are PER PRODUCT: <product-root>/.relkit-keys/, referenced by
-# signing.privateKeyPath. Never set a global signing key here.
+# Signing is ONE root per server, named by rootKeyId and resolved through the
+# custody manifest (requirements 10.1, 10.5). There is no per-product signing
+# key any more, and the unit never mentions a key path.
 
 [Install]
 WantedBy=multi-user.target

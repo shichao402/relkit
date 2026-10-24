@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/shichao402/relkit/internal/vnext/contracts"
 	"github.com/shichao402/relkit/internal/vnext/document"
 )
 
@@ -39,7 +38,6 @@ const (
 	PackTrackedTree PackKind = "tracked-tree"
 	PackWorkingTree PackKind = "working-tree"
 	PackListedFiles PackKind = "listed-files"
-	PackGoDeps      PackKind = "go-deps"
 )
 
 // Pack declares the zip shape of one product-tree component.
@@ -50,8 +48,6 @@ type Pack struct {
 	ExcludeSuffixes []string    `json:"excludeSuffixes,omitempty"`
 	ExcludePaths    []string    `json:"excludePaths,omitempty"`
 	Extras          [][2]string `json:"extras,omitempty"`
-	GoEntrypoints   []string    `json:"goEntrypoints,omitempty"`
-	GoModule        string      `json:"goModule,omitempty"`
 }
 
 // Build declares how a component is produced and named in a relkit release.
@@ -70,15 +66,13 @@ type Build struct {
 }
 
 type Component struct {
-	Name        string                 `json:"name"`
-	Role        Role                   `json:"role"`
-	Transport   Transport              `json:"transport"`
-	Targets     []string               `json:"targets"`
-	Destination string                 `json:"destination,omitempty"`
-	Default     bool                   `json:"default,omitempty"`
-	Requires    []contracts.Capability `json:"requires,omitempty"`
-	Provides    []contracts.Capability `json:"provides,omitempty"`
-	Build       Build                  `json:"build"`
+	Name        string    `json:"name"`
+	Role        Role      `json:"role"`
+	Transport   Transport `json:"transport"`
+	Targets     []string  `json:"targets"`
+	Destination string    `json:"destination,omitempty"`
+	Default     bool      `json:"default,omitempty"`
+	Build       Build     `json:"build"`
 }
 
 type Document struct {
@@ -143,9 +137,6 @@ func (d Document) Validate() error {
 		if component.Role != RoleInfrastructureBinary && component.Destination == "" {
 			return fmt.Errorf("component %q has no destination", component.Name)
 		}
-		if err := (contracts.Vector{Requires: component.Requires, Provides: component.Provides}).Validate(); err != nil {
-			return fmt.Errorf("component %q: %w", component.Name, err)
-		}
 		if err := validateBuild(component); err != nil {
 			return err
 		}
@@ -202,29 +193,19 @@ func validatePack(name string, build Build) error {
 	}
 	switch kind {
 	case PackTrackedTree:
-		if len(pack.Files) > 0 || len(pack.ExcludeParts) > 0 || len(pack.ExcludeSuffixes) > 0 ||
-			len(pack.GoEntrypoints) > 0 || pack.GoModule != "" {
+		if len(pack.Files) > 0 || len(pack.ExcludeParts) > 0 || len(pack.ExcludeSuffixes) > 0 {
 			return fmt.Errorf("component %q tracked-tree pack carries fields of another kind", name)
 		}
 	case PackWorkingTree:
-		if len(pack.Files) > 0 || len(pack.ExcludeSuffixes) > 0 ||
-			len(pack.GoEntrypoints) > 0 || pack.GoModule != "" {
+		if len(pack.Files) > 0 || len(pack.ExcludeSuffixes) > 0 {
 			return fmt.Errorf("component %q working-tree pack carries fields of another kind", name)
 		}
 	case PackListedFiles:
 		if len(pack.Files) == 0 {
 			return fmt.Errorf("component %q listed-files pack requires files", name)
 		}
-		if len(pack.ExcludeParts) > 0 || len(pack.ExcludeSuffixes) > 0 ||
-			len(pack.GoEntrypoints) > 0 || pack.GoModule != "" {
+		if len(pack.ExcludeParts) > 0 || len(pack.ExcludeSuffixes) > 0 {
 			return fmt.Errorf("component %q listed-files pack carries fields of another kind", name)
-		}
-	case PackGoDeps:
-		if len(pack.GoEntrypoints) == 0 || pack.GoModule == "" {
-			return fmt.Errorf("component %q go-deps pack requires entrypoints and module", name)
-		}
-		if len(pack.ExcludeParts) > 0 || len(pack.ExcludePaths) > 0 {
-			return fmt.Errorf("component %q go-deps pack carries fields of another kind", name)
 		}
 	default:
 		return fmt.Errorf("component %q has unknown pack kind %q", name, kind)

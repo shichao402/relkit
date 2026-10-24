@@ -1,7 +1,13 @@
 # ADR 0019: vNext 断代边界与协议合同
 
-- 状态：Accepted（vNext core、发布事务与 conformance 已实现；§1 控制面删除已于 2026-10-21 在 relkit 仓内执行完毕）
+- 状态：**Superseded**（2026-10-22 由 [ADR 0023](0023-desktop-updater-epoch.md) 取代；逐条驳斥与保留项见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)，现行架构见 [`docs/architecture.md`](../architecture.md)）
+- 历史状态：Accepted（vNext core、发布事务与 conformance 已实现；§1 控制面删除已于 2026-10-21 在 relkit 仓内执行完毕）
 - 日期：2026-10-16
+- 取代：[ADR 0017](0017-cli-owns-consume-source-channel.md) 的 consume/host/onboarding 控制面（决策 2、4 中产品仓入口与 lock `relkit.consume/3` follow-latest 语义）；不取代其 Go module + sumdb 传输经验
+- 修订：[ADR 0011](0011-immutable-release-consume.md) 的 lock/consume 形态；[ADR 0012](0012-single-component-registry.md) 的 Python `facets.py` 载体（声明式 registry 归属 ADR 0021）
+- 关联：[ADR 0003](0003-protobuf-v2-wire-format.md)、[ADR 0005](0005-signed-bootstrap-directory.md)、[ADR 0009](0009-publisher-protocol-negotiation.md)、[ADR 0010](0010-single-updater-engine.md)、[ADR 0020](0020-vnext-catalog-operator-resolution.md)、[ADR 0021](0021-vnext-artifact-runtime-registry.md)、[ADR 0022](0022-vnext-certification-ops-skill.md)
+
+> **Superseded 说明（2026-10-22）**：本 ADR 的协议合同框架仍然有效（§2 四类合同、§5 发布事务、§8 命名隔离、§7 module 传输经验），但签名与信任模型、控制面形态、兼容窗口策略已被 [ADR 0023](0023-desktop-updater-epoch.md) 取代。本文件保留为历史记录，不作为现行设计依据；现行设计见 [`docs/architecture.md`](../architecture.md)，逐条差异见 [驳斥文档](0019-0022-refutation.md)。
 - 取代：[ADR 0017](0017-cli-owns-consume-source-channel.md) 的 consume/host/onboarding 控制面（决策 2、4 中产品仓入口与 lock `relkit.consume/3` follow-latest 语义）；不取代其 Go module + sumdb 传输经验
 - 修订：[ADR 0011](0011-immutable-release-consume.md) 的 lock/consume 形态；[ADR 0012](0012-single-component-registry.md) 的 Python `facets.py` 载体（声明式 registry 归属 ADR 0021）
 - 关联：[ADR 0003](0003-protobuf-v2-wire-format.md)、[ADR 0005](0005-signed-bootstrap-directory.md)、[ADR 0009](0009-publisher-protocol-negotiation.md)、[ADR 0010](0010-single-updater-engine.md)、[ADR 0020](0020-vnext-catalog-operator-resolution.md)、[ADR 0021](0021-vnext-artifact-runtime-registry.md)、[ADR 0022](0022-vnext-certification-ops-skill.md)

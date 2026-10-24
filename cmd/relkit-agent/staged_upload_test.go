@@ -165,8 +165,7 @@ func TestLoadConfigUploadTuning(t *testing.T) {
   "minPartSize": "2MiB",
   "maxPartSize": "32MiB",
   "maxPartConcurrency": 12,
-  "uploadTTL": "6h",
-  "products": {}
+  "uploadTTL": "6h"
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}

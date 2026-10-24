@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.artifact-set/1",
+  "title": "relkit.artifact-set/1",
+  "description": "产品 producer 对一次构建的制品声明。producer 只返回候选制品，不写 staged 树、index、manifest，不签名，不碰 backend。对应 internal/vnext/artifactset。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "product", "version", "releaseCode", "channel", "artifacts"],
+  "properties": {
+    "schema": { "const": "relkit.artifact-set/1" },
+    "product": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    },
+    "version": { "type": "string", "minLength": 1 },
+    "releaseCode": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "产品侧生成的单调版本号。服务器不从 tag 或仓库规则二次猜测。多平台合并时各 drop 必须一致。"
+    },
+    "channel": { "type": "string", "minLength": 1 },
+    "changelog": { "type": "string" },
+    "display": {
+      "type": "object",
+      "description": "展示元数据。多平台合并时各 drop 的 canonical 摘要必须一致。"
+    },
+    "mergeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "version", "channel"],
+      "description": "多平台合并的身份声明。单平台 drop 可省略；参与合并时三者必须与文档身份一致。",
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "channel": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "description": "本次构建产出的文件行。平台不对称合法：Windows 可有 installer + payload，macOS 只发 installer，不强求全平台同构。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "kind", "sha256", "size"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+            "description": "本文档内唯一的 artifact 标识，relations 用它引用目标。"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "相对输出目录的规范化正斜杠路径。不得为绝对路径、不得含反斜杠、不得含 .. 逃逸。"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["installer", "payload", "blob", "metadata", "other"]
+          },
+          "platform": {
+            "type": "string",
+            "description": "平台标识，形如 windows-amd64 / macos-arm64。同一 (platform, path) 在本文件内不得重复。"
+          },
+          "selectors": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "minLength": 1 },
+            "description": "该文件的选择器取值。维度名必须已在项目 selectorDimensions 声明。引擎注入 os/arch 并强制 apply=relkit-payload。"
+          },
+          "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "size": { "type": "integer", "minimum": 0 },
+          "relations": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "与另一 artifact 的关系。两个字段互斥；引用目标必须存在、不得自引用、不得跨平台。",
+            "properties": {
+              "installOf": { "type": "string", "minLength": 1 },
+              "payloadOf": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.operator-profile/1",
+  "title": "relkit.operator-profile/1",
+  "description": "一台部署的现场事实：服务器是谁、在哪应答、服务版本是什么。由服务器在部署时签发，不可手改。它不承载版本选择策略与能力向量（这两样已按 ADR 0023 删除），也不承载产品偏好。对应 internal/vnext/operator，消费方是 relkit-ops 的 status/plan/upgrade/rotate。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "deploymentId", "serverRelease", "sequence", "signatures"],
+  "properties": {
+    "schema": { "const": "relkit.operator-profile/1" },
+    "deploymentId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "这份 Profile 对应的部署标识。一份 Profile = 一个部署；dev/stable、内网/外网若部署事实不同就是多份 Profile。"
+    },
+    "serverRelease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit"],
+      "description": "该部署实际运行的服务端版本。这是部署事实，不是期望值。",
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "commit": { "type": "string", "minLength": 1 }
+      }
+    },
+    "endpoints": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "description": "绝对 HTTP(S) URL，不含用户凭据、query 与 fragment。"
+      },
+      "description": "服务端点。判据是一个服务实例对应一个域名；实例是否与签名端点同机属部署细节，客户端配置不得表达。"
+    },
+    "serviceIdentity": {
+      "type": "string",
+      "description": "服务身份标识（签名端点即服务身份）。"
+    },
+    "secretRefs": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "description": "凭据的位置，不是凭据本身。断代后只剩一种：agent token。"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "签发序号，每次重签递增。信息性字段，供运维排查；不作为接受/拒绝判据。"
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "description": "由该服务器根密钥签名。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keyId", "algorithm", "value"],
+        "properties": {
+          "keyId": { "type": "string", "minLength": 1 },
+          "algorithm": { "const": "ed25519" },
+          "value": { "type": "string" }
+        }
+      }
+    }
+  }
+}

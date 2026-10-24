@@ -4,11 +4,9 @@ import (
 	"crypto/ed25519"
 	"strings"
 	"testing"
-
-	"github.com/shichao402/relkit/internal/vnext/contracts"
 )
 
-func signedProfile(t *testing.T, policy SelectionPolicy) (Document, ed25519.PublicKey) {
+func signedProfile(t *testing.T) (Document, ed25519.PublicKey) {
 	t.Helper()
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
@@ -18,26 +16,26 @@ func signedProfile(t *testing.T, policy SelectionPolicy) (Document, ed25519.Publ
 		Schema:       Schema,
 		DeploymentID: "prod-public",
 		ServerRelease: ServerRelease{
-			Version:            "v1.2.3",
-			Commit:             strings.Repeat("a", 40),
-			DistributionDigest: "sha256:" + strings.Repeat("b", 64),
+			Version: "v1.2.3",
+			Commit:  strings.Repeat("a", 40),
 		},
-		SelectionPolicy: policy,
-		Provides: []contracts.Capability{
-			{Domain: contracts.DomainPublishProtocol, Peer: "cli", Min: 2, Max: 3},
-			{Domain: contracts.DomainRUPSchemaSet, Peer: "updater", ID: "rup.v2"},
+		Endpoints: map[string]string{
+			"api": "https://agent.example/api",
 		},
-		Sequence: 4,
+		// A credential reference names where a client finds the token; it never
+		// holds the token itself.
+		SecretRefs: map[string]string{"token": "env:RELKIT_TOKEN"},
+		Sequence:   4,
 	}
-	if err := value.Sign("distribution-2026", seed); err != nil {
+	if err := value.Sign("server-root", seed); err != nil {
 		t.Fatal(err)
 	}
 	return value, ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 }
 
 func TestSignedProfileDetectsMutation(t *testing.T) {
-	value, publicKey := signedProfile(t, SelectionExact)
-	trusted := map[string]ed25519.PublicKey{"distribution-2026": publicKey}
+	value, publicKey := signedProfile(t)
+	trusted := map[string]ed25519.PublicKey{"server-root": publicKey}
 	if err := value.Verify(trusted); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +46,7 @@ func TestSignedProfileDetectsMutation(t *testing.T) {
 }
 
 func TestProfileDigestIncludesSignature(t *testing.T) {
-	value, _ := signedProfile(t, SelectionLatestCompatible)
+	value, _ := signedProfile(t)
 	digest, err := value.Digest()
 	if err != nil {
 		t.Fatal(err)
@@ -58,14 +56,42 @@ func TestProfileDigestIncludesSignature(t *testing.T) {
 	}
 }
 
-func TestProfileRejectsDuplicateSources(t *testing.T) {
-	value, _ := signedProfile(t, SelectionLatestCompatible)
-	value.Sources.Mirrors = []string{"https://mirror.invalid/relkit", "https://mirror.invalid/relkit"}
-	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("unexpected duplicate-source result: %v", err)
-	}
-	value.Sources.Mirrors = []string{"https://writer:secret@mirror.invalid/relkit"}
+func TestProfileRejectsMalformedEndpoints(t *testing.T) {
+	value, _ := signedProfile(t)
+	value.Endpoints = map[string]string{"api": "https://user:secret@agent.example/api"}
 	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "without credentials") {
-		t.Fatalf("unexpected credentialed-source result: %v", err)
+		t.Fatalf("unexpected credentialed-endpoint result: %v", err)
+	}
+
+	value, _ = signedProfile(t)
+	value.Endpoints = map[string]string{"api": "ftp://agent.example/api"}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "HTTP(S) URL") {
+		t.Fatalf("unexpected scheme result: %v", err)
+	}
+}
+
+func TestProfileRequiresDeploymentFacts(t *testing.T) {
+	value, _ := signedProfile(t)
+	value.DeploymentID = ""
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "deploymentId") {
+		t.Fatalf("expected a deploymentId rejection, got %v", err)
+	}
+
+	value, _ = signedProfile(t)
+	value.ServerRelease.Commit = ""
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "serverRelease") {
+		t.Fatalf("expected a server release rejection, got %v", err)
+	}
+
+	value, _ = signedProfile(t)
+	value.Sequence = 0
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "sequence") {
+		t.Fatalf("expected a sequence rejection, got %v", err)
+	}
+
+	value, _ = signedProfile(t)
+	value.SecretRefs = map[string]string{"token": ""}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "secretRefs") {
+		t.Fatalf("expected a secret reference rejection, got %v", err)
 	}
 }

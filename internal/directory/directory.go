@@ -88,7 +88,7 @@ func Set(cfg *config.Config, opts Options, printer Printer) (*model.UpdateDirect
 	var signers []envelope.Signer
 	var err error
 	if !opts.DryRun {
-		signers, err = cfg.LoadSigners()
+		signers, err = cfg.Signers()
 		if err != nil {
 			return nil, err
 		}

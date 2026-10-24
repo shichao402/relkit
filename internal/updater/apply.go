@@ -3,6 +3,7 @@ package updater
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,12 +42,22 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 			return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "downloaded file size mismatch")
 		}
 	}
-	if len(plan.Files) == 0 || plan.Files[0].Kind != "payload" {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "artifact requires the full installation flow")
+	if len(plan.Files) == 0 {
+		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "plan has no files")
 	}
 	inst := req.GetRuntime().GetInstall()
 	if inst == nil {
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "install spec required")
+	}
+	disposition, installerRel, derr := classifyApply(plan)
+	if derr != nil {
+		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, derr.Error())
+	}
+	if disposition == updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL && fullInstallRefused(runtime.GOOS) {
+		// macOS products ship the whole .app as a payload; there is no
+		// installer handoff (requirement 3.11).
+		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED,
+			"full-install disposition is not supported on macOS; ship the .app as a payload")
 	}
 	if inst.InstallRoot == "" {
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, "installRoot required")
@@ -60,10 +71,14 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 	if err := acquireApplyLock(inst.InstallRoot, sessionID); err != nil {
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, err.Error())
 	}
-	requiresHostExit, err := planRequiresHostExit(inst, plan)
-	if err != nil {
-		releaseApplyLock(inst.InstallRoot)
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, err.Error())
+	requiresHostExit := true
+	if disposition == updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL {
+		ok, perr := planRequiresHostExit(inst, plan)
+		if perr != nil {
+			releaseApplyLock(inst.InstallRoot)
+			return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, perr.Error())
+		}
+		requiresHostExit = ok
 	}
 	sess := &updaterv1.ApplySessionRecord{
 		SessionId:         sessionID,
@@ -84,12 +99,13 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 		InstallOnly:       op.InstallOnly,
 		Library:           inst.Library,
 		RequiresHostExit:  requiresHostExit,
+		Disposition:       disposition,
+		InstallerRelpath:  installerRel,
 	}
 	if err := st.saveSession(sess); err != nil {
 		releaseApplyLock(inst.InstallRoot)
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, err.Error())
 	}
-	_ = writeCompatibilitySession(req.GetRuntime().GetDataDir(), sess)
 	launch := e.LaunchWorker
 	if launch == nil {
 		launch = launchApplyWorker
@@ -99,7 +115,6 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 		sess.Error = newError(updaterv1.ErrorCode_ERROR_CODE_DISK, true, err.Error(), nil)
 		sess.HeartbeatAt = timestamppb.Now()
 		_ = st.saveSession(sess)
-		_ = writeCompatibilitySession(req.GetRuntime().GetDataDir(), sess)
 		releaseApplyLock(inst.InstallRoot)
 		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, "failed to start apply worker: "+err.Error())
 	}
@@ -149,6 +164,95 @@ func (e *Engine) emitApplyFail(code updaterv1.ErrorCode, message string) error {
 	})
 }
 
+// fullInstallRefused is the platform rule for installer handoff, kept as a pure
+// function so the rule itself is testable on any OS (requirement 3.11).
+//
+// macOS products update by replacing the whole .app bundle in place, so an
+// unsigned installer is never the right answer there. Every other desktop OS
+// accepts the handoff.
+func fullInstallRefused(goos string) bool {
+	return goos == "darwin"
+}
+
+// classifyApply decides which of the two install styles a plan needs.
+//
+// payload  -> the engine unpacks the signed payload itself (IN_PLACE/LIBRARY)
+// anything else -> the engine hands over to the product's own installer
+//
+// The engine never guesses: a plan whose single artifact is neither a payload
+// nor a runnable installer is rejected by the caller.
+func classifyApply(plan *updaterv1.UpdatePlan) (upderv1Disposition updaterv1.ApplyDisposition, installerRel string, err error) {
+	if plan == nil || len(plan.Files) == 0 {
+		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "", fmt.Errorf("plan has no files")
+	}
+	first := plan.Files[0]
+	if first.Kind == "payload" {
+		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL, "", nil
+	}
+	if first.Kind != "installer" {
+		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "",
+			fmt.Errorf("artifact kind %q is neither a payload nor an installer", first.Kind)
+	}
+	rel := first.DestRelpath
+	if rel == "" {
+		rel = first.Name
+	}
+	if err := ValidateArtifactFilename(rel); err != nil {
+		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "", err
+	}
+	return updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL, rel, nil
+}
+
+// installerCommand builds the process that runs the verified installer.
+//
+// It is a package variable only so tests can substitute a stub process and
+// exercise the real exit-code path; production always uses the installer file
+// itself, interactively, with no silent flags and no elevation.
+var installerCommand = func(installer string) *exec.Cmd {
+	cmd := exec.Command(installer)
+	cmd.Dir = filepath.Dir(installer)
+	// Interactive: the installer draws its own UI and needs a console.
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+// runFullInstall performs the handoff the hosts used to implement themselves
+// (requirement 3.10): wait for the host to exit, run the verified installer
+// interactively (no silent flags, no elevation — the OS raises UAC if the
+// installer needs it), then judge the result by exit code and relaunch.
+func runFullInstall(sess *updaterv1.ApplySessionRecord, installer string) error {
+	if _, err := os.Stat(installer); err != nil {
+		return fmt.Errorf("installer missing from staging: %w", err)
+	}
+	err := installerCommand(installer).Run()
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		code := exitErr.ExitCode()
+		if isUserCancelledExit(code) {
+			return fmt.Errorf("%w (exit code %d)", errInstallerCancelled, code)
+		}
+		return fmt.Errorf("%w (exit code %d)", errInstallerFailed, code)
+	}
+	return err
+}
+
+var (
+	errInstallerCancelled = errors.New("installer was cancelled by the user")
+	errInstallerFailed    = errors.New("installer exited with a failure code")
+)
+
+// isUserCancelledExit maps the exit codes the supported installers use for
+// "the user closed the wizard". Inno Setup: 1 = user cancelled before install.
+// NSIS: 2 = user aborted. Anything else is a real failure.
+func isUserCancelledExit(code int) bool {
+	return code == 1 || code == 2
+}
+
 func assertWritable(root string) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
@@ -159,37 +263,6 @@ func assertWritable(root string) error {
 	}
 	_ = os.Remove(probe)
 	return nil
-}
-
-func writeLegacyJSONSession(installRoot string, sess *updaterv1.ApplySessionRecord) error {
-	state := "running"
-	switch sess.Phase {
-	case updaterv1.SessionPhase_SESSION_PHASE_COMPLETED:
-		state = "succeeded"
-	case updaterv1.SessionPhase_SESSION_PHASE_ROLLED_BACK, updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION:
-		state = "failed"
-	}
-	payload := map[string]any{
-		"state":          state,
-		"pid":            sess.Pid,
-		"startedAt":      sess.GetStartedAt().AsTime().UTC().Format(time.RFC3339Nano),
-		"updatedAt":      sess.GetHeartbeatAt().AsTime().UTC().Format(time.RFC3339Nano),
-		"installDir":     sess.InstallRoot,
-		"stagedRoot":     sess.StagedRoot,
-		"targetCode":     sess.TargetCode,
-		"targetVersion":  sess.TargetVersion,
-		"needsAttention": sess.Phase == updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
-	}
-	raw, _ := json.MarshalIndent(payload, "", "  ")
-	return atomicWrite(filepath.Join(installRoot, JSONSessionName), append(raw, '\n'))
-}
-
-func writeCompatibilitySession(dataDir string, sess *updaterv1.ApplySessionRecord) error {
-	root := dataDir
-	if sess.Placement == updaterv1.Placement_PLACEMENT_LIBRARY {
-		root = sess.InstallRoot
-	}
-	return writeLegacyJSONSession(root, sess)
 }
 
 // RunWorker applies a previously accepted session. It must be started from staging.
@@ -209,7 +282,6 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		sess.HeartbeatAt = timestamppb.Now()
 		sess.Error = errp
 		_ = st.saveSession(sess)
-		_ = writeCompatibilitySession(dataDir, sess)
 	}
 	if sess.RequiresHostExit {
 		if err := waitForHostExit(int(sess.Pid), 5*time.Minute, func() {
@@ -222,6 +294,9 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 			releaseApplyLock(sess.InstallRoot)
 			return err
 		}
+	}
+	if sess.Disposition == updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL {
+		return runFullInstallPhase(sess, st, setPhase)
 	}
 	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COPYING, nil)
 
@@ -252,6 +327,37 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	}
 	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMPLETED, nil)
 	releaseApplyLock(sess.InstallRoot)
+	return nil
+}
+
+// runFullInstallPhase runs the verified installer and reports the outcome in
+// the session, which is what the next status call reads (requirement 3.10).
+func runFullInstallPhase(
+	sess *updaterv1.ApplySessionRecord,
+	st store,
+	setPhase func(updaterv1.SessionPhase, *updaterv1.Error),
+) error {
+	defer releaseApplyLock(sess.InstallRoot)
+	installer := filepath.Join(sess.StagedRoot, filepath.FromSlash(sess.InstallerRelpath))
+	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMMITTING, nil)
+	if err := runFullInstall(sess, installer); err != nil {
+		code := updaterv1.ErrorCode_ERROR_CODE_INSTALLER_FAILED
+		retry := false
+		if errors.Is(err, errInstallerCancelled) {
+			code = updaterv1.ErrorCode_ERROR_CODE_CANCELED
+			retry = true
+		}
+		setPhase(updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION, newError(code, retry, err.Error(), nil))
+		return err
+	}
+	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
+		setPhase(updaterv1.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
+		exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
+		cmd := exec.Command(exe)
+		cmd.Dir = sess.InstallRoot
+		_ = cmd.Start()
+	}
+	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMPLETED, nil)
 	return nil
 }
 

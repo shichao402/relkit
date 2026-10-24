@@ -1,4 +1,4 @@
-package inprocess
+﻿package inprocess
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/selectors"
-	"github.com/shichao402/relkit/sdk"
+	"github.com/shichao402/relkit/internal/sdk"
 )
 
 // Updater checks for and downloads RUP v2 updates.
@@ -24,7 +24,7 @@ type Updater struct {
 	Channel         string
 	CurrentCode     int
 	IndexURLs       []string // ignored when EntryURLs is non-empty
-	EntryURLs       []string // signed directory bootstrap (SPEC §12.1 step 0 / §16)
+	EntryURLs       []string // signed directory bootstrap (SPEC 搂12.1 step 0 / 搂16)
 	FallbackURLs    []string // optional; also filled from directory services
 	TrustedKeys     sdk.TrustedKeys
 	ClientSelectors map[string]string
@@ -52,7 +52,7 @@ type UpdateAvailable struct {
 	PriorReleaseNotes []PriorReleaseNotes
 }
 
-// FallbackRequired urges a manual update via a signed rule (SPEC §12.6).
+// FallbackRequired urges a manual update via a signed rule (SPEC 搂12.6).
 type FallbackRequired struct {
 	ManualURL string
 	Message   string
@@ -173,7 +173,7 @@ func (u *Updater) IsSkipped(code int) bool {
 }
 
 // Check fetches index envelopes, verifies signatures, and selects the next target.
-// When force is false, SPEC §12.2 throttling may return Throttled.
+// When force is false, SPEC 搂12.2 throttling may return Throttled.
 func (u *Updater) Check(ctx context.Context) CheckResult {
 	return u.CheckForce(ctx, false)
 }
@@ -538,7 +538,7 @@ func collectPriorReleaseNotes(index *rupv2.Index, currentCode int) []PriorReleas
 	return out
 }
 
-// CheckFallback evaluates only the signed fallback document (SPEC §12.6).
+// CheckFallback evaluates only the signed fallback document (SPEC 搂12.6).
 func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []string) {
 	_, fallbackURLs, planAttempts := u.resolveIndexPlan(ctx)
 	urls := fallbackURLs

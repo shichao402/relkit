@@ -1,0 +1,30 @@
+{
+  "schema": "relkit.runtime-bootstrap/2",
+  "rootKeyId": "conformance-root",
+  "rootPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICFS+NGbeR0kRTJC4V8uq2y3z/p7al7TAJeWDgaYgdsS",
+  "rootFingerprint": "sha256:3097e2dee2cb4a34b53840cdb705aed71067c36f68db0e0f559c3f3fa043315f",
+  "product": "loom",
+  "profile": {
+    "schema": "relkit.runtime-profile/1",
+    "product": "loom",
+    "profileVersion": 7,
+    "allowedChannels": [
+      "dev",
+      "stable"
+    ],
+    "directoryBootstrap": {
+      "entryUrls": [
+        "https://update.example.invalid/"
+      ]
+    },
+    "rupSchemaSet": "rup.v2",
+    "digest": "sha256:07d2e856fd5c72f4972b0474eeea1d0fd6499293d8696662dd71a816f5c15c15",
+    "signatures": [
+      {
+        "keyId": "conformance-root",
+        "algorithm": "ed25519",
+        "value": "bcI/V1uDEkgNtiBuooMFaTVkjxdP92D6mTyBphodGmEGcwB8ov3J4Dd9zT0Cm6O278cZT8o0uFdU5WRsJ5BKAg=="
+      }
+    ]
+  }
+}

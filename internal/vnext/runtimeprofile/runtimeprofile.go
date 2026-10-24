@@ -14,6 +14,11 @@ import (
 
 const Schema = "relkit.runtime-profile/1"
 
+// SchemaSet is the RUP wire schema set every profile advertises. It is a
+// property of the engine build, not a per-project choice: hosts no longer
+// negotiate protocols (requirement 14.4).
+const SchemaSet = "rup.v2"
+
 type DirectoryBootstrap struct {
 	EntryURLs []string       `json:"entryUrls"`
 	Recovery  map[string]any `json:"recovery,omitempty"`

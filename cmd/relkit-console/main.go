@@ -56,6 +56,7 @@ type FileConfig struct {
 	Addr           string         `json:"addr"`
 	Dir            string         `json:"dir"`
 	Store          string         `json:"store,omitempty"`
+	Agent          string         `json:"agent,omitempty"`
 	StateDir       string         `json:"stateDir,omitempty"`
 	StatsFile      string         `json:"statsFile,omitempty"`
 	AdminStateFile string         `json:"adminStateFile,omitempty"`
@@ -103,6 +104,7 @@ func main() {
 		addr        = flag.String("addr", "127.0.0.1:8081", "address to listen on")
 		dir         = flag.String("dir", ".", "release tree to read (read-only)")
 		store       = flag.String("store", "", "relkit-store base URL to read over HTTP instead of a local tree")
+		agentAddr   = flag.String("agent", "", "agent server base URL this panel manages (requirement 13.6)")
 		stateDir    = flag.String("state-dir", "", "agent state directory (site status)")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
@@ -129,6 +131,9 @@ func main() {
 		}
 		if fileCfg.Store != "" && !explicit["store"] {
 			*store = fileCfg.Store
+		}
+		if fileCfg.Agent != "" && !explicit["agent"] {
+			*agentAddr = fileCfg.Agent
 		}
 		if fileCfg.StateDir != "" && !explicit["state-dir"] {
 			*stateDir = fileCfg.StateDir
@@ -164,13 +169,12 @@ func main() {
 	}
 	console.adapter = adapter
 
-	// Admin auth state follows the release tree unless configured otherwise;
-	// same default layout relkit-serve used, so a box migrating to console
-	// keeps its operator accounts. In store mode there may be no local tree
-	// at all: the admin state is the console's own file, resolved through the
-	// config directory instead.
+	// Panel state is one cookie signing key; the authority for users, roles,
+	// products and tokens lives on the agent (requirement 13.6). A box with no
+	// agent configured still serves the read-only pages, it just cannot render
+	// the management screens.
 	adminPath := resolveAdminPath(*dir, usedPath, adminStateFileFrom(fileCfg))
-	admin, err := openAdminAuth(adminPath, *dir)
+	admin, err := openPanelSession(adminPath, *dir, *agentAddr)
 	if err != nil {
 		log.Fatalf("admin: %v", err)
 	}
@@ -216,10 +220,11 @@ func main() {
 
 // skeletonBytes renders the panel config a fresh box starts from. Only the
 // paths matter; the site section is left for the operator to shape.
-func skeletonBytes(dir string) []byte {
+func skeletonBytes(dir, agent string) []byte {
 	cfg := &FileConfig{
-		Addr: "127.0.0.1:8081",
-		Dir:  dir,
+		Addr:  "127.0.0.1:8081",
+		Dir:   dir,
+		Agent: agent,
 	}
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -242,9 +247,10 @@ func skeletonBytes(dir string) []byte {
 func runInit(out io.Writer, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	dir := fs.String("dir", "/srv/releases", "release tree the panel reads (read-only)")
-	target := fs.String("out", ".", "where to write the config and bootstrap state")
+	target := fs.String("out", ".", "where to write the config and panel state")
+	agentURL := fs.String("agent", "", "agent server base URL this panel manages")
 	force := fs.Bool("force", false, "overwrite an existing config")
-	resetAdmin := fs.Bool("reset-admin", false, "issue a new panel bootstrap; existing operators are wiped")
+	resetAdmin := fs.Bool("reset-admin", false, "regenerate the panel cookie key; every session is signed out")
 	fs.Parse(args)
 
 	outDir := *target
@@ -267,35 +273,33 @@ func runInit(out io.Writer, args []string) error {
 
 	if _, err := os.Stat(configPath); err == nil && !*force {
 		return fmt.Errorf("%s already exists; pass -force to overwrite "+
-			"(this invalidates the current bootstrap)", configPath)
+			"(this signs every operator out)", configPath)
 	}
 
-	// Config first, bootstrap second. A crash between the two leaves a config
-	// with no live bootstrap: the panel comes up locked rather than open.
-	if err := os.WriteFile(configPath, skeletonBytes(*dir), 0o644); err != nil {
+	// Config first, panel state second. A crash between the two leaves a config
+	// with no cookie key: the panel mints one on first start.
+	if err := os.WriteFile(configPath, skeletonBytes(*dir, *agentURL), 0o644); err != nil {
 		return err
 	}
 
-	token, adminPath, adminRel, err := writeNewAdminState(*dir, outDir)
+	adminPath, adminRel, err := writeNewPanelState(*dir, outDir)
 	if err != nil {
 		return err
 	}
 
 	fmt.Fprintf(out, "config %s\n", configPath)
 	if adminRel != "" {
-		fmt.Fprintf(out, "NOTE: %s did not exist; admin state is next to the config.\n", *dir)
+		fmt.Fprintf(out, "NOTE: %s did not exist; panel state is next to the config.\n", *dir)
 		fmt.Fprintf(out, "      Move it into the release directory before first start.\n")
 	}
-	printAdminBootstrap(out, adminPath, token)
-	fmt.Fprintf(out, "\nPanel reads %s read-only; store serves the same tree.\n", *dir)
+	printPanelNote(out, adminPath)
+	fmt.Fprintf(out, "\nPanel reads %s read-only; relkit-store serves the same tree.\n", *dir)
 	fmt.Fprintf(out, "Then: relkit-console -config %s\n", configPath)
-	fmt.Fprintf(out, "Storage side (upload tokens, product tokens): relkit-store init\n")
 	return nil
 }
 
-// runInitResetAdmin wipes operator accounts and issues a new bootstrap. The
-// running process keeps the old session key until it reloads, so restart
-// after handing the new bootstrap to whoever will create the next account.
+// runInitResetAdmin replaces the panel cookie key, signing every operator out.
+// It does not touch accounts: those live on the agent now (requirement 13.6).
 //
 // This is the break-glass path the locked panel points at: it must work even
 // when the config is gone, so it locates the state file through the -dir
@@ -315,16 +319,16 @@ func runInitResetAdmin(out io.Writer, configPath, dirFlag string) error {
 		adminRel = cfg.AdminStateFile
 	}
 	path := resolveAdminPath(serveDir, configPath, adminRel)
-	token, doc, err := mintAdminDoc()
+	doc, err := mintPanelDoc()
 	if err != nil {
 		return err
 	}
-	if err := writeAdminDoc(path, doc); err != nil {
+	if err := writePanelDoc(path, doc); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "config %s\n", configPath)
-	printAdminBootstrap(out, path, token)
-	fmt.Fprintf(out, "\nExisting operator accounts and sessions are gone. Restart to load it:\n")
+	printPanelNote(out, path)
+	fmt.Fprintf(out, "\nEvery operator session is signed out. Restart to load it:\n")
 	fmt.Fprintf(out, "  systemctl restart relkit-console\n")
 	return nil
 }

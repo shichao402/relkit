@@ -9,26 +9,25 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shichao402/relkit/internal/vnext/catalog"
 	"github.com/shichao402/relkit/internal/vnext/document"
 	"github.com/shichao402/relkit/internal/vnext/operator"
 )
 
 type Status struct {
-	Schema               string                `json:"schema"`
-	OK                   bool                  `json:"ok"`
-	Operator             string                `json:"operator"`
-	ProfileDigest        string                `json:"profileDigest"`
-	Profile              operator.Document     `json:"profile"`
-	CatalogDigest        string                `json:"catalogDigest"`
-	CatalogSequence      int64                 `json:"catalogSequence"`
-	LatestCertified      *catalog.Distribution `json:"latestCertified,omitempty"`
-	UpgradeAvailable     bool                  `json:"upgradeAvailable"`
-	IncompleteOperations []OperationState      `json:"incompleteOperations,omitempty"`
+	Schema               string            `json:"schema"`
+	OK                   bool              `json:"ok"`
+	Operator             string            `json:"operator"`
+	ProfileDigest        string            `json:"profileDigest"`
+	Profile              operator.Document `json:"profile"`
+	CatalogDigest        string            `json:"catalogDigest"`
+	CatalogSequence      int64             `json:"catalogSequence"`
+	CatalogCurrent       string            `json:"catalogCurrent"`
+	UpgradeAvailable     bool              `json:"upgradeAvailable"`
+	IncompleteOperations []OperationState  `json:"incompleteOperations,omitempty"`
 }
 
 func ReadStatus(inventory Inventory) (*Status, error) {
-	profile, distributions, _, err := loadTrustedState(inventory)
+	profile, value, err := loadTrustedState(inventory)
 	if err != nil {
 		return nil, operationError("operator.control_plane_invalid", "status", "Operator control plane is not trusted", nil, err)
 	}
@@ -36,37 +35,31 @@ func ReadStatus(inventory Inventory) (*Status, error) {
 	if err != nil {
 		return nil, err
 	}
-	catalogDigest, err := distributions.Digest()
+	catalogDigest, err := value.Digest()
 	if err != nil {
 		return nil, err
 	}
-	production, err := distributions.Production()
+	current, err := value.CurrentRelease()
 	if err != nil {
 		return nil, err
-	}
-	var latest *catalog.Distribution
-	if len(production) > 0 {
-		value := production[0]
-		latest = &value
 	}
 	incomplete, err := readIncompleteOperations(inventory.StateDirectory)
 	if err != nil {
 		return nil, err
 	}
 	status := &Status{
-		Schema:               "relkit.ops-status/1",
+		Schema:               "relkit.ops-status/2",
 		OK:                   len(incomplete) == 0,
 		Operator:             inventory.Operator,
 		ProfileDigest:        profileDigest,
 		Profile:              *profile,
 		CatalogDigest:        catalogDigest,
-		CatalogSequence:      distributions.Sequence,
-		LatestCertified:      latest,
+		CatalogSequence:      value.Sequence,
+		CatalogCurrent:       current.Version,
 		IncompleteOperations: incomplete,
 	}
-	if latest != nil {
-		status.UpgradeAvailable = latest.Digest != profile.ServerRelease.DistributionDigest
-	}
+	status.UpgradeAvailable = current.Version != profile.ServerRelease.Version ||
+		current.Commit != profile.ServerRelease.Commit
 	return status, nil
 }
 

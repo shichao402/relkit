@@ -8,6 +8,7 @@ import (
 
 	"github.com/shichao402/relkit/internal/backends"
 	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/vnext/canonical"
 	"github.com/shichao402/relkit/internal/vnext/project"
@@ -17,6 +18,9 @@ type PublishOptions struct {
 	To             []string
 	ProfileVersion int64
 	DryRun         bool
+	// Signer is the server root. A profile carries exactly one signature
+	// (requirement 10.4).
+	Signer envelope.Signer
 }
 
 type PublishResult struct {
@@ -36,17 +40,10 @@ func Publish(
 	if printer == nil {
 		printer = func(string) {}
 	}
-	if product.RuntimeProfilePublication == nil {
-		return nil, fmt.Errorf("project does not publish a Runtime Profile")
-	}
 	if cfg.Directory == nil || len(cfg.Directory.EntryURLs) == 0 {
 		return nil, fmt.Errorf("Runtime Profile publication requires consumer-visible directory.entryUrls")
 	}
-	signers, err := cfg.LoadSigners()
-	if err != nil {
-		return nil, err
-	}
-	value, err := Create(product, cfg.Directory.EntryURLs, options.ProfileVersion, signers)
+	value, err := Create(product, cfg.Directory.EntryURLs, options.ProfileVersion, options.Signer)
 	if err != nil {
 		return nil, err
 	}

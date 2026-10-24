@@ -1,4 +1,4 @@
-package sdk_test
+﻿package sdk_test
 
 import (
 	"context"
@@ -18,11 +18,11 @@ import (
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/inprocess"
 	"github.com/shichao402/relkit/internal/testutil"
-	"github.com/shichao402/relkit/sdk"
+	"github.com/shichao402/relkit/internal/sdk"
 )
 
 func TestVersionSelectConformanceDelegated(t *testing.T) {
-	// Full version-select fixtures live in internal/chain (legacy JSON → model).
+	// Full version-select fixtures live in internal/chain (legacy JSON 鈫?model).
 	// Here we only assert the package is wired and fixtures are discoverable.
 	root := filepath.Join(testutil.ConformanceRoot(t), "version-select")
 	files, err := filepath.Glob(filepath.Join(root, "*.json"))

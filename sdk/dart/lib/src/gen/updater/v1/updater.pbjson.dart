@@ -40,6 +40,7 @@ const ErrorCode$json = {
     {'1': 'ERROR_CODE_CANCELED', '2': 18},
     {'1': 'ERROR_CODE_SIDECAR_NOT_FOUND', '2': 19},
     {'1': 'ERROR_CODE_LAYOUT_UNSUPPORTED', '2': 20},
+    {'1': 'ERROR_CODE_INSTALLER_FAILED', '2': 21},
   ],
 };
 
@@ -56,7 +57,8 @@ final $typed_data.Uint8List errorCodeDescriptor = $convert.base64Decode(
     'T1RfRE9XTkxPQURFRBAOEhoKFkVSUk9SX0NPREVfU0tJUF9ERU5JRUQQDxIeChpFUlJPUl9DT0'
     'RFX1BST0ZJTEVfSU5WQUxJRBAQEiIKHkVSUk9SX0NPREVfQ0hBTk5FTF9OT1RfQUxMT1dFRBAR'
     'EhcKE0VSUk9SX0NPREVfQ0FOQ0VMRUQQEhIgChxFUlJPUl9DT0RFX1NJREVDQVJfTk9UX0ZPVU'
-    '5EEBMSIQodRVJST1JfQ09ERV9MQVlPVVRfVU5TVVBQT1JURUQQFA==');
+    '5EEBMSIQodRVJST1JfQ09ERV9MQVlPVVRfVU5TVVBQT1JURUQQFBIfChtFUlJPUl9DT0RFX0lO'
+    'U1RBTExFUl9GQUlMRUQQFQ==');
 
 @$core.Deprecated('Use lastResultDescriptor instead')
 const LastResult$json = {
@@ -122,10 +124,13 @@ const Operation$json = {
     {'1': 'OPERATION_STATUS', '2': 5},
     {'1': 'OPERATION_CLEANUP', '2': 6},
     {'1': 'OPERATION_CANCEL', '2': 7},
-    {'1': 'OPERATION_SCHEDULER', '2': 8},
     {'1': 'OPERATION_LIST_INSTALLED', '2': 9},
     {'1': 'OPERATION_SWITCH_ACTIVE', '2': 10},
     {'1': 'OPERATION_ROLLBACK', '2': 11},
+    {'1': 'OPERATION_DELETE_INSTALLED', '2': 12},
+  ],
+  '4': [
+    {'1': 8, '2': 8},
   ],
 };
 
@@ -134,9 +139,9 @@ final $typed_data.Uint8List operationDescriptor = $convert.base64Decode(
     'CglPcGVyYXRpb24SGQoVT1BFUkFUSU9OX1VOU1BFQ0lGSUVEEAASEwoPT1BFUkFUSU9OX0NIRU'
     'NLEAESEgoOT1BFUkFUSU9OX1NLSVAQAhIWChJPUEVSQVRJT05fRE9XTkxPQUQQAxITCg9PUEVS'
     'QVRJT05fQVBQTFkQBBIUChBPUEVSQVRJT05fU1RBVFVTEAUSFQoRT1BFUkFUSU9OX0NMRUFOVV'
-    'AQBhIUChBPUEVSQVRJT05fQ0FOQ0VMEAcSFwoTT1BFUkFUSU9OX1NDSEVEVUxFUhAIEhwKGE9Q'
-    'RVJBVElPTl9MSVNUX0lOU1RBTExFRBAJEhsKF09QRVJBVElPTl9TV0lUQ0hfQUNUSVZFEAoSFg'
-    'oST1BFUkFUSU9OX1JPTExCQUNLEAs=');
+    'AQBhIUChBPUEVSQVRJT05fQ0FOQ0VMEAcSHAoYT1BFUkFUSU9OX0xJU1RfSU5TVEFMTEVEEAkS'
+    'GwoXT1BFUkFUSU9OX1NXSVRDSF9BQ1RJVkUQChIWChJPUEVSQVRJT05fUk9MTEJBQ0sQCxIeCh'
+    'pPUEVSQVRJT05fREVMRVRFX0lOU1RBTExFRBAMIgQICBAI');
 
 @$core.Deprecated('Use sessionPhaseDescriptor instead')
 const SessionPhase$json = {
@@ -234,6 +239,8 @@ const ClientProfile$json = {
       '6': '.relkit.updater.v1.RecoveryHelp',
       '10': 'recovery'
     },
+    {'1': 'bootstrap', '3': 8, '4': 1, '5': 9, '10': 'bootstrap'},
+    {'1': 'expected_product', '3': 9, '4': 1, '5': 9, '10': 'expectedProduct'},
   ],
 };
 
@@ -244,7 +251,31 @@ final $typed_data.Uint8List clientProfileDescriptor = $convert.base64Decode(
     'VXJscxIdCgppbmRleF91cmxzGAQgAygJUglpbmRleFVybHMSIwoNZmFsbGJhY2tfdXJscxgFIA'
     'MoCVIMZmFsbGJhY2tVcmxzEkAKDHRydXN0ZWRfa2V5cxgGIAMoCzIdLnJlbGtpdC51cGRhdGVy'
     'LnYxLlRydXN0ZWRLZXlSC3RydXN0ZWRLZXlzEjsKCHJlY292ZXJ5GAcgASgLMh8ucmVsa2l0Ln'
-    'VwZGF0ZXIudjEuUmVjb3ZlcnlIZWxwUghyZWNvdmVyeQ==');
+    'VwZGF0ZXIudjEuUmVjb3ZlcnlIZWxwUghyZWNvdmVyeRIcCglib290c3RyYXAYCCABKAlSCWJv'
+    'b3RzdHJhcBIpChBleHBlY3RlZF9wcm9kdWN0GAkgASgJUg9leHBlY3RlZFByb2R1Y3Q=');
+
+@$core.Deprecated('Use handshakeReportDescriptor instead')
+const HandshakeReport$json = {
+  '1': 'HandshakeReport',
+  '2': [
+    {'1': 'product', '3': 1, '4': 1, '5': 9, '10': 'product'},
+    {'1': 'allowed_channels', '3': 2, '4': 3, '5': 9, '10': 'allowedChannels'},
+    {'1': 'default_channel', '3': 3, '4': 1, '5': 9, '10': 'defaultChannel'},
+    {'1': 'root_key_id', '3': 6, '4': 1, '5': 9, '10': 'rootKeyId'},
+    {'1': 'root_fingerprint', '3': 7, '4': 1, '5': 9, '10': 'rootFingerprint'},
+  ],
+  '9': [
+    {'1': 4, '2': 5},
+    {'1': 5, '2': 6},
+  ],
+};
+
+/// Descriptor for `HandshakeReport`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List handshakeReportDescriptor = $convert.base64Decode(
+    'Cg9IYW5kc2hha2VSZXBvcnQSGAoHcHJvZHVjdBgBIAEoCVIHcHJvZHVjdBIpChBhbGxvd2VkX2'
+    'NoYW5uZWxzGAIgAygJUg9hbGxvd2VkQ2hhbm5lbHMSJwoPZGVmYXVsdF9jaGFubmVsGAMgASgJ'
+    'Ug5kZWZhdWx0Q2hhbm5lbBIeCgtyb290X2tleV9pZBgGIAEoCVIJcm9vdEtleUlkEikKEHJvb3'
+    'RfZmluZ2VycHJpbnQYByABKAlSD3Jvb3RGaW5nZXJwcmludEoECAQQBUoECAUQBg==');
 
 @$core.Deprecated('Use libraryPolicyDescriptor instead')
 const LibraryPolicy$json = {
@@ -385,29 +416,6 @@ final $typed_data.Uint8List checkPolicyDescriptor = $convert.base64Decode(
     'R1cmF0aW9uUgxhZnRlclN1Y2Nlc3MSPgoNYWZ0ZXJfZmFpbHVyZRgCIAEoCzIZLmdvb2dsZS5w'
     'cm90b2J1Zi5EdXJhdGlvblIMYWZ0ZXJGYWlsdXJl');
 
-@$core.Deprecated('Use schedulerConfigDescriptor instead')
-const SchedulerConfig$json = {
-  '1': 'SchedulerConfig',
-  '2': [
-    {'1': 'check_on_start', '3': 1, '4': 1, '5': 8, '10': 'checkOnStart'},
-    {'1': 'force_on_start', '3': 2, '4': 1, '5': 8, '10': 'forceOnStart'},
-    {
-      '1': 'policy',
-      '3': 3,
-      '4': 1,
-      '5': 11,
-      '6': '.relkit.updater.v1.CheckPolicy',
-      '10': 'policy'
-    },
-  ],
-};
-
-/// Descriptor for `SchedulerConfig`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List schedulerConfigDescriptor = $convert.base64Decode(
-    'Cg9TY2hlZHVsZXJDb25maWcSJAoOY2hlY2tfb25fc3RhcnQYASABKAhSDGNoZWNrT25TdGFydB'
-    'IkCg5mb3JjZV9vbl9zdGFydBgCIAEoCFIMZm9yY2VPblN0YXJ0EjYKBnBvbGljeRgDIAEoCzIe'
-    'LnJlbGtpdC51cGRhdGVyLnYxLkNoZWNrUG9saWN5UgZwb2xpY3k=');
-
 @$core.Deprecated('Use clientHelloDescriptor instead')
 const ClientHello$json = {
   '1': 'ClientHello',
@@ -460,6 +468,14 @@ const Capabilities$json = {
       '10': 'planTtl'
     },
     {'1': 'engine_version', '3': 6, '4': 1, '5': 9, '10': 'engineVersion'},
+    {
+      '1': 'handshake',
+      '3': 7,
+      '4': 1,
+      '5': 11,
+      '6': '.relkit.updater.v1.HandshakeReport',
+      '10': 'handshake'
+    },
   ],
 };
 
@@ -470,7 +486,9 @@ final $typed_data.Uint8List capabilitiesDescriptor = $convert.base64Decode(
     'AygOMhwucmVsa2l0LnVwZGF0ZXIudjEuUGxhY2VtZW50UgpwbGFjZW1lbnRzEkcKEm1pbl9jaG'
     'Vja19pbnRlcnZhbBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvblIQbWluQ2hlY2tJ'
     'bnRlcnZhbBI0CghwbGFuX3R0bBgFIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvblIHcG'
-    'xhblR0bBIlCg5lbmdpbmVfdmVyc2lvbhgGIAEoCVINZW5naW5lVmVyc2lvbg==');
+    'xhblR0bBIlCg5lbmdpbmVfdmVyc2lvbhgGIAEoCVINZW5naW5lVmVyc2lvbhJACgloYW5kc2hh'
+    'a2UYByABKAsyIi5yZWxraXQudXBkYXRlci52MS5IYW5kc2hha2VSZXBvcnRSCWhhbmRzaGFrZQ'
+    '==');
 
 @$core.Deprecated('Use checkOpDescriptor instead')
 const CheckOp$json = {
@@ -589,6 +607,20 @@ const RollbackOp$json = {
 /// Descriptor for `RollbackOp`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List rollbackOpDescriptor =
     $convert.base64Decode('CgpSb2xsYmFja09w');
+
+@$core.Deprecated('Use deleteInstalledOpDescriptor instead')
+const DeleteInstalledOp$json = {
+  '1': 'DeleteInstalledOp',
+  '2': [
+    {'1': 'code', '3': 1, '4': 1, '5': 3, '10': 'code'},
+    {'1': 'in_use_codes', '3': 2, '4': 3, '5': 3, '10': 'inUseCodes'},
+  ],
+};
+
+/// Descriptor for `DeleteInstalledOp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List deleteInstalledOpDescriptor = $convert.base64Decode(
+    'ChFEZWxldGVJbnN0YWxsZWRPcBISCgRjb2RlGAEgASgDUgRjb2RlEiAKDGluX3VzZV9jb2Rlcx'
+    'gCIAMoA1IKaW5Vc2VDb2Rlcw==');
 
 @$core.Deprecated('Use installedVersionDescriptor instead')
 const InstalledVersion$json = {
@@ -748,6 +780,15 @@ const UpdaterRequest$json = {
       '9': 0,
       '10': 'rollback'
     },
+    {
+      '1': 'delete_installed',
+      '3': 20,
+      '4': 1,
+      '5': 11,
+      '6': '.relkit.updater.v1.DeleteInstalledOp',
+      '9': 0,
+      '10': 'deleteInstalled'
+    },
   ],
   '8': [
     {'1': 'op'},
@@ -770,7 +811,8 @@ final $typed_data.Uint8List updaterRequestDescriptor = $convert.base64Decode(
     '5MaXN0SW5zdGFsbGVkT3BIAFINbGlzdEluc3RhbGxlZBJICg1zd2l0Y2hfYWN0aXZlGBIgASgL'
     'MiEucmVsa2l0LnVwZGF0ZXIudjEuU3dpdGNoQWN0aXZlT3BIAFIMc3dpdGNoQWN0aXZlEjsKCH'
     'JvbGxiYWNrGBMgASgLMh0ucmVsa2l0LnVwZGF0ZXIudjEuUm9sbGJhY2tPcEgAUghyb2xsYmFj'
-    'a0IECgJvcA==');
+    'axJRChBkZWxldGVfaW5zdGFsbGVkGBQgASgLMiQucmVsa2l0LnVwZGF0ZXIudjEuRGVsZXRlSW'
+    '5zdGFsbGVkT3BIAFIPZGVsZXRlSW5zdGFsbGVkQgQKAm9w');
 
 @$core.Deprecated('Use errorDescriptor instead')
 const Error$json = {
@@ -1742,6 +1784,21 @@ const ApplySessionRecord$json = {
       '6': '.relkit.updater.v1.LibraryPolicy',
       '10': 'library'
     },
+    {
+      '1': 'disposition',
+      '3': 23,
+      '4': 1,
+      '5': 14,
+      '6': '.relkit.updater.v1.ApplyDisposition',
+      '10': 'disposition'
+    },
+    {
+      '1': 'installer_relpath',
+      '3': 24,
+      '4': 1,
+      '5': 9,
+      '10': 'installerRelpath'
+    },
   ],
   '9': [
     {'1': 16, '2': 17},
@@ -1766,7 +1823,9 @@ final $typed_data.Uint8List applySessionRecordDescriptor = $convert.base64Decode
     'gJUghwcmVzZXJ2ZRInCg9zaWRlY2FyX3JlbHBhdGgYEiABKAlSDnNpZGVjYXJSZWxwYXRoEiEK'
     'DGluc3RhbGxfb25seRgTIAEoCFILaW5zdGFsbE9ubHkSLAoScmVxdWlyZXNfaG9zdF9leGl0GB'
     'UgASgIUhByZXF1aXJlc0hvc3RFeGl0EjoKB2xpYnJhcnkYFiABKAsyIC5yZWxraXQudXBkYXRl'
-    'ci52MS5MaWJyYXJ5UG9saWN5UgdsaWJyYXJ5SgQIEBARSgQIERASSgQIFBAV');
+    'ci52MS5MaWJyYXJ5UG9saWN5UgdsaWJyYXJ5EkUKC2Rpc3Bvc2l0aW9uGBcgASgOMiMucmVsa2'
+    'l0LnVwZGF0ZXIudjEuQXBwbHlEaXNwb3NpdGlvblILZGlzcG9zaXRpb24SKwoRaW5zdGFsbGVy'
+    'X3JlbHBhdGgYGCABKAlSEGluc3RhbGxlclJlbHBhdGhKBAgQEBFKBAgREBJKBAgUEBU=');
 
 @$core.Deprecated('Use journalEntryDescriptor instead')
 const JournalEntry$json = {

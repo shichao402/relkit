@@ -22,9 +22,12 @@ const (
 	testPanelPassword = "password123"
 )
 
-// newTestConsole assembles a console over a temp release tree, the test
-// counterpart of main(): adapter over the tree, admin state in it, stats at
-// the default hidden path.
+// newTestConsole assembles a console over a temp release tree plus a stub
+// agent holding one operator, the test counterpart of main(): adapter over the
+// tree, panel state in it, stats at the default hidden path. The agent is a
+// stub because the panel has no accounts of its own any more (requirement
+// 13.6); a test that needs a specific agent answer builds its own with
+// newPanelConsole.
 func newTestConsole(t *testing.T) (*console, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -36,10 +39,17 @@ func newTestConsole(t *testing.T) (*console, string) {
 	// RemoveAll cleanup fails with "being used by another process" on
 	// every test. relkit-store's tests already close theirs; same here.
 	t.Cleanup(func() { _ = adapter.root.Close() })
+	stub, agentURL := newAgentStubServer(t)
+	stub.bootstrapLive = false
+	stub.addUser(testPanelUser, testPanelPassword, "admin", nil)
+	admin, err := openPanelSession(filepath.Join(dir, adminStateFileName), dir, agentURL)
+	if err != nil {
+		t.Fatalf("openPanelSession: %v", err)
+	}
 	c := &console{
 		adapter: adapter,
 		stats:   newDownloadStats(defaultStatsPath(dir), dir),
-		admin:   readyTestAdmin(t, dir),
+		admin:   admin,
 	}
 	t.Cleanup(c.stats.stop)
 	return c, dir
@@ -47,25 +57,18 @@ func newTestConsole(t *testing.T) (*console, string) {
 
 // readyTestAdmin is the serve version carried over: one user, deterministic
 // session key, so requirePanelAuth passes after login.
-func readyTestAdmin(t *testing.T, dir string) *adminAuth {
+func readyTestAdmin(t *testing.T, dir string) *panelSession {
 	t.Helper()
-	hash, err := hashPassword(testPanelPassword)
-	if err != nil {
-		t.Fatal(err)
-	}
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
 	path := filepath.Join(dir, adminStateFileName)
-	doc := adminDoc{
-		SessionKey: base64.RawURLEncoding.EncodeToString(key),
-		Users:      []adminUser{{Username: testPanelUser, PasswordHash: hash}},
-	}
-	if err := writeAdminDoc(path, doc); err != nil {
+	doc := panelDoc{SessionKey: base64.RawURLEncoding.EncodeToString(key)}
+	if err := writePanelDoc(path, doc); err != nil {
 		t.Fatal(err)
 	}
-	admin, err := openAdminAuth(path, dir)
+	admin, err := openPanelSession(path, dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +173,7 @@ func TestLoginServesPortalAndFiles(t *testing.T) {
 
 func TestRootAdapterListsAndReads(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "index/dec/dev.pb", []byte("x"))
+	writeFile(t, dir, "index/loom/dev.pb", []byte("x"))
 	a, err := newRootAdapter("local", dir)
 	if err != nil {
 		t.Fatal(err)
@@ -179,15 +182,15 @@ func TestRootAdapterListsAndReads(t *testing.T) {
 	if a.Name() != "local" {
 		t.Fatalf("name = %q", a.Name())
 	}
-	entries, err := a.ReadDir("index/dec")
+	entries, err := a.ReadDir("index/loom")
 	if err != nil || len(entries) != 1 || entries[0].Name != "dev.pb" {
 		t.Fatalf("entries=%+v err=%v", entries, err)
 	}
-	raw, err := a.ReadKey("index/dec/dev.pb")
+	raw, err := a.ReadKey("index/loom/dev.pb")
 	if err != nil || string(raw) != "x" {
 		t.Fatalf("read=%q err=%v", raw, err)
 	}
-	if a.ModTime("index/dec/dev.pb").IsZero() {
+	if a.ModTime("index/loom/dev.pb").IsZero() {
 		t.Fatal("modtime missing")
 	}
 	if !a.ModTime("missing").IsZero() {
@@ -291,8 +294,8 @@ func newFakeStoreServer(t *testing.T, dir string) *httptest.Server {
 
 func TestStoreAdapterReadsRemoteTree(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "index/dec/dev.pb", []byte("x"))
-	writeFile(t, dir, "artifact/dec/1.0.0/dec.zip", []byte("pkg"))
+	writeFile(t, dir, "index/loom/dev.pb", []byte("x"))
+	writeFile(t, dir, "artifact/loom/1.0.0/loom.zip", []byte("pkg"))
 	writeFile(t, dir, ".relkit-serve-admin.json", []byte(`{}`))
 
 	srv := newFakeStoreServer(t, dir)
@@ -305,7 +308,7 @@ func TestStoreAdapterReadsRemoteTree(t *testing.T) {
 	}
 
 	// ReadKey: same semantics as rootAdapter, including 404 → error.
-	raw, err := a.ReadKey("index/dec/dev.pb")
+	raw, err := a.ReadKey("index/loom/dev.pb")
 	if err != nil || string(raw) != "x" {
 		t.Fatalf("read=%q err=%v", raw, err)
 	}
@@ -318,7 +321,7 @@ func TestStoreAdapterReadsRemoteTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name != "dec" || !entries[0].IsDir {
+	if len(entries) != 1 || entries[0].Name != "loom" || !entries[0].IsDir {
 		t.Fatalf("entries=%+v", entries)
 	}
 	rootEntries, err := a.ReadDir(".")
@@ -330,7 +333,7 @@ func TestStoreAdapterReadsRemoteTree(t *testing.T) {
 	}
 
 	// ModTime comes from the listing payload.
-	if a.ModTime("index/dec/dev.pb").IsZero() {
+	if a.ModTime("index/loom/dev.pb").IsZero() {
 		t.Fatal("modtime missing")
 	}
 	if !a.ModTime("missing").IsZero() {

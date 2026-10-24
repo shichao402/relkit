@@ -1,8 +1,12 @@
 # ADR 0020: Catalog、Operator 与 Immutable Resolution
 
-- 状态：Accepted（Catalog、Operator、resolution、wrapper 与离线 bundle 已实现）
+- 状态：**Superseded**（2026-10-22 由 [ADR 0023](0023-desktop-updater-epoch.md) 取代；逐条驳斥与保留项见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)，现行架构见 [`docs/architecture.md`](../architecture.md)）
+- 历史状态：Accepted（Catalog、Operator、resolution、wrapper 与离线 bundle 已实现）
 - 日期：2026-10-16
 - 依赖：[ADR 0019](0019-vnext-breaking-and-protocol-contracts.md)
+- 关联：[ADR 0021](0021-vnext-artifact-runtime-registry.md)、[ADR 0022](0022-vnext-certification-ops-skill.md)、[ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md)、[ADR 0018](0018-offline-env-pack-in-ci.md)
+
+> **Superseded 说明（2026-10-22）**：四把信任根、`selectionPolicy`、resolution、wrapper、离线 bundle、候选 bundle、Catalog 生命周期与 watermark 全部删除；Catalog 只表达"服务器当前提供哪个版本"，Operator Profile 与 Runtime Profile 合并为一份由服务器根自动签发的 Profile，端点与拓扑无关的规则保留。现行设计见 [`docs/architecture.md`](../architecture.md)，逐条差异见 [驳斥文档](0019-0022-refutation.md)。本文件中的 schema 链接指向已删除的 `docs/design/vnext/`，仅作历史参考。
 - 关联：[ADR 0021](0021-vnext-artifact-runtime-registry.md)、[ADR 0022](0022-vnext-certification-ops-skill.md)、[ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md)、[ADR 0018](0018-offline-env-pack-in-ci.md)
 
 ## 背景
@@ -31,7 +35,7 @@
 - Token、SSH、机器目录、mirror 凭据、CI secret
 - onboarding step 或 verified 状态
 
-Schema 草案：[`../design/vnext/schemas/relkit.project.1.schema.json`](../design/vnext/schemas/relkit.project.1.schema.json)
+Schema：[`../schemas/relkit.project.1.schema.json`](../schemas/relkit.project.1.schema.json)（已按断代后模型重写；本节描述的角色/Operator ref/能力指纹等字段已删除）
 
 ### 2. `relkit.operator-profile/1`
 
@@ -156,7 +160,7 @@ Relkit 版本字段。
 
 
 
-Schema 草案：[`../design/vnext/schemas/relkit.operator-profile.1.schema.json`](../design/vnext/schemas/relkit.operator-profile.1.schema.json)
+Schema：[`../schemas/relkit.operator-profile.1.schema.json`](../schemas/relkit.operator-profile.1.schema.json)（已按断代后模型重写；selectionPolicy、provides、distribution sources、mirror、bundle、SSH inventory 等字段已删除）
 
 ### 3. 信任根
 
@@ -241,7 +245,7 @@ browse 的 `catalog.json` 不在此信任链（ADR 0019）。
 7. extension 不能生成或修改 resolution
 8. 定义 canonical JSON 与 digest 算法（字段排序、无无关空白、固定编码）；同一输入在不同平台/镜像得到相同 digest
 
-Schema 草案：[`../design/vnext/schemas/relkit.resolution.1.schema.json`](../design/vnext/schemas/relkit.resolution.1.schema.json)
+Schema 已删除：`relkit.resolution/1` 随整个 resolution 层一起删除，宿主不再持有 resolution。理由见 [ADR 0019-0022 驳斥](0019-0022-refutation.md) 第一节第 3 项。
 
 ### 6. Canonical wrapper
 

@@ -2,7 +2,6 @@ package updater
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,9 +9,7 @@ import (
 	"time"
 
 	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
-	"github.com/shichao402/relkit/sdk"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type store struct {
@@ -34,7 +31,6 @@ func (s store) statePath() string {
 	name := "state-" + sanitizeStateName(s.product) + "-" + sanitizeStateName(s.channel) + ".pb"
 	return filepath.Join(s.dataDir, name)
 }
-func (s store) jsonPath() string { return filepath.Join(s.dataDir, LegacyStateJSON) }
 func (s store) plansDir() string { return filepath.Join(s.dataDir, PlansDirName) }
 func (s store) sessionsDir() string {
 	return filepath.Join(s.dataDir, SessionsDirName)
@@ -74,48 +70,8 @@ func (s store) loadState() (*updaterv1.PersistedState, error) {
 		return nil, err
 	}
 	st := &updaterv1.PersistedState{}
-	// Legacy state.pb / JSON had no product or channel identity. Importing its
-	// index watermark into the first channel opened would make a later channel
-	// with an independent sequence look like a rollback. Only unscoped stores
-	// (legacy tests/tools) retain the old JSON migration behavior.
-	if s.product == "" && s.channel == "" {
-		var err error
-		st, err = s.migrateLegacyJSON()
-		if err != nil {
-			return nil, err
-		}
-	}
 	if err := s.saveState(st); err != nil {
 		return nil, err
-	}
-	return st, nil
-}
-
-func (s store) migrateLegacyJSON() (*updaterv1.PersistedState, error) {
-	st := &updaterv1.PersistedState{}
-	raw, err := os.ReadFile(s.jsonPath())
-	if err != nil {
-		return st, nil
-	}
-	var legacy sdk.UpdateState
-	if json.Unmarshal(raw, &legacy) != nil {
-		return st, nil
-	}
-	if legacy.LastCheckAt != nil {
-		st.LastCheckAt = timestamppb.New(legacy.LastCheckAt.UTC())
-	}
-	st.LastResult = MapLegacyLastResult(legacy.LastResult)
-	if legacy.LastSeenSequence != nil {
-		st.LastSeenSequence = *legacy.LastSeenSequence
-	}
-	if legacy.LastSeenDirectorySequence != nil {
-		st.LastSeenDirectorySequence = *legacy.LastSeenDirectorySequence
-	}
-	if legacy.LastSeenFallbackSequence != nil {
-		st.LastSeenFallbackSequence = *legacy.LastSeenFallbackSequence
-	}
-	for _, c := range legacy.Skipped {
-		st.SkippedCodes = append(st.SkippedCodes, int64(c))
 	}
 	return st, nil
 }

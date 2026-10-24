@@ -14,7 +14,7 @@ import (
 // the Adapter instead of an os.Root of the served tree.
 type console struct {
 	adapter  Adapter
-	admin    *adminAuth
+	admin    *panelSession
 	stats    *downloadStats
 	site     *SiteConfig
 	stateDir string
@@ -28,6 +28,11 @@ func (c *console) handler() http.Handler {
 	mux.HandleFunc(adminLogoutPath, c.serveAdminLogout)
 	mux.HandleFunc(adminPath, c.requirePanelAuth(c.serveAdmin))
 	mux.HandleFunc(adminFilesPath, c.requirePanelAuth(c.serveAdminFiles))
+	mux.HandleFunc(panelPath, c.requirePanelAuth(c.handlePanel))
+	mux.HandleFunc(panelUsersPath, c.requirePanelAuth(c.handlePanel))
+	mux.HandleFunc(panelRolesPath, c.requirePanelAuth(c.handlePanel))
+	mux.HandleFunc(panelHostsPath, c.requirePanelAuth(c.handlePanel))
+	mux.HandleFunc(panelTokensPath, c.requirePanelAuth(c.handlePanel))
 	mux.HandleFunc(productPathPrefix, c.requirePanelAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")

@@ -1,57 +1,50 @@
-// Package runtimebootstrap projects a verified Runtime Profile and its
-// externally trusted product roots into the build input consumed by updater
-// facades. It is deliberately unsigned: the immutable resolution bundle is
-// the signed source and the resolution digest records that provenance.
+// Package runtimebootstrap produces the document a host build embeds into its
+// updater: the one server root the application trusts, plus the signed
+// Runtime Profile describing that server's directories.
+//
+// Requirement 10.6: an application trusts exactly one server root. The
+// document is deliberately unsigned — the Runtime Profile it carries is signed
+// by the server root, and the updater verifies it with the embedded key.
 package runtimebootstrap
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"fmt"
-	"sort"
 
 	"github.com/shichao402/relkit/internal/vnext/canonical"
 	"github.com/shichao402/relkit/internal/vnext/runtimeprofile"
 	"github.com/shichao402/relkit/internal/vnext/trust"
 )
 
-const Schema = "relkit.runtime-bootstrap/1"
+const Schema = "relkit.runtime-bootstrap/2"
 
-type TrustedKey struct {
-	KeyID string `json:"keyId"`
-	Key   string `json:"key"`
-}
-
+// Document is the build input consumed by updater facades.
+//
+// RootKeyID and RootPublicKey name the single server root. There is no key set
+// and no product root: one application talks to one server (requirement 10.7).
 type Document struct {
-	Schema           string                  `json:"schema"`
-	ResolutionDigest string                  `json:"resolutionDigest"`
-	ProfileDigest    string                  `json:"profileDigest"`
-	RootFingerprint  string                  `json:"rootFingerprint"`
-	Profile          runtimeprofile.Document `json:"profile"`
-	TrustedKeys      []TrustedKey            `json:"trustedKeys"`
+	Schema        string                  `json:"schema"`
+	RootKeyID     string                  `json:"rootKeyId"`
+	RootPublicKey string                  `json:"rootPublicKey"`
+	RootFingerprint string                `json:"rootFingerprint"`
+	Product       string                  `json:"product"`
+	Profile       runtimeprofile.Document `json:"profile"`
 }
 
-func New(
-	resolutionDigest string,
-	rootFingerprint string,
-	profile runtimeprofile.Document,
-	roots map[string]ed25519.PublicKey,
-) (*Document, error) {
-	keys := make([]TrustedKey, 0, len(roots))
-	for keyID, key := range roots {
-		keys = append(keys, TrustedKey{
-			KeyID: keyID,
-			Key:   base64.StdEncoding.EncodeToString(key),
-		})
+// New builds the bootstrap document for a product from the resolved server
+// root. The profile must already be signed by that same root.
+func New(rootKeyID string, root ed25519.PublicKey, product string, profile runtimeprofile.Document) (*Document, error) {
+	fingerprint, err := trust.Fingerprint(root)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i].KeyID < keys[j].KeyID })
 	value := &Document{
-		Schema:           Schema,
-		ResolutionDigest: resolutionDigest,
-		ProfileDigest:    profile.Digest,
-		RootFingerprint:  rootFingerprint,
-		Profile:          profile,
-		TrustedKeys:      keys,
+		Schema:          Schema,
+		RootKeyID:       rootKeyID,
+		RootPublicKey:   trust.SSHPublicKeyLine(root),
+		RootFingerprint: fingerprint,
+		Product:         product,
+		Profile:         profile,
 	}
 	if err := value.Validate(); err != nil {
 		return nil, err
@@ -59,53 +52,46 @@ func New(
 	return value, nil
 }
 
+// PublicKey decodes the embedded server root.
+func (d Document) PublicKey() (ed25519.PublicKey, error) {
+	publicKey, err := trust.ParsePublicKey(d.RootPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("rootPublicKey: %w", err)
+	}
+	return publicKey, nil
+}
+
 func (d Document) Validate() error {
 	if d.Schema != Schema {
 		return fmt.Errorf("schema is %q, expected %q", d.Schema, Schema)
 	}
-	if err := canonical.ValidateDigest(d.ResolutionDigest); err != nil {
-		return fmt.Errorf("resolutionDigest: %w", err)
+	if d.RootKeyID == "" {
+		return fmt.Errorf("rootKeyId must not be empty")
 	}
-	if d.ProfileDigest != d.Profile.Digest {
-		return fmt.Errorf("profileDigest %s does not match embedded profile %s", d.ProfileDigest, d.Profile.Digest)
+	root, err := d.PublicKey()
+	if err != nil {
+		return err
 	}
-	if err := canonical.ValidateDigest(d.ProfileDigest); err != nil {
-		return fmt.Errorf("profileDigest: %w", err)
+	fingerprint, err := trust.Fingerprint(root)
+	if err != nil {
+		return err
 	}
 	if err := canonical.ValidateDigest(d.RootFingerprint); err != nil {
 		return fmt.Errorf("rootFingerprint: %w", err)
 	}
-	if len(d.TrustedKeys) == 0 {
-		return fmt.Errorf("trustedKeys must not be empty")
+	if fingerprint != d.RootFingerprint {
+		return fmt.Errorf("rootFingerprint %s does not match rootPublicKey %s", d.RootFingerprint, fingerprint)
 	}
-	roots := make(map[string]ed25519.PublicKey, len(d.TrustedKeys))
-	previous := ""
-	for _, key := range d.TrustedKeys {
-		if key.KeyID == "" {
-			return fmt.Errorf("trusted key id must not be empty")
-		}
-		if previous != "" && key.KeyID <= previous {
-			return fmt.Errorf("trustedKeys must be unique and sorted by keyId")
-		}
-		raw, err := base64.StdEncoding.DecodeString(key.Key)
-		if err != nil {
-			return fmt.Errorf("trusted key %q is not base64: %w", key.KeyID, err)
-		}
-		if len(raw) != ed25519.PublicKeySize {
-			return fmt.Errorf("trusted key %q must contain a %d-byte ed25519 key", key.KeyID, ed25519.PublicKeySize)
-		}
-		fingerprint, err := trust.Fingerprint(ed25519.PublicKey(raw))
-		if err != nil {
-			return err
-		}
-		if fingerprint != d.RootFingerprint {
-			return fmt.Errorf("trusted key %q fingerprint %s does not match rootFingerprint %s", key.KeyID, fingerprint, d.RootFingerprint)
-		}
-		roots[key.KeyID] = ed25519.PublicKey(append([]byte(nil), raw...))
-		previous = key.KeyID
-	}
-	if err := d.Profile.Verify(roots); err != nil {
+	if err := d.Profile.Validate(); err != nil {
 		return fmt.Errorf("profile: %w", err)
+	}
+	if d.Product != "" && d.Profile.Product != d.Product {
+		return fmt.Errorf("profile belongs to product %q, bootstrap declares %q", d.Profile.Product, d.Product)
+	}
+	// The profile must be signed by the same single root the bootstrap embeds.
+	// Verify runs last so a malformed key reports before a signature mismatch.
+	if err := d.Profile.Verify(map[string]ed25519.PublicKey{d.RootKeyID: root}); err != nil {
+		return fmt.Errorf("profile is not signed by the embedded server root: %w", err)
 	}
 	return nil
 }

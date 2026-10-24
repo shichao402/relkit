@@ -7,7 +7,7 @@
 - 修订：[ADR 0010](0010-single-updater-engine.md) 决策 7「consume 同一 SHA 产出 facade 与二进制」改述为「同一 commit」；[ADR 0012](0012-single-component-registry.md) 的注册表载体由 `facets.py` 改为 Go。另：`scripts/deploy` 发布层自始未入任何 ADR，本 ADR 一并收编其 `build` 面。
 - 关联：[ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md)、[ADR 0009](0009-publisher-protocol-negotiation.md)、[ADR 0019](0019-vnext-breaking-and-protocol-contracts.md)
 
-> **vNext 说明（已执行）**：本 ADR 描述的 consume/CLI 控制面已于 2026-10-21 从 relkit 仓内删除，产品仓入口现为 `relkit.project.json` + Operator Profile + resolution；本文件保留为历史与 module 传输依据。详见 [design/vnext/USER-ACCEPTANCE.md](../design/vnext/USER-ACCEPTANCE.md) 与 [ADR 0019](0019-vnext-breaking-and-protocol-contracts.md) §1。
+> **vNext 说明（已执行）**：本 ADR 描述的 consume/CLI 控制面已于 2026-10-21 从 relkit 仓内删除，产品仓入口现为 `relkit.project.json` + 服务器签发的 Runtime Profile/Catalog；本文件保留为历史与 module 传输依据。该控制面本身已于 2026-10-22 由 [ADR 0023](0023-desktop-updater-epoch.md) 进一步断代（宿主持有 resolution/Operator Profile 的形态一并删除），现行设计见 [`docs/architecture.md`](../architecture.md)，差异见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)。
 
 ## 背景
 

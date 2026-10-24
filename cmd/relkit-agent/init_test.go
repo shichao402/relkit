@@ -7,471 +7,186 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/relkit/internal/agentadmin"
 )
 
-func writeAgentCfg(t *testing.T, dir string, cfg FileConfig) string {
-	t.Helper()
-	path := filepath.Join(dir, "relkit-agent.json")
-	if err := writeFileConfig(path, &cfg); err != nil {
+// TestInitBootstrapMintsOneShotCredential covers the only job `relkit-agent init`
+// has left: mint the credential that creates the first operator (requirement
+// 13.2). The credential stops working the moment an account exists, so the second
+// call must be refused rather than silently rotate it.
+func TestInitBootstrapMintsOneShotCredential(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "agent.json")
+	if err := os.WriteFile(cfgPath, []byte("{\n  \"stateDir\": \""+filepath.ToSlash(filepath.Join(root, "state"))+"\"\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return path
-}
-
-func TestInitListProducts(t *testing.T) {
-	dir := t.TempDir()
-	path := writeAgentCfg(t, dir, FileConfig{
-		Addr:      "127.0.0.1:8787",
-		MaxUpload: "8GiB",
-		UploadTokens: []UploadTokenEntry{
-			{File: "tokens/dec.token", Products: []string{"dec"}},
-			{File: "tokens/app.token", Products: []string{"app"}},
-		},
-		Products: map[string]ProductConfig{
-			"dec": {Root: "/srv/relkit/dec"},
-			"app": {Root: "/srv/relkit/app"},
-		},
-	})
-
-	var buf bytes.Buffer
-	if err := runInit(&buf, []string{"-config", path, "-list-products"}); err != nil {
+	var out bytes.Buffer
+	if err := runInit(&out, []string{"-config", cfgPath, "-bootstrap"}); err != nil {
 		t.Fatal(err)
 	}
-	out := buf.String()
-	if strings.Contains(out, "secret") || strings.Contains(out, "RELKIT_UPLOAD_TOKEN=") {
-		t.Fatalf("list printed a secret:\n%s", out)
+	text := out.String()
+	if !strings.Contains(text, "shown once") {
+		t.Fatalf("bootstrap output does not warn that the value is shown once:\n%s", text)
 	}
-	if !strings.Contains(out, "config "+path) {
-		t.Fatalf("missing config path:\n%s", out)
-	}
-	if !strings.Contains(out, "tokens/dec.token") {
-		t.Fatalf("missing product token file path:\n%s", out)
-	}
-	if !strings.Contains(out, "dec") || !strings.Contains(out, "app") {
-		t.Fatalf("missing products:\n%s", out)
-	}
-}
-
-func TestInitListMissingConfigDoesNotCreateDir(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "no-such", "relkit-agent.json")
-	if err := runInit(bytes.NewBuffer(nil), []string{"-config", missing, "-list-products"}); err == nil {
-		t.Fatal("expected error")
-	}
-	if _, err := os.Stat(filepath.Dir(missing)); !os.IsNotExist(err) {
-		t.Fatalf("list created config dir: %v", err)
-	}
-}
-
-func TestInitAddAndRemoveProduct(t *testing.T) {
-	dir := t.TempDir()
-	path := writeAgentCfg(t, dir, FileConfig{
-		Addr:      "127.0.0.1:9",
-		MaxUpload: "8GiB",
-		MaxFiles:  10000,
-		StateDir:  "/var/lib/relkit-agent",
-		Products: map[string]ProductConfig{
-			"dec": {Root: "/srv/relkit/dec"},
-		},
-	})
-	root := filepath.Join(dir, "svn-auto-merge")
-
-	var buf bytes.Buffer
-	if err := runInit(&buf, []string{"-config", path, "-product", "svn-auto-merge", "-root", root}); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, "export RELKIT_UPLOAD_TOKEN=") {
-		t.Fatalf("add should print the new product token:\n%s", out)
-	}
-	if strings.Contains(out, "RELKIT_AGENT_TOKEN") || strings.Contains(out, "No new secret") {
-		t.Fatalf("add still talks about an instance token:\n%s", out)
-	}
-	if st, err := os.Stat(root); err != nil || !st.IsDir() {
-		t.Fatalf("root not created: %v", err)
-	}
-
-	raw, err := loadFileConfig(path)
+	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if raw.Addr != "127.0.0.1:9" || raw.MaxUpload != "8GiB" {
-		t.Fatalf("hand-edited fields were rewritten: %+v", raw)
+	store := cfg.admin
+	if store == nil || !store.BootstrapLive() {
+		t.Fatal("bootstrap is not live after the command reported success")
 	}
-	if raw.UploadTokenFile != "" || raw.UploadToken != "" {
-		t.Fatal("instance token fields must be stripped")
+	// Second call must be a refusal, not a silent rotation: rotating would
+	// invalidate the value an operator already copied.
+	if err := runInit(&bytes.Buffer{}, []string{"-config", cfgPath, "-bootstrap"}); err == nil {
+		t.Fatal("bootstrap was minted twice; the first credential would be silently invalidated")
 	}
-	if len(raw.UploadTokens) != 1 || raw.UploadTokens[0].Products[0] != "svn-auto-merge" {
-		t.Fatalf("product token not added: %+v", raw.UploadTokens)
+	// Replacing it is an explicit, separate decision.
+	out.Reset()
+	if err := runInit(&out, []string{"-config", cfgPath, "-bootstrap", "-reset"}); err != nil {
+		t.Fatalf("reset refused: %v", err)
 	}
-	if raw.Products["svn-auto-merge"].Root != root {
-		t.Fatalf("product not added: %+v", raw.Products)
-	}
-	if _, ok := raw.Products["dec"]; !ok {
-		t.Fatalf("existing product lost: %+v", raw.Products)
-	}
-
-	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "svn-auto-merge", "-root", root}); err == nil {
-		t.Fatal("duplicate add should fail")
-	}
-
-	if err := runInit(&buf, []string{"-config", path, "-product", "svn-auto-merge", "-remove"}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err = loadFileConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := raw.Products["svn-auto-merge"]; ok {
-		t.Fatal("product still listed")
-	}
-	if _, err := os.Stat(root); err != nil {
-		t.Fatal("remove deleted the product root")
-	}
-	if len(raw.UploadTokens) != 0 {
-		t.Fatal("product token entry left after remove")
+	if !strings.Contains(out.String(), "shown once") {
+		t.Fatal("reset did not report the new credential")
 	}
 }
 
-func TestInitShareProductReusesTokenFile(t *testing.T) {
-	dir := t.TempDir()
-	rootA := filepath.Join(dir, "suite-a")
-	rootB := filepath.Join(dir, "suite-b")
-	path := writeAgentCfg(t, dir, FileConfig{
-		Addr:     "127.0.0.1:9",
-		Products: map[string]ProductConfig{},
-	})
-	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "suite-a", "-root", rootA}); err != nil {
+// TestInitRejectsRemovedProductFlags pins the removal itself. These spellings
+// must not exist as deprecated no-ops: a script that still calls them has to fail
+// loudly (requirement 11.3).
+func TestInitRejectsRemovedProductFlags(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "agent.json")
+	if err := os.WriteFile(cfgPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tokenPath := filepath.Join(dir, "tokens", "suite-a.token")
-	before, err := os.ReadFile(tokenPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	if err := runInit(&buf, []string{"-config", path, "-product", "suite-b", "-share-with", "suite-a", "-root", rootB}); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	if strings.Contains(out, "export RELKIT_UPLOAD_TOKEN=") {
-		t.Fatalf("sharing must not print a new token:\n%s", out)
-	}
-	if !strings.Contains(out, "shared") {
-		t.Fatalf("expected a shared-token explanation, got:\n%s", out)
-	}
-	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
-		t.Fatalf("product-named token should be renamed away: %v", err)
-	}
-	sharedPath := filepath.Join(dir, "tokens", "shared.token")
-	after, err := os.ReadFile(sharedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Fatal("sharing must not rotate the existing token file")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "tokens", "suite-b.token")); !os.IsNotExist(err) {
-		t.Fatalf("sharing should not create a second token file: %v", err)
-	}
-
-	cfg, err := loadFileConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.UploadTokens) != 1 {
-		t.Fatalf("uploadTokens = %+v", cfg.UploadTokens)
-	}
-	got := cfg.UploadTokens[0].Products
-	if len(got) != 2 || got[0] != "suite-a" || got[1] != "suite-b" {
-		t.Errorf("products = %v, want [suite-a suite-b]", got)
-	}
-	if cfg.UploadTokens[0].File != "tokens/shared.token" {
-		t.Errorf("file = %s, want tokens/shared.token", cfg.UploadTokens[0].File)
-	}
-	if _, err := LoadConfig(path); err != nil {
-		t.Fatalf("agent should start with a shared token: %v", err)
-	}
-
-	unknownRoot := filepath.Join(dir, "suite-c")
-	if err := runInit(bytes.NewBuffer(nil), []string{
-		"-config", path,
-		"-product", "suite-c",
-		"-share-with", "missing",
-		"-root", unknownRoot,
-	}); err == nil {
-		t.Fatal("sharing with an unknown product should fail")
-	}
-	if _, err := os.Stat(unknownRoot); !os.IsNotExist(err) {
-		t.Fatalf("unknown share target must not create a product root: %v", err)
-	}
-}
-
-func TestInitShareConvertsExclusiveToken(t *testing.T) {
-	dir := t.TempDir()
-	rootA := filepath.Join(dir, "suite-a")
-	rootB := filepath.Join(dir, "suite-b")
-	path := writeAgentCfg(t, dir, FileConfig{
-		Products: map[string]ProductConfig{},
-	})
-	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "suite-a", "-root", rootA}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "suite-b", "-root", rootB}); err != nil {
-		t.Fatal(err)
-	}
-	exclusive := filepath.Join(dir, "tokens", "suite-b.token")
-	if _, err := os.Stat(exclusive); err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	if err := runInit(&buf, []string{"-config", path, "-product", "suite-b", "-share-with", "suite-a"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(exclusive); !os.IsNotExist(err) {
-		t.Fatalf("exclusive token file should be deleted: %v", err)
-	}
-	cfg, err := loadFileConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.UploadTokens) != 1 || len(cfg.UploadTokens[0].Products) != 2 {
-		t.Fatalf("uploadTokens = %+v", cfg.UploadTokens)
-	}
-	if cfg.UploadTokens[0].File != "tokens/shared.token" {
-		t.Fatalf("shared file = %s", cfg.UploadTokens[0].File)
-	}
-	if cfg.Products["suite-b"].Root != rootB {
-		t.Fatalf("convert must keep product root: %+v", cfg.Products)
-	}
-}
-
-func TestInitRemoveLastProduct(t *testing.T) {
-	dir := t.TempDir()
-	path := writeAgentCfg(t, dir, FileConfig{
-		UploadTokenFile: "token",
-		Products:        map[string]ProductConfig{"dec": {Root: "/srv/relkit/dec"}},
-	})
-	if err := runInit(bytes.NewBuffer(nil), []string{"-config", path, "-product", "dec", "-remove"}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := loadFileConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(raw.Products) != 0 {
-		t.Fatalf("expected empty products, got %+v", raw.Products)
-	}
-	data, _ := os.ReadFile(path)
-	var decoded map[string]any
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := decoded["products"]; !ok {
-		t.Fatal("products key dropped")
-	}
-}
-
-func TestParseStagedRoute(t *testing.T) {
-	cases := []struct {
-		in      string
-		product string
-		version string
-		ok      bool
-	}{
-		{"/v1/staged/dec/1.13.38", "dec", "1.13.38", true},
-		{"//v1/staged/dec/1.13.38", "dec", "1.13.38", true},
-		{"/v1/staged/dec/1.13.38/", "dec", "1.13.38", true},
-		{"/v1/staged/dec/1.13.38/uploads", "dec", "1.13.38", false},
-		{"/v1/staged/dec", "", "", false},
-		{"/v1/publish", "", "", false},
-	}
-	for _, tc := range cases {
-		p, v, ok := parseStagedRoute(tc.in)
-		if ok != tc.ok || p != tc.product || v != tc.version {
-			t.Fatalf("%q: got (%q,%q,%v) want (%q,%q,%v)", tc.in, p, v, ok, tc.product, tc.version, tc.ok)
+	for _, args := range [][]string{
+		{"-config", cfgPath, "-product", "loom"},
+		{"-config", cfgPath, "-product", "loom", "-token-only"},
+		{"-config", cfgPath, "-product", "loom", "-share-with", "svn-auto-merge"},
+		{"-config", cfgPath, "-list-products"},
+		{"-config", cfgPath, "-product", "loom", "-remove"},
+	} {
+		if err := runInit(&bytes.Buffer{}, args); err == nil {
+			t.Fatalf("init %v succeeded; the flag is supposed to be gone", args)
 		}
 	}
 }
 
-func TestInitFlagCombos(t *testing.T) {
-	dir := t.TempDir()
-	path := writeAgentCfg(t, dir, FileConfig{
-		Products: map[string]ProductConfig{"dec": {Root: "/x"}},
-	})
-	cases := [][]string{
-		{"-config", path, "-list-products", "-product", "dec"},
-		{"-config", path, "-list-products", "-remove"},
-		{"-config", path, "-remove"},
-		{"-config", path, "-product", "dec", "-token-only", "-remove"},
-		{"-config", path, "-list-products", "-token-only"},
-		{"-config", path},
-		{"-config", path, "-product", "bad id"},
-		{"-config", path, "-product", "missing", "-remove"},
-		{"-config", path, "-share-with", "dec"},
-		{"-config", path, "-product", "dec", "-share-with", "dec"},
-		{"-config", path, "-product", "dec", "-remove", "-share-with", "other"},
-		{"-config", path, "-product", "dec", "-token-only", "-share-with", "other"},
-		{"-config", path, "-list-products", "-share-with", "dec"},
+// TestLoadConfigRejectsLegacyProductFields covers the config-file half of the
+// epoch rule: a server that still names products or upload tokens must refuse to
+// start instead of authorizing nobody (requirements 11.3, 13.6).
+func TestLoadConfigRejectsLegacyProductFields(t *testing.T) {
+	cases := []string{
+		`{"products": {"loom": {"root": "/srv/relkit/loom"}}}`,
+		`{"uploadTokens": [{"file": "tokens/loom.token", "products": ["loom"]}]}`,
+		`{"uploadToken": "instance-wide"}`,
+		`{"uploadTokenFile": "token"}`,
 	}
-	for _, args := range cases {
-		if err := runInit(bytes.NewBuffer(nil), args); err == nil {
-			t.Fatalf("expected error for %v", args)
-		}
-	}
-}
-
-func TestLoadConfigRejectsInstanceToken(t *testing.T) {
-	dir := t.TempDir()
-	path := writeAgentCfg(t, dir, FileConfig{
-		UploadTokenFile: "/etc/relkit-agent/token",
-		Products:        map[string]ProductConfig{"dec": {Root: dir}},
-	})
-	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "instance-wide") {
-		t.Fatalf("want instance-wide refusal, got %v", err)
-	}
-	t.Setenv("RELKIT_AGENT_TOKEN", "leaked")
-	path2 := writeAgentCfg(t, dir, FileConfig{
-		Products: map[string]ProductConfig{"dec": {Root: dir}},
-	})
-	if _, err := LoadConfig(path2); err == nil || !strings.Contains(err.Error(), "RELKIT_AGENT_TOKEN") {
-		t.Fatalf("want env refusal, got %v", err)
-	}
-}
-
-func TestLoadConfigAcceptsSharedProductToken(t *testing.T) {
-	dir := t.TempDir()
-	tokenPath := filepath.Join(dir, "tokens", "shared.token")
-	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(tokenPath, []byte("shared\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	path := writeAgentCfg(t, dir, FileConfig{
-		UploadTokens: []UploadTokenEntry{
-			{File: "tokens/shared.token", Products: []string{"dec", "cronkit"}},
-		},
-		Products: map[string]ProductConfig{
-			"dec":     {Root: dir},
-			"cronkit": {Root: dir},
-		},
-	})
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("shared token should load: %v", err)
-	}
-	if len(cfg.credentials) != 1 {
-		t.Fatalf("credentials = %d", len(cfg.credentials))
-	}
-	if !cfg.credentials[0].allows("dec") || !cfg.credentials[0].allows("cronkit") {
-		t.Fatalf("shared credential missing products: %+v", cfg.credentials[0].products)
-	}
-	if cfg.credentials[0].allows("other") {
-		t.Fatal("shared credential must not allow an unlisted product")
-	}
-
-	before, err := os.ReadFile(tokenPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rotate bytes.Buffer
-	if err := runInit(
-		&rotate,
-		[]string{"-config", path, "-product", "cronkit", "-token-only"},
-	); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(rotate.String(), "dec, cronkit") ||
-		!strings.Contains(rotate.String(), "All of their publishers") {
-		t.Fatalf("shared rotation must name its blast radius:\n%s", rotate.String())
-	}
-	rotated, err := os.ReadFile(tokenPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(rotated) == string(before) {
-		t.Fatal("shared rotation did not replace the token")
-	}
-}
-
-func TestLoadConfigRejectsDuplicateTokenHashAcrossFiles(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "tokens"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"a.token", "b.token"} {
-		if err := os.WriteFile(filepath.Join(dir, "tokens", name), []byte("same\n"), 0o600); err != nil {
+	for _, doc := range cases {
+		root := t.TempDir()
+		cfgPath := filepath.Join(root, "agent.json")
+		if err := os.WriteFile(cfgPath, []byte(doc), 0o644); err != nil {
 			t.Fatal(err)
 		}
-	}
-	path := writeAgentCfg(t, dir, FileConfig{
-		UploadTokens: []UploadTokenEntry{
-			{File: "tokens/a.token", Products: []string{"dec"}},
-			{File: "tokens/b.token", Products: []string{"cronkit"}},
-		},
-		Products: map[string]ProductConfig{
-			"dec":     {Root: dir},
-			"cronkit": {Root: dir},
-		},
-	})
-	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "duplicate token hash") {
-		t.Fatalf("want duplicate hash refusal, got %v", err)
+		_, err := LoadConfig(cfgPath)
+		if err == nil {
+			t.Fatalf("%s was accepted; the field is gone and must be an error", doc)
+		}
+		if !strings.Contains(err.Error(), "gone") {
+			t.Fatalf("%s: error does not explain the removal: %v", doc, err)
+		}
 	}
 }
 
-func TestInitIssuesTokenForExistingProduct(t *testing.T) {
-	dir := t.TempDir()
-	root := filepath.Join(dir, "dec")
-	if err := os.MkdirAll(root, 0o755); err != nil {
+// TestLoadConfigProjectsAdminProducts checks that registrations reach the request
+// path with absolute roots and a defaulted profile: registration records what the
+// operator typed, and the agent runs from wherever the service started.
+func TestLoadConfigProjectsAdminProducts(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	productRoot := filepath.Join(root, "products-root", "loom")
+	if err := os.MkdirAll(productRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := writeAgentCfg(t, dir, FileConfig{
-		UploadTokenFile: "/etc/relkit-agent/token",
-		Products:        map[string]ProductConfig{"dec": {Root: root}},
-	})
-	var buf bytes.Buffer
-	if err := runInit(&buf, []string{"-config", path, "-product", "dec"}); err != nil {
+	writeAdminDoc(t, filepath.Join(stateDir, "admin.json"), map[string]string{"loom": productRoot}, "tok", "loom")
+	cfgPath := filepath.Join(root, "agent.json")
+	if err := os.WriteFile(cfgPath, []byte("{\n  \"stateDir\": \""+filepath.ToSlash(stateDir)+"\"\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "export RELKIT_UPLOAD_TOKEN=") {
-		t.Fatalf("missing token export:\n%s", buf.String())
-	}
-	raw, err := loadFileConfig(path)
+	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if raw.UploadTokenFile != "" {
-		t.Fatal("instance token file left in config")
+	product, ok := cfg.Products["loom"]
+	if !ok {
+		t.Fatalf("registration did not reach the runtime view: %+v", cfg.Products)
 	}
-	if _, err := LoadConfig(path); err != nil {
-		t.Fatalf("agent should start after issuing product token: %v", err)
+	if product.Root != productRoot {
+		t.Fatalf("root = %q, want %q", product.Root, productRoot)
+	}
+	wantProfile := filepath.Join(root, "products", "loom.json")
+	if product.Profile != wantProfile {
+		t.Fatalf("profile = %q, want %q", product.Profile, wantProfile)
+	}
+	if len(cfg.credentials) != 1 || !cfg.credentials[0].Allows("loom") {
+		t.Fatalf("credentials = %+v", cfg.credentials)
+	}
+	if cfg.credentials[0].Allows("other") {
+		t.Fatal("a single-product credential authorized another product")
 	}
 }
 
-func TestInitListDoesNotPrintTokenFileContents(t *testing.T) {
-	dir := t.TempDir()
-	tokenPath := filepath.Join(dir, "tokens", "dec.token")
-	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o755); err != nil {
+// TestAdminStateFileIsOptIn confirms the state file is only created when
+// something changes. A read-only mirror must not grow a management document just
+// because it started.
+func TestAdminStateFileIsOptIn(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	cfgPath := filepath.Join(root, "agent.json")
+	if err := os.WriteFile(cfgPath, []byte("{\n  \"stateDir\": \""+filepath.ToSlash(stateDir)+"\"\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	secret := "super-secret-upload-token-value"
-	if err := os.WriteFile(tokenPath, []byte(secret+"\n"), 0o600); err != nil {
+	if _, err := LoadConfig(cfgPath); err != nil {
 		t.Fatal(err)
 	}
-	path := writeAgentCfg(t, dir, FileConfig{
-		Addr: "127.0.0.1:9",
-		UploadTokens: []UploadTokenEntry{
-			{File: "tokens/dec.token", Products: []string{"dec"}},
-		},
-		Products: map[string]ProductConfig{"dec": {Root: dir}},
-	})
-	var buf bytes.Buffer
-	if err := runInit(&buf, []string{"-config", path, "-list-products"}); err != nil {
+	if _, err := os.Stat(filepath.Join(stateDir, "admin.json")); !os.IsNotExist(err) {
+		t.Fatalf("loading the config created an admin document: %v", err)
+	}
+}
+
+// TestAdminStoreRoundTripThroughConfig is the integration seam: a document
+// written by the store is exactly what LoadConfig reads back, including roles and
+// product assignments.
+func TestAdminStoreRoundTripThroughConfig(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	cfgPath := filepath.Join(root, "agent.json")
+	if err := os.WriteFile(cfgPath, []byte("{\n  \"stateDir\": \""+filepath.ToSlash(stateDir)+"\"\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(buf.String(), secret) {
-		t.Fatalf("list leaked token file contents:\n%s", buf.String())
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.admin.BootstrapToken(); err != nil {
+		t.Fatal(err)
+	}
+	// A live bootstrap is not replaced by a second call: that would invalidate the
+	// value an operator already has.
+	if second, err := cfg.admin.BootstrapToken(); err == nil {
+		t.Fatalf("a second bootstrap token was minted: %s", second)
+	}
+	// Reload through the store to prove the document survives a round trip.
+	reopened, err := agentadmin.Open(cfg.admin.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reopened.BootstrapLive() {
+		t.Fatal("bootstrap did not survive the reopen")
+	}
+	if err := json.NewEncoder(&bytes.Buffer{}).Encode(reopened.Products()); err != nil {
+		t.Fatal(err)
 	}
 }

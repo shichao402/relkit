@@ -64,7 +64,7 @@ func unpublishOnBackends(cfg *config.Config, version string, openedBackends []ba
 	// The signing key is required even for a dry run: OpenEnvelope verifies the
 	// current index, and the trust set includes the signer's public half (same
 	// discipline as publish.Run, which needs signers for the same read).
-	signers, err := cfg.LoadSigners()
+	signers, err := cfg.Signers()
 	if err != nil {
 		return nil, err
 	}

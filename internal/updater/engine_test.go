@@ -3,7 +3,6 @@ package updater
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,58 +18,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-func TestMapLegacyLastResult(t *testing.T) {
-	cases := map[string]updaterv1.LastResult{
-		"available":        updaterv1.LastResult_LAST_RESULT_UPDATE_AVAILABLE,
-		"update-available": updaterv1.LastResult_LAST_RESULT_UPDATE_AVAILABLE,
-		"fallback":         updaterv1.LastResult_LAST_RESULT_FALLBACK_REQUIRED,
-		"success":          updaterv1.LastResult_LAST_RESULT_UP_TO_DATE,
-		"up-to-date":       updaterv1.LastResult_LAST_RESULT_UP_TO_DATE,
-		"failure":          updaterv1.LastResult_LAST_RESULT_FAILED,
-		"error":            updaterv1.LastResult_LAST_RESULT_FAILED,
-		"no-artifact":      updaterv1.LastResult_LAST_RESULT_FAILED,
-		"mystery":          updaterv1.LastResult_LAST_RESULT_UNSPECIFIED,
-	}
-	for in, want := range cases {
-		if got := MapLegacyLastResult(in); got != want {
-			t.Errorf("%q: got %v want %v", in, got, want)
-		}
-	}
-}
-
-func TestMigrateLegacyJSONPreservesWatermark(t *testing.T) {
-	dir := t.TempDir()
-	seq := int64(9)
-	dirSeq := int64(4)
-	legacy := map[string]any{
-		"lastResult":                "available",
-		"lastSeenSequence":          seq,
-		"lastSeenDirectorySequence": dirSeq,
-		"skipped":                   []int{91},
-	}
-	raw, _ := json.Marshal(legacy)
-	if err := os.WriteFile(filepath.Join(dir, LegacyStateJSON), raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	st := store{dataDir: dir}
-	got, err := st.loadState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.LastSeenSequence != seq || got.LastSeenDirectorySequence != dirSeq {
-		t.Fatalf("watermarks dropped: %+v", got)
-	}
-	if got.LastResult != updaterv1.LastResult_LAST_RESULT_UPDATE_AVAILABLE {
-		t.Fatalf("lastResult %v", got.LastResult)
-	}
-	if len(got.SkippedCodes) != 1 || got.SkippedCodes[0] != 91 {
-		t.Fatalf("skipped %v", got.SkippedCodes)
-	}
-	if _, err := os.Stat(filepath.Join(dir, StateFileName)); err != nil {
-		t.Fatal("state.pb not written")
-	}
-}
 
 func TestStateIsIsolatedByProductAndChannel(t *testing.T) {
 	dir := t.TempDir()
@@ -112,7 +59,9 @@ func TestStateIsIsolatedByProductAndChannel(t *testing.T) {
 	}
 }
 
-func TestScopedStateDoesNotImportUnattributedLegacyWatermark(t *testing.T) {
+// The epoch deletes the legacy migration (requirement 3.4). An unattributed
+// state.pb written by an old client must never leak into a scoped store.
+func TestScopedStateIgnoresUnattributedStateFile(t *testing.T) {
 	dir := t.TempDir()
 	legacy := &updaterv1.PersistedState{
 		LastSeenSequence:          93,
@@ -135,9 +84,6 @@ func TestScopedStateDoesNotImportUnattributedLegacyWatermark(t *testing.T) {
 	if got.LastSeenSequence != 0 || got.LastSeenDirectorySequence != 0 ||
 		len(got.SkippedCodes) != 0 {
 		t.Fatalf("unattributed legacy state leaked into stable: %+v", got)
-	}
-	if _, err := os.Stat(filepath.Join(dir, StateFileName)); err != nil {
-		t.Fatal("legacy state should remain available for rollback/forensics")
 	}
 	if _, err := os.Stat(scoped.statePath()); err != nil {
 		t.Fatal("scoped state was not created")
@@ -188,17 +134,20 @@ func TestFrameRoundTrip(t *testing.T) {
 }
 
 func TestNegotiateWindow(t *testing.T) {
-	if negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 1}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW {
-		t.Fatal("window 1 host must be rejected")
+	for _, window := range []uint32{1, 2, 3} {
+		if got := negotiate(&updaterv1.ClientHello{IpcMin: window, IpcMax: window}); got == nil ||
+			got.Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW {
+			t.Fatalf("window %d host must be rejected with UPDATER_TOO_NEW, got %v", window, got)
+		}
 	}
-	if negotiate(&updaterv1.ClientHello{IpcMin: 2, IpcMax: 2}).Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW {
-		t.Fatal("window 2 host must be rejected")
+	if negotiate(&updaterv1.ClientHello{IpcMin: 4, IpcMax: 4}) != nil {
+		t.Fatal("window 4 host must be accepted")
 	}
-	if negotiate(&updaterv1.ClientHello{IpcMin: 3, IpcMax: 3}) != nil {
-		t.Fatal("window 3 host")
+	if got := negotiate(&updaterv1.ClientHello{IpcMin: 5, IpcMax: 5}); got == nil ||
+		got.Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_OLD {
+		t.Fatalf("window 5 host must be rejected with UPDATER_TOO_OLD, got %v", got)
 	}
-	got := negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 0})
-	if got == nil {
+	if got := negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 0}); got == nil {
 		t.Fatal("expected error")
 	}
 }

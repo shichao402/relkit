@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.distribution-catalog/1",
+  "title": "relkit.distribution-catalog/1",
+  "description": "服务器提供的 relkit 组件清单。只回答一个问题：这台服务器当前服务哪个 relkit 版本、它由哪些文件组成、每个文件的摘要是什么。没有 candidate/certified 状态机、没有 certificationSequence、没有能力向量、没有 requires/provides。Catalog 由已签名的工具清单投影生成，因此两者不会漂移。对应 internal/vnext/catalog。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "sequence", "current", "releases", "signatures"],
+  "properties": {
+    "schema": { "const": "relkit.distribution-catalog/1" },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Catalog 变更时递增。信息性字段：CI 不保留水位，因此签名有效的旧 Catalog 可被重放并接受，这是已接受的代价（见 docs/architecture.md §五）。不得用作接受/拒绝判据。"
+    },
+    "current": {
+      "type": "string",
+      "minLength": 1,
+      "description": "服务器当前服务的 release 版本。宿主不挑版本，取这里的值。必须能在 releases 中找到。"
+    },
+    "releases": {
+      "type": "array",
+      "minItems": 1,
+      "description": "服务器上现存的 relkit 版本。历史条目保留，供钉住旧版本的宿主取回它当时拿到的文件。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "commit", "components"],
+        "properties": {
+          "version": { "type": "string", "minLength": 1 },
+          "commit": { "type": "string", "minLength": 1 },
+          "components": {
+            "type": "array",
+            "minItems": 1,
+            "description": "该版本的文件行。同一 (name, platform) 在一个 release 内不得重复。",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version", "platform", "sha256", "source"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "relkit 组件名（cli / updater / ops / ...）。"
+                },
+                "version": { "type": "string", "minLength": 1 },
+                "platform": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "平台标识，形如 windows-amd64 / macos-arm64。"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "description": "文件摘要。文件本身不再另签名，靠这个摘要与已签 Catalog 绑定。"
+                },
+                "source": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "url"],
+                  "description": "文件从哪取。kind 恒为 server：服务器发自己的 URL，不再指向 GitHub 或 mirror。",
+                  "properties": {
+                    "kind": { "const": "server" },
+                    "url": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "description": "服务器根密钥签名。签名覆盖 schema/sequence/current/releases 四字段的 canonical JSON。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keyId", "algorithm", "value"],
+        "properties": {
+          "keyId": { "type": "string", "minLength": 1 },
+          "algorithm": { "const": "ed25519" },
+          "value": { "type": "string" }
+        }
+      }
+    }
+  }
+}

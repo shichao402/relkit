@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relkit.dev/schemas/relkit.extension/1",
+  "title": "relkit.extension/1",
+  "description": "产品面 extension 的输入/输出双文档。只允许两种用途：artifact producer 与可选 version provider。统一约束为 argv 启动、版本化 JSON stdin/stdout、stderr 日志、超时、工作目录、环境变量白名单。禁止任意 pre/post hook、进程内插件，禁止 extension 修改 staged/index/manifest/签名数据。对应 internal/vnext/extension。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind"],
+  "properties": {
+    "schema": { "const": "relkit.extension/1" },
+    "kind": {
+      "type": "string",
+      "enum": ["artifact-producer", "version-provider"],
+      "description": "extension 的用途。产品面只有这两种。"
+    }
+  },
+  "$defs": {
+    "producerInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "product", "version", "channel", "target", "releaseCode", "outputDir"],
+      "properties": {
+        "schema": { "const": "relkit.extension/1" },
+        "product": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "channel": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "releaseCode": { "type": "integer", "minimum": 1 },
+        "outputDir": { "type": "string", "minLength": 1 }
+      }
+    },
+    "producerOutput": {
+      "type": "object",
+      "description": "producer 的唯一合法产出：一份 relkit.artifact-set/1。它不得写 staged 树、index、manifest、签名或 backend。",
+      "required": ["schema"],
+      "properties": {
+        "schema": { "const": "relkit.artifact-set/1" }
+      }
+    },
+    "versionProviderOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "releaseCode"],
+      "properties": {
+        "schema": { "const": "relkit.extension/1" },
+        "version": { "type": "string", "minLength": 1 },
+        "releaseCode": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -1,9 +1,12 @@
 # ADR 0022: 认证模型、relkit-ops 与 Skill
 
-- 状态：Accepted（分层认证、relkit-ops 与薄 Skill 已实现）
+- 状态：**Superseded**（2026-10-22 由 [ADR 0023](0023-desktop-updater-epoch.md) 取代；逐条驳斥与保留项见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)，现行架构见 [`docs/architecture.md`](../architecture.md)）
+- 历史状态：Accepted（分层认证、relkit-ops 与薄 Skill 已实现）
 - 日期：2026-10-16
 - 依赖：[ADR 0019](0019-vnext-breaking-and-protocol-contracts.md)、[ADR 0020](0020-vnext-catalog-operator-resolution.md)、[ADR 0021](0021-vnext-artifact-runtime-registry.md)
-- 关联：使用者验收入口 [`../design/vnext/USER-ACCEPTANCE.md`](../design/vnext/USER-ACCEPTANCE.md)
+- 关联：原使用者验收入口 `../design/vnext/USER-ACCEPTANCE.md` 已随该目录删除；现行设计见 [`docs/architecture.md`](../architecture.md)
+
+> **Superseded 说明（2026-10-22）**：certification / impact / fleet / production escape 全套体系删除，`relkit-ops` 收敛为 5 个服务器运维子命令，Catalog 与 Profile 由服务器在部署与发布时自动签发（不再有 `certify`/`operator`/`catalog` 人工入口）。合同 conformance（§6.1）与结构化诊断 envelope（§7）继续有效。Token 模型改为"只表示能操作哪些产品"，签发/轮换/吊销走管理面板，见 [`docs/architecture.md`](../architecture.md) §三。本文件对 `docs/design/vnext/` 的链接已失效，仅作历史参考。
 
 ## 背景
 
@@ -76,12 +79,11 @@ relkit-ops upgrade <operator> --to <certified-version|latest>
 - 每项能力单独测输入/输出/错误/状态迁移
 - 对共享状态的能力做组合测试（两两、已知冲突、非法组合）；不做无关笛卡尔积
 - 触及发布事务/签名/resolution/updater 状态机的三项以上组合，由端到端场景覆盖
-- 重点交互矩阵与保证边界见
-  [`representative-scenarios.md`](../design/vnext/representative-scenarios.md#组合测试重点非穷举)
+- 重点交互矩阵与保证边界见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)（原场景文档已随 `docs/design/vnext/` 删除）
 
 #### 6.3 三个匿名代表性场景（distribution 级长期 mandatory）
 
-见 [`../design/vnext/representative-scenarios.md`](../design/vnext/representative-scenarios.md)：
+见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)：场景文档已随 `docs/design/vnext/` 删除，三个场景本身仍作为协议层 conformance 的覆盖目标（`conformance/`）。
 
 1. 独立应用自更新  
 2. 管理器与被管理产品  
@@ -258,7 +260,7 @@ vNext 首次切换：
 
 - 验证成本随能力增长，不随宿主数量平方增长
 - 运维与产品仓隔离
-- 使用者最终只通过 [`USER-ACCEPTANCE.md`](../design/vnext/USER-ACCEPTANCE.md) 验收
+- 使用者最终通过 [`docs/architecture.md`](../architecture.md) 与协议 conformance 验收（原 `USER-ACCEPTANCE.md` 已随 `docs/design/vnext/` 删除）
 
 ## 完成标准（本 ADR）
 

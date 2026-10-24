@@ -11,10 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/jsonio"
-	"github.com/shichao402/relkit/internal/keys"
 	"github.com/shichao402/relkit/internal/model"
 )
 
@@ -42,8 +40,14 @@ type Config struct {
 	// 0 (default) keeps the full history. N >= 1 keeps only the N highest-code
 	// nodes after merge, so relkit-store orphan GC can drop older artifacts.
 	RetainVersions int
-	Signing        map[string]any
-	Backends       map[string]map[string]any
+	// RootKeyIDValue is the server root keyId this project signs as. It is the
+	// only signing fact a project file is allowed to hold: no key path, no
+	// environment variable name, no public key (requirement 15.3).
+	RootKeyIDValue string
+	// root is the resolved root identity, injected after the custody manifest
+	// hands back the key material (requirement 15.1).
+	root     *RootKey
+	Backends map[string]map[string]any
 	PublishTo      []string
 	// Directory is optional bootstrap-document publish settings (SPEC §16).
 	Directory *DirectoryConfig
@@ -234,13 +238,19 @@ func Load(path string) (*Config, error) {
 		cfg.RetainVersions = n
 	}
 
-	cfg.Signing = map[string]any{}
-	if value, ok := raw["signing"]; ok {
-		obj, ok := value.(map[string]any)
+	// rootKeyId names the server root. The key material itself never appears
+	// here: the custody manifest resolves the keyId to a carrier, so moving the
+	// key to a different file or environment variable needs no config change
+	// (requirement 15.1).
+	if value, ok := raw["rootKeyId"]; ok {
+		asString, ok := value.(string)
 		if !ok {
-			return nil, Error{Message: "signing must be an object"}
+			return nil, Error{Message: "rootKeyId must be a string"}
 		}
-		cfg.Signing = obj
+		cfg.RootKeyIDValue = strings.TrimSpace(asString)
+	}
+	if _, ok := raw["signing"]; ok {
+		return nil, Error{Message: "signing is gone: a server signs every document with its one root (requirement 10.5); replace the signing block with rootKeyId"}
 	}
 
 	backendsValue, ok := raw["backends"]
@@ -471,113 +481,67 @@ func (c *Config) BackendConfig(name string) (map[string]any, error) {
 	return cloned, nil
 }
 
-func (c *Config) LoadSigners() ([]envelope.Signer, error) {
-	if rawKeys, exists := c.Signing["keys"]; exists {
-		if c.Signing["keyId"] != nil || c.Signing["privateKeyPath"] != nil {
-			return nil, Error{Message: "signing.keys cannot be combined with legacy signing.keyId/privateKeyPath"}
-		}
-		keysList, ok := rawKeys.([]any)
-		if !ok || len(keysList) == 0 {
-			return nil, Error{Message: "signing.keys must be a non-empty array"}
-		}
-		signers := make([]envelope.Signer, 0, len(keysList))
-		seen := map[string]bool{}
-		for index, raw := range keysList {
-			entry, ok := raw.(map[string]any)
-			if !ok {
-				return nil, Error{Message: fmt.Sprintf("signing.keys[%d] must be an object", index)}
-			}
-			signer, err := c.loadSigner(entry, fmt.Sprintf("signing.keys[%d]", index))
-			if err != nil {
-				return nil, err
-			}
-			if seen[signer.KeyID] {
-				return nil, Error{Message: fmt.Sprintf("signing.keys contains duplicate keyId %q", signer.KeyID)}
-			}
-			seen[signer.KeyID] = true
-			signers = append(signers, signer)
-		}
-		return signers, nil
-	}
-	return c.loadLegacySigner()
+// RootKey is the single signing identity a deployment signs with. Configuration
+// only ever names KeyID; Seed, PublicKey and Fingerprint come from whatever
+// resolved the keyId (the custody manifest on a server, requirement 15.1).
+//
+// One server, one root: there is no product key, no rotation window, and no
+// per-document key selection. Every document a server emits is signed by this
+// identity, and its only job is proving the document came from that server and
+// was not modified (requirement 10.4).
+type RootKey struct {
+	KeyID       string
+	Seed        []byte
+	PublicKey   ed25519.PublicKey
+	Fingerprint string
 }
 
-func (c *Config) loadLegacySigner() ([]envelope.Signer, error) {
-	signer, err := c.loadSigner(c.Signing, "signing")
-	if err != nil {
-		return nil, err
-	}
-	return []envelope.Signer{signer}, nil
+// SetRoot injects the resolved root. Callers resolve a keyId through the
+// custody manifest and hand the result in, so this package never learns a key
+// path or an environment variable name.
+func (c *Config) SetRoot(root *RootKey) {
+	c.root = root
 }
 
-func (c *Config) loadSigner(value map[string]any, field string) (envelope.Signer, error) {
-	keyID, _ := value["keyId"].(string)
-	if keyID == "" {
-		return envelope.Signer{}, Error{Message: field + ".keyId is required in order to publish"}
-	}
-
-	if rawPath, ok := value["privateKeyPath"]; ok && rawPath != nil {
-		keyPath, ok := rawPath.(string)
-		if !ok {
-			return envelope.Signer{}, Error{Message: field + ".privateKeyPath must be a string or null"}
-		}
-		resolved := keyPath
-		if !filepath.IsAbs(resolved) {
-			resolved = filepath.Join(c.Root, keyPath)
-		}
-		info, err := os.Stat(resolved)
-		if err != nil || info.IsDir() {
-			return envelope.Signer{}, Error{Message: fmt.Sprintf("%s.privateKeyPath not found: %s", field, resolved)}
-		}
-		data, err := os.ReadFile(resolved)
-		if err != nil {
-			return envelope.Signer{}, err
-		}
-		document, err := rupv2.UnmarshalPrivateKey(data)
-		if err != nil {
-			return envelope.Signer{}, err
-		}
-		seed, err := keys.LoadPrivateSeed(*document, resolved)
-		if err != nil {
-			return envelope.Signer{}, err
-		}
-		if document.KeyId != "" && document.KeyId != keyID {
-			return envelope.Signer{}, Error{Message: fmt.Sprintf("%s.keyId %q does not match key document %q", field, keyID, document.KeyId)}
-		}
-		return envelope.Signer{KeyID: keyID, Seed: seed}, nil
-	}
-
-	return envelope.Signer{}, Error{Message: "no private key available: set " + field + ".privateKeyPath to this product's key file"}
+// ServerRoot returns the configured root, if any.
+func (c *Config) ServerRoot() *RootKey {
+	return c.root
 }
 
-func (c *Config) TrustedPublicKeys() (map[string]ed25519.PublicKey, error) {
-	value, ok := c.Signing["publicKeys"]
-	if !ok {
-		return nil, Error{Message: "signing.publicKeys is empty; add the public key(s) clients embed so that verification is possible without the private key"}
+// RootKeyID returns the keyId this deployment signs as, from configuration or
+// from the injected root.
+func (c *Config) RootKeyID() string {
+	if c.root != nil {
+		return c.root.KeyID
 	}
-	list, ok := value.([]any)
-	if !ok || len(list) == 0 {
-		return nil, Error{Message: "signing.publicKeys is empty; add the public key(s) clients embed so that verification is possible without the private key"}
-	}
+	return c.RootKeyIDValue
+}
 
-	trusted := make(map[string]ed25519.PublicKey, len(list))
-	for _, entry := range list {
-		obj, ok := entry.(map[string]any)
-		if !ok {
-			return nil, Error{Message: "every signing.publicKeys entry must be an object"}
-		}
-		keyID, _ := obj["keyId"].(string)
+// Signers returns the one signer every document is sealed with. A deployment
+// without a root cannot publish: there is deliberately no fallback to a
+// product key.
+func (c *Config) Signers() ([]envelope.Signer, error) {
+	if c.root == nil {
+		keyID := c.RootKeyIDValue
 		if keyID == "" {
-			return nil, Error{Message: "every signing.publicKeys entry needs a keyId"}
+			return nil, Error{Message: "no server root configured: set rootKeyId and resolve it through the custody manifest"}
 		}
-		publicKeyBase64, _ := obj["publicKeyBase64"].(string)
-		publicKey, err := keys.DecodePublicKey(publicKeyBase64, fmt.Sprintf("signing.publicKeys[%s]", keyID))
-		if err != nil {
-			return nil, err
-		}
-		trusted[keyID] = publicKey
+		return nil, Error{Message: fmt.Sprintf("server root %q was not resolved: load the custody manifest and inject the root before signing", keyID)}
 	}
-	return trusted, nil
+	if len(c.root.Seed) != ed25519.SeedSize {
+		return nil, Error{Message: fmt.Sprintf("server root %q holds %d seed bytes, expected %d", c.root.KeyID, len(c.root.Seed), ed25519.SeedSize)}
+	}
+	return []envelope.Signer{{KeyID: c.root.KeyID, Seed: c.root.Seed}}, nil
+}
+
+// TrustedPublicKeys returns the root public key this deployment's documents are
+// verified against. Clients embed this same key in Runtime Bootstrap, so the
+// publish path uses it to prove its own output is verifiable before committing.
+func (c *Config) TrustedPublicKeys() (map[string]ed25519.PublicKey, error) {
+	if c.root == nil || len(c.root.PublicKey) == 0 {
+		return nil, Error{Message: "server root public key is unavailable; resolve the root before verifying or publishing"}
+	}
+	return map[string]ed25519.PublicKey{c.root.KeyID: c.root.PublicKey}, nil
 }
 
 func (c *Config) ChannelOrDefault(channel string) (string, error) {
@@ -596,11 +560,7 @@ func Skeleton(product string) map[string]any {
 		"defaultChannel": "stable",
 		"channels":       []string{"stable", "beta"},
 		"codeStrategy":   "version-build",
-		"signing": map[string]any{
-			"keyId":          "k1",
-			"privateKeyPath": ".relkit-keys/k1.private.pb",
-			"publicKeys":     []any{},
-		},
+		"rootKeyId":      "server-root",
 		"backends": map[string]any{
 			"serve": map[string]any{
 				"type":     "relkit-compatible",

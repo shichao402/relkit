@@ -5,20 +5,20 @@ import (
 
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/trust"
 )
 
-// Create builds a signed Runtime Profile without publishing it. This is the
-// bootstrap path used before a self-subscribing product can produce its first
-// vNext release.
+// Create builds a Runtime Profile signed by the server root, without publishing
+// it. Requirement 10.4: the one server root signs every document the server
+// emits, so a profile carries exactly one signature and needs no separate
+// Runtime Profile Root.
 func Create(
 	product project.Document,
 	entryURLs []string,
 	profileVersion int64,
-	signers []envelope.Signer,
+	signer envelope.Signer,
 ) (*Document, error) {
-	if product.RuntimeProfilePublication == nil {
-		return nil, fmt.Errorf("project does not publish a Runtime Profile")
+	if err := product.Validate(); err != nil {
+		return nil, fmt.Errorf("project: %w", err)
 	}
 	if len(entryURLs) == 0 {
 		return nil, fmt.Errorf("Runtime Profile requires consumer-visible directory entry URLs")
@@ -31,24 +31,8 @@ func Create(
 	if profileVersion < 1 {
 		return nil, fmt.Errorf("Runtime Profile version must be positive")
 	}
-	if len(signers) == 0 {
-		return nil, fmt.Errorf("Runtime Profile requires at least one signer")
-	}
-	matchesPinnedRoot := false
-	for _, signer := range signers {
-		fingerprint, err := trust.Fingerprint(signer.PublicKey())
-		if err != nil {
-			return nil, err
-		}
-		if fingerprint == product.RuntimeProfilePublication.RootFingerprint {
-			matchesPinnedRoot = true
-		}
-	}
-	if !matchesPinnedRoot {
-		return nil, fmt.Errorf(
-			"none of the product signers match Runtime Profile root fingerprint %s",
-			product.RuntimeProfilePublication.RootFingerprint,
-		)
+	if signer.KeyID == "" {
+		return nil, fmt.Errorf("Runtime Profile requires the server root signer")
 	}
 	value := &Document{
 		Schema:          Schema,
@@ -57,17 +41,11 @@ func Create(
 		AllowedChannels: append([]string(nil), product.Channels...),
 		DirectoryBootstrap: DirectoryBootstrap{
 			EntryURLs: append([]string(nil), entryURLs...),
-			Recovery:  cloneAnyMap(product.RuntimeProfilePublication.Recovery),
 		},
-		RUPSchemaSet: product.RuntimeProfilePublication.RUPSchemaSet,
+		RUPSchemaSet: SchemaSet,
 	}
-	if err := value.Sign(signers[0].KeyID, signers[0].Seed); err != nil {
+	if err := value.Sign(signer.KeyID, signer.Seed); err != nil {
 		return nil, err
-	}
-	for _, signer := range signers[1:] {
-		if err := value.AddSignature(signer.KeyID, signer.Seed); err != nil {
-			return nil, err
-		}
 	}
 	return value, nil
 }

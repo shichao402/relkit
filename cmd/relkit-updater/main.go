@@ -40,19 +40,17 @@ func run(args []string) int {
 		return 0
 	}
 	if *caps {
-		req := &updaterv1.UpdaterRequest{
-			Hello: &updaterv1.ClientHello{IpcMin: updater.IPCMin, IpcMax: updater.IPCMax},
-		}
-		// capabilities-only: emit caps without requiring profile
+		// capabilities-only: emit caps without requiring a profile or a Hello.
+		// The handshake field stays empty on purpose — nothing was validated.
 		if err := ipc.WriteFrame(os.Stdout, &updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Capabilities{Capabilities: capabilitiesEvent(version)},
+			Kind: &updaterv1.UpdaterEvent_Capabilities{Capabilities: eng.PublicCapabilities()},
 		}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		_ = req
 		return 0
 	}
+
 	if *worker != "" {
 		if *dataDir == "" {
 			fmt.Fprintln(os.Stderr, "--data-dir is required with --worker")
@@ -83,7 +81,3 @@ func run(args []string) int {
 	return 0
 }
 
-func capabilitiesEvent(ver string) *updaterv1.Capabilities {
-	e := &updater.Engine{Version: ver}
-	return e.PublicCapabilities()
-}

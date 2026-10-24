@@ -1,0 +1,6 @@
+version: v2
+# Dart projection for the thin client: it only needs the updater IPC types.
+# The RUP wire types stay Go-side; a Dart host never parses index/manifest.
+plugins:
+  - remote: buf.build/protocolbuffers/dart
+    out: ../sdk/dart/lib/src/gen

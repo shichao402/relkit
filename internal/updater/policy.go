@@ -49,3 +49,9 @@ func minCheckDurationPB() *durationpb.Duration {
 func planTTLDurationPB() *durationpb.Duration {
 	return durationpb.New(PlanTTL)
 }
+
+// isFailureResult lives here (it used to sit next to the legacy state reader)
+// because the throttle policy is its only consumer.
+func isFailureResult(r updaterv1.LastResult) bool {
+	return r == updaterv1.LastResult_LAST_RESULT_FAILED
+}

@@ -212,31 +212,12 @@ func UnmarshalRelease(data []byte) (*Release, error) {
 // ArtifactsFromManifest projects the manifest's install artifacts into the
 // human-facing artifact list. Payloads are protocol-internal and never shown.
 //
-// Audience rule: when any install artifact carries the "audience" selector
-// (e.g. dec's runtime binaries are audience=runtime, console installers are
-// audience=user), only audience=user artifacts are projected — the web page
-// shows what a human downloads, not the fleet of runtime components behind
-// the update protocol. A manifest with no audience selectors at all (older
-// products, test fixtures) keeps the full list: filtering must never empty
-// a page that predates the convention.
+// There is no audience filtering: it existed for one product whose manifest
+// carried runtime binaries next to console installers, and that product is gone.
+// A page now shows exactly what the manifest lists, minus payloads.
 func ArtifactsFromManifest(manifest *rupv2.Manifest) []Artifact {
 	if manifest == nil {
 		return nil
-	}
-	hasAudience := false
-	for _, item := range manifest.Artifacts {
-		if item == nil {
-			continue
-		}
-		for _, selector := range item.Selectors {
-			if selector != nil && selector.Key == "audience" {
-				hasAudience = true
-				break
-			}
-		}
-		if hasAudience {
-			break
-		}
 	}
 	out := make([]Artifact, 0, len(manifest.Artifacts))
 	for _, item := range manifest.Artifacts {
@@ -245,18 +226,6 @@ func ArtifactsFromManifest(manifest *rupv2.Manifest) []Artifact {
 		}
 		if item.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
 			continue
-		}
-		if hasAudience {
-			userFacing := false
-			for _, selector := range item.Selectors {
-				if selector != nil && selector.Key == "audience" && selector.Value == "user" {
-					userFacing = true
-					break
-				}
-			}
-			if !userFacing {
-				continue
-			}
 		}
 		selectors := make(map[string]string, len(item.Selectors))
 		for _, selector := range item.Selectors {

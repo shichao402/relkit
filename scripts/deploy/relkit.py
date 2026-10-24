@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -47,13 +48,16 @@ if str(DEPLOY_DIR) not in sys.path:
     sys.path.insert(0, str(DEPLOY_DIR))
 from components import (  # noqa: E402
     BY_NAME,
+    REGISTRY_PATH,
     TARGETS,
     components as registry_components,
 )
 
 from relkit_ops import (  # noqa: E402
+    admin_merge,
     dump_json,
     ensure_cas_grace,
+    epoch_split_agent_config,
     extract_export,
     load_json_object,
     loopback_base,
@@ -261,59 +265,6 @@ def listed_file_entries(source: str, names: Sequence[str], component: str) -> li
     return entries
 
 
-def go_dep_packages(module: str, entrypoints: Sequence[str]) -> list[str]:
-    """Module-internal packages a Go host needs, resolved by the compiler itself.
-
-    Asking `go list` keeps the artifact honest when sdk/ grows a dependency; a
-    hand-written directory list would only surface the gap at the host's build.
-    """
-    listed = run(
-        ["go", "list", "-deps", *entrypoints],
-        cwd=REPO_ROOT,
-        capture=True,
-    ).stdout
-    prefix = module + "/"
-    packages = {
-        line.strip()[len(prefix) :]
-        for line in listed.splitlines()
-        if line.strip().startswith(prefix)
-    }
-    if not packages:
-        raise Fail("go list resolved no relkit packages for the Go SDK artifact")
-    return sorted(packages)
-
-
-def go_deps_entries(
-    source: str,
-    module: str,
-    entrypoints: Sequence[str],
-    files: Sequence[str],
-    exclude_suffixes: Sequence[str],
-) -> list[tuple[Path, str]]:
-    source_root = REPO_ROOT / source
-    entries = listed_file_entries(source, files, "sdk-go")
-    for package in go_dep_packages(module, entrypoints):
-        tracked = package if source == "." else (Path(source) / package).as_posix()
-        sources = [
-            item
-            for item in release_source_paths(tracked)
-            if item.endswith(".go")
-            and not any(item.endswith(suffix) for suffix in exclude_suffixes)
-            and Path(item).parent.as_posix() == tracked
-            and (REPO_ROOT / item).is_file()
-        ]
-        if not sources:
-            raise Fail(f"Go SDK package {package} has no tracked sources")
-        entries.extend(
-            (
-                REPO_ROOT / item,
-                item if source == "." else Path(item).relative_to(source_root).as_posix(),
-            )
-            for item in sources
-        )
-    return entries
-
-
 def component_entries(name: str) -> list[tuple[Path, str]]:
     row = BY_NAME[name]
     if row.role != "product-tree":
@@ -323,17 +274,12 @@ def component_entries(name: str) -> list[tuple[Path, str]]:
         entries = listed_file_entries(row.source, row.pack_files, row.name)
     elif kind == "working-tree":
         entries = working_tree_entries(row.source, row.pack_exclude_parts)
-    elif kind == "go-deps":
-        entries = go_deps_entries(
-            row.source,
-            row.go_module,
-            row.go_entrypoints,
-            row.pack_files,
-            row.pack_exclude_suffixes,
-        )
     elif kind == "tracked-tree":
         entries = tree_entries(row.source)
     else:
+        # go-deps existed only for the retired sdk-go component; the epoch
+        # upgrade moves the Go packages into internal/ and ships no Go SDK
+        # (requirement 135 keeps pack-shape and this table in sync).
         raise Fail(f"{row.name} has unknown pack {row.pack}")
     for extra_src, extra_dest in row.pack_extras:
         path = REPO_ROOT / extra_src
@@ -365,10 +311,6 @@ def pack_path_excluded(archive_name: str, prefixes: Sequence[str]) -> bool:
 
 def rust_sdk_entries() -> list[tuple[Path, str]]:
     return component_entries("sdk-rust")
-
-
-def go_sdk_entries() -> list[tuple[Path, str]]:
-    return component_entries("sdk-go")
 
 
 def cmd_build(args: argparse.Namespace) -> None:
@@ -414,10 +356,39 @@ def cmd_build(args: argparse.Namespace) -> None:
         die("internal/updater declares an invalid IPC window")
     protocol = {"min": protocol_min, "max": protocol_max}
     built: list[dict[str, Any]] = []
+    manifest_file = out_dir / "manifest.json"
+    if getattr(args, "append", False) and manifest_file.is_file():
+        # A deploy ships infrastructure binaries and tools in one release, but
+        # building them in two invocations must not leave the manifest claiming
+        # only the second batch: the tools publish step verifies every tool
+        # against this manifest, so an overwritten manifest would silently
+        # shrink the release. Carry forward rows for the same version only;
+        # a different stamp means the earlier rows describe other bytes.
+        previous = load_json_object(manifest_file.read_text(encoding="utf-8"))
+        if previous.get("version") == stamp:
+            built.extend(
+                row for row in (previous.get("artifacts") or [])
+                if isinstance(row, dict) and row.get("sha256")
+            )
     for kind in targets:
         pkg, prefix = pkgs[kind]
+        row = BY_NAME[kind]
+        # A component declares the platforms it actually ships for: `ops`
+        # carries a darwin-universal entry the plain build matrix cannot
+        # express, and building a target a component never publishes would put
+        # an artifact into the release manifest that no host may ever download.
+        component_platforms = platforms
+        if row.targets and "all" not in row.targets:
+            declared = {target for target in row.targets if "-" in target}
+            narrowed = [p for p in platforms if f"{p[0]}-{p[1]}" in declared]
+            if not narrowed:
+                raise Fail(
+                    f"{kind} declares targets {', '.join(row.targets)} but none of them "
+                    f"is in the build matrix after --os/--arch filtering"
+                )
+            component_platforms = narrowed
         ldflags = f"-s -w -X main.version={stamp}"
-        for os_name, arch in platforms:
+        for os_name, arch in component_platforms:
             name = f"{prefix}-{os_name}-{arch}"
             if os_name == "windows":
                 name += ".exe"
@@ -433,6 +404,10 @@ def cmd_build(args: argparse.Namespace) -> None:
                 cwd=REPO_ROOT,
                 env=env,
             )
+            built = [
+                row for row in built
+                if (row["component"], row["os"], row["arch"]) != (kind, os_name, arch)
+            ]
             built.append({"component": kind, "os": os_name, "arch": arch, "path": dest.name, "sha256": file_sha256(dest)})
     for row in selected_trees:
         entries = component_entries(row.name)
@@ -702,6 +677,64 @@ def write_agent_unit(
     os.chmod(dest, 0o644)
 
 
+# The panel's own state file inside the release tree. It holds one cookie
+# signing key and nothing else; losing it only signs operators out.
+CONSOLE_PANEL_FILE = ".relkit-console-panel.json"
+
+
+def console_admin_path(console_cfg: dict[str, Any], config_path: str) -> Path:
+    """Where the panel will open its cookie-key file, given this config.
+
+    Mirrors resolveAdminPath in cmd/relkit-console: an empty setting means
+    <dir>/.relkit-console-panel.json, an absolute path is used as is, and a
+    relative one is joined onto the *config file's* directory rather than the
+    release tree. That last rule is how a serve-era config naming
+    ".relkit-serve-admin.json" pointed the panel at /etc, which
+    ProtectSystem=strict keeps read-only. The deploy path therefore never
+    leaves a relative name in place.
+    """
+    tree = Path(str(console_cfg.get("dir") or "/srv/releases"))
+    configured = str(console_cfg.get("adminStateFile") or "").strip()
+    if not configured:
+        return tree / CONSOLE_PANEL_FILE
+    candidate = Path(configured)
+    if candidate.is_absolute():
+        return candidate
+    if config_path:
+        return Path(config_path).parent / candidate
+    return tree / candidate
+
+
+def console_panel_file(tree: Path) -> Path:
+    """The panel state file inside the release tree, legacy name first.
+
+    A box migrated from relkit-serve keeps its session key under the old name;
+    opening that file in place signs nobody out, and relkit-store already hides
+    the name from every listing. A fresh tree gets the current name.
+    """
+    legacy = tree / ADMIN_STATE_FILE
+    if legacy.is_file():
+        return legacy
+    return tree / CONSOLE_PANEL_FILE
+
+
+def console_read_write_paths(console_cfg: dict[str, Any], config_path: str) -> list[str]:
+    """Directories the console unit must be able to write.
+
+    The panel writes exactly one file: its cookie-key document. The unit runs
+    with ProtectSystem=strict, so the directory holding that file has to be
+    listed explicitly; the release tree alone is not enough when a config still
+    points somewhere else. Paths are rendered POSIX-style because they end up in
+    a systemd unit, not on the machine that happens to run this script.
+    """
+    tree = Path(str(console_cfg.get("dir") or "/srv/releases")).as_posix()
+    paths = [tree]
+    parent = console_admin_path(console_cfg, config_path).parent.as_posix()
+    if parent and parent not in paths:
+        paths.append(parent)
+    return paths
+
+
 def write_console_unit(
     *,
     user: str,
@@ -711,9 +744,7 @@ def write_console_unit(
 ) -> None:
     template = (DEPLOY_DIR / "relkit-console.service").read_text(encoding="utf-8")
     state_dir = str(console_cfg.get("stateDir") or "")
-    # The panel writes exactly one file: the operator-account state inside the
-    # release tree. Everything else (tree, agent state) is read-only input.
-    rwp = [str(console_cfg.get("dir") or "/srv/releases")]
+    rwp = console_read_write_paths(console_cfg, config_path)
     unit = render_console_unit(
         template,
         user=user,
@@ -1220,7 +1251,7 @@ def prune_backups(
 
 def probe_local() -> dict[str, Any]:
     probe: dict[str, Any] = {"hostname": os.uname().nodename if hasattr(os, "uname") else ""}
-    for unit, kind in (("relkit-store", "serve"), ("relkit-agent", "agent")):
+    for unit, kind in (("relkit-store", "serve"), ("relkit-agent", "agent"), ("relkit-console", "console")):
         show = systemd_show(unit, "FragmentPath", "User", "Group", "ExecStart", "ReadWritePaths", "ProtectSystem", "ActiveState")
         entry: dict[str, Any] = {"unit": show}
         exec_start = show.get("ExecStart") or ""
@@ -1230,7 +1261,7 @@ def probe_local() -> dict[str, Any]:
             cfg = load_json_object(Path(config_path).read_text(encoding="utf-8"))
             entry["config"] = redact_value(cfg)
             entry["configRawOk"] = True
-        bin_name = "relkit-store" if kind == "serve" else "relkit-agent"
+        bin_name = {"serve": "relkit-store", "agent": "relkit-agent", "console": "relkit-console"}[kind]
         bin_path = parse_exec_binary(exec_start) or shutil.which(bin_name) or f"/usr/local/bin/{bin_name}"
         entry["binary"] = bin_path
         present = Path(bin_path).is_file()
@@ -1240,6 +1271,19 @@ def probe_local() -> dict[str, Any]:
             entry["version"] = (ver.stdout or ver.stderr or "").strip()
         else:
             entry["version"] = ""
+        if kind == "console":
+            # Where the running panel actually opens its cookie-key file, and
+            # whether the unit may write there. A mismatch is the serve-era
+            # relative adminStateFile, and it only shows up as a crash loop.
+            cfg = entry.get("config") if isinstance(entry.get("config"), dict) else {}
+            panel_file = console_admin_path(cfg, config_path or "")
+            entry["panelStateFile"] = str(panel_file)
+            entry["panelStateFilePresent"] = panel_file.is_file()
+            writable = str((entry.get("unit") or {}).get("ReadWritePaths") or "").split()
+            entry["panelStateWritable"] = any(
+                str(panel_file).startswith(path.rstrip("/") + "/") or str(panel_file) == path
+                for path in writable
+            )
         probe[kind] = entry
     agent_cfg_path = probe.get("agent", {}).get("configPath")
     products_dir = Path("/etc/relkit-agent/products")
@@ -1255,6 +1299,149 @@ def probe_local() -> dict[str, Any]:
     probe["profiles"] = profiles
     probe["python"] = sys.version.split()[0]
     return probe
+
+
+def unit_state(unit: str) -> dict[str, str]:
+    return systemd_show(unit, "ActiveState", "SubState", "MainPID", "NRestarts", "ExecMainStatus")
+
+
+def require_unit_running(unit: str) -> None:
+    """Prove the fresh process is the one serving, not a leftover impostor.
+
+    A restart can lose a race for the port to an older process: systemd then
+    reports "activating (auto-restart)" while the old binary happily answers on
+    the socket. Curling the port alone therefore proves nothing - it returns 200
+    from whatever is listening, which is exactly how a crash loop went unnoticed.
+    This checks the unit reached a steady active state with a live main PID.
+    """
+    state: dict[str, str] = {}
+    for _ in range(15):
+        state = unit_state(unit)
+        if state.get("ActiveState") == "active" and state.get("MainPID", "0") not in ("", "0"):
+            return
+        time.sleep(1)
+    try:
+        log = run(["journalctl", "-u", unit, "-n", "40", "--no-pager"], check=False, capture=True)
+        print(redact_text(log.stdout or ""), file=sys.stderr)
+    except (Fail, OSError):
+        # Diagnostics must never replace the verdict: on a host without systemd
+        # the journal call fails for its own reasons, and the reason the unit is
+        # not running is what the operator needs to read.
+        pass
+    raise Fail(
+        f"{unit} is {state.get('ActiveState') or 'unknown'}"
+        f"/{state.get('SubState') or 'unknown'} after restart "
+        f"(main pid {state.get('MainPID') or '0'}, {state.get('NRestarts') or '0'} restarts); "
+        "refusing to report a healthy upgrade"
+    )
+
+
+def listener_pid(port: str) -> str:
+    """PID listening on a TCP port, via ss. Empty when nothing is listening."""
+    out = run(["ss", "-lntpH"], check=False, capture=True)
+    for line in (out.stdout or "").splitlines():
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        local = fields[3]
+        if not local.endswith(":" + port):
+            continue
+        found = re.search(r"pid=(\d+)", line)
+        if found:
+            return found.group(1)
+    return ""
+
+
+def require_listener_belongs_to(unit: str, addr: str) -> None:
+    """The socket must be held by the unit's own main process.
+
+    This is the check that would have caught the silent failure: relkit-store
+    crash-looped on "address already in use" while a retired relkit-serve
+    process answered every probe. Everything looked green because the probes
+    are answered - just by the wrong program.
+
+    Binding happens after the process reaches "active", so the listener is
+    polled rather than sampled once: an instant read would call a healthy start
+    a failure and roll a good upgrade back.
+    """
+    port = str(addr or "").rsplit(":", 1)[-1]
+    if not port.isdigit():
+        return
+    pid = ""
+    for _ in range(20):
+        pid = listener_pid(port)
+        if pid:
+            break
+        time.sleep(0.5)
+    if not pid:
+        raise Fail(f"nothing is listening on :{port} after restarting {unit}")
+    main_pid = unit_state(unit).get("MainPID") or ""
+    if main_pid and main_pid not in ("0", pid):
+        cmd = run(["ps", "-o", "cmd=", "-p", pid], check=False, capture=True)
+        raise Fail(
+            f":{port} is held by pid {pid} ({(cmd.stdout or '').strip() or 'unknown command'}), "
+            f"but {unit} runs as pid {main_pid}; the unit is not the process serving traffic"
+        )
+
+
+def retire_legacy_serve() -> list[str]:
+    """Stop the pre-ADR-0016 relkit-serve unit for good.
+
+    On a migrated box relkit-serve is disabled but its unit file is still
+    installed with Restart=always. systemd had restarted it over a million
+    times trying to bind a port relkit-store owned; each restart was a chance to
+    win the race and hijack :8080 during an upgrade. Leaving it installed keeps
+    that race alive: a unit that cannot start is not a fallback.
+
+    Masking is what makes the retirement durable, but mask cannot replace an
+    existing unit file - it only creates a /dev/null symlink where no file is.
+    The file is therefore moved into the upgrade backup first, which also keeps
+    rollback possible.
+    """
+    unit = Path("/etc/systemd/system/relkit-serve.service")
+    if not unit.is_file():
+        return []
+    notes = ["found retired relkit-serve.service still installed; stopping, disabling and masking it"]
+    run(["systemctl", "stop", "relkit-serve"], check=False)
+    run(["systemctl", "disable", "relkit-serve"], check=False)
+    masked = run(["systemctl", "mask", "relkit-serve"], check=False, capture=True)
+    if masked.returncode != 0:
+        # mask refused because the unit file is a real file. Retire it by name
+        # instead: systemd then has nothing to start, which is the same outcome.
+        retired = unit.with_suffix(".service.retired")
+        try:
+            unit.rename(retired)
+            notes.append(f"moved {unit} to {retired.name}; systemd can no longer start it")
+        except OSError as exc:
+            notes.append(
+                "could not retire relkit-serve: "
+                + redact_text(str(exc))
+                + " (the unit is stopped and disabled, but it is still installed)"
+            )
+        run(["systemctl", "daemon-reload"], check=False)
+        return notes
+    notes.append("relkit-serve stopped, disabled and masked so it can never take the port again")
+    return notes
+
+
+def restart_unit(unit: str) -> None:
+    """Restart a unit, surviving a crash loop left over from an earlier run.
+
+    systemd refuses to start a unit that already failed too many times
+    ("start-limit-hit"), so an upgrade could not even try to bring the service
+    back: the failure it reports is the *previous* run's, not this one's. The
+    counter is reset first, which is safe because this is a deliberate start.
+    """
+    run(["systemctl", "reset-failed", unit], check=False)
+    started = run(["systemctl", "restart", unit], check=False, capture=True)
+    if started.returncode == 0:
+        return
+    detail = redact_text((started.stderr or started.stdout or "").strip())
+    state = unit_state(unit)
+    if state.get("SubState") == "auto-restart" or "start-limit" in detail:
+        log = run(["journalctl", "-u", unit, "-n", "40", "--no-pager"], check=False, capture=True)
+        print(redact_text(log.stdout or ""), file=sys.stderr)
+    raise Fail(f"systemctl restart {unit} failed ({started.returncode}): {detail}")
 
 
 def apply_serve_upgrade(
@@ -1280,7 +1467,14 @@ def apply_serve_upgrade(
         token_file = legacy_token_file
         notes.append("using legacy token file relkit-serve.token (migrate-serve box)")
     dest_bin = Path(prefix) / "relkit-store"
-    backup_files(backup_root / "serve", [dest_bin, config_file, Path("/etc/systemd/system/relkit-store.service")])
+    legacy_unit = Path("/etc/systemd/system/relkit-serve.service")
+    backup_files(
+        backup_root / "serve",
+        [dest_bin, config_file, Path("/etc/systemd/system/relkit-store.service"), legacy_unit],
+    )
+    # Retire the old unit only once its file is safely in the backup: rollback
+    # has to be able to put it back.
+    notes.extend(retire_legacy_serve())
     cfg = load_json_object(config_file.read_text(encoding="utf-8"))
     live_addr = cfg.get("addr")
     live_dir = cfg.get("dir")
@@ -1300,7 +1494,9 @@ def apply_serve_upgrade(
     fix_token_perms(token_file, user)
     run(["systemctl", "daemon-reload"])
     if restart:
-        run(["systemctl", "restart", "relkit-store"])
+        restart_unit("relkit-store")
+        require_unit_running("relkit-store")
+        require_listener_belongs_to("relkit-store", str(cfg.get("addr") or ""))
         token = token_file.read_text(encoding="utf-8").strip()
         self_check_serve(
             str(cfg.get("addr") or ""),
@@ -1313,6 +1509,155 @@ def apply_serve_upgrade(
     return notes
 
 
+def tool_publish_token_path(config_dir: Path) -> Path:
+    """Where the deploy pipeline's tool-publish credential lives.
+
+    It sits beside the agent config, in the same directory that already holds
+    the custody manifest, so the file is protected by the same ownership rules
+    and the config can name it by an absolute path.
+
+    The result is written into a Linux config file, so it is built with POSIX
+    separators rather than the host's: deploying from Windows must not produce
+    a config the server cannot read.
+    """
+    return config_dir / "tools-publish.token"
+
+
+def ensure_tool_publish_token(config_dir: Path, *, user: str, rotate: bool = False) -> tuple[Path, str, bool]:
+    """Make the agent able to accept tool publishing, returning (path, token, minted).
+
+    Tool publishing is what requirement 12.6 needs: the deploy pipeline uploads
+    the version's tool files and the server signs them with its root. The
+    credential is minted here rather than shipped in, so no plaintext deploy
+    token travels through a spec file or a command line. An existing token is
+    reused unless rotation is asked for, which keeps a working release pipeline
+    working across upgrades.
+
+    The plaintext is returned because the same process has to publish tools with
+    it; it is deliberately never written into notes or printed.
+    """
+    path = tool_publish_token_path(config_dir)
+    if path.is_file() and not rotate:
+        existing = path.read_text(encoding="utf-8").strip()
+        if existing:
+            return path, existing, False
+    token = secrets.token_urlsafe(32)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp~")
+    tmp.write_text(token + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    try:
+        chown_path(path, user)
+        chown_path(config_dir, user)
+    except LookupError:
+        pass
+    return path, token, True
+
+
+def publish_release_tools(
+    *,
+    files: list[dict[str, Any]],
+    version: str,
+    commit: str,
+    public_base: str,
+    user: str,
+    restart: bool,
+) -> list[str]:
+    """Publish this release's tool build to the local agent.
+
+    Runs on the server, because both the credential and a reachable agent are
+    local. The signed manifest records absolute download URLs, so the public
+    origin must be stated: publishing against 127.0.0.1 would sign an address no
+    host can use, and every host's bootstrap would then fail at download time
+    while the publish itself reported success.
+
+    Tool publishing is what makes /v1/catalog answer: the endpoint serves a
+    document that only exists once something has been published, so an agent
+    with no tool release returns 404 and hosts have nothing to bootstrap from.
+    """
+    if not files:
+        return []
+    if not version:
+        raise Fail("cannot publish tools without a release version")
+    base = (public_base or "").rstrip("/")
+    if not base or "127.0.0.1" in base or "localhost" in base:
+        raise Fail(
+            f"tool publishing needs a public base URL, got {base or '(empty)'}; "
+            "the URLs it signs are downloaded by hosts, not by this server"
+        )
+    helper = DEPLOY_DIR / "relkit_tools_publish.py"
+    if not helper.is_file():
+        raise Fail(f"missing {helper.name}; the release cannot publish its tools")
+    staged = Path("/tmp/relkit-tools-publish")
+    if staged.exists():
+        shutil.rmtree(staged, ignore_errors=True)
+    staged.mkdir(parents=True, exist_ok=True)
+    for row in files:
+        source = Path(str(row.get("path") or ""))
+        if not source.is_file():
+            raise Fail(f"tool artifact {source} is missing; refusing to publish a partial tool set")
+        shutil.copy2(source, staged / source.name)
+    payload = {
+        "version": version,
+        "commit": commit,
+        "baseUrl": base,
+        "files": [
+            {
+                "name": Path(str(row["path"])).name,
+                "component": row.get("component") or "",
+                # A tree component ships one artifact for every platform, so it
+                # is published under the "all" alias hosts ask for by name
+                # rather than under the any-any string its os/arch would imply.
+                "platform": tool_platform(row.get("os") or "", row.get("arch") or ""),
+                "os": row.get("os") or "",
+                "arch": row.get("arch") or "",
+            }
+            for row in files
+        ],
+    }
+    spec_file = staged / "spec.json"
+    spec_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    show = systemd_show("relkit-agent", "ExecStart")
+    cfg_path = parse_exec_config(show.get("ExecStart") or "")
+    addr = ""
+    token = ""
+    if cfg_path and Path(cfg_path).is_file():
+        cfg = load_json_object(Path(cfg_path).read_text(encoding="utf-8"))
+        addr = str(cfg.get("addr") or "")
+        token_file = str(cfg.get("toolsTokenFile") or "")
+        if token_file and Path(token_file).is_file():
+            token = Path(token_file).read_text(encoding="utf-8").strip()
+    if not addr:
+        raise Fail("the agent has no listen address; cannot publish tools")
+    if not token:
+        raise Fail(
+            "the agent accepts no tool publishing (toolsTokenFile unset or empty); "
+            "enable tool publishing before publishing a release that ships tools"
+        )
+    base_root = loopback_base(addr)
+    result = run(
+        [
+            sys.executable,
+            str(helper),
+            "--server",
+            base_root,
+            "--spec",
+            str(spec_file),
+        ],
+        capture=True,
+        env={"RELKIT_TOOLS_TOKEN": token},
+    )
+    output = (result.stdout or "").strip()
+    if restart:
+        # Restarting is not needed for the catalog to appear (it is written
+        # before the response), but a clean restart proves the served document
+        # survives a process boundary, which is what hosts will hit.
+        restart_unit("relkit-agent")
+        require_unit_running("relkit-agent")
+    return [f"published tools {version}: {output.splitlines()[-1] if output else '(no output)'}"]
+
+
 def apply_agent_upgrade(
     *,
     binary: Optional[Path],
@@ -1323,6 +1668,10 @@ def apply_agent_upgrade(
     serve_addr: str,
     restart: bool,
     backup_root: Path,
+    root_key_id: str = "",
+    custody_manifest: str = "",
+    admin_state_file: str = "",
+    enable_tool_publish: bool = False,
 ) -> list[str]:
     notes: list[str] = []
     show = systemd_show("relkit-agent", "ExecStart", "User", "FragmentPath")
@@ -1330,14 +1679,113 @@ def apply_agent_upgrade(
     config_file = Path(config_path)
     dest_bin = Path(prefix) / "relkit-agent"
     products_dir = config_file.parent / "products"
+    config_dir = config_file.parent
+    cfg: dict[str, Any] = {}
+    if config_file.is_file():
+        cfg = load_json_object(config_file.read_text(encoding="utf-8"))
+    # The custody manifest belongs beside the config: it describes this
+    # machine's identity, not any one product's data.
+    manifest_file = config_dir / (Path(custody_manifest).name if custody_manifest else "custody-manifest.json")
+    # The admin document must be found where the agent will look for it. An
+    # explicit path wins; otherwise it is <stateDir>/admin.json, exactly like
+    # openAdminStore derives it, so a migration cannot write a document the
+    # server never reads.
+    if admin_state_file:
+        admin_file = Path(admin_state_file)
+    else:
+        state_dir = str(cfg.get("stateDir") or "").strip()
+        if state_dir and not state_dir.startswith("/"):
+            state_dir = str(config_dir / state_dir)
+        if not state_dir:
+            state_dir = str(config_dir / "relkit-agent-state")
+        admin_file = Path(state_dir) / "admin.json"
     backup_files(
         backup_root / "agent",
-        [dest_bin, config_file, Path("/etc/systemd/system/relkit-agent.service"), products_dir],
+        [
+            dest_bin,
+            config_file,
+            Path("/etc/systemd/system/relkit-agent.service"),
+            products_dir,
+            manifest_file,
+            admin_file,
+        ],
     )
-    cfg = load_json_object(config_file.read_text(encoding="utf-8"))
-    cfg, agent_notes = migrate_agent_config(cfg)
-    notes.extend(agent_notes)
+
+    # A token's plaintext is only ever in the file it was issued into. Hash the
+    # trimmed content so the pre-epoch credential keeps working after the move;
+    # nothing is reissued, because reissuing would break every publisher's CI.
+    token_hashes: dict[str, str] = {}
+    for entry in cfg.get("uploadTokens") or []:
+        if not isinstance(entry, dict):
+            continue
+        carrier = str(entry.get("file") or "").strip()
+        if not carrier:
+            continue
+        path = Path(carrier)
+        if not path.is_absolute():
+            path = config_dir / path
+        if path.is_file():
+            token_hashes[carrier] = hashlib.sha256(
+                path.read_text(encoding="utf-8").strip().encode("utf-8")
+            ).hexdigest()
+        # A legacy uploadToken (instance-wide, not per product) has no product to
+        # authorize, so it is deliberately not carried over: requirement 11.1
+        # says a token names exactly one product.
+
+    product_roots: dict[str, str] = {}
+    for entry_id, entry in (cfg.get("products") or {}).items():
+        if isinstance(entry, dict) and entry.get("root"):
+            product_roots[entry_id] = str(entry["root"])
+
+    effective_key_id = root_key_id
+    if not effective_key_id:
+        effective_key_id = str(cfg.get("rootKeyId") or "").strip()
+    cfg, admin_doc, split_notes = epoch_split_agent_config(
+        cfg,
+        product_roots=product_roots,
+        token_hashes=token_hashes,
+        root_key_id=effective_key_id,
+        custody_manifest=str(manifest_file),
+    )
+    notes.extend(split_notes)
+    if enable_tool_publish:
+        # Requirement 12.6: the deploy pipeline uploads the version's tools and
+        # the server signs them. Without this credential the agent serves tools
+        # it already has but refuses every upload, which is how /v1/catalog
+        # stayed empty. Minting happens on the box so no plaintext token is
+        # carried in the spec.
+        token_path, _, minted = ensure_tool_publish_token(config_dir, user=user)
+        # The config is read on the server, so the value is stated with POSIX
+        # separators even though this runs wherever the deploy is driven from.
+        cfg["toolsTokenFile"] = token_path.as_posix()
+        notes.append(
+            f"tool publishing enabled via {token_path}"
+            + (" (new credential minted)" if minted else " (existing credential reused)")
+        )
     config_file.write_text(dump_json(cfg), encoding="utf-8")
+
+    if admin_doc.get("products") or admin_doc.get("tokens"):
+        existing: dict[str, Any] = {}
+        if admin_file.is_file():
+            existing = load_json_object(admin_file.read_text(encoding="utf-8"))
+        merged, merge_notes = admin_merge(existing, admin_doc)
+        admin_file.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(admin_file.parent, 0o700)
+        admin_file.write_text(dump_json(merged), encoding="utf-8")
+        os.chmod(admin_file, 0o600)
+        try:
+            chown_path(admin_file, user)
+            chown_path(admin_file.parent, user)
+        except LookupError:
+            pass
+        notes.extend(f"admin state: {item}" for item in merge_notes)
+        notes.append(f"admin state written to {admin_file}")
+    if manifest_file.is_file():
+        os.chmod(manifest_file, 0o600)
+        try:
+            chown_path(manifest_file, user)
+        except LookupError:
+            pass
     if products_dir.is_dir():
         for path in sorted(products_dir.glob("*.json")):
             profile = load_json_object(path.read_text(encoding="utf-8"))
@@ -1354,6 +1802,7 @@ def apply_agent_upgrade(
         install_file(binary, dest_bin, 0o755)
         notes.append(f"installed {dest_bin}")
     unit_text = Path(show.get("FragmentPath") or "/etc/systemd/system/relkit-agent.service").read_text(encoding="utf-8")
+    live_working_dir = ""
     for line in unit_text.splitlines():
         if line.startswith("WorkingDirectory="):
             live_working_dir = line.split("=", 1)[1].strip()
@@ -1368,13 +1817,136 @@ def apply_agent_upgrade(
     )
     run(["systemctl", "daemon-reload"])
     if restart:
-        run(["systemctl", "restart", "relkit-agent"])
+        restart_unit("relkit-agent")
+        require_unit_running("relkit-agent")
+        require_listener_belongs_to("relkit-agent", str(cfg.get("addr") or "127.0.0.1:8787"))
         self_check_agent(str(cfg.get("addr") or "127.0.0.1:8787"))
         notes.append("agent restarted and health-checked")
         version = run([str(dest_bin), "-version"], capture=True)
         notes.append((version.stdout or "").strip() or "relkit-agent version ok")
     else:
         notes.append("agent files updated; restart skipped")
+    return notes
+
+
+def normalize_console_admin_config(
+    console_cfg: dict[str, Any], config_path: str
+) -> tuple[dict[str, Any], str]:
+    """Point the panel's state file at the place it actually belongs.
+
+    Returns the new config plus one note (empty when nothing changed). The value
+    written is always absolute: a relative name is resolved against the config
+    directory by the binary, so leaving one in place would keep the panel pointed
+    at read-only /etc no matter what the unit lists as writable.
+    """
+    tree = Path(str(console_cfg.get("dir") or "/srv/releases"))
+    panel_file = console_panel_file(tree)
+    current = console_admin_path(console_cfg, config_path)
+    if current.resolve() == panel_file.resolve():
+        return console_cfg, ""
+    updated = dict(console_cfg)
+    updated["adminStateFile"] = str(panel_file)
+    return updated, (
+        f"adminStateFile {console_cfg.get('adminStateFile') or '(unset)'} resolved to "
+        f"{current}; pointing it at {panel_file}"
+    )
+
+
+def apply_console_upgrade(
+    *,
+    binary: Optional[Path],
+    user: str,
+    prefix: str,
+    agent_addr: str,
+    restart: bool,
+    backup_root: Path,
+) -> list[str]:
+    """Upgrade relkit-console in place, repairing a serve-era admin path.
+
+    A console inherited from the serve split may still carry a relative
+    `adminStateFile`. The binary resolves that against the config directory, so
+    on a box with ProtectSystem=strict the panel dies on first start trying to
+    write /etc/...tmp~. The panel's real state file lives in the release tree,
+    so the fix is to name that file explicitly: the running session key is then
+    opened in place (nobody is signed out) and the directory is already the one
+    the unit may write.
+    """
+    notes: list[str] = []
+    show = systemd_show("relkit-console", "ExecStart", "User", "FragmentPath")
+    config_path = parse_exec_config(show.get("ExecStart") or "") or "/etc/relkit-console/relkit-console.json"
+    config_file = Path(config_path)
+    dest_bin = Path(prefix) / "relkit-console"
+    cfg: dict[str, Any] = {}
+    if config_file.is_file():
+        cfg = load_json_object(config_file.read_text(encoding="utf-8"))
+    stale_panel_file = console_admin_path(cfg, str(config_file))
+    backup_files(
+        backup_root / "console",
+        [
+            dest_bin,
+            config_file,
+            Path("/etc/systemd/system/relkit-console.service"),
+            stale_panel_file,
+        ],
+    )
+
+    # Resolve the state file first: the answer decides both the config value and
+    # the unit's writable paths, and those two must agree or the panel dies.
+    cfg, path_note = normalize_console_admin_config(cfg, str(config_file))
+    if path_note:
+        notes.append(path_note)
+    panel_file = Path(str(cfg.get("adminStateFile")))
+    # A panel that started once under the broken path minted a fresh cookie key
+    # in the read-only-by-policy directory. That key is a stray: the real one,
+    # with the operator accounts, is the file now named above. Removing it keeps
+    # the box honest about having exactly one panel state file.
+    if stale_panel_file != panel_file and stale_panel_file.is_file():
+        try:
+            stale_panel_file.unlink()
+            notes.append(f"removed stray panel state {stale_panel_file} (superseded by {panel_file})")
+        except OSError as exc:
+            notes.append(f"left stray panel state {stale_panel_file}: {exc}")
+    # The panel is the human face of the agent (requirement 13.6): without the
+    # agent URL it renders read-only pages and cannot manage anything.
+    if agent_addr and str(cfg.get("agent") or "") != agent_addr:
+        cfg["agent"] = agent_addr
+        notes.append(f"panel now manages the agent at {agent_addr}")
+    if config_file.is_file() or cfg:
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(dump_json(cfg), encoding="utf-8")
+        os.chmod(config_file, 0o644)
+        try:
+            chown_path(config_file, user)
+        except LookupError:
+            pass
+    if panel_file.is_file():
+        os.chmod(panel_file, 0o600)
+        try:
+            chown_path(panel_file, user)
+        except LookupError:
+            pass
+
+    if binary:
+        install_file(binary, dest_bin, 0o755)
+        notes.append(f"installed {dest_bin}")
+    write_console_unit(
+        user=user,
+        prefix=prefix,
+        config_path=str(config_file),
+        console_cfg=cfg,
+    )
+    run(["systemctl", "daemon-reload"])
+    if restart:
+        restart_unit("relkit-console")
+        console_addr = str(cfg.get("addr") or "127.0.0.1:8081")
+        require_unit_running("relkit-console")
+        require_listener_belongs_to("relkit-console", console_addr)
+        wait_health(loopback_base(console_addr), "relkit-console")
+        notes.append("console restarted and health-checked")
+        version = run([str(dest_bin), "-version"], capture=True)
+        notes.append((version.stdout or "").strip() or "relkit-console version ok")
+    else:
+        notes.append("console files updated; restart skipped")
     return notes
 
 
@@ -1393,6 +1965,15 @@ def rollback(backup_root: Path, prefix: str) -> None:
     unit = backup_root / "serve" / "relkit-store.service"
     if unit.is_file():
         shutil.copy2(unit, "/etc/systemd/system/relkit-store.service")
+    # A retired relkit-serve unit is restored before the unit set is reloaded, so
+    # a failed upgrade leaves the box exactly as it was: old serve binary, old
+    # unit, no permanent retirement that nobody asked for.
+    retired_serve = backup_root / "serve" / "relkit-serve.service"
+    if retired_serve.is_file():
+        shutil.copy2(retired_serve, "/etc/systemd/system/relkit-serve.service")
+        stale = Path("/etc/systemd/system/relkit-serve.service.retired")
+        if stale.exists():
+            stale.unlink()
     agent_bin = backup_root / "agent" / "relkit-agent"
     if agent_bin.is_file():
         install_file(agent_bin, Path(prefix) / "relkit-agent", 0o755)
@@ -1414,9 +1995,26 @@ def rollback(backup_root: Path, prefix: str) -> None:
     agent_unit = backup_root / "agent" / "relkit-agent.service"
     if agent_unit.is_file():
         shutil.copy2(agent_unit, "/etc/systemd/system/relkit-agent.service")
+    console_bin = backup_root / "console" / "relkit-console"
+    if console_bin.is_file():
+        install_file(console_bin, Path(prefix) / "relkit-console", 0o755)
+    console_cfg = backup_root / "console" / "relkit-console.json"
+    if console_cfg.is_file():
+        dest = Path("/etc/relkit-console/relkit-console.json")
+        show = systemd_show("relkit-console", "ExecStart")
+        config_path = parse_exec_config(show.get("ExecStart") or "")
+        if config_path:
+            dest = Path(config_path)
+        if dest.parent.is_dir():
+            shutil.copy2(console_cfg, dest)
+    console_unit = backup_root / "console" / "relkit-console.service"
+    if console_unit.is_file():
+        shutil.copy2(console_unit, "/etc/systemd/system/relkit-console.service")
     run(["systemctl", "daemon-reload"], check=False)
     run(["systemctl", "restart", "relkit-store"], check=False)
     run(["systemctl", "restart", "relkit-agent"], check=False)
+    if console_bin.is_file() or console_cfg.is_file() or console_unit.is_file():
+        run(["systemctl", "restart", "relkit-console"], check=False)
 
 
 def cmd_remote(args: argparse.Namespace) -> None:
@@ -1482,6 +2080,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
         public_upload = spec.get("publicUploadUrl")
         serve_bin = Path(spec["serveBinary"]) if spec.get("serveBinary") else None
         agent_bin = Path(spec["agentBinary"]) if spec.get("agentBinary") else None
+        console_bin = Path(spec["consoleBinary"]) if spec.get("consoleBinary") else None
         notes: list[str] = []
         try:
             if spec.get("upgradeServe"):
@@ -1513,6 +2112,51 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         serve_addr=serve_addr,
                         restart=restart,
                         backup_root=backup,
+                        root_key_id=spec.get("rootKeyId") or "",
+                        custody_manifest=spec.get("custodyManifest") or "",
+                        admin_state_file=spec.get("adminStateFile") or "",
+                        enable_tool_publish=bool(spec.get("enableToolPublish")),
+                    )
+                )
+            if spec.get("upgradeConsole"):
+                # The panel talks to the agent, so it is configured after the
+                # agent has been migrated: the address written into the panel
+                # config must be the live one.
+                agent_addr = ""
+                show = systemd_show("relkit-agent", "ExecStart")
+                cfg_path = parse_exec_config(show.get("ExecStart") or "")
+                if cfg_path and Path(cfg_path).is_file():
+                    agent_addr = str(
+                        load_json_object(Path(cfg_path).read_text(encoding="utf-8")).get("addr") or ""
+                    )
+                if agent_addr:
+                    agent_addr = loopback_base(agent_addr)
+                notes.extend(
+                    apply_console_upgrade(
+                        binary=console_bin,
+                        user=user,
+                        prefix=prefix,
+                        agent_addr=agent_addr,
+                        restart=restart,
+                        backup_root=backup,
+                    )
+                )
+            tool_files = spec.get("toolFiles") or []
+            if tool_files:
+                # Requirement 12.6: deploy publishes the version's tools and the
+                # server signs them, so hosts can fetch a tool build that matches
+                # the release they just installed. Doing it here rather than by
+                # hand keeps the catalog in step with the release: a version
+                # whose tools were never published is a version that hosts
+                # cannot bootstrap the CLI from.
+                notes.extend(
+                    publish_release_tools(
+                        files=tool_files,
+                        version=str(spec.get("version") or ""),
+                        commit=str(spec.get("commit") or ""),
+                        public_base=str(spec.get("toolsBaseUrl") or public_base or ""),
+                        user=user,
+                        restart=restart,
                     )
                 )
         except Exception as exc:
@@ -1553,9 +2197,15 @@ def remote_bootstrap_sources() -> list[tuple[Path, str]]:
         (DEPLOY_DIR / "relkit.py", ""),
         (DEPLOY_DIR / "relkit_ops.py", ""),
         (DEPLOY_DIR / "components.py", ""),
+        # components.py reads the registry at import time. A remote bootstrap has
+        # no repository above it, so the table has to travel with the CLI.
+        (REGISTRY_PATH, ""),
         (DEPLOY_DIR / "relkit-store.service", ""),
         (DEPLOY_DIR / "relkit-agent.service", ""),
         (DEPLOY_DIR / "relkit-console.service", ""),
+        # Tool publishing runs on the server: it needs the local credential and
+        # a reachable agent, so the helper travels with the CLI.
+        (DEPLOY_DIR / "relkit_tools_publish.py", ""),
     ]
 
 
@@ -1668,7 +2318,14 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     print(json.dumps(redact_value(probe), ensure_ascii=False, indent=2))
     want_serve = not args.agent_only
     want_agent = not args.serve_only
+    want_console = bool((probe.get("console") or {}).get("unit", {}).get("FragmentPath")) and not args.no_console
     missing = missing_upgrade_targets(probe, want_serve=want_serve, want_agent=want_agent)
+    if probe.get("console") and not (probe.get("console") or {}).get("present") and want_console:
+        missing.append(
+            "relkit-console (no binary at "
+            f"{(probe.get('console') or {}).get('binary') or 'unknown path'}); "
+            "pass --no-console to skip it, or run 'install console' to add it"
+        )
     if missing:
         die(f"{host} does not run " + "; ".join(missing))
     serve_cfg = (probe.get("serve") or {}).get("config") or {}
@@ -1714,9 +2371,14 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     if args.keep_backups < 1:
         die("--keep-backups must be at least 1")
     keep_backups = 0 if args.no_prune_backups else args.keep_backups
+    # Requirement 12.6: a release that ships tools also publishes them, so a
+    # host that installed this version can fetch a matching CLI afterwards. It
+    # is skippable only for a server that never serves tools.
+    want_tools = not args.no_tools
     spec = {
         "upgradeServe": want_serve,
         "upgradeAgent": want_agent,
+        "upgradeConsole": want_console,
         "restart": restart,
         "prefix": args.prefix,
         "user": args.user,
@@ -1725,20 +2387,62 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "publicUploadUrl": public_upload,
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
         "keepBackups": keep_backups,
+        "rootKeyId": args.root_key_id,
+        "custodyManifest": args.custody_manifest,
+        "adminStateFile": args.admin_state_file,
+        "enableToolPublish": want_tools,
+        "version": git_stamp(load_ssot()["number"]),
+        "commit": ident["commit"],
+        "toolsBaseUrl": public or public_upload,
     }
     uploads: list[Path] = []
     if not args.unsafe_from_dist:
-        step("building linux/amd64 agent+serve from HEAD")
+        step(f"building linux/amd64 {'agent+serve+console' if want_tools else 'agent+serve+console'} from HEAD")
         cmd_build(
             argparse.Namespace(
                 store=spec["upgradeServe"],
                 agent=spec["upgradeAgent"],
-                cli=False,
+                console=spec["upgradeConsole"],
                 out="dist",
                 os="linux",
                 arch="amd64",
+                append=False,
             )
         )
+        if want_tools:
+            # Tools are what host CI downloads on every build, so they must
+            # cover every platform a host builds on (requirement 12). They are
+            # built in a second pass so the server binaries stay linux/amd64:
+            # pinning the tool flags to this machine's platform -- which is what
+            # this did -- silently shrinks the served tool surface back to one
+            # platform on every upgrade.
+            step("building tools for every host platform")
+            cmd_build(
+                argparse.Namespace(
+                    **{row.build_flag.replace("-", "_"): True for row in TOOL_COMPONENTS},
+                    out="dist",
+                    os="",
+                    arch="",
+                    # Carry the server rows forward: one release is described by
+                    # one manifest, and the tools publish step verifies every
+                    # tool against it.
+                    append=True,
+                )
+            )
+    tools_built: list[dict[str, Any]] = []
+    if want_tools:
+        manifest_path = REPO_ROOT / "dist" / "manifest.json"
+        if manifest_path.is_file():
+            tools_built = [
+                row
+                for row in load_json_object(manifest_path.read_text(encoding="utf-8")).get("artifacts", [])
+                if row.get("component") in TOOL_COMPONENT_NAMES
+            ]
+        if not tools_built:
+            die(
+                f"the release declares no {', '.join(TOOL_COMPONENT_NAMES)} artifact in "
+                "dist/manifest.json; build them or pass --no-tools"
+            )
     if spec["upgradeServe"]:
         serve_bin = Path(args.serve_binary)
         if not serve_bin.is_absolute():
@@ -1755,6 +2459,30 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
             die(f"agent binary not found: {agent_bin}")
         uploads.append(agent_bin)
         spec["agentBinary"] = f"{remote_dir}/{agent_bin.name}"
+    if spec["upgradeConsole"]:
+        console_bin = Path(args.console_binary)
+        if not console_bin.is_absolute():
+            console_bin = (REPO_ROOT / console_bin).resolve()
+        if not console_bin.is_file():
+            die(f"console binary not found: {console_bin}")
+        uploads.append(console_bin)
+        spec["consoleBinary"] = f"{remote_dir}/{console_bin.name}"
+    if tools_built:
+        tool_rows: list[dict[str, Any]] = []
+        for row in tools_built:
+            tool_path = REPO_ROOT / "dist" / str(row["path"])
+            if not tool_path.is_file():
+                die(f"tool artifact listed in the manifest is missing: {tool_path}")
+            uploads.append(tool_path)
+            tool_rows.append(
+                {
+                    "path": f"{remote_dir}/{tool_path.name}",
+                    "component": row.get("component") or "",
+                    "os": row.get("os") or "",
+                    "arch": row.get("arch") or "",
+                }
+            )
+        spec["toolFiles"] = tool_rows
     if uploads:
         scp_to(host, uploads, remote_dir + "/")
     fd, spec_name = tempfile.mkstemp(prefix="relkit-spec-", suffix=".json")
@@ -1836,6 +2564,235 @@ def cmd_version(args: argparse.Namespace) -> None:
     print(ssot[args.field])
 
 
+# The relkit components a host CI downloads and runs. Only the ones a host
+# actually fetches are published as tools: the server programs are installed by
+# the deploy pipeline itself, never fetched by a host.
+#
+# sdk-dart is included because requirement 12 makes the server the only place a
+# host materialises its thin client from: SvnMergeTool resolves its `rup_client`
+# dependency out of the served tool surface at build time, so a tool surface
+# without sdk-dart leaves that host unable to build at all.
+#
+# sdk-rust is included for the same reason: Loom-Launcher's Rust shell links the
+# facade crate (`relkit-updater = { path = ".relkit/components/sdk/rust" }`), so
+# a server that serves no sdk-rust leaves that host unable to build at all. It is
+# a thin IPC client (it spawns the updater sidecar), which is exactly the shape
+# requirement 12 keeps on the server.
+TOOL_COMPONENT_NAMES = ("cli", "updater", "ops", "sdk-dart", "sdk-rust")
+# Binaries are cross-compiled per platform; trees are platform-independent and
+# are published once under the "all" platform a host asks for by name.
+TOOL_BINARY_NAMES = ("cli", "updater", "ops")
+TOOL_TREE_NAMES = ("sdk-dart", "sdk-rust")
+TOOL_COMPONENT_FLAGS = TOOL_BINARY_NAMES
+
+
+def tool_component_flag(name: str) -> str:
+    row = BY_NAME.get(name)
+    return row.build_flag.replace("-", "_") if row else ""
+
+
+def tool_components() -> list[Any]:
+    """Return the registry rows a host CI downloads as tools."""
+    return [BY_NAME[name] for name in TOOL_COMPONENT_NAMES if name in BY_NAME]
+
+
+TOOL_COMPONENTS = tool_components()
+
+
+def tool_platform(os_name: str, arch: str) -> str:
+    # A tree component (sdk-dart) ships one artifact for every platform;
+    # `relkit build` records it as os/arch = any, while hosts ask for it by the
+    # "all" platform name. Anything else is the plain os-arch selector.
+    if os_name == "any" and arch == "any":
+        return "all"
+    return f"{os_name}-{arch}"
+
+
+def release_artifact_index(manifest: dict[str, Any]) -> dict[tuple[str, str, str], str]:
+    """Map (component, os, arch) to the digest the release manifest declares.
+
+    Requirement 12.6: the pipeline validates every tool against the official
+    Release before the server signs it, so a stray local build can never become
+    the toolchain a host runs.
+    """
+    index: dict[tuple[str, str, str], str] = {}
+    for row in manifest.get("artifacts") or []:
+        if not isinstance(row, dict):
+            continue
+        component = str(row.get("component") or "")
+        os_name = str(row.get("os") or "")
+        arch = str(row.get("arch") or "")
+        digest = str(row.get("sha256") or "")
+        if component and os_name and arch and digest:
+            index[(component, os_name, arch)] = digest
+    return index
+
+
+def file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def strip_digest_prefix(value: str) -> str:
+    """Return the bare hex digest, dropping any algorithm prefix and case.
+
+    Two writers record artifact digests: `relkit build` (Go) writes bare hex
+    into dist/manifest.json, while this module's own file_sha256 also writes
+    bare hex and file_digest prefixes "sha256:". Comparing raw strings therefore
+    reports a mismatch for a byte-identical file and blocks every tool publish,
+    so the comparison normalises both sides.
+    """
+    text = str(value or "").strip().lower()
+    if text.startswith("sha256:"):
+        text = text[len("sha256:"):]
+    return text
+
+
+def cmd_tools(args: argparse.Namespace) -> None:
+    if args.tools_cmd != "publish":
+        die(f"unknown tools command {args.tools_cmd}")
+    dist = Path(args.dist)
+    if not dist.is_dir():
+        die(f"{dist} does not exist; run relkit build first")
+    manifest_path = Path(args.release_manifest) if args.release_manifest else dist / "manifest.json"
+    if not manifest_path.is_file():
+        die(f"{manifest_path} does not exist; requirement 12.6 needs the official release manifest")
+    release = load_json_object(manifest_path.read_text(encoding="utf-8"))
+    if release.get("schema") != "relkit.release/1":
+        die(f"{manifest_path} schema is {release.get('schema')!r}, expected relkit.release/1")
+    version = str(release.get("version") or "")
+    commit = str(release.get("commit") or "")
+    if not version or not commit:
+        die(f"{manifest_path} is missing version or commit")
+    if args.version and args.version != version:
+        die(f"--version {args.version} does not match {manifest_path} version {version}")
+
+    base = (args.server or "").rstrip("/")
+    if not base:
+        die("--server is required; it is the agent the tools are published to")
+    public_base = (args.base_url or "").rstrip("/")
+    if public_base and not re.match(r"^https?://[^/\s]+", public_base):
+        die(f"--base-url {public_base!r} is not an absolute http(s) origin")
+    token = args.token or os.environ.get("RELKIT_TOOLS_TOKEN", "")
+    if not token:
+        die("--token or RELKIT_TOOLS_TOKEN is required (the deploy pipeline credential)")
+
+    index = release_artifact_index(release)
+    plan: list[dict[str, Any]] = []
+    for flag in TOOL_BINARY_NAMES:
+        row = BY_NAME.get(flag)
+        if row is None:
+            continue
+        for target in TARGETS:
+            parts = target.split("-", 1)
+            if len(parts) != 2:
+                continue
+            os_name, arch = parts[0], parts[1]
+            declared = index.get((flag, os_name, arch))
+            if declared is None:
+                # A platform the release did not build is not an error: not
+                # every component targets every platform.
+                continue
+            name = f"{row.binary_prefix}-{os_name}-{arch}"
+            if os_name == "windows":
+                name += ".exe"
+            path = dist / name
+            if not path.is_file():
+                die(f"{path} is missing; the release manifest declares {flag} for {target}")
+            actual = file_digest(path)
+            # The release manifest records a bare digest (relkit build writes
+            # hex, and so does Python file_sha256), while file_digest prefixes
+            # its result. Normalising both sides keeps the check strict about
+            # the value without turning the prefix into a false mismatch.
+            if strip_digest_prefix(actual) != strip_digest_prefix(declared):
+                die(
+                    f"{path} digest {actual} does not match the official release "
+                    f"{declared} for {flag}/{target}; refusing to publish a tool the "
+                    "release did not build"
+                )
+            plan.append({
+                "component": flag, "name": name, "platform": tool_platform(os_name, arch),
+                "os": os_name, "arch": arch, "size": path.stat().st_size,
+                "sha256": actual, "path": path,
+            })
+    for name in TOOL_TREE_NAMES:
+        row = BY_NAME.get(name)
+        if row is None or not row.archive:
+            continue
+        # A tree ships one artifact for every platform, and `relkit build`
+        # records it that way (os/arch = any). Hosts still select by platform,
+        # so it is published under the "all" platform they ask for by name.
+        declared = index.get((name, "any", "any"))
+        if declared is None:
+            continue
+        path = dist / row.archive
+        if not path.is_file():
+            die(f"{path} is missing; the release manifest declares {name}")
+        actual = file_digest(path)
+        if strip_digest_prefix(actual) != strip_digest_prefix(declared):
+            die(
+                f"{path} digest {actual} does not match the official release "
+                f"{declared} for {name}; refusing to publish a tool the "
+                "release did not build"
+            )
+        plan.append({
+            "component": name, "name": row.archive, "platform": "all",
+            "os": "any", "arch": "any", "size": path.stat().st_size,
+            "sha256": actual, "path": path,
+        })
+    if not plan:
+        die(f"the release manifest declares no {', '.join(TOOL_COMPONENT_NAMES)} artifact")
+    if args.dry_run:
+        print(json.dumps(
+            [{"component": row["component"], "name": row["name"], "platform": row["platform"],
+              "sha256": row["sha256"]} for row in plan],
+            ensure_ascii=False, indent=2,
+        ))
+        return
+
+    for row in plan:
+        url = f"{base}/v1/tools/{version}/{row['name']}"
+        code, body = http_call(
+            "PUT", url,
+            headers={"Authorization": f"Bearer {token}"},
+            data=row["path"].read_bytes(),
+            timeout=600,
+            publish_protocol=False,
+        )
+        if code not in (200, 201):
+            die(f"upload {row['name']} returned {code}: {body[:400].decode('utf-8', 'replace')}")
+        print(f"uploaded {row['name']} ({row['platform']})")
+
+    payload = {
+        "version": version,
+        "commit": commit,
+        "files": [
+            {key: row[key] for key in ("component", "name", "platform", "os", "arch", "size", "sha256")}
+            for row in plan
+        ],
+    }
+    if public_base:
+        # The signed manifest records where hosts download from. Publishing over
+        # loopback would otherwise sign 127.0.0.1 into every URL, which no host
+        # can reach, so the caller states the public origin explicitly.
+        payload["baseUrl"] = public_base
+    code, body = http_call(
+        "POST", f"{base}/v1/tools",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        data=json.dumps(payload).encode(),
+        timeout=120,
+        publish_protocol=False,
+    )
+    if code != 200:
+        die(f"publish manifest returned {code}: {body[:400].decode('utf-8', 'replace')}")
+    result = json.loads(body.decode("utf-8", "replace"))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(f"tools {version} are current; host CI downloads them from {base}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scripts/deploy/relkit.py", description="relkit deploy CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1844,6 +2801,15 @@ def build_parser() -> argparse.ArgumentParser:
     for row in registry_components():
         build.add_argument(f"--{row.build_flag}", action="store_true")
     build.add_argument("--all", action="store_true", help="build every registry component")
+    build.add_argument(
+        "--append",
+        action="store_true",
+        help=(
+            "keep artifacts already listed in <out>/manifest.json for the same "
+            "version instead of overwriting them; one release is built from both "
+            "the host binaries and the tool binaries"
+        ),
+    )
     build.add_argument("--out", default="dist")
     build.add_argument("--os")
     build.add_argument("--arch")
@@ -1899,6 +2865,20 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--unsafe-from-dist", action="store_true", help="ship existing dist/ binaries instead of building HEAD")
     upgrade.add_argument("--serve-binary", default="dist/relkit-store-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")
+    upgrade.add_argument("--console-binary", default="dist/relkit-console-linux-amd64")
+    upgrade.add_argument(
+        "--no-tools",
+        action="store_true",
+        help=(
+            "do not build, publish, or enable publishing of the cli/updater/ops tools; "
+            "only a server that never serves tools should pass this"
+        ),
+    )
+    upgrade.add_argument(
+        "--no-console",
+        action="store_true",
+        help="skip relkit-console even when the host runs it",
+    )
     upgrade.add_argument(
         "--serve-listen-addr",
         help="explicit relkit-store listen address (for example :8080)",
@@ -1912,6 +2892,25 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--prefix", default="/usr/local/bin")
     upgrade.add_argument("--serve-only", action="store_true")
     upgrade.add_argument("--agent-only", action="store_true")
+    upgrade.add_argument(
+        "--root-key-id",
+        default="",
+        help="keyId of the server's one root; written into the agent config on the epoch upgrade",
+    )
+    upgrade.add_argument(
+        "--custody-manifest",
+        default="",
+        help="custody manifest filename the agent reads its keys from (default custody-manifest.json beside the config)",
+    )
+    upgrade.add_argument(
+        "--admin-state-file",
+        default="",
+        help=(
+            "path of the agent admin document "
+            "(default <stateDir>/admin.json, and <configDir>/relkit-agent-state/admin.json "
+            "when stateDir is unset)"
+        ),
+    )
     upgrade.add_argument(
         "--keep-backups",
         type=int,
@@ -1942,6 +2941,31 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TAG",
         help="require TAG to equal v{number} from VERSION.json",
     )
+
+    tools = sub.add_parser("tools", help="publish relkit tools to an agent (requirement 12.6)")
+    tools_sub = tools.add_subparsers(dest="tools_cmd", required=True)
+    tools_publish = tools_sub.add_parser(
+        "publish",
+        help="verify every tool against the official release, upload, then let the server sign",
+    )
+    tools_publish.add_argument("--server", required=True, help="agent base URL, for example https://updates.example")
+    tools_publish.add_argument("--dist", default="dist", help="directory holding the built tool files (default dist)")
+    tools_publish.add_argument(
+        "--release-manifest",
+        default="",
+        help="official relkit.release/1 manifest (default <dist>/manifest.json)",
+    )
+    tools_publish.add_argument("--version", default="", help="require the release version to equal this")
+    tools_publish.add_argument("--token", default="", help="deploy token; defaults to RELKIT_TOOLS_TOKEN")
+    tools_publish.add_argument(
+        "--base-url",
+        default="",
+        help=(
+            "public origin hosts download from; required when --server is a loopback "
+            "address, because these URLs are signed into the manifest"
+        ),
+    )
+    tools_publish.add_argument("--dry-run", action="store_true", help="print the plan, upload nothing")
 
     remote = sub.add_parser("remote", help=argparse.SUPPRESS)
     remote.add_argument("remote_cmd", choices=["probe", "apply", "migrate-serve", "prune-backups"])
@@ -1975,6 +2999,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             cmd_prune_backups(args)
         elif args.cmd == "version":
             cmd_version(args)
+        elif args.cmd == "tools":
+            cmd_tools(args)
         elif args.cmd == "remote":
             cmd_remote(args)
         else:

@@ -22,7 +22,6 @@ func writeAgentConfig(t *testing.T, site map[string]any) string {
 	raw := map[string]any{
 		"addr":     "127.0.0.1:8787",
 		"stateDir": filepath.Join(dir, "state"),
-		"products": map[string]any{"demo": map[string]any{"root": dir}},
 		"site":     site,
 	}
 	data, _ := json.Marshal(raw)
@@ -30,6 +29,9 @@ func writeAgentConfig(t *testing.T, site map[string]any) string {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Products are agent state now, not config: register the fixture product in
+	// the management document so the site rebuild has something to walk.
+	writeAdminDoc(t, filepath.Join(dir, "state", "admin.json"), map[string]string{"demo": dir}, "test-token", "demo")
 	return path
 }
 

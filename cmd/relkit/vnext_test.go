@@ -2,235 +2,167 @@ package main
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	"github.com/shichao402/relkit/internal/keys"
-	"github.com/shichao402/relkit/internal/vnext/bootstrap"
-	"github.com/shichao402/relkit/internal/vnext/catalog"
-	"github.com/shichao402/relkit/internal/vnext/contracts"
+	"github.com/shichao402/relkit/internal/custody"
+	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	"github.com/shichao402/relkit/internal/vnext/document"
-	"github.com/shichao402/relkit/internal/vnext/operator"
 	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/resolution"
-	"github.com/shichao402/relkit/internal/vnext/runtimeprofile"
-	"github.com/shichao402/relkit/internal/vnext/trust"
 )
 
-func TestResolveCommandWritesImmutableResolution(t *testing.T) {
-	t.Setenv("RELKIT_OPERATOR_PROFILE", "")
-	t.Setenv("RELKIT_DISTRIBUTION_CATALOG", "")
-	t.Setenv("RELKIT_DISTRIBUTION_ROOT", "")
-	t.Setenv("RELKIT_OPERATOR_BOOTSTRAP", "")
-	t.Setenv("RELKIT_PROJECT", "")
-	root := t.TempDir()
+const testProjectFile = "relkit.project.json"
+
+func testProjectDocument(t *testing.T) project.Document {
+	t.Helper()
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
-		seed[i] = byte(i + 19)
+		seed[i] = byte(i + 7)
 	}
-	keyID := "distribution-root"
 	publicKey := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	fingerprint, err := trust.Fingerprint(publicKey)
-	if err != nil {
-		t.Fatal(err)
+	return project.Document{
+		Schema:             project.Schema,
+		Product:            "demo",
+		Server:             "https://updates.example.invalid",
+		RootPublicKey:      base64.StdEncoding.EncodeToString(publicKey),
+		Channels:           []string{"dev", "stable"},
+		SelectorDimensions: []string{"os-arch"},
 	}
-	publicDocument := keys.PublicKeyDocument(keyID, seed)
-	publicBytes, err := rupv2.MarshalPublicKey(&publicDocument)
-	if err != nil {
-		t.Fatal(err)
-	}
-	publicPath := filepath.Join(root, "distribution.public.pb")
-	if err := os.WriteFile(publicPath, publicBytes, 0o644); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	digest := "sha256:" + strings.Repeat("a", 64)
-	productDocument := project.Document{
-		Schema:           project.Schema,
-		Product:          "demo",
-		Channels:         []string{"dev", "stable"},
-		OperatorRef:      "prod",
-		TrustFingerprint: fingerprint,
-		Roles:            []project.Role{project.RoleUpdaterHost, project.RoleSubscriber},
-		RuntimeProfileSubscriptions: []project.Subscription{
-			{ProductRef: "demo", RootFingerprint: fingerprint},
-		},
-		CapabilityFingerprint: project.CapabilityFingerprint{
-			OSArch:        []string{"darwin-arm64"},
-			Facades:       []string{"rust"},
-			Subscriptions: []string{"demo"},
-			Topology:      "self-update",
-			RequiredContracts: []contracts.Capability{
-				{Domain: contracts.DomainPublishProtocol, Peer: "agent", Min: 3, Max: 3},
-			},
-		},
-	}
-	projectPath := filepath.Join(root, "relkit.project.json")
+// stageFixture stages one version under root from an ArtifactSet plus the
+// project declaration. Both staging and release read the same
+// .relkit/cache/staged/<version> tree, so the shape lives in one helper.
+func stageFixture(t *testing.T, root, version string) {
+	t.Helper()
+	productDocument := testProjectDocument(t)
+	projectPath := filepath.Join(root, testProjectFile)
 	if err := document.Write(projectPath, productDocument); err != nil {
 		t.Fatal(err)
 	}
 
-	operatorDocument := operator.Document{
-		Schema:       operator.Schema,
-		DeploymentID: "prod",
-		ServerRelease: operator.ServerRelease{
-			Version:            "v1.0.0",
-			Commit:             strings.Repeat("b", 40),
-			DistributionDigest: digest,
-		},
-		SelectionPolicy: operator.SelectionExact,
-		Provides: []contracts.Capability{
-			{Domain: contracts.DomainPublishProtocol, Peer: "agent", Min: 2, Max: 3},
-		},
-		Sequence: 1,
-	}
-	if err := operatorDocument.Sign(keyID, seed); err != nil {
+	artifactRoot := filepath.Join(root, "artifacts")
+	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	operatorPath := filepath.Join(root, "operator.json")
-	if err := document.Write(operatorPath, operatorDocument); err != nil {
+	payload := []byte("payload-bytes")
+	if err := os.WriteFile(filepath.Join(artifactRoot, "payload.zip"), payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	catalogDocument := catalog.Document{
-		Schema:   catalog.Schema,
-		Sequence: 1,
-		Distributions: []catalog.Distribution{
+	sum := sha256.Sum256(payload)
+	value := artifactset.Document{
+		Schema:      artifactset.Schema,
+		Product:     productDocument.Product,
+		Version:     version,
+		ReleaseCode: 7,
+		Channel:     "dev",
+		Artifacts: []artifactset.Artifact{
 			{
-				Version:               "v1.0.0",
-				Commit:                strings.Repeat("b", 40),
-				Digest:                digest,
-				State:                 catalog.StateCertified,
-				CertificationSequence: 1,
-				Components: []catalog.Component{
-					{Name: "cli", Version: "v1.0.0", Platform: "darwin-arm64", SHA256: digest, Source: catalog.Source{Kind: "release-asset", URL: "https://example.invalid/cli"}},
-					{Name: "updater", Version: "v1.0.0", Platform: "darwin-arm64", SHA256: digest, Source: catalog.Source{Kind: "release-asset", URL: "https://example.invalid/updater"}},
-					{Name: "sdk-rust", Version: "v1.0.0", Platform: "all", SHA256: digest, Source: catalog.Source{Kind: "release-asset", URL: "https://example.invalid/sdk-rust.zip"}},
-				},
-				Provides: []contracts.Capability{
-					{Domain: contracts.DomainPublishProtocol, Peer: "agent", Min: 2, Max: 3},
-				},
+				ID:        "payload",
+				Kind:      artifactset.KindPayload,
+				Path:      "payload.zip",
+				Size:      int64(len(payload)),
+				SHA256:    "sha256:" + hex.EncodeToString(sum[:]),
+				Selectors: map[string]string{"os-arch": "windows-amd64"},
 			},
 		},
 	}
-	if err := catalogDocument.Sign(keyID, seed); err != nil {
-		t.Fatal(err)
-	}
-	catalogPath := filepath.Join(root, "catalog.json")
-	if err := document.Write(catalogPath, catalogDocument); err != nil {
-		t.Fatal(err)
-	}
-	runtimeDocument := runtimeprofile.Document{
-		Schema:          runtimeprofile.Schema,
-		Product:         "demo",
-		ProfileVersion:  1,
-		AllowedChannels: []string{"dev", "stable"},
-		DirectoryBootstrap: runtimeprofile.DirectoryBootstrap{
-			EntryURLs: []string{"https://updates.example.invalid/directory/demo.pb"},
-		},
-		RUPSchemaSet: "rup.v2",
-	}
-	if err := runtimeDocument.Sign(keyID, seed); err != nil {
-		t.Fatal(err)
-	}
-	runtimePath := filepath.Join(root, "runtime-profile.json")
-	if err := document.Write(runtimePath, runtimeDocument); err != nil {
+	artifactSetPath := filepath.Join(artifactRoot, "artifact-set.json")
+	if err := document.Write(artifactSetPath, value); err != nil {
 		t.Fatal(err)
 	}
 
-	outputPath := filepath.Join(root, ".relkit", "resolution.json")
-	if err := cmdResolve([]string{
+	if err := cmdStage([]string{
 		"--project", projectPath,
-		"--operator", operatorPath,
-		"--catalog", catalogPath,
-		"--trust-key", publicPath,
-		"--runtime-profile", "demo=" + runtimePath,
-		"--runtime-profile-root", "demo=" + publicPath,
-		"--out", outputPath,
+		"--artifact-set", artifactSetPath,
 	}); err != nil {
 		t.Fatal(err)
-	}
-	value, err := resolution.Load(outputPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if value.SelectedDistribution.Version != "v1.0.0" {
-		t.Fatalf("selected %q", value.SelectedDistribution.Version)
-	}
-	if err := cmdDoctor([]string{"--resolution", outputPath}); err != nil {
-		t.Fatal(err)
-	}
-
-	home := filepath.Join(root, "user-config")
-	if _, err := bootstrap.Write(home, bootstrap.Document{
-		Schema:            bootstrap.Schema,
-		OperatorRef:       "prod",
-		OperatorProfile:   operatorPath,
-		Catalog:           catalogPath,
-		DistributionRoots: []string{publicPath},
-		RuntimeProfiles: map[string]bootstrap.RuntimeProfile{
-			"demo": {Profile: runtimePath, Roots: []string{publicPath}},
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("RELKIT_HOME", home)
-	autoOutput := filepath.Join(root, "automatic", "resolution.json")
-	if err := cmdResolve([]string{
-		"--project", projectPath,
-		"--out", autoOutput,
-	}); err != nil {
-		t.Fatalf("resolve through logical Operator bootstrap: %v", err)
-	}
-	automatic, err := resolution.Load(autoOutput)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if automatic.Digest != value.Digest {
-		t.Fatalf("bootstrap resolution %s differs from explicit resolution %s", automatic.Digest, value.Digest)
-	}
-	if err := os.RemoveAll(filepath.Join(filepath.Dir(autoOutput), "control-plane")); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmdDoctor([]string{"--project", projectPath, "--resolution", autoOutput}); err != nil {
-		t.Fatalf("doctor through logical Operator bootstrap: %v", err)
-	}
-	t.Setenv("RELKIT_PROJECT", projectPath)
-	if err := cmdDoctor([]string{"--resolution", autoOutput}); err != nil {
-		t.Fatalf("doctor through wrapper-provided project context: %v", err)
 	}
 }
 
-func TestReleasedVerificationScenarioRecoversProductRootFromInstalledRuntimeProfile(t *testing.T) {
-	productDocument := project.Document{
-		Product: "demo",
-		RuntimeProfilePublication: &project.RuntimeProfilePublication{
-			RootFingerprint: "sha256:" + strings.Repeat("a", 64),
-			RUPSchemaSet:    "rup.v2",
+// TestStageFromArtifactSet covers the remaining staging input shape: an
+// ArtifactSet plus the project declaration. There is no resolution, no
+// Operator Profile, and no bundle in the path any more (requirements 12.1,
+// 14.9).
+func TestStageFromArtifactSet(t *testing.T) {
+	root := t.TempDir()
+	stageFixture(t, root, "1.2.3")
+
+	// A second stage of the same version must fail: staged releases are
+	// immutable.
+	projectPath := filepath.Join(root, testProjectFile)
+	artifactSetPath := filepath.Join(root, "artifacts", "artifact-set.json")
+	if err := cmdStage([]string{
+		"--project", projectPath,
+		"--artifact-set", artifactSetPath,
+	}); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestReleaseTokenFromCustodyManifest covers the token half of `relkit release`:
+// the token comes from the credential manifest by keyId, never from a
+// hard-coded variable name in a flag or in the project file (requirement 15).
+func TestReleaseTokenFromCustodyManifest(t *testing.T) {
+	root := t.TempDir()
+	tokenPath := filepath.Join(root, "token")
+	if err := os.WriteFile(tokenPath, []byte("ci-token-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(root, "custody-manifest.json")
+	manifest := custody.Manifest{
+		Schema: custody.ManifestSchema,
+		Scope:  custody.ScopeHostCI,
+		Keys: []custody.Entry{
+			{
+				KeyID:   "demo-ci-token",
+				Kind:    custody.KindTokenRef,
+				Purpose: "publish demo from CI",
+				Carrier: custody.CarrierFile,
+				Path:    tokenPath,
+			},
 		},
 	}
-	mapping := &bootstrap.Document{
-		ProductRoots: map[string][]string{
-			"demo": {"/keys/product.public.pb"},
-		},
-		RuntimeProfiles: map[string]bootstrap.RuntimeProfile{
-			"demo": {Roots: []string{"/keys/runtime.public.pb"}},
-		},
-	}
-	if got := releaseProductRootPaths(mapping, &productDocument); len(got) != 1 || got[0] != "/keys/product.public.pb" {
-		t.Fatalf("explicit Product RUP Root = %v", got)
+	if err := document.Write(manifestPath, manifest); err != nil {
+		t.Fatal(err)
 	}
 
-	delete(mapping.ProductRoots, "demo")
-	if got := releaseProductRootPaths(mapping, &productDocument); len(got) != 1 || got[0] != "/keys/runtime.public.pb" {
-		t.Fatalf("Runtime Profile Root fallback = %v", got)
+	value, err := releaseToken(manifestPath, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "ci-token-value" {
+		t.Fatalf("token=%q", value)
+	}
+	if _, err := releaseToken(manifestPath, "missing-key", true); err == nil {
+		t.Fatal("expected an unknown keyId to fail")
 	}
 
-	productDocument.RuntimeProfilePublication = nil
-	if got := releaseProductRootPaths(mapping, &productDocument); len(got) != 0 {
-		t.Fatalf("subscriber-only project unexpectedly reused Runtime Profile Root: %v", got)
+	// A dry run tolerates a machine with no CI secrets so a plan can be printed.
+	if value, err := releaseToken(filepath.Join(root, "absent.json"), "", false); err != nil || value != "" {
+		t.Fatalf("dry run token=%q err=%v", value, err)
+	}
+}
+
+// TestReleaseRequiresCIToken covers the execute gate: publishing needs an
+// explicit CI marker and a declared server, and a plan alone does not.
+func TestReleaseRequiresCIToken(t *testing.T) {
+	root := t.TempDir()
+	stageFixture(t, root, "1.2.3")
+	projectPath := filepath.Join(root, testProjectFile)
+	t.Setenv("RELKIT_AGENT_TRANSPORT_URL", "")
+	t.Setenv("RELKIT_CUSTODY_MANIFEST", "")
+	if err := cmdRelease([]string{"--project", projectPath, "--version", "1.2.3"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RELKIT_RELEASE_VIA_CI", "")
+	if err := cmdRelease([]string{"--project", projectPath, "--version", "1.2.3", "--execute"}); err == nil ||
+		!strings.Contains(err.Error(), "RELKIT_RELEASE_VIA_CI=1") {
+		t.Fatalf("err=%v", err)
 	}
 }

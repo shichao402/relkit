@@ -1,8 +1,13 @@
 # ADR 0021: ArtifactSet、Runtime Profile 与 Component Registry
 
-- 状态：Accepted（ArtifactSet、Runtime Profile、registry 与 facade 物化已实现）
+- 状态：**Superseded**（2026-10-22 由 [ADR 0023](0023-desktop-updater-epoch.md) 取代；逐条驳斥与保留项见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)，现行架构见 [`docs/architecture.md`](../architecture.md)）
+- 历史状态：Accepted（ArtifactSet、Runtime Profile、registry 与 facade 物化已实现）
 - 日期：2026-10-16
 - 依赖：[ADR 0019](0019-vnext-breaking-and-protocol-contracts.md)、[ADR 0020](0020-vnext-catalog-operator-resolution.md)
+- 取代：[ADR 0012](0012-single-component-registry.md) 的 Python `facets.py` 载体与宿主特判式门禁写法
+- 关联：[ADR 0010](0010-single-updater-engine.md)、[ADR 0013](0013-internal-update-payload.md)、[ADR 0014](0014-placement-and-version-library.md)、[ADR 0022](0022-vnext-certification-ops-skill.md)
+
+> **Superseded 说明（2026-10-22）**：`relkit.artifact-set/1`、`relkit.extension/1`、声明式 Component Registry、平台不对称合法、core 不得按仓库身份分支这些决策继续有效（见驳斥文档「保留项」）。被否定的是：facade 物化与 SDK 分发、Runtime Profile 的 Product RUP Root 信任方式（改为服务器单根）、能力维度中的 `audience`（为已退出的 Dec 服务）。现行设计见 [`docs/architecture.md`](../architecture.md)。
 - 取代：[ADR 0012](0012-single-component-registry.md) 的 Python `facets.py` 载体与宿主特判式门禁写法
 - 关联：[ADR 0010](0010-single-updater-engine.md)、[ADR 0013](0013-internal-update-payload.md)、[ADR 0014](0014-placement-and-version-library.md)、[ADR 0022](0022-vnext-certification-ops-skill.md)
 
@@ -34,7 +39,7 @@ vNext 不读取旧 `/1`、`/2`，保留有效语义：
 6. 平台不对称合法：例如 Windows 有 installer+payload，macOS 仅 installer；不得强迫全平台同构
 7. 产品元数据（如版本树所需 JSON）由宿主 producer 声明字段，**不进入 core 特判**
 
-Schema 草案：[`../design/vnext/schemas/relkit.artifact-set.1.schema.json`](../design/vnext/schemas/relkit.artifact-set.1.schema.json)
+Schema：[`../schemas/relkit.artifact-set.1.schema.json`](../schemas/relkit.artifact-set.1.schema.json)
 
 ### 2. `relkit.runtime-profile/1`
 
@@ -58,7 +63,7 @@ Schema 草案：[`../design/vnext/schemas/relkit.artifact-set.1.schema.json`](..
 
 Loom 发布 `loom` profile；Launcher 订阅 `loom-launcher` 与 `loom`，禁止手写另一仓 URL/公钥。
 
-Schema 草案：[`../design/vnext/schemas/relkit.runtime-profile.1.schema.json`](../design/vnext/schemas/relkit.runtime-profile.1.schema.json)
+Schema：[`../schemas/relkit.runtime-profile.1.schema.json`](../schemas/relkit.runtime-profile.1.schema.json)（已按单根模型重写：不再有 Product RUP Root，由服务器根签名）
 
 ### 3. Projection 与 Facade
 
@@ -96,7 +101,7 @@ vNext 只有一份声明式 registry；Go 代码、schema、打包与文档由�
 
 运维面 extension（mirror/CI/deploy）见 ADR 0022。
 
-Schema 草案：[`../design/vnext/schemas/relkit.extension.1.schema.json`](../design/vnext/schemas/relkit.extension.1.schema.json)
+Schema：[`../schemas/relkit.extension.1.schema.json`](../schemas/relkit.extension.1.schema.json)
 
 ### 6. 能力维度（禁止仓库身份）
 
@@ -109,7 +114,7 @@ core 与 registry **不得**包含 Loom、Launcher、SvnMergeTool、Dec 等仓�
 - 制品选择：platform / component / audience
 - 语言接入：projection / facade
 
-代表性场景映射见 [`../design/vnext/representative-scenarios.md`](../design/vnext/representative-scenarios.md)。
+代表性场景映射见 [ADR 0019-0022 驳斥](0019-0022-refutation.md)：场景文档随 `docs/design/vnext/` 删除，能力维度中的 `audience` 也一并删除；协议层 conformance 保留在 `conformance/`。
 
 ## 否决
 

@@ -58,6 +58,11 @@ class ErrorCode extends $pb.ProtobufEnum {
   static const ErrorCode ERROR_CODE_LAYOUT_UNSUPPORTED =
       ErrorCode._(20, _omitEnumNames ? '' : 'ERROR_CODE_LAYOUT_UNSUPPORTED');
 
+  /// The full-install handoff ran the verified installer and it exited with a
+  /// non-zero code that does not mean "user cancelled".
+  static const ErrorCode ERROR_CODE_INSTALLER_FAILED =
+      ErrorCode._(21, _omitEnumNames ? '' : 'ERROR_CODE_INSTALLER_FAILED');
+
   static const $core.List<ErrorCode> values = <ErrorCode>[
     ERROR_CODE_UNSPECIFIED,
     ERROR_CODE_NETWORK,
@@ -80,10 +85,11 @@ class ErrorCode extends $pb.ProtobufEnum {
     ERROR_CODE_CANCELED,
     ERROR_CODE_SIDECAR_NOT_FOUND,
     ERROR_CODE_LAYOUT_UNSUPPORTED,
+    ERROR_CODE_INSTALLER_FAILED,
   ];
 
   static final $core.List<ErrorCode?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 20);
+      $pb.ProtobufEnum.$_initByValueList(values, 21);
   static ErrorCode? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 
@@ -187,14 +193,14 @@ class Operation extends $pb.ProtobufEnum {
       Operation._(6, _omitEnumNames ? '' : 'OPERATION_CLEANUP');
   static const Operation OPERATION_CANCEL =
       Operation._(7, _omitEnumNames ? '' : 'OPERATION_CANCEL');
-  static const Operation OPERATION_SCHEDULER =
-      Operation._(8, _omitEnumNames ? '' : 'OPERATION_SCHEDULER');
   static const Operation OPERATION_LIST_INSTALLED =
       Operation._(9, _omitEnumNames ? '' : 'OPERATION_LIST_INSTALLED');
   static const Operation OPERATION_SWITCH_ACTIVE =
       Operation._(10, _omitEnumNames ? '' : 'OPERATION_SWITCH_ACTIVE');
   static const Operation OPERATION_ROLLBACK =
       Operation._(11, _omitEnumNames ? '' : 'OPERATION_ROLLBACK');
+  static const Operation OPERATION_DELETE_INSTALLED =
+      Operation._(12, _omitEnumNames ? '' : 'OPERATION_DELETE_INSTALLED');
 
   static const $core.List<Operation> values = <Operation>[
     OPERATION_UNSPECIFIED,
@@ -205,14 +211,14 @@ class Operation extends $pb.ProtobufEnum {
     OPERATION_STATUS,
     OPERATION_CLEANUP,
     OPERATION_CANCEL,
-    OPERATION_SCHEDULER,
     OPERATION_LIST_INSTALLED,
     OPERATION_SWITCH_ACTIVE,
     OPERATION_ROLLBACK,
+    OPERATION_DELETE_INSTALLED,
   ];
 
   static final $core.List<Operation?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 11);
+      $pb.ProtobufEnum.$_initByValueList(values, 12);
   static Operation? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 

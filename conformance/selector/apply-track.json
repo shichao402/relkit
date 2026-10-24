@@ -26,13 +26,13 @@
         "urls": ["https://x.invalid/update.zip"]
       },
       {
-        "id": "linux-installer",
-        "filename": "setup.deb",
+        "id": "macos-installer",
+        "filename": "setup.pkg",
         "size": 1,
         "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
         "kind": "installer",
-        "selectors": { "os": "linux" },
-        "urls": ["https://x.invalid/setup.deb"]
+        "selectors": { "os": "macos" },
+        "urls": ["https://x.invalid/setup.pkg"]
       }
     ]
   },
@@ -46,8 +46,8 @@
       "expectArtifactId": "z-windows-payload"
     },
     {
-      "clientSelectors": { "os": "linux", "apply": "relkit-payload" },
-      "expectArtifactId": "linux-installer"
+      "clientSelectors": { "os": "macos", "apply": "relkit-payload" },
+      "expectArtifactId": "macos-installer"
     }
   ]
 }

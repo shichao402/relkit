@@ -10,13 +10,15 @@ import "google/protobuf/timestamp.proto";
 // IPC window for this schema. Facade generators embed these as compile-time
 // constants. Products MUST NOT declare a different window in ClientProfile.
 //
-// Current: [3, 3]
+// Current: [4, 4]
 // Framing: 4-byte big-endian length + protobuf bytes on stdout.
-// Window 3 replaces Layout with Placement, adds payload apply disposition,
-// and moves version-library retention into LibraryPolicy. Because field
-// meanings changed rather than only growing, windows 1-2 are not compatible.
-// Window 2 adds list/switch/rollback ops, ApplyOp.install_only, and
-// InstallSpec.reserved_codes. Window 1 hosts remain compatible.
+// Window 4 is the desktop-epoch baseline (requirements 2.2, 3.1, 3.8). It
+// drops OPERATION_SCHEDULER, adds DeleteInstalledOp, and makes the engine the
+// only place that parses the embedded Runtime Bootstrap: hosts pass the
+// document text in ClientProfile.bootstrap and read product/channels back
+// from Capabilities. Windows 1-3 are rejected without fallback.
+// Window 3 replaced Layout with Placement, added payload apply disposition,
+// and moved version-library retention into LibraryPolicy.
 
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
@@ -40,6 +42,9 @@ enum ErrorCode {
   ERROR_CODE_CANCELED = 18;
   ERROR_CODE_SIDECAR_NOT_FOUND = 19;
   ERROR_CODE_LAYOUT_UNSUPPORTED = 20;
+  // The full-install handoff ran the verified installer and it exited with a
+  // non-zero code that does not mean "user cancelled".
+  ERROR_CODE_INSTALLER_FAILED = 21;
 }
 
 enum LastResult {
@@ -73,10 +78,11 @@ enum Operation {
   OPERATION_STATUS = 5;
   OPERATION_CLEANUP = 6;
   OPERATION_CANCEL = 7;
-  OPERATION_SCHEDULER = 8;
+  reserved 8; // retired OPERATION_SCHEDULER: "when to check" belongs to the host
   OPERATION_LIST_INSTALLED = 9;
   OPERATION_SWITCH_ACTIVE = 10;
   OPERATION_ROLLBACK = 11;
+  OPERATION_DELETE_INSTALLED = 12;
 }
 
 enum SessionPhase {
@@ -105,6 +111,16 @@ message RecoveryHelp {
   repeated RecoveryLink links = 2;
 }
 
+// ClientProfile is what the engine needs to reach a server. In window 4 the
+// host no longer parses the embedded Runtime Bootstrap: it forwards the
+// document text verbatim and the engine validates it (requirement 3.8).
+//
+// When bootstrap is non-empty the engine derives product, allowed channels,
+// entry URLs and the trusted key from it, then checks that it agrees with
+// expected_product and with the channel in Runtime. Fields duplicated here
+// (product, allowed_channels, entry_urls, trusted_keys) stay for hosts that
+// speak window 4 without a bootstrap; the engine rejects disagreement rather
+// than silently picking one side.
 message ClientProfile {
   string product = 1;
   repeated string allowed_channels = 2;
@@ -113,6 +129,25 @@ message ClientProfile {
   repeated string fallback_urls = 5;
   repeated TrustedKey trusted_keys = 6;
   RecoveryHelp recovery = 7;
+  // Verbatim relkit.runtime-bootstrap/2 JSON. Empty means the host resolved
+  // the profile itself.
+  string bootstrap = 8;
+  // Product name the host believes it is. When bootstrap is set the engine
+  // requires this to equal the bootstrap product.
+  string expected_product = 9;
+}
+
+// HandshakeReport is what the engine learned while validating the client
+// profile. It rides on Capabilities so a host that forwards its Runtime
+// Bootstrap verbatim (requirement 3.8) never needs its own parser: the engine
+// tells it the product, the channels it may use, and which one to preselect.
+message HandshakeReport {
+  string product = 1;
+  repeated string allowed_channels = 2;
+  string default_channel = 3;
+  reserved 4, 5; // retired resolutionDigest, profileDigest
+  string root_key_id = 6;
+  string root_fingerprint = 7;
 }
 
 message LibraryPolicy {
@@ -148,12 +183,6 @@ message CheckPolicy {
   google.protobuf.Duration after_failure = 2;
 }
 
-message SchedulerConfig {
-  bool check_on_start = 1;
-  bool force_on_start = 2;
-  CheckPolicy policy = 3;
-}
-
 message ClientHello {
   uint32 ipc_min = 1;
   uint32 ipc_max = 2;
@@ -166,6 +195,9 @@ message Capabilities {
   google.protobuf.Duration min_check_interval = 4;
   google.protobuf.Duration plan_ttl = 5;
   string engine_version = 6;
+  // Present once the engine has validated a profile; absent in the
+  // capabilities-only probe (--capabilities) and before negotiation.
+  HandshakeReport handshake = 7;
 }
 
 message CheckOp {
@@ -203,6 +235,17 @@ message SwitchActiveOp {
 
 message RollbackOp {}
 
+// DeleteInstalledOp removes one installed version from a LIBRARY install root
+// (requirement 3.1). The engine refuses to delete the version active.json
+// points at and any version the host declares in use, renames the directory
+// out of versions/ before removing it, and holds .relkit-apply.lock so it can
+// never race an apply.
+message DeleteInstalledOp {
+  int64 code = 1;
+  // Codes the host is currently running from, e.g. every open editor window.
+  repeated int64 in_use_codes = 2;
+}
+
 message InstalledVersion {
   int64 code = 1;
   string version = 2;
@@ -231,6 +274,7 @@ message UpdaterRequest {
     ListInstalledOp list_installed = 17;
     SwitchActiveOp switch_active = 18;
     RollbackOp rollback = 19;
+    DeleteInstalledOp delete_installed = 20;
   }
 }
 
@@ -456,6 +500,11 @@ message ApplySessionRecord {
   bool install_only = 19;
   bool requires_host_exit = 21;
   LibraryPolicy library = 22;
+  // Carried into the worker so a FULL_INSTALL session runs the installer
+  // instead of unpacking a payload.
+  ApplyDisposition disposition = 23;
+  // Relpath of the verified installer inside the staged root.
+  string installer_relpath = 24;
 }
 
 message JournalEntry {
