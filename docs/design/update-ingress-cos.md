@@ -372,10 +372,9 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 ### 10.2 剩余待办
 
 1. 按 §5 为 `directory/` / `index/` / `fallback/` 设短缓存，`manifest/` / `artifact/` 设长缓存。
-2. 证书续期自动化：独立程序 `relkit-cos-cert-renew` + systemd timer（与 agent 同机不同进程），配置 `targets[]`。
-3. 需要边缘加速时再挂 CDN 加速域名（届时 CNAME 改指 `*.cdn.dnsv1.com`，证书托管随之迁到 CDN）。
-4. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
-5. 公网：产品 `relkit.json` 只提供 site 文案；Makers projectId/region/tokenEnv 只在 agent 顶层配置。publish 更新 `site/` 与 `latest/` 后触发全量静态 rebuild。内网由同一 rebuild 写 `browse/`。
+2. 需要边缘加速时再挂 CDN 加速域名（届时 CNAME 改指 `*.cdn.dnsv1.com`，证书托管随之迁到 CDN）。
+3. ~~COS 控制台为 `raw.firoyang.com` 绑定自定义源站域名并部署证书~~ **已完成（2026-08-27）**：`raw` CNAME 已指向同一 COS 主机；桶自定义源站域名为 REST；证书 `aKgyuExf` 已签发并 `DeployCertificateInstance` 到 `ap-guangzhou|relkit-updates-1251882798|raw.firoyang.com`。匿名 `GET https://raw.firoyang.com/rup/directory/dec.pb` 返回 200。**不要动 `updates.`。**
+4. 公网：产品 `relkit.json` 只提供 site 文案；Makers projectId/region/tokenEnv 只在 agent 顶层配置。publish 更新 `site/` 与 `latest/` 后触发全量静态 rebuild。内网由同一 rebuild 写 `browse/`。
 
 ### 10.4 验证用第二 backend（成都桶）——已拆除
 
