@@ -80,8 +80,8 @@ func TestNormalizeSinksValidatesAndDefaults(t *testing.T) {
 
 func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0", "dev")
-	putWebmeta(t, shared, "cronkit", "2.0.0", "beta")
+	putWebmeta(t, shared, "loom", "1.0.0", "dev")
+	putWebmeta(t, shared, "svn-auto-merge", "2.0.0", "beta")
 	putCount := 0
 	oldFactory := createBackend
 	createBackend = func(_ string, cfg *config.Config, _ string) (backends.Backend, error) {
@@ -90,11 +90,11 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	t.Cleanup(func() { createBackend = oldFactory })
 
 	var products []Product
-	for _, id := range []string{"dec", "cronkit"} {
+	for _, id := range []string{"loom", "svn-auto-merge"} {
 		dir := t.TempDir()
 		profile := filepath.Join(dir, "profile.json")
 		raw := map[string]any{
-			"product": id, "signing": map[string]any{"keyId": "k1"},
+			"product":   id,
 			"backends":  map[string]any{"prod": map[string]any{"type": "s3-compatible"}},
 			"publishTo": []string{"prod"},
 		}
@@ -113,7 +113,7 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Products) != 2 || catalog.Products[0].ID != "cronkit" || catalog.Products[1].ID != "dec" {
+	if len(catalog.Products) != 2 || catalog.Products[0].ID != "loom" || catalog.Products[1].ID != "svn-auto-merge" {
 		t.Fatalf("catalog=%+v", catalog.Products)
 	}
 	// The state-dir dump copy exists and is servable (no browse/ prefix).
@@ -153,8 +153,8 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 		t.Fatal("unchanged rewrite rewrote status.json")
 	}
 
-	delete(shared, webmeta.SiteKey("dec"))
-	delete(shared, webmeta.LatestKey("dec", "dev"))
+	delete(shared, webmeta.SiteKey("loom"))
+	delete(shared, webmeta.LatestKey("loom", "dev"))
 	changed, err = Rebuild(cfg, products, nil)
 	if err == nil || !strings.Contains(err.Error(), "incomplete snapshot") {
 		t.Fatalf("missing prior product changed=%v err=%v", changed, err)
@@ -164,10 +164,70 @@ func TestRebuildDeploysAllProductsAndSkipsUnchanged(t *testing.T) {
 	}
 }
 
+// TestRebuildEmptyShelfRequiresExplicitPermission pins both halves of the empty
+// shelf rule: without permission a snapshot with no products is refused (the
+// page must not silently lose every product), and with permission the empty
+// catalog is written so a retired shelf stops advertising dead versions.
+func TestRebuildEmptyShelfRequiresExplicitPermission(t *testing.T) {
+	shared := map[string][]byte{}
+	putWebmeta(t, shared, "loom", "1.0.0", "dev")
+	oldFactory := createBackend
+	putCount := 0
+	createBackend = func(_ string, cfg *config.Config, _ string) (backends.Backend, error) {
+		return &memoryBackend{product: cfg.Product, data: shared, puts: &putCount}, nil
+	}
+	t.Cleanup(func() { createBackend = oldFactory })
+
+	dir := t.TempDir()
+	profile := filepath.Join(dir, "profile.json")
+	raw := map[string]any{
+		"product":   "loom",
+		"backends":  map[string]any{"prod": map[string]any{"type": "s3-compatible"}},
+		"publishTo": []string{"prod"},
+	}
+	data, _ := json.Marshal(raw)
+	if err := os.WriteFile(profile, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	products := []Product{{ID: "loom", Root: dir, Profile: profile}}
+	stateDir := t.TempDir()
+	cfg := Config{StateDir: stateDir, Sinks: []SinkSpec{{Type: SinkBackend, Backend: "prod"}}}
+
+	if _, err := Rebuild(cfg, products, nil); err != nil {
+		t.Fatalf("baseline rebuild: %v", err)
+	}
+
+	// The product's documents disappear, as they do after a retirement. Without
+	// permission this is an incomplete snapshot and must be refused.
+	for key := range shared {
+		if strings.Contains(key, "loom") {
+			delete(shared, key)
+		}
+	}
+	if _, err := Rebuild(cfg, products, nil); err == nil {
+		t.Fatal("empty shelf was deployed without explicit permission")
+	}
+
+	// With permission the empty catalog is published and lists no products.
+	emptyCfg := cfg
+	emptyCfg.AllowEmpty = true
+	changed, err := Rebuild(emptyCfg, products, nil)
+	if err != nil || !changed {
+		t.Fatalf("allowed empty rebuild changed=%v err=%v", changed, err)
+	}
+	catalog, err := browse.UnmarshalCatalog(shared[browse.CatalogKey()])
+	if err != nil {
+		t.Fatalf("empty catalog: %v", err)
+	}
+	if len(catalog.Products) != 0 {
+		t.Fatalf("empty catalog still lists %d product(s)", len(catalog.Products))
+	}
+}
+
 func TestRebuildRequiresExplicitSinks(t *testing.T) {
 	// A HostsBrowse backend alone is no longer a sink: rebuild must refuse.
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0", "dev")
+	putWebmeta(t, shared, "loom", "1.0.0", "dev")
 	oldFactory := createBackend
 	createBackend = func(_ string, cfg *config.Config, _ string) (backends.Backend, error) {
 		return &memoryBackend{product: cfg.Product, data: shared, puts: new(int)}, nil
@@ -176,7 +236,7 @@ func TestRebuildRequiresExplicitSinks(t *testing.T) {
 	dir := t.TempDir()
 	profile := filepath.Join(dir, "profile.json")
 	raw := map[string]any{
-		"product": "dec", "signing": map[string]any{"keyId": "k1"},
+		"product":   "loom",
 		"backends":  map[string]any{"prod": map[string]any{"type": "s3-compatible"}},
 		"publishTo": []string{"prod"},
 	}
@@ -184,7 +244,7 @@ func TestRebuildRequiresExplicitSinks(t *testing.T) {
 	if err := os.WriteFile(profile, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	products := []Product{{ID: "dec", Root: dir, Profile: profile}}
+	products := []Product{{ID: "loom", Root: dir, Profile: profile}}
 	_, err := Rebuild(Config{StateDir: t.TempDir()}, products, nil)
 	if err == nil || !strings.Contains(err.Error(), "no destination") {
 		t.Fatalf("expected no-destination error, got %v", err)
@@ -193,7 +253,7 @@ func TestRebuildRequiresExplicitSinks(t *testing.T) {
 
 func TestRebuildRejectsBackendSinkForUnknownOrIncapableBackend(t *testing.T) {
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0", "dev")
+	putWebmeta(t, shared, "loom", "1.0.0", "dev")
 	putCount := new(int)
 	oldFactory := createBackend
 	createBackend = func(name string, cfg *config.Config, _ string) (backends.Backend, error) {
@@ -208,7 +268,7 @@ func TestRebuildRejectsBackendSinkForUnknownOrIncapableBackend(t *testing.T) {
 	dir := t.TempDir()
 	profile := filepath.Join(dir, "profile.json")
 	raw := map[string]any{
-		"product": "dec", "signing": map[string]any{"keyId": "k1"},
+		"product": "loom",
 		"backends": map[string]any{
 			"prod":    map[string]any{"type": "s3-compatible"},
 			"noserve": map[string]any{"type": "s3-compatible"},
@@ -219,7 +279,7 @@ func TestRebuildRejectsBackendSinkForUnknownOrIncapableBackend(t *testing.T) {
 	if err := os.WriteFile(profile, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	products := []Product{{ID: "dec", Root: dir, Profile: profile}}
+	products := []Product{{ID: "loom", Root: dir, Profile: profile}}
 
 	_, err := Rebuild(Config{StateDir: t.TempDir(), Sinks: []SinkSpec{{Type: SinkBackend, Backend: "missing"}}}, products, nil)
 	if err == nil || !strings.Contains(err.Error(), "not defined") {
@@ -269,7 +329,7 @@ func TestDirectorySinkAtomicReplaceAndPrefixStrip(t *testing.T) {
 		browse.IndexKey():                []byte("<html>index</html>"),
 		browse.CatalogKey():              []byte("{}"),
 		browse.AssetKey("app.js"):        []byte("// app"),
-		webmeta.ChannelKey("dec", "dev"): webmetaJSON(`{"schema":"relkit.channel/1","product":"dec","channel":"dev","latest":{"version":"1.0.0"},"versions":[{"version":"1.0.0"}]}`),
+		webmeta.ChannelKey("loom", "dev"): webmetaJSON(`{"schema":"relkit.channel/1","product":"loom","channel":"dev","latest":{"version":"1.0.0"},"versions":[{"version":"1.0.0"}]}`),
 	}
 	if err := writeDumpDir(dir, dump); err != nil {
 		t.Fatal(err)
@@ -281,7 +341,7 @@ func TestDirectorySinkAtomicReplaceAndPrefixStrip(t *testing.T) {
 		"index.html":           "<html>index</html>",
 		"catalog.json":         "{}",
 		"assets/app.js":        "// app",
-		"channel/dec/dev.json": `{"schema":"relkit.channel/1","product":"dec","channel":"dev","latest":{"version":"1.0.0"},"versions":[{"version":"1.0.0"}]}`,
+		"channel/loom/dev.json": `{"schema":"relkit.channel/1","product":"loom","channel":"dev","latest":{"version":"1.0.0"},"versions":[{"version":"1.0.0"}]}`,
 	} {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || string(got) != body {
@@ -338,7 +398,7 @@ func TestDirectorySinkReplacesStalePrevious(t *testing.T) {
 
 func TestDirectorySinkServesFullRebuild(t *testing.T) {
 	shared := map[string][]byte{}
-	putWebmeta(t, shared, "dec", "1.0.0", "dev")
+	putWebmeta(t, shared, "loom", "1.0.0", "dev")
 	oldFactory := createBackend
 	createBackend = func(_ string, cfg *config.Config, _ string) (backends.Backend, error) {
 		return &memoryBackend{product: cfg.Product, data: shared, puts: new(int)}, nil
@@ -347,7 +407,7 @@ func TestDirectorySinkServesFullRebuild(t *testing.T) {
 	dir := t.TempDir()
 	profile := filepath.Join(dir, "profile.json")
 	raw := map[string]any{
-		"product": "dec", "signing": map[string]any{"keyId": "k1"},
+		"product":   "loom",
 		"backends":  map[string]any{"prod": map[string]any{"type": "s3-compatible"}},
 		"publishTo": []string{"prod"},
 	}
@@ -356,7 +416,7 @@ func TestDirectorySinkServesFullRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Join(t.TempDir(), "public")
-	products := []Product{{ID: "dec", Root: dir, Profile: profile}}
+	products := []Product{{ID: "loom", Root: dir, Profile: profile}}
 	cfg := Config{StateDir: t.TempDir(), Sinks: []SinkSpec{{Type: SinkDirectory, Path: root}}}
 	changed, err := Rebuild(cfg, products, nil)
 	if err != nil || !changed {
@@ -368,10 +428,10 @@ func TestDirectorySinkServesFullRebuild(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "assets", "app.js")); err != nil {
 		t.Fatalf("directory sink missing spa assets: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "channel", "dec", "dev.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "channel", "loom", "dev.json")); err != nil {
 		t.Fatalf("directory sink missing channel data snapshot: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "release", "dec", "dev", "1.0.0.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "release", "loom", "dev", "1.0.0.json")); err != nil {
 		t.Fatalf("directory sink missing release data snapshot: %v", err)
 	}
 	// Second run: same sinks + same dump is skipped.

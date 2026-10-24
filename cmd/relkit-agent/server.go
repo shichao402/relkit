@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,8 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shichao402/relkit/internal/agentadmin"
 	"github.com/shichao402/relkit/internal/config"
+	"github.com/shichao402/relkit/internal/custody"
 	"github.com/shichao402/relkit/internal/directory"
+	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/humansize"
 	"github.com/shichao402/relkit/internal/makers"
 	"github.com/shichao402/relkit/internal/model"
@@ -33,40 +35,60 @@ import (
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	vnextproject "github.com/shichao402/relkit/internal/vnext/project"
 	vnextrelease "github.com/shichao402/relkit/internal/vnext/release"
-	vnextresolution "github.com/shichao402/relkit/internal/vnext/resolution"
 	vnextruntimeprofile "github.com/shichao402/relkit/internal/vnext/runtimeprofile"
 )
 
-const errInstanceToken = "instance-wide agent tokens are gone: delete uploadToken, uploadTokenFile, and RELKIT_AGENT_TOKEN; issue a product token with `relkit-agent init -product <id>` (share a family with -share-with; CI env is RELKIT_UPLOAD_TOKEN)"
+const errLegacyProductConfig = "products and upload tokens are no longer config-file fields: register the product and issue a token through the admin surface (requirements 11.3, 13.6)"
 
+// ProductConfig is one registered product's on-host layout. Registration itself
+// lives in the admin store; this type is only how the server hands a product to
+// the code paths that need its tree.
 type ProductConfig struct {
-	Root                        string `json:"root"`
-	Profile                     string `json:"profile,omitempty"`
-	DistributionRootFingerprint string `json:"distributionRootFingerprint,omitempty"`
-	CandidateRootFingerprint    string `json:"candidateRootFingerprint,omitempty"`
-	OperatorDeploymentID        string `json:"operatorDeploymentId,omitempty"`
-	Lane                        string `json:"lane,omitempty"`
+	Root    string `json:"root"`
+	Profile string `json:"profile,omitempty"`
 }
 
+// FileConfig is the deployment-level configuration of one agent server. It
+// deliberately holds no product registration and no credential: products and
+// publisher tokens are agent state, managed through the admin API and stored
+// under stateDir (requirements 11.3, 13.6). A config file that still names
+// products is rejected at load time rather than silently ignored.
 type FileConfig struct {
-	Addr               string                   `json:"addr"`
-	UploadToken        string                   `json:"uploadToken,omitempty"`
-	UploadTokenFile    string                   `json:"uploadTokenFile,omitempty"`
-	UploadTokens       []UploadTokenEntry       `json:"uploadTokens,omitempty"`
-	MaxUpload          string                   `json:"maxUpload,omitempty"`
-	MaxFiles           int                      `json:"maxFiles,omitempty"`
-	PartSize           string                   `json:"partSize,omitempty"`
-	MinPartSize        string                   `json:"minPartSize,omitempty"`
-	MaxPartSize        string                   `json:"maxPartSize,omitempty"`
-	MaxParts           int                      `json:"maxParts,omitempty"`
-	MaxPartConcurrency int                      `json:"maxPartConcurrency,omitempty"`
-	UploadTTL          string                   `json:"uploadTTL,omitempty"`
-	StateDir           string                   `json:"stateDir,omitempty"`
-	MinPublishProtocol *int                     `json:"minPublishProtocol,omitempty"`
-	MaxPublishProtocol *int                     `json:"maxPublishProtocol,omitempty"`
-	Site               SiteConfig               `json:"site,omitempty"`
-	Products           map[string]ProductConfig `json:"products"`
+	Addr string `json:"addr"`
+	// RootKeyID names this server's one root in the custody manifest. The
+	// manifest resolves it to a carrier, so the config never learns a key path
+	// (requirements 10.1, 15.3).
+	RootKeyID string `json:"rootKeyId,omitempty"`
+	// CustodyManifest is the custody manifest this server reads its root from.
+	CustodyManifest string `json:"custodyManifest,omitempty"`
+	// AdminStateFile is where the management document lives (users, roles,
+	// products, token hashes). Unset means <stateDir>/admin.json.
+	AdminStateFile     string `json:"adminStateFile,omitempty"`
+	MaxUpload          string `json:"maxUpload,omitempty"`
+	MaxFiles           int    `json:"maxFiles,omitempty"`
+	PartSize           string `json:"partSize,omitempty"`
+	MinPartSize        string `json:"minPartSize,omitempty"`
+	MaxPartSize        string `json:"maxPartSize,omitempty"`
+	MaxParts           int    `json:"maxParts,omitempty"`
+	MaxPartConcurrency int    `json:"maxPartConcurrency,omitempty"`
+	UploadTTL          string `json:"uploadTTL,omitempty"`
+	StateDir           string `json:"stateDir,omitempty"`
+	// ToolsDir holds the released relkit tool files this server distributes.
+	// Unset means <stateDir>/tools.
+	ToolsDir string `json:"toolsDir,omitempty"`
+	// ToolsTokenFile is the deploy pipeline's credential for publishing tools.
+	// Tool publishing is a deployment action, not a product action: one server
+	// has one toolchain and one deploy pipeline (requirement 12.6), so it must
+	// not ride on a product upload token. Empty disables tool publishing.
+	ToolsTokenFile     string `json:"toolsTokenFile,omitempty"`
+	// PublicURL is the address hosts should put in their project config. Unset
+	// means the management API derives it from the request that asked.
+	PublicURL          string `json:"publicURL,omitempty"`
+	MinPublishProtocol *int   `json:"minPublishProtocol,omitempty"`
+	MaxPublishProtocol *int   `json:"maxPublishProtocol,omitempty"`
+	Site               SiteConfig `json:"site,omitempty"`
 }
+
 
 type SiteConfig struct {
 	// Makers is the pre-sinks spelling (ADR 0015 deprecated). It expands to a
@@ -77,33 +99,18 @@ type SiteConfig struct {
 	Sinks []siterebuild.SinkSpec `json:"sinks,omitempty"`
 }
 
-// UploadTokenEntry is a publisher credential. One file maps to one or more
-// product ids (family share-with). Two entries must not point at the same
-// file or the same secret bytes.
-type UploadTokenEntry struct {
-	File     string   `json:"file"`
-	Products []string `json:"products"`
-}
-
-type credential struct {
-	hash     []byte
-	products []string
-}
-
-func (c credential) allows(product string) bool {
-	for _, id := range c.products {
-		if id == product {
-			return true
-		}
-	}
-	return false
-}
-
 type Config struct {
-	Addr               string
-	credentials        []credential
+	Addr string
+	// RootKeyID is this server's one signing identity, named in the custody
+	// manifest. Root is the resolved material and is never serialized.
+	RootKeyID          string
+	CustodyManifest    string
+	Root               *config.RootKey
+	admin              *agentadmin.Store
+	credentials        []agentadmin.Credential
 	MaxUpload          int64
 	MaxFiles           int
+
 	PartSize           int64
 	MinPartSize        int64
 	MaxPartSize        int64
@@ -111,20 +118,26 @@ type Config struct {
 	MaxPartConcurrency int
 	UploadTTL          time.Duration
 	StateDir           string
+	// ToolsDir is where distributable relkit tool files live; empty means
+	// <StateDir>/tools.
+	ToolsDir string
+	// ToolsTokenHash gates POST /v1/tools. Nil means tool publishing is off,
+	// which is the safe default for a read-only mirror.
+	ToolsTokenHash     []byte
 	MinPublishProtocol int
 	MaxPublishProtocol int
-	Site               SiteConfig
-	Products           map[string]ProductConfig
-	ConfigPath         string
+	// PublicURL is what the panel prints in a connect config. Empty means the
+	// management API derives it from the request.
+	PublicURL  string
+	Site       SiteConfig
+	Products   map[string]ProductConfig
+	ConfigPath string
 }
 
 func LoadConfig(path string) (*Config, error) {
 	raw, err := loadFileConfig(path)
 	if err != nil {
 		return nil, err
-	}
-	if raw.Products == nil {
-		raw.Products = map[string]ProductConfig{}
 	}
 	if raw.Site.Makers != nil && len(raw.Site.Sinks) > 0 {
 		return nil, fmt.Errorf("site.makers and site.sinks are mutually exclusive; migrate site.makers to site.sinks [{\"type\":\"makers\",...}]")
@@ -165,10 +178,11 @@ func LoadConfig(path string) (*Config, error) {
 		MaxPartConcurrency: 16,
 		UploadTTL:          24 * time.Hour,
 		StateDir:           raw.StateDir,
+		ToolsDir:           raw.ToolsDir,
 		MinPublishProtocol: publishproto.Min,
 		MaxPublishProtocol: publishproto.Max,
 		Site:               raw.Site,
-		Products:           raw.Products,
+		PublicURL:          strings.TrimSpace(raw.PublicURL),
 		ConfigPath:         path,
 	}
 	// Default to the contract this build speaks. An operator can lower Min to
@@ -230,45 +244,62 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.StateDir == "" {
 		cfg.StateDir = filepath.Join(filepath.Dir(path), "relkit-agent-state")
 	}
-	creds, err := loadProductTokens(path, raw)
+	cfg.RootKeyID = strings.TrimSpace(raw.RootKeyID)
+	if strings.TrimSpace(raw.CustodyManifest) != "" {
+		manifestPath := raw.CustodyManifest
+		if !filepath.IsAbs(manifestPath) {
+			manifestPath = filepath.Join(filepath.Dir(path), manifestPath)
+		}
+		cfg.CustodyManifest = mustAbs(manifestPath)
+	}
+	// A server cannot sign anything without its root, and a root that does not
+	// match its registered public key would emit documents nobody can verify.
+	// Resolve it here so a bad manifest stops the process at startup instead of
+	// failing on the first publish (requirements 10.1, 15.2).
+	if cfg.RootKeyID != "" || cfg.CustodyManifest != "" {
+		if cfg.RootKeyID == "" {
+			return nil, fmt.Errorf("custodyManifest is set but rootKeyId is missing; name the keyId to read from the manifest")
+		}
+		if cfg.CustodyManifest == "" {
+			return nil, fmt.Errorf("rootKeyId %q is set but custodyManifest is missing; a server reads its root only through the custody manifest", cfg.RootKeyID)
+		}
+		manifest, err := custody.Load(cfg.CustodyManifest)
+		if err != nil {
+			return nil, fmt.Errorf("custody manifest: %w", err)
+		}
+		root, err := manifest.Root(cfg.RootKeyID)
+		if err != nil {
+			return nil, fmt.Errorf("custody manifest: %w", err)
+		}
+		cfg.Root = &config.RootKey{
+			KeyID:       root.KeyID,
+			Seed:        root.Seed,
+			PublicKey:   root.PublicKey,
+			Fingerprint: root.Fingerprint,
+		}
+	}
+	admin, err := openAdminStore(path, raw)
 	if err != nil {
 		return nil, err
 	}
-	cfg.credentials = creds
-	for name, p := range cfg.Products {
-		if strings.TrimSpace(p.Root) == "" {
-			return nil, fmt.Errorf("product %q: root is required", name)
+	cfg.admin = admin
+	if err := refreshAdminState(cfg); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(raw.ToolsTokenFile) != "" {
+		toolTokenPath := raw.ToolsTokenFile
+		if !filepath.IsAbs(toolTokenPath) {
+			toolTokenPath = filepath.Join(filepath.Dir(path), toolTokenPath)
 		}
-		root := p.Root
-		if !filepath.IsAbs(root) {
-			root = filepath.Join(filepath.Dir(path), root)
+		data, err := os.ReadFile(toolTokenPath)
+		if err != nil {
+			return nil, fmt.Errorf("toolsTokenFile: %w", err)
 		}
-		p.Root = mustAbs(root)
-		if strings.TrimSpace(p.Profile) == "" {
-			p.Profile = filepath.Join(filepath.Dir(path), "products", name+".json")
-		} else if !filepath.IsAbs(p.Profile) {
-			p.Profile = filepath.Join(filepath.Dir(path), p.Profile)
+		token := strings.TrimSpace(string(data))
+		if token == "" {
+			return nil, fmt.Errorf("toolsTokenFile: %s is empty", toolTokenPath)
 		}
-		p.Profile = mustAbs(p.Profile)
-		hasVNextPolicy := p.DistributionRootFingerprint != "" || p.CandidateRootFingerprint != "" || p.OperatorDeploymentID != "" || p.Lane != ""
-		if hasVNextPolicy {
-			if p.DistributionRootFingerprint == "" || p.OperatorDeploymentID == "" || p.Lane == "" {
-				return nil, fmt.Errorf("product %q: distributionRootFingerprint, operatorDeploymentId, and lane are all required for vNext", name)
-			}
-			switch vnextresolution.Identity(p.Lane) {
-			case vnextresolution.IdentityProduction:
-				if p.CandidateRootFingerprint != "" {
-					return nil, fmt.Errorf("product %q: production lane must not configure candidateRootFingerprint", name)
-				}
-			case vnextresolution.IdentityCandidate:
-				if p.CandidateRootFingerprint == "" {
-					return nil, fmt.Errorf("product %q: candidate lane requires candidateRootFingerprint", name)
-				}
-			default:
-				return nil, fmt.Errorf("product %q: lane must be production or candidate", name)
-			}
-		}
-		cfg.Products[name] = p
+		cfg.ToolsTokenHash = hashToken(token)
 	}
 	return cfg, nil
 }
@@ -278,6 +309,19 @@ func loadFileConfig(path string) (*FileConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The epoch upgrade keeps no reader for the old spelling. Silently ignoring
+	// `products` or `uploadTokens` would leave a server that looks configured and
+	// authorizes nobody, so a config file that still carries them is an error
+	// (requirements 11.3, 13.6).
+	var legacy map[string]json.RawMessage
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return nil, err
+	}
+	for _, field := range []string{"products", "uploadTokens", "uploadToken", "uploadTokenFile"} {
+		if _, found := legacy[field]; found {
+			return nil, fmt.Errorf("%s: %q is gone: %s", path, field, errLegacyProductConfig)
+		}
+	}
 	var raw FileConfig
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
@@ -285,81 +329,79 @@ func loadFileConfig(path string) (*FileConfig, error) {
 	return &raw, nil
 }
 
-func writeFileConfig(path string, cfg *FileConfig) error {
-	out, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
+// openAdminStore opens the management document. Its location defaults to
+// <stateDir>/admin.json so a deployment that never sets adminStateFile still has
+// one place for users, products and token hashes.
+func openAdminStore(path string, raw *FileConfig) (*agentadmin.Store, error) {
+	adminPath := strings.TrimSpace(raw.AdminStateFile)
+	if adminPath == "" {
+		stateDir := raw.StateDir
+		if stateDir == "" {
+			stateDir = filepath.Join(filepath.Dir(path), "relkit-agent-state")
+		}
+		adminPath = filepath.Join(stateDir, "admin.json")
+	} else if !filepath.IsAbs(adminPath) {
+		adminPath = filepath.Join(filepath.Dir(path), adminPath)
 	}
-	return os.WriteFile(path, append(out, '\n'), 0o644)
+	store, err := agentadmin.Open(mustAbs(adminPath))
+	if err != nil {
+		return nil, fmt.Errorf("admin state: %w", err)
+	}
+	return store, nil
 }
 
-func (e UploadTokenEntry) validate() error {
-	if strings.TrimSpace(e.File) == "" {
-		return fmt.Errorf("file is required")
-	}
-	if len(e.Products) == 0 {
-		return fmt.Errorf("products must list at least one id")
-	}
-	seen := map[string]bool{}
-	for _, id := range e.Products {
-		if err := model.CheckIdentifier(id, "product"); err != nil {
-			return err
+// loadAdminProducts projects the admin store's registrations into the on-host
+// layout the request path needs. Relative roots and profiles are resolved
+// against the config file, because registration records what the operator typed
+// and the agent runs from wherever the service was started.
+func loadAdminProducts(cfg *Config, admin *agentadmin.Store, configPath string) error {
+	products := map[string]ProductConfig{}
+	base := filepath.Dir(configPath)
+	for _, registered := range admin.Products() {
+		product := ProductConfig{Root: registered.Root, Profile: registered.Profile}
+		if strings.TrimSpace(product.Root) == "" {
+			return fmt.Errorf("product %q: root is required", registered.ID)
 		}
-		if seen[id] {
-			return fmt.Errorf("duplicate product %q in entry", id)
+		if !filepath.IsAbs(product.Root) {
+			product.Root = filepath.Join(base, product.Root)
 		}
-		seen[id] = true
+		product.Root = mustAbs(product.Root)
+		if strings.TrimSpace(product.Profile) == "" {
+			product.Profile = filepath.Join(base, "products", registered.ID+".json")
+		} else if !filepath.IsAbs(product.Profile) {
+			product.Profile = filepath.Join(base, product.Profile)
+		}
+		product.Profile = mustAbs(product.Profile)
+		products[registered.ID] = product
 	}
+	cfg.Products = products
 	return nil
 }
 
-func loadProductTokens(configPath string, raw *FileConfig) ([]credential, error) {
-	if raw.UploadToken != "" || raw.UploadTokenFile != "" {
-		return nil, fmt.Errorf("%s", errInstanceToken)
+// refreshAdminState projects the admin document into the runtime view: the
+// product map the request path reads and the live credential list. Both change
+// at runtime, so this is the one function that keeps them in step.
+func refreshAdminState(cfg *Config) error {
+	if cfg.admin == nil {
+		return nil
 	}
-	if strings.TrimSpace(os.Getenv("RELKIT_AGENT_TOKEN")) != "" {
-		return nil, fmt.Errorf("%s", errInstanceToken)
+	if err := loadAdminProducts(cfg, cfg.admin, cfg.ConfigPath); err != nil {
+		return err
 	}
-	var creds []credential
-	seenFile := map[string]bool{}
-	seenProduct := map[string]bool{}
-	seenHash := map[string]bool{}
-	for i, entry := range raw.UploadTokens {
-		if err := entry.validate(); err != nil {
-			return nil, fmt.Errorf("uploadTokens[%d]: %w", i, err)
-		}
-		products := append([]string(nil), entry.Products...)
-		for _, product := range products {
-			if seenProduct[product] {
-				return nil, fmt.Errorf("uploadTokens[%d]: duplicate product %q", i, product)
-			}
-			seenProduct[product] = true
-		}
-		path := entry.File
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(filepath.Dir(configPath), path)
-		}
-		if seenFile[path] {
-			return nil, fmt.Errorf("uploadTokens[%d]: token file already used by another product", i)
-		}
-		seenFile[path] = true
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("uploadTokens[%d]: %w", i, err)
-		}
-		token := strings.TrimSpace(string(data))
-		if token == "" {
-			return nil, fmt.Errorf("uploadTokens[%d]: %s is empty", i, path)
-		}
-		hash := hashToken(token)
-		key := hex.EncodeToString(hash)
-		if seenHash[key] {
-			return nil, fmt.Errorf("uploadTokens[%d]: duplicate token hash (share via one uploadTokens entry, not two files)", i)
-		}
-		seenHash[key] = true
-		creds = append(creds, credential{hash: hash, products: products})
+	cfg.credentials = cfg.admin.Credentials()
+	return nil
+}
+
+// reloadAdmin re-reads registrations and live credentials after a management
+// write. Product and token changes take effect without a restart, which is what
+// "issue a token in the panel" has to mean.
+func (s *Server) reloadAdmin() error {
+	if s.cfg.admin == nil {
+		return nil
 	}
-	return creds, nil
+	s.productMu.Lock()
+	defer s.productMu.Unlock()
+	return refreshAdminState(s.cfg)
 }
 
 func parseSize(text string) (int64, error) {
@@ -367,14 +409,41 @@ func parseSize(text string) (int64, error) {
 }
 
 type Server struct {
-	cfg           *Config
+	cfg *Config
+	// productMu guards cfg.Products and cfg.credentials. The management surface
+	// changes both at runtime (register a product, issue or revoke a token), so
+	// the request path cannot read them through an unsynchronized map.
+	productMu     sync.RWMutex
 	locks         sync.Map // product -> *sync.Mutex
 	siteMu        sync.Mutex
-	siteTriggerMu sync.Mutex
-	siteRunning   bool
-	sitePending   bool
-	idemMu        sync.Mutex
-	uploads       sync.Map // upload id -> *liveUpload
+	// allowEmptySite is set only by `site-rebuild -allow-empty`: it is the
+	// operator's explicit permission to write a snapshot with no products, used
+	// after retiring every product. Publish-triggered rebuilds never set it.
+	allowEmptySite bool
+	siteTriggerMu  sync.Mutex
+	siteRunning    bool
+	sitePending    bool
+	idemMu         sync.Mutex
+	uploads        sync.Map // upload id -> *liveUpload
+}
+
+// product returns one registration under the read lock.
+func (s *Server) product(id string) (ProductConfig, bool) {
+	s.productMu.RLock()
+	defer s.productMu.RUnlock()
+	product, ok := s.cfg.Products[id]
+	return product, ok
+}
+
+// productIDs lists registered products under the read lock.
+func (s *Server) productIDs() map[string]ProductConfig {
+	s.productMu.RLock()
+	defer s.productMu.RUnlock()
+	out := make(map[string]ProductConfig, len(s.cfg.Products))
+	for id, product := range s.cfg.Products {
+		out[id] = product
+	}
+	return out
 }
 
 func NewServer(cfg *Config) *Server {
@@ -403,6 +472,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/runtime-profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
 	mux.HandleFunc("/v1/unpublish", s.handleUnpublish)
+	// Tool distribution is the one read face a host CI reaches before it has
+	// any relkit code: the file plus its SSH signature, both rooted in the
+	// project's pinned public key (requirements 12.1, 12.2, 12.3).
+	mux.HandleFunc(toolsPrefix, s.handleTools)
+	mux.HandleFunc("/v1/tools", s.handleToolPublish)
+	// The Catalog names the tool version the server serves right now. A tool
+	// reads it after starting, on the same origin as the tool bytes.
+	mux.HandleFunc("/v1/catalog", s.handleCatalog)
+	// The management surface owns users, roles, products and tokens. The panel
+	// writes through here; it never touches the agent's storage (requirement 13.6).
+	mux.HandleFunc(adminPrefix, s.handleAdmin)
+	mux.HandleFunc(strings.TrimSuffix(adminPrefix, "/"), s.handleAdmin)
 	return mux
 }
 
@@ -446,14 +527,15 @@ func (s *Server) productLock(product string) *sync.Mutex {
 func (s *Server) rebuildSite(printer func(string)) (bool, error) {
 	s.siteMu.Lock()
 	defer s.siteMu.Unlock()
-	products := make([]siterebuild.Product, 0, len(s.cfg.Products))
-	for id, product := range s.cfg.Products {
+	registered := s.productIDs()
+	products := make([]siterebuild.Product, 0, len(registered))
+	for id, product := range registered {
 		products = append(products, siterebuild.Product{
 			ID: id, Root: product.Root, Profile: product.Profile,
 		})
 	}
 	return siterebuild.Rebuild(siterebuild.Config{
-		Sinks: s.cfg.Site.Sinks, StateDir: s.cfg.StateDir,
+		Sinks: s.cfg.Site.Sinks, StateDir: s.cfg.StateDir, AllowEmpty: s.allowEmptySite,
 	}, products, printer)
 }
 
@@ -499,26 +581,35 @@ func (s *Server) triggerSiteRebuild(product, version string) {
 	}()
 }
 
-func (s *Server) lookupCredential(r *http.Request) *credential {
+// credentials returns the live token hashes. The management surface replaces
+// this slice when a token is issued or revoked, so callers take a snapshot.
+func (s *Server) credentials() []agentadmin.Credential {
+	s.productMu.RLock()
+	defer s.productMu.RUnlock()
+	return append([]agentadmin.Credential(nil), s.cfg.credentials...)
+}
+
+func (s *Server) lookupCredential(r *http.Request) *agentadmin.Credential {
 	header := r.Header.Get("Authorization")
 	value, found := strings.CutPrefix(header, "Bearer ")
 	if !found {
 		return nil
 	}
 	presented := hashToken(strings.TrimSpace(value))
-	var matched *credential
-	for i := range s.cfg.credentials {
-		if subtle.ConstantTimeCompare(presented, s.cfg.credentials[i].hash) == 1 {
-			matched = &s.cfg.credentials[i]
+	credentials := s.credentials()
+	var matched *agentadmin.Credential
+	for i := range credentials {
+		if subtle.ConstantTimeCompare(presented, credentials[i].Hash) == 1 {
+			matched = &credentials[i]
 		}
 	}
 	return matched
 }
 
 func (s *Server) requireAuthFor(w http.ResponseWriter, r *http.Request, product string) bool {
-	if len(s.cfg.credentials) == 0 {
+	if len(s.credentials()) == 0 {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "uploads are disabled on this server", http.StatusMethodNotAllowed)
+		http.Error(w, "uploads are disabled on this server: no product token has been issued yet", http.StatusMethodNotAllowed)
 		return false
 	}
 	cred := s.lookupCredential(r)
@@ -527,8 +618,11 @@ func (s *Server) requireAuthFor(w http.ResponseWriter, r *http.Request, product 
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	if !cred.allows(product) {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	// A token is scoped to exactly one product, so an operator who reaches for the
+	// wrong product gets a message that names both sides instead of a bare
+	// forbidden (requirement 11.1).
+	if !cred.Allows(product) {
+		http.Error(w, fmt.Sprintf("forbidden: this token authorizes product %q, not %q", cred.Product, product), http.StatusForbidden)
 		return false
 	}
 	// Every publisher endpoint funnels through here, so the protocol handshake
@@ -566,7 +660,7 @@ func (s *Server) handleStaged(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid version", http.StatusBadRequest)
 		return
 	}
-	if _, ok := s.cfg.Products[product]; !ok {
+	if _, ok := s.product(product); !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
 	}
@@ -633,7 +727,10 @@ func writeStagedErr(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (string, error) {
-	pc := s.cfg.Products[product]
+	pc, ok := s.product(product)
+	if !ok {
+		return "", &stagedHTTPError{http.StatusNotFound, "unknown product"}
+	}
 	mu := s.productLock(product)
 	if !mu.TryLock() {
 		return "", &stagedHTTPError{http.StatusConflict, "publish or staged upload already in progress for this product"}
@@ -657,13 +754,8 @@ func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (st
 		return "", &stagedHTTPError{http.StatusBadRequest, "invalid staged tree: " + err.Error()}
 	}
 	// ADR 0019 §1 retired the release-policy.json control plane. A staged tree
-	// without vNext provenance is no longer publishable: the signed resolution
-	// digest is the only accepted proof of what the tree contains.
-	if stagedDocument.ResolutionDigest == "" {
-		_ = os.RemoveAll(dest)
-		log.Printf("staged tree %s/%s: no resolution digest", product, version)
-		return "", &stagedHTTPError{http.StatusBadRequest, "staged tree carries no vNext resolution digest; run 'relkit stage --artifact-set' to produce a vNext staged release"}
-	}
+	// carries its project declaration and ArtifactSet; validateVNextStaged
+	// proves they describe this product's staged release.
 	if err := s.validateVNextStaged(product, version, pc, stagedDocument); err != nil {
 		_ = os.RemoveAll(dest)
 		return "", &stagedHTTPError{http.StatusBadRequest, "invalid vNext staged tree: " + err.Error()}
@@ -675,60 +767,48 @@ func (s *Server) installStagedArchive(product, version, tmpPath, sum string) (st
 	return dest, nil
 }
 
+// validateVNextStaged proves a staged tree is what the server itself would
+// publish: the project declaration names this product, and the ArtifactSet
+// describes exactly the staged version, channel, and release code.
+//
+// There is no resolution, no signed input bundle, and no control-plane
+// watermark any more. The server has one root, so provenance is "this server
+// accepted this tree", not "some earlier signed snapshot authorised it"
+// (requirements 10.3, 14.4).
 func (s *Server) validateVNextStaged(
 	product string,
 	version string,
 	pc ProductConfig,
 	stagedDocument *model.StagedDocument,
 ) error {
-	if pc.DistributionRootFingerprint == "" || pc.OperatorDeploymentID == "" || pc.Lane == "" {
-		return fmt.Errorf("agent product is not configured with a vNext trust/lane policy")
+	if s.cfg.Root == nil {
+		return fmt.Errorf("agent has no server root: configure rootKeyId and custodyManifest so staged releases can be verified")
 	}
 	root := stage.StagingDir(pc.Root, version)
 	productDocument, err := vnextproject.Load(filepath.Join(root, vnextrelease.ProjectFile))
 	if err != nil {
 		return err
 	}
-	bundle, err := vnextresolution.LoadBundle(filepath.Join(root, vnextrelease.ResolutionBundleFile))
-	if err != nil {
-		return err
+	if productDocument.Product != product {
+		return fmt.Errorf("project document declares product %q, route is %q", productDocument.Product, product)
 	}
-	resolved, err := bundle.Verify(vnextresolution.BundlePolicy{
-		DistributionRootFingerprint: pc.DistributionRootFingerprint,
-		CandidateRootFingerprint:    pc.CandidateRootFingerprint,
-		OperatorDeploymentID:        pc.OperatorDeploymentID,
-		Identity:                    vnextresolution.Identity(pc.Lane),
-	})
-	if err != nil {
+	// The staged project must trust this same server: a host tree built against
+	// another server cannot be published here, because every document this
+	// server emits is signed with its one root.
+	if err := productDocumentRootMatches(productDocument, s.cfg.Root); err != nil {
 		return err
-	}
-	projectDigest, err := productDocument.Digest()
-	if err != nil {
-		return err
-	}
-	if projectDigest != resolved.ProjectDigest || productDocument.Product != product {
-		return fmt.Errorf("project document does not match verified resolution or route product")
 	}
 	if stagedDocument.Product != product || stagedDocument.Version != version {
 		return fmt.Errorf("staged product/version does not match route")
 	}
-	if stagedDocument.ResolutionDigest != resolved.Digest ||
-		stagedDocument.OperatorDeploymentId != resolved.Operator.DeploymentID ||
-		stagedDocument.ResolutionIdentity != string(resolved.Identity) {
-		return fmt.Errorf("staged provenance does not match verified resolution")
-	}
-	if !slices.Contains(resolved.AllowedChannels, stagedDocument.Channel) {
-		return fmt.Errorf("resolution identity %s does not allow channel %q", resolved.Identity, stagedDocument.Channel)
-	}
-	if resolved.Identity == vnextresolution.IdentityCandidate && stagedDocument.Channel == "stable" {
-		return fmt.Errorf("candidate resolution cannot stage stable")
+	if len(productDocument.Channels) != 0 && !slices.Contains(productDocument.Channels, stagedDocument.Channel) {
+		return fmt.Errorf("project does not declare channel %q", stagedDocument.Channel)
 	}
 	artifactDocument, err := artifactset.Load(filepath.Join(root, vnextrelease.ArtifactSetFile))
 	if err != nil {
 		return err
 	}
-	if artifactDocument.ResolutionDigest != resolved.Digest ||
-		artifactDocument.Product != product ||
+	if artifactDocument.Product != product ||
 		artifactDocument.Version != version ||
 		artifactDocument.Channel != stagedDocument.Channel {
 		return fmt.Errorf("ArtifactSet identity does not match staged release")
@@ -740,27 +820,27 @@ func (s *Server) validateVNextStaged(
 			stagedDocument.Code,
 		)
 	}
-	profileDigest, err := bundle.Operator.Digest()
-	if err != nil {
-		return err
-	}
-	catalogDigest, err := bundle.Catalog.Digest()
-	if err != nil {
-		return err
-	}
-	watermarkPath := filepath.Join(s.cfg.StateDir, "control-plane", product+"-"+pc.Lane+".json")
-	watermarks, err := vnextresolution.LoadWatermarks(watermarkPath)
-	if err != nil {
-		return err
-	}
-	if err := watermarks.AdvanceOperator(bundle.Operator.DeploymentID, bundle.Operator.Sequence, profileDigest); err != nil {
-		return err
-	}
-	if err := watermarks.AdvanceCatalog(resolved.AuthorityFingerprint, bundle.Catalog.Sequence, catalogDigest); err != nil {
-		return err
-	}
-	return watermarks.Write(watermarkPath)
+	return nil
 }
+
+// productDocumentRootMatches checks that the staged project trusts the root
+// this server signs with. The host writes that public key verbatim from what
+// the server handed out at product registration, so a mismatch means the tree
+// was built for a different deployment.
+func productDocumentRootMatches(document *vnextproject.Document, root *config.RootKey) error {
+	publicKey, err := document.RootKey()
+	if err != nil {
+		return err
+	}
+	if len(root.PublicKey) == 0 {
+		return fmt.Errorf("agent server root has no public key")
+	}
+	if !publicKey.Equal(root.PublicKey) {
+		return fmt.Errorf("project rootPublicKey does not match this server's root")
+	}
+	return nil
+}
+
 
 // parseStagedPath accepts /v1/staged/{product}/{version}[/...], including a
 // doubled slash when RELKIT_PUBLISH_URL was configured with a trailing slash.
@@ -850,14 +930,7 @@ func sha256HexEqual(presented, stored string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-func loadProductConfig(pc ProductConfig, version string) (*config.Config, string, error) {
-	stagedDocument, err := stage.LoadStaged(pc.Root, version)
-	if err != nil {
-		return nil, "", err
-	}
-	if stagedDocument.ResolutionDigest == "" {
-		return nil, "", fmt.Errorf("staged release %s carries no vNext resolution digest; the release-policy.json control plane is retired (ADR 0019 §1)", version)
-	}
+func loadProductConfig(pc ProductConfig, version string, root *config.RootKey) (*config.Config, string, error) {
 	productDocument, err := vnextproject.Load(filepath.Join(stage.StagingDir(pc.Root, version), vnextrelease.ProjectFile))
 	if err != nil {
 		return nil, "", err
@@ -866,17 +939,18 @@ func loadProductConfig(pc ProductConfig, version string) (*config.Config, string
 	if err != nil {
 		return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
 	}
-	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root)
+	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root, root)
 	if err != nil {
 		return nil, "", err
 	}
-	return cfg, "vNext project/resolution bundle + " + pc.Profile, nil
+	return cfg, "vNext project bundle + " + pc.Profile, nil
 }
 
 func mergeVNextPublishConfig(
 	productDocument *vnextproject.Document,
 	profile *config.PublishProfile,
 	productRoot string,
+	root *config.RootKey,
 ) (*config.Config, error) {
 	if productDocument == nil || profile == nil {
 		return nil, fmt.Errorf("vNext project and publish profile are required")
@@ -887,32 +961,11 @@ func mergeVNextPublishConfig(
 	if len(productDocument.Channels) == 0 {
 		return nil, fmt.Errorf("vNext publisher project must declare channels")
 	}
-	signing := map[string]any{}
-	if len(profile.Signing.Keys) > 0 {
-		keys := make([]any, 0, len(profile.Signing.Keys))
-		for _, key := range profile.Signing.Keys {
-			keys = append(keys, map[string]any{"keyId": key.KeyID, "privateKeyPath": key.PrivateKeyPath})
-		}
-		signing["keys"] = keys
-	} else {
-		signing["keyId"] = profile.Signing.KeyID
-		if profile.Signing.PrivateKeyPath != "" {
-			signing["privateKeyPath"] = profile.Signing.PrivateKeyPath
-		}
-	}
-	publicKeys := make([]any, 0, len(profile.Signing.PublicKeys))
-	for _, key := range profile.Signing.PublicKeys {
-		entry := map[string]any{"keyId": key.KeyID}
-		if key.PublicKeyBase64 != "" {
-			entry["publicKeyBase64"] = key.PublicKeyBase64
-		}
-		if key.Key != "" {
-			entry["key"] = key.Key
-		}
-		publicKeys = append(publicKeys, entry)
-	}
-	if len(publicKeys) > 0 {
-		signing["publicKeys"] = publicKeys
+	// One server, one root: every product this server publishes is signed by
+	// the same identity, so signing is not part of the product declaration and
+	// there is nothing per-product to assemble (requirement 10.5).
+	if root == nil {
+		return nil, fmt.Errorf("server root is required to publish: resolve the custody manifest root before merging the publish config")
 	}
 	cfg := &config.Config{
 		Root:           productRoot,
@@ -920,10 +973,11 @@ func mergeVNextPublishConfig(
 		DefaultChannel: productDocument.Channels[0],
 		Channels:       append([]string(nil), productDocument.Channels...),
 		CodeStrategy:   "explicit",
-		Signing:        signing,
+		RootKeyIDValue: root.KeyID,
 		Backends:       cloneBackendConfig(profile.Backends),
 		PublishTo:      append([]string(nil), profile.PublishTo...),
 	}
+	cfg.SetRoot(root)
 	// The vNext project document is the only site declaration a migrated
 	// product has: relkit.json is gone. Without this the publisher sees an
 	// empty SiteConfig, hasSiteCopy is always false, and site/<product>.json
@@ -936,34 +990,6 @@ func mergeVNextPublishConfig(
 			Homepage:    productDocument.Site.Homepage,
 		}
 	}
-	signers, err := cfg.LoadSigners()
-	if err != nil {
-		return nil, fmt.Errorf("vNext publish signer: %w", err)
-	}
-	trusted := map[string][]byte{}
-	if len(publicKeys) > 0 {
-		configured, err := cfg.TrustedPublicKeys()
-		if err != nil {
-			return nil, err
-		}
-		for keyID, publicKey := range configured {
-			trusted[keyID] = publicKey
-		}
-	}
-	for _, signer := range signers {
-		publicKey := signer.PublicKey()
-		if configured, ok := trusted[signer.KeyID]; ok {
-			if !slices.Equal(configured, publicKey) {
-				return nil, fmt.Errorf("vNext publish public key %q does not match its private signer", signer.KeyID)
-			}
-			continue
-		}
-		publicKeys = append(publicKeys, map[string]any{
-			"keyId":           signer.KeyID,
-			"publicKeyBase64": base64.StdEncoding.EncodeToString(publicKey),
-		})
-	}
-	signing["publicKeys"] = publicKeys
 	if profile.Directory != nil {
 		cfg.Directory = &config.DirectoryConfig{
 			PublishTo: append([]string(nil), profile.Directory.PublishTo...),
@@ -1104,7 +1130,7 @@ func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuthFor(w, r, req.Product) {
 		return
 	}
-	pc, ok := s.cfg.Products[req.Product]
+	pc, ok := s.product(req.Product)
 	if !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
@@ -1123,7 +1149,7 @@ func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	cfg, err := mergeVNextPublishConfig(&req.Project, profile, pc.Root)
+	cfg, err := mergeVNextPublishConfig(&req.Project, profile, pc.Root, s.cfg.Root)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"ok": false, "code": "runtime_profile.config_invalid", "error": err.Error(),
@@ -1140,7 +1166,10 @@ func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := vnextruntimeprofile.Publish(cfg, req.Project, vnextruntimeprofile.PublishOptions{
-		To: req.To, ProfileVersion: preview.DirectorySequence, DryRun: req.DryRun,
+		To:             req.To,
+		ProfileVersion: preview.DirectorySequence,
+		DryRun:         req.DryRun,
+		Signer:         envelope.Signer{KeyID: s.cfg.Root.KeyID, Seed: s.cfg.Root.Seed},
 	}, printer)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{
@@ -1209,7 +1238,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuthFor(w, r, req.Product) {
 		return
 	}
-	pc, ok := s.cfg.Products[req.Product]
+	pc, ok := s.product(req.Product)
 	if !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
@@ -1247,7 +1276,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	defer mu.Unlock()
 
-	cfg, source, err := loadProductConfig(pc, version)
+	cfg, source, err := loadProductConfig(pc, version, s.cfg.Root)
 	if err != nil {
 		http.Error(w, "load publish config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1271,31 +1300,37 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	logs = append(logs, "publish config: "+source)
 	printer := func(line string) { logs = append(logs, line) }
 	var runtimeProfileResult *vnextruntimeprofile.PublishResult
-	if staged.ResolutionDigest != "" {
+	if s.cfg.Root == nil {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "code": "release.root_unavailable",
+			"error": "agent server root is not resolved; configure rootKeyId and custodyManifest",
+			"log":   logs,
+		})
+		return
+	}
+	if !req.DryRun && cfg.Directory != nil {
+		// The profile is signed by the server root and points at the directory
+		// entries this release publishes to (requirements 10.4, 12.6). There is
+		// no per-product runtime profile root and no opt-in flag: every release
+		// carries one.
 		productDocument, projectErr := vnextproject.Load(filepath.Join(stage.StagingDir(cfg.Root, version), vnextrelease.ProjectFile))
 		if projectErr != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "code": "release.project_invalid", "error": projectErr.Error(), "log": logs})
 			return
 		}
-		if productDocument.RuntimeProfilePublication != nil {
-			if cfg.Directory == nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "code": "release.directory_missing", "error": "Runtime Profile publication requires directory configuration", "log": logs})
-				return
-			}
-			preview, previewErr := directory.Set(cfg, directory.Options{To: req.To, DryRun: true}, printer)
-			if previewErr != nil {
-				writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "release.directory_preflight_failed", "error": previewErr.Error(), "log": logs})
-				return
-			}
-			runtimeProfileResult, err = vnextruntimeprofile.Publish(cfg, *productDocument, vnextruntimeprofile.PublishOptions{
-				To:             req.To,
-				ProfileVersion: preview.DirectorySequence,
-				DryRun:         req.DryRun,
-			}, printer)
-			if err != nil {
-				writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "release.runtime_profile_failed", "error": err.Error(), "log": logs})
-				return
-			}
+		preview, previewErr := directory.Set(cfg, directory.Options{To: req.To, DryRun: true}, printer)
+		if previewErr != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "release.directory_preflight_failed", "error": previewErr.Error(), "log": logs})
+			return
+		}
+		runtimeProfileResult, err = vnextruntimeprofile.Publish(cfg, *productDocument, vnextruntimeprofile.PublishOptions{
+			To:             req.To,
+			ProfileVersion: preview.DirectorySequence,
+			Signer:         envelope.Signer{KeyID: s.cfg.Root.KeyID, Seed: s.cfg.Root.Seed},
+		}, printer)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "release.runtime_profile_failed", "error": err.Error(), "log": logs})
+			return
 		}
 	}
 	index, err := publish.Run(cfg, version, req.To, req.DryRun, req.AllowBackfill, req.AllowPartial, printer)
@@ -1345,14 +1380,14 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		}
 		directorySequence = directoryDocument.DirectorySequence
 	}
-	if !req.DryRun && (cfg.Directory != nil || staged.ResolutionDigest != "") {
-		if staged.ResolutionDigest != "" && cfg.Directory == nil {
+	if !req.DryRun {
+		if cfg.Directory == nil {
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"ok":       false,
 				"code":     "release.directory_missing",
 				"severity": "error",
 				"stage":    "verify-released",
-				"error":    "vNext releases require a consumer-visible directory",
+				"error":    "releases require a consumer-visible directory",
 				"product":  req.Product,
 				"version":  version,
 				"log":      logs,
@@ -1363,8 +1398,6 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 			Channel:                  staged.Channel,
 			To:                       req.To,
 			Version:                  version,
-			ResolutionDigest:         staged.ResolutionDigest,
-			OperatorDeploymentID:     staged.OperatorDeploymentId,
 			MinimumIndexSequence:     index.Sequence,
 			MinimumDirectorySequence: directorySequence,
 		}

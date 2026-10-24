@@ -52,6 +52,14 @@ type SinkSpec struct {
 type Config struct {
 	Sinks    []SinkSpec
 	StateDir string
+	// AllowEmpty is the operator's explicit permission to publish a snapshot
+	// with no products at all. It exists because emptying the shelf is a real
+	// operation (retiring every product, or rebuilding after an epoch change)
+	// and the complete-snapshot guard below would otherwise refuse to write the
+	// empty catalog, leaving a page that advertises products no longer served.
+	// Every other incomplete snapshot stays refused: the flag covers the whole
+	// set being empty, not one product going missing while others remain.
+	AllowEmpty bool
 }
 
 // Product is one configured product root plus its machine publish profile.
@@ -200,11 +208,11 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	inputs, backendsByName, err := collect(products, printer)
+	inputs, backendsByName, err := collect(products, siteCfg.AllowEmpty, printer)
 	if err != nil {
 		return false, err
 	}
-	if len(inputs) == 0 {
+	if len(inputs) == 0 && !siteCfg.AllowEmpty {
 		return false, fmt.Errorf("site rebuild found no published product data")
 	}
 	if len(sinks) == 0 {
@@ -217,7 +225,7 @@ func Rebuild(siteCfg Config, products []Product, printer Printer) (bool, error) 
 	status := Status{At: time.Now().UTC().Format(time.RFC3339)}
 	memberPath := filepath.Join(siteCfg.StateDir, "site", "members.json")
 	members := inputMembers(inputs)
-	if err := guardCompleteSnapshot(memberPath, products, members); err != nil {
+	if err := guardCompleteSnapshot(memberPath, products, members, siteCfg.AllowEmpty); err != nil {
 		return false, err
 	}
 	dump, err := browse.Build(inputs)
@@ -357,7 +365,11 @@ func inputMembers(inputs []browse.ProductData) []string {
 	return members
 }
 
-func guardCompleteSnapshot(path string, products []Product, current []string) error {
+// guardCompleteSnapshot refuses a snapshot that silently drops a product which
+// used to be published. The one deliberate exception is an operator asking for
+// an empty shelf: with allowEmpty there is no product left to accidentally miss,
+// and refusing would make "the shelf is now empty" unreachable.
+func guardCompleteSnapshot(path string, products []Product, current []string, allowEmpty bool) error {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -368,6 +380,9 @@ func guardCompleteSnapshot(path string, products []Product, current []string) er
 	var previous []string
 	if err := json.Unmarshal(data, &previous); err != nil {
 		return fmt.Errorf("site membership state: %w", err)
+	}
+	if allowEmpty && len(current) == 0 {
+		return nil
 	}
 	configured := map[string]bool{}
 	for _, product := range products {
@@ -404,7 +419,7 @@ func writeMembers(path string, members []string) error {
 // publish backends and backfills missing release details. Backends are also
 // indexed by profile name so declarative backend sinks can be resolved;
 // sinks are no longer derived from HostsBrowse.
-func collect(products []Product, printer Printer) ([]browse.ProductData, map[string][]productBackend, error) {
+func collect(products []Product, allowEmpty bool, printer Printer) ([]browse.ProductData, map[string][]productBackend, error) {
 	sorted := append([]Product(nil), products...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	var inputs []browse.ProductData
@@ -434,6 +449,14 @@ func collect(products []Product, printer Printer) ([]browse.ProductData, map[str
 		}
 		if len(siteRaw) == 0 {
 			printer("site rebuild: skip " + product.ID + " (no site document)")
+			if allowEmpty {
+				// Retiring every product removes its site document too, and this
+				// early exit would otherwise skip the backend registration that
+				// resolveSinks needs to find a destination for the empty dump.
+				for name, entries := range declared {
+					backendsByName[name] = append(backendsByName[name], entries...)
+				}
+			}
 			continue
 		}
 		siteDoc, err := webmeta.UnmarshalSite(siteRaw)
@@ -516,6 +539,15 @@ func collect(products []Product, printer Printer) ([]browse.ProductData, map[str
 			// its backend declaration must not be able to make the sink
 			// ambiguous (or hijack the dump destination) for the products that
 			// are served.
+			for name, entries := range declared {
+				backendsByName[name] = append(backendsByName[name], entries...)
+			}
+		} else if allowEmpty {
+			// An empty shelf is the one case where no product contributes a
+			// page, yet the empty dump still has to be written somewhere. The
+			// destinations come from the configured profiles, so the sink stays
+			// resolvable instead of failing with "not defined by any served
+			// product profile" exactly when the operator is retiring everything.
 			for name, entries := range declared {
 				backendsByName[name] = append(backendsByName[name], entries...)
 			}

@@ -1,5 +1,5 @@
 // relkit-agent [flags]                         run the server
-// relkit-agent init …                          internal: on-box config writer (relkit-ops agent policy drives it)
+// relkit-agent init -bootstrap                 mint the one-shot first-operator credential
 // relkit-agent site-rebuild [-config PATH]     rebuild the static release site
 // relkit-agent unpublish [flags]               remove one published version
 // relkit-agent -version
@@ -69,10 +69,15 @@ func run(argv []string) int {
 
 	srv := NewServer(cfg)
 	log.Printf("relkit-agent %s listening on %s (maxUpload %d partSize %d maxPartConcurrency %d)", version, cfg.Addr, cfg.MaxUpload, cfg.PartSize, cfg.MaxPartConcurrency)
+	if cfg.admin != nil {
+		log.Printf("admin state %s", cfg.admin.Path())
+		if cfg.admin.BootstrapLive() {
+			log.Printf("WARNING: no operator account yet; run `relkit-agent init -bootstrap` to create the first one")
+		}
+	}
+	log.Printf("products: %d, live product tokens: %d", len(cfg.Products), len(cfg.credentials))
 	if len(cfg.credentials) == 0 {
-		log.Printf("WARNING: no product upload tokens configured; write endpoints return 405")
-	} else {
-		log.Printf("product upload tokens: %d", len(cfg.credentials))
+		log.Printf("WARNING: no product token has been issued; write endpoints return 405")
 	}
 	server := newHTTPServer(cfg, logRequests(srv.Handler()))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -86,6 +91,10 @@ func runSiteRebuild(argv []string) int {
 	fs := flag.NewFlagSet("relkit-agent site-rebuild", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	configPath := fs.String("config", "relkit-agent.json", "agent config path")
+	// Emptying the shelf is an explicit operation. Without it the complete
+	// snapshot guard refuses to write a catalog with no products, which would
+	// leave the human page advertising versions that no longer exist.
+	allowEmpty := fs.Bool("allow-empty", false, "publish a snapshot with no products at all (after retiring every product)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -95,6 +104,7 @@ func runSiteRebuild(argv []string) int {
 		return 1
 	}
 	srv := NewServer(cfg)
+	srv.allowEmptySite = *allowEmpty
 	changed, err := srv.rebuildSite(func(line string) { fmt.Fprintln(os.Stdout, line) })
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -116,6 +126,7 @@ func runUnpublish(argv []string) int {
 	addr := fs.String("addr", "", "agent address (defaults to the configured addr)")
 	product := fs.String("product", "", "product id")
 	version := fs.String("version", "", "version to remove")
+	tokenFlag := fs.String("token", "", "product token (defaults to the RELKIT_UPLOAD_TOKEN environment variable)")
 	dryRun := fs.Bool("dry-run", false, "validate only, remove nothing")
 	var to []string
 	fs.Func("to", "target backend (repeatable)", func(value string) error { to = append(to, value); return nil })
@@ -123,7 +134,7 @@ func runUnpublish(argv []string) int {
 		return 2
 	}
 	if *product == "" || *version == "" {
-		fmt.Fprintln(os.Stderr, "usage: relkit-agent unpublish -product <id> -version <version> [-config PATH] [-addr HOST:PORT] [-to name] [--dry-run]")
+		fmt.Fprintln(os.Stderr, "usage: relkit-agent unpublish -product <id> -version <version> [-config PATH] [-addr HOST:PORT] [-to name] [--token TOKEN] [--dry-run]")
 		return 2
 	}
 
@@ -140,7 +151,7 @@ func runUnpublish(argv []string) int {
 		target = "127.0.0.1:8787"
 	}
 
-	token, err := productToken(cfg, *product)
+	token, err := productToken(*tokenFlag, *product)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -187,43 +198,19 @@ func runUnpublish(argv []string) int {
 	return 0
 }
 
-// productToken reads the plaintext token for product from the agent config's
-// uploadTokens entries. The CLI runs on the same host as the agent, so the
-// token files are readable with the same privileges.
-func productToken(cfg *Config, product string) (string, error) {
-	for _, cred := range cfg.credentials {
-		for _, id := range cred.products {
-			if id == product {
-				return credTokenFromFile(cfg, product)
-			}
-		}
+// productToken resolves the plaintext token for a CLI call. The server keeps
+// only hashes (requirement 11.3), so there is no file to read back: the caller
+// supplies the value, either with -token or through the same environment
+// variable a host CI uses.
+func productToken(flagValue, product string) (string, error) {
+	token := strings.TrimSpace(flagValue)
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("RELKIT_UPLOAD_TOKEN"))
 	}
-	return "", fmt.Errorf("product %q has no upload token entry in the agent config", product)
-}
-
-func credTokenFromFile(cfg *Config, product string) (string, error) {
-	// The token files are listed in the raw config; reload it to find the path.
-	raw, err := loadFileConfig(cfg.ConfigPath)
-	if err != nil {
-		return "", err
+	if token == "" {
+		return "", fmt.Errorf("no token for %q: pass -token or set RELKIT_UPLOAD_TOKEN", product)
 	}
-	for _, entry := range raw.UploadTokens {
-		for _, id := range entry.Products {
-			if id != product {
-				continue
-			}
-			path := entry.File
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(filepath.Dir(cfg.ConfigPath), path)
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return "", err
-			}
-			return strings.TrimSpace(string(data)), nil
-		}
-	}
-	return "", fmt.Errorf("no token file for %s", product)
+	return token, nil
 }
 
 func firstLine(data []byte) string {
