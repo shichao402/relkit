@@ -60,7 +60,28 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           await api.logout();
         } finally {
           setCsrfToken(null);
-          client.clear();
+          // A session read that started before the logout finished can still
+          // answer "ready"; cancelling it keeps that answer from resurrecting
+          // the panel the operator just left.
+          await client.cancelQueries({ queryKey: ["session"] });
+          // Writing the signed-out answer locally, instead of clearing the
+          // cache, is what actually gets the operator to the sign-in screen.
+          // Clearing drops the session query to "pending", and a pending
+          // session renders neither the panel nor the sign-in screen; the next
+          // refetch then answers from a cookie that may still be in flight, so
+          // the panel came back and a stale write answered "sign in to
+          // continue" on top of the page the operator just left.
+          client.setQueryData<SessionView>(["session"], (previous) => ({
+            ok: true,
+            gate: "login",
+            version: previous?.version ?? "",
+            agent: previous?.agent ?? "",
+          }));
+          // Cached reads belong to the session that just ended; drop them but
+          // keep the session answer written above.
+          client.removeQueries({
+            predicate: (query) => query.queryKey[0] !== "session",
+          });
         }
       },
     }),

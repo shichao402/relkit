@@ -204,22 +204,45 @@ function CreateUserDialog({
   const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [role, setRole] = React.useState("owner");
+  const [products, setProducts] = React.useState<string[]>([]);
   const [error, setError] = React.useState<ApiRequestError | null>(null);
+
+  // The agent refuses an owner with no products, so the dialog has to offer the
+  // same choice it refuses to go without. The list is the registered catalogue,
+  // read only while the dialog is open.
+  const catalogue = useQuery({
+    queryKey: ["products"],
+    queryFn: ({ signal }) => api.products(signal),
+    enabled: open,
+  });
+
+  const reset = () => {
+    setUsername("");
+    setPassword("");
+    setRole("owner");
+    setProducts([]);
+    setError(null);
+  };
 
   const create = useMutation({
     mutationFn: () =>
-      api.addUser({ username: username.trim(), password, role, products: [] }),
+      api.addUser({
+        username: username.trim(),
+        password,
+        role,
+        products: role === "admin" ? [] : products,
+      }),
     onSuccess: () => {
       toast.success(`账号 ${username.trim()} 已创建`);
       onCreated();
       onOpenChange(false);
-      setUsername("");
-      setPassword("");
-      setRole("owner");
-      setError(null);
+      reset();
     },
     onError: (error) => setError(error as ApiRequestError),
   });
+
+  const available = (catalogue.data?.products ?? []).filter((row) => row.registered);
+  const needsProduct = role !== "admin" && products.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -227,7 +250,7 @@ function CreateUserDialog({
         <DialogHeader>
           <DialogTitle>新建账号</DialogTitle>
           <DialogDescription>
-            创建后可以把具体产品授权给这个账号。管理员自动拥有全部产品。
+            角色决定能做什么，产品决定能管理哪些产品的发布。管理员自动拥有全部产品。
           </DialogDescription>
         </DialogHeader>
         <form
@@ -285,6 +308,44 @@ function CreateUserDialog({
               <option value="admin">管理员</option>
             </select>
           </div>
+          {role !== "admin" && (
+            <div className="space-y-1.5">
+              <Label>可管理的产品</Label>
+              {available.length === 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  还没有已注册的产品，创建后无法授权，请先注册产品。
+                </p>
+              ) : (
+                <div className="grid max-h-44 gap-1 overflow-y-auto rounded-md border p-2">
+                  {available.map((row) => (
+                    <label
+                      key={row.id}
+                      className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={products.includes(row.id)}
+                        aria-invalid={error?.field === "products" && needsProduct}
+                        onChange={(event) => {
+                          setProducts((current) =>
+                            event.target.checked
+                              ? [...current, row.id]
+                              : current.filter((id) => id !== row.id),
+                          );
+                        }}
+                      />
+                      <span className="font-mono text-xs">{row.id}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {needsProduct && (
+                <p className="text-muted-foreground text-xs">
+                  产品负责人至少需要一个产品，否则保存会被拒绝。
+                </p>
+              )}
+            </div>
+          )}
           {error && !error.field && (
             <p className="text-destructive text-sm" role="alert">
               {error.message}
@@ -298,7 +359,9 @@ function CreateUserDialog({
           <Button
             type="submit"
             form="create-user"
-            disabled={create.isPending || !username.trim() || !password}
+            disabled={
+              create.isPending || !username.trim() || !password || needsProduct
+            }
           >
             {create.isPending ? "创建中…" : "创建"}
           </Button>

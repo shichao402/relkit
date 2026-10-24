@@ -35,6 +35,33 @@ export class ApiRequestError extends Error {
   }
 }
 
+/** Refusals that come back as a fixed English sentence: the panel answers in
+ *  Chinese, so they are translated here once instead of in every screen. Only
+ *  whole messages are listed; a message with a computed tail (a path, an OS
+ *  error) is left alone because half-translating it would be worse. */
+const messageTranslations: Record<string, string> = {
+  "sign in to continue": "登录已失效，请重新登录",
+  "a product owner needs at least one product": "产品负责人至少要授权一个产品",
+  "only an administrator can browse the file tree": "只有管理员可以浏览文件树",
+  "missing or stale CSRF token; reload the page": "请求已过期，请重新加载页面",
+  "the panel has no agent configured": "控制台没有配置 agent",
+  "no such API endpoint": "接口不存在",
+  "no such product": "产品不存在",
+  "no such directory": "目录不存在",
+  "no such user action": "用户操作不存在",
+  "no such token action": "令牌操作不存在",
+  "method not allowed": "不支持该请求方法",
+  "invalid directory": "目录参数无效",
+  "request body is too large": "请求体过大",
+  "could not read the request body": "无法读取请求体",
+};
+
+/** Turns a refusal into the sentence the panel shows. Unknown messages pass
+ *  through verbatim: hiding the reason a call failed is worse than English. */
+export function translateApiMessage(message: string): string {
+  return messageTranslations[message.trim()] ?? message;
+}
+
 /** The CSRF token changes with every session, so it is held here and set by the
  *  session query rather than read from a cookie (the browser cannot read the
  *  signed one, and it must not be in a place a cross-site page can guess). */
@@ -84,7 +111,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw new ApiRequestError(
       response.status,
       envelope.code ?? "http_" + response.status,
-      envelope.message ?? (text || `请求失败（HTTP ${response.status}）`),
+      translateApiMessage(
+        envelope.message ?? (text || `请求失败（HTTP ${response.status}）`),
+      ),
       envelope.field,
     );
   }
