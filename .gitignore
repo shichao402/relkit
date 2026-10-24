@@ -9,6 +9,17 @@ tmp/
 *.private.json
 coverage.out
 
+# The console front end's build output is committed on purpose: `go build` on a
+# Go-only checkout must work, since cmd/relkit-console/internal/webui embeds it.
+!cmd/relkit-console/internal/webui/dist/
+!cmd/relkit-console/internal/webui/dist/**
+
+# Front-end dependencies are restored with npm ci.
+cmd/relkit-console/web/node_modules/
+
+# TypeScript incremental build caches (`tsc -b` writes these next to the configs).
+*.tsbuildinfo
+
 __pycache__/
 *.pyc
 

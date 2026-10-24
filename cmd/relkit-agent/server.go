@@ -84,6 +84,11 @@ type FileConfig struct {
 	// PublicURL is the address hosts should put in their project config. Unset
 	// means the management API derives it from the request that asked.
 	PublicURL          string `json:"publicURL,omitempty"`
+	// ProductRootParent is where a product registered without an explicit root
+	// gets its tree: <productRootParent>/<id>. Unset means the agent infers it
+	// from the products already registered; there is no hardcoded fallback,
+	// because a guessed path the service user cannot create only fails later.
+	ProductRootParent  string `json:"productRootParent,omitempty"`
 	MinPublishProtocol *int   `json:"minPublishProtocol,omitempty"`
 	MaxPublishProtocol *int   `json:"maxPublishProtocol,omitempty"`
 	Site               SiteConfig `json:"site,omitempty"`
@@ -129,6 +134,9 @@ type Config struct {
 	// PublicURL is what the panel prints in a connect config. Empty means the
 	// management API derives it from the request.
 	PublicURL  string
+	// ProductRootParent is the configured parent for default product roots.
+	// Empty means infer from existing registrations (see productRootParent).
+	ProductRootParent string
 	Site       SiteConfig
 	Products   map[string]ProductConfig
 	ConfigPath string
@@ -184,6 +192,12 @@ func LoadConfig(path string) (*Config, error) {
 		Site:               raw.Site,
 		PublicURL:          strings.TrimSpace(raw.PublicURL),
 		ConfigPath:         path,
+	}
+	if parent := strings.TrimSpace(raw.ProductRootParent); parent != "" {
+		if !filepath.IsAbs(parent) {
+			parent = filepath.Join(filepath.Dir(path), parent)
+		}
+		cfg.ProductRootParent = filepath.Clean(parent)
 	}
 	// Default to the contract this build speaks. An operator can lower Min to
 	// ride out a publisher rollout, or set 0 to disable the handshake. Max

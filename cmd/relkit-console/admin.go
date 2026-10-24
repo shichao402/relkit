@@ -24,11 +24,9 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -78,14 +76,6 @@ const (
 	gateSetup
 	gateLogin
 )
-
-type authPage struct {
-	pageChrome
-	Action string
-	Next   string
-	Error  string
-	Agent  string
-}
 
 func resolveAdminPath(rootPath, configPath, configured string) string {
 	configured = strings.TrimSpace(configured)
@@ -406,293 +396,21 @@ func expireCookie() *http.Cookie {
 	}
 }
 
-func panelUsername(r *http.Request) string {
-	u, _ := r.Context().Value(panelUserKey{}).(string)
-	return u
-}
-
-// panelAgentSession is the bearer stored in the request context by
-// requirePanelAuth, so a page handler can call the agent without re-reading the
-// cookie.
-func panelAgentSession(r *http.Request) string {
-	session, _ := r.Context().Value(panelAgentKey{}).(string)
-	return session
-}
-
+// panelAgentKey carries the agent bearer through the request context.
 type panelAgentKey struct{}
 
-func (c *console) stampChrome(r *http.Request, data any) {
-	user := panelUsername(r)
-	if user == "" {
-		return
-	}
-	switch page := data.(type) {
-	case *portalPage:
-		page.LoggedIn = true
-		page.Username = user
-	case *productPage:
-		page.LoggedIn = true
-		page.Username = user
-	case *listingPage:
-		page.LoggedIn = true
-		page.Username = user
-	case *authPage:
-		page.LoggedIn = true
-		page.Username = user
-	case *panelPage:
-		page.LoggedIn = true
-		page.Username = user
-	}
-}
-
-func (c *console) requirePanelAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if session, ok := c.admin.session(r); ok {
-			next(w, withPanel(r, session))
-			return
-		}
-		switch c.admin.gate() {
-		case gateSetup:
-			http.Redirect(w, r, adminSetupPath, http.StatusFound)
-		case gateLogin:
-			target := adminLoginPath
-			if next := r.URL.RequestURI(); next != "" && next != adminPath {
-				target += "?next=" + url.QueryEscape(next)
-			}
-			http.Redirect(w, r, target, http.StatusFound)
-		case gateUnavailable:
-			c.serveAgentUnavailable(w, r)
-		default:
-			c.servePanelLocked(w, r)
-		}
-	}
-}
-
 // withPanel stamps the signed-in operator and the agent bearer onto the request
-// context, so page handlers can call the agent without re-reading the cookie.
+// context, so an API handler can call the agent without re-reading the cookie.
 func withPanel(r *http.Request, session signedSession) *http.Request {
 	ctx := context.WithValue(r.Context(), panelUserKey{}, session.User)
 	ctx = context.WithValue(ctx, panelAgentKey{}, session.Agent)
 	return r.WithContext(ctx)
 }
 
-func (c *console) serveAdminLogin(w http.ResponseWriter, r *http.Request) {
-	if session, ok := c.admin.session(r); ok {
-		http.Redirect(w, withPanel(r, session), safeNext(r.URL.Query().Get("next")), http.StatusFound)
-		return
-	}
-	switch r.Method {
-	case http.MethodGet, http.MethodHead:
-		c.renderAuth(w, r, "login", "", "")
-	case http.MethodPost:
-		if !sameOriginPOST(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			c.renderAuth(w, r, "login", "Could not read the form.", r.FormValue("next"))
-			return
-		}
-		next := safeNext(r.FormValue("next"))
-		agent := c.admin.agentClient()
-		if agent == nil {
-			c.serveAgentUnavailable(w, r)
-			return
-		}
-		login, err := agent.Login(r.FormValue("username"), r.FormValue("password"))
-		if err != nil {
-			sleepAuthFail()
-			c.renderAuth(w, r, "login", loginErrorText(err), next)
-			return
-		}
-		c.setSession(w, login)
-		http.Redirect(w, r, next, http.StatusFound)
-	default:
-		w.Header().Set("Allow", "GET, HEAD, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (c *console) serveAdminSetup(w http.ResponseWriter, r *http.Request) {
-	if session, ok := c.admin.session(r); ok {
-		http.Redirect(w, withPanel(r, session), adminPath, http.StatusFound)
-		return
-	}
-	switch c.admin.gate() {
-	case gateSetup:
-	case gateLogin:
-		http.Redirect(w, r, adminLoginPath, http.StatusFound)
-		return
-	case gateUnavailable:
-		c.serveAgentUnavailable(w, r)
-		return
-	default:
-		c.servePanelLocked(w, r)
-		return
-	}
-	switch r.Method {
-	case http.MethodGet, http.MethodHead:
-		c.renderAuth(w, r, "setup", "", "")
-	case http.MethodPost:
-		if !sameOriginPOST(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			c.renderAuth(w, r, "setup", "Could not read the form.", "")
-			return
-		}
-		if r.FormValue("password") != r.FormValue("password2") {
-			c.renderAuth(w, r, "setup", "Passwords do not match.", "")
-			return
-		}
-		agent := c.admin.agentClient()
-		if agent == nil {
-			c.serveAgentUnavailable(w, r)
-			return
-		}
-		login, err := agent.Bootstrap(
-			r.FormValue("bootstrap"),
-			r.FormValue("username"),
-			r.FormValue("password"),
-		)
-		if err != nil {
-			sleepAuthFail()
-			// One message for every refusal: a wrong bootstrap and a consumed one
-			// look the same from outside, which is what keeps this form from
-			// becoming a probe for whether a credential is live.
-			c.renderAuth(w, r, "setup", "Could not create the account.", "")
-			return
-		}
-		c.setSession(w, login)
-		http.Redirect(w, r, adminPath, http.StatusFound)
-	default:
-		w.Header().Set("Allow", "GET, HEAD, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (c *console) serveAdminLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, HEAD, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	// Best effort: the agent session dies with the cookie either way, and a
-	// failed logout call must not leave the operator stuck signed in.
-	if session, ok := c.admin.session(r); ok {
-		if agent := c.admin.agentClient(); agent != nil {
-			_ = agent.Logout(session.Agent)
-		}
-	}
-	http.SetCookie(w, expireCookie())
-	http.Redirect(w, r, adminLoginPath, http.StatusFound)
-}
-
-func (c *console) servePanelLocked(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	c.renderAuth(w, r, "locked", "", "")
-}
-
-// serveAgentUnavailable is its own screen because the fix is different from
-// every other failure: the panel is fine, the server it manages is not.
-func (c *console) serveAgentUnavailable(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	c.renderAuth(w, r, "unavailable", "", "")
-}
-
-func (c *console) renderAuth(w http.ResponseWriter, r *http.Request, mode, errMsg, next string) {
-	title := "Sign in"
-	switch mode {
-	case "setup":
-		title = "Create operator"
-	case "locked":
-		title = "Panel locked"
-	case "unavailable":
-		title = "Agent unavailable"
-	}
-	page := &authPage{
-		pageChrome: pageChrome{Title: title, Version: version},
-		Action:     r.URL.Path,
-		Next:       next,
-		Error:      errMsg,
-	}
-	if agent := c.admin.agentClient(); agent != nil {
-		page.Agent = agent.base
-	}
-	c.renderPage(w, r, mode, page)
-}
-
-func (c *console) setSession(w http.ResponseWriter, login agentLogin) {
-	cookie, err := c.admin.issueCookie(signedSession{
-		User:    login.User.Username,
-		Agent:   login.Session,
-		Display: string(login.User.Role),
-	})
-	if err != nil {
-		return
-	}
-	http.SetCookie(w, cookie)
-}
-
-// loginErrorText turns an agent refusal into something an operator can act on
-// without leaking whether the account exists.
-func loginErrorText(err error) string {
-	var refusal *agentError
-	if errors.As(err, &refusal) {
-		switch {
-		case refusal.Unauthorized():
-			return "Wrong username or password."
-		case refusal.StatusCode == http.StatusServiceUnavailable:
-			return "The agent has no admin state configured."
-		}
-		return refusal.Message
-	}
-	return "The agent is unreachable: " + err.Error()
-}
-
 func sleepAuthFail() {
 	if authFailDelay > 0 {
 		time.Sleep(authFailDelay)
 	}
-}
-
-func sameOriginPOST(r *http.Request) bool {
-	if origin := r.Header.Get("Origin"); origin != "" {
-		u, err := url.Parse(origin)
-		return err == nil && strings.EqualFold(u.Host, r.Host)
-	}
-	if ref := r.Header.Get("Referer"); ref != "" {
-		u, err := url.Parse(ref)
-		return err == nil && strings.EqualFold(u.Host, r.Host)
-	}
-	return true
-}
-
-func safeNext(raw string) string {
-	if raw == "" {
-		return adminPath
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.IsAbs() || u.Host != "" {
-		return adminPath
-	}
-	if !strings.HasPrefix(u.Path, "/-/") {
-		return adminPath
-	}
-	switch u.Path {
-	case adminLoginPath, adminSetupPath, adminLogoutPath:
-		return adminPath
-	}
-	return u.RequestURI()
 }
 
 func printPanelNote(out io.Writer, path string) {

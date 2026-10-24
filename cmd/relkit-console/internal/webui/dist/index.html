@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>relkit 控制台</title>
+    <script>
+      // Applied before first paint so a dark-mode operator never sees a white
+      // flash. The stored value is only a preference; "system" removes it.
+      (function () {
+        try {
+          var stored = localStorage.getItem("relkit-theme");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.dataset.theme = stored;
+            document.documentElement.classList.toggle("dark", stored === "dark");
+          } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/-/admin/assets/index-CJGcXvrg.js"></script>
+    <link rel="stylesheet" crossorigin href="/-/admin/assets/index-BY2A37sw.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

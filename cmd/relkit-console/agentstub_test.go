@@ -101,6 +101,13 @@ func (s *agentStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeStubJSON(w, map[string]any{"ok": true})
 	case path == "/v1/admin/whoami":
 		s.whoami(w, r)
+	case path == "/v1/admin/settings":
+		if _, ok := s.gate(w, r); !ok {
+			return
+		}
+		writeStubJSON(w, map[string]any{
+			"ok": true, "productRootParent": "/data/relkit", "productRootParentSource": "config",
+		})
 	case path == "/v1/admin/users":
 		s.usersRoute(w, r)
 	case strings.HasPrefix(path, "/v1/admin/users/"):

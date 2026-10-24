@@ -31,7 +31,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: bindings/ts/package-lock.json
+          cache-dependency-path: |
+            bindings/ts/package-lock.json
+            cmd/relkit-console/web/package-lock.json
       - name: Test
         shell: bash
         run: |
@@ -40,6 +42,8 @@ jobs:
           python -m unittest scripts/deploy/test_relkit.py
           npm --prefix bindings/ts ci
           npm --prefix bindings/ts test
+          npm --prefix cmd/relkit-console/web ci
+          npm --prefix cmd/relkit-console/web test
   universal:
     needs: test
     runs-on: macos-latest
@@ -91,6 +95,24 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cmd/relkit-console/web/package-lock.json
+      # dist/ is committed so a Go-only checkout builds; rebuilding here and
+      # comparing is what keeps the committed bytes honest. A stale bundle
+      # would ship code that is not in this commit, which is worse than a
+      # build that needs Node.
+      - name: Rebuild the console front end
+        run: |
+          npm --prefix cmd/relkit-console/web ci
+          npm --prefix cmd/relkit-console/web run build
+          if ! git diff --quiet -- cmd/relkit-console/internal/webui/dist; then
+            echo "::error::cmd/relkit-console/internal/webui/dist is stale; run npm --prefix cmd/relkit-console/web run build and commit it"
+            git --no-pager diff --stat -- cmd/relkit-console/internal/webui/dist
+            exit 1
+          fi
       - name: Build immutable release artifacts
         run: |
           go run ./cmd/relkit build --all --check-tag "${GITHUB_REF_NAME}" --out dist

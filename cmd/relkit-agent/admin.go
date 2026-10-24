@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/relkit/internal/agentadmin"
+	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/publish"
 	vnextrelease "github.com/shichao402/relkit/internal/vnext/release"
 	vnexttrust "github.com/shichao402/relkit/internal/vnext/trust"
@@ -54,6 +55,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.adminLogout(w, r)
 	case "whoami":
 		s.adminWhoami(w, r)
+	case "settings":
+		s.adminSettings(w, r)
 	case "users":
 		if len(parts) == 1 {
 			s.adminUsers(w, r)
@@ -197,6 +200,67 @@ func (s *Server) adminWhoami(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": user})
+}
+
+// adminSettings tells the panel the server-side facts its forms depend on, so
+// no form hardcodes a path that is only true on some other machine. It needs a
+// session: the product root layout is not public.
+func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, ok := s.requireOperator(w, r); !ok {
+		return
+	}
+	parent, source := s.productRootParent()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                      true,
+		"productRootParent":       parent,
+		"productRootParentSource": source,
+	})
+}
+
+// productRootParent answers where a product registered without a root lives.
+// The configured value wins. Otherwise the registered products vote: when they
+// all sit under one directory, that directory is the convention of this
+// machine. A machine with no products, or products scattered across
+// directories, has no convention, and guessing one is how the old hardcoded
+// /srv/relkit failed on a box whose service user could not create /srv/relkit.
+// source is "config", "inferred" or "" (none).
+func (s *Server) productRootParent() (parent, source string) {
+	if s.cfg.ProductRootParent != "" {
+		return s.cfg.ProductRootParent, "config"
+	}
+	store := s.adminStore()
+	if store == nil {
+		return "", ""
+	}
+	for _, product := range store.Products() {
+		dir := filepath.Dir(filepath.Clean(product.Root))
+		if parent == "" {
+			parent = dir
+			continue
+		}
+		if dir != parent {
+			return "", ""
+		}
+	}
+	if parent == "" {
+		return "", ""
+	}
+	return parent, "inferred"
+}
+
+// writeAdminError is the structured error the panel renders next to the field
+// that caused it. The message is complete on its own, so a caller that only
+// shows the body as text still reads something useful.
+func writeAdminError(w http.ResponseWriter, status int, code, field, message string) {
+	body := map[string]any{"ok": false, "code": code, "message": message}
+	if field != "" {
+		body["field"] = field
+	}
+	writeJSON(w, status, body)
 }
 
 // requireOperator resolves the session bearer. Sessions live in process memory:
@@ -400,21 +464,32 @@ func (s *Server) adminProducts(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSONBody(w, r, &req) {
 			return
 		}
+		if err := model.CheckIdentifier(req.ID, "product"); err != nil {
+			writeAdminError(w, http.StatusBadRequest, "invalid_product_id", "id", err.Error())
+			return
+		}
 		root := strings.TrimSpace(req.Root)
 		if root == "" {
-			root = filepath.Join("/srv/relkit", req.ID)
+			parent, _ := s.productRootParent()
+			if parent == "" {
+				writeAdminError(w, http.StatusBadRequest, "product_root_required", "root",
+					"no default product root is configured and none can be inferred from registered products; set productRootParent in the agent config or enter a root")
+				return
+			}
+			root = filepath.Join(parent, req.ID)
 		}
 		if !filepath.IsAbs(root) {
 			root = filepath.Join(filepath.Dir(s.cfg.ConfigPath), root)
 		}
 		root = mustAbs(root)
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			http.Error(w, "create product root: "+err.Error(), http.StatusInternalServerError)
+			writeAdminError(w, http.StatusBadRequest, "product_root_unwritable", "root",
+				fmt.Sprintf("cannot create product root %s as the agent's service user: %v", root, err))
 			return
 		}
 		product, err := store.AddProduct(req.ID, root, req.Profile)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAdminError(w, http.StatusBadRequest, "product_rejected", "id", err.Error())
 			return
 		}
 		// Registering a product issues its first token in the same breath: a

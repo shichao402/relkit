@@ -1,22 +1,17 @@
 package main
 
-// Operator pages live under /-/ so they never shadow a published file. Protocol
-// clients never read any of this: they fetch the signed index.
+// Read models behind the operator surface.
 //
-// The public catalog is the static browse dump (GET /). These pages are the
-// self-hosted panel: live portal, product cards, file tree. That surface is for
-// operators on this box and can grow into an admin UI; it is not the catalog
-// people bookmark.
+// These types used to feed html/template pages. The front end is a single-page
+// app now and this file only produces the data the JSON API hands over: a
+// product's channels, its release chain, and the artifacts of the newest
+// version. Nothing here writes HTML, and nothing here is fetched by protocol
+// clients, which read the signed index instead.
 
 import (
-	"bytes"
-	"embed"
-	"html/template"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,12 +23,17 @@ import (
 
 // productPathPrefix is under /-/ for the same reason the health endpoint is:
 // RUP keys start with index/, manifest/ or artifact/, and a leading dash is not
-// a legal identifier, so nothing here can ever shadow a real file.
+// a legal identifier, so nothing here can ever shadow a real file. The path is
+// kept as a redirect source for old bookmarks; the page it used to render lives
+// in the front end now.
 const (
 	productPathPrefix = "/-/p/"
 	latestPathPrefix  = "/-/latest/"
 	adminPath         = "/-/admin"
-	adminFilesPath    = "/-/admin/files"
+
+	// adminFilesPath is the file browser's own route. It kept its path from the
+	// server-rendered listing, so nothing redirects it: the front end owns it.
+	adminFilesPath = "/-/admin/files"
 )
 
 const (
@@ -45,38 +45,15 @@ const (
 	maxReleaseRows = 25
 )
 
-type crumb struct {
-	Label string
-	Href  string // empty renders as plain text, i.e. the current page
-}
-
-// pageChrome is embedded by every page so the shared head/foot templates can
-// reach the same fields regardless of which page is rendering.
-type pageChrome struct {
-	Title    string
-	Crumbs   []crumb
-	Version  string
-	Note     string
-	LoggedIn bool
-	Username string
-}
-
-// channelRow is the portal's one-line summary of a channel. The index object
-// behind it is an operator detail, so its link lives on the product page.
-//
-// Download* is the fixed URL of that channel's build for the visiting platform,
-// resolved from the pointer the publish wrote. A channel with no pointer, or no
-// build for this platform, simply has no link.
+// channelRow is the product list's one-line summary of a channel. The index
+// object behind it is an operator detail, so its link lives on the product page.
 type channelRow struct {
-	Name         string
-	Version      string
-	Code         int64
-	Released     string
-	Yanked       bool
-	Err          string
-	DownloadHref string
-	DownloadName string
-	DownloadSize string
+	Name     string
+	Version  string
+	Code     int64
+	Released string
+	Yanked   bool
+	Err      string
 }
 
 type productCard struct {
@@ -87,31 +64,6 @@ type productCard struct {
 	Updated     string
 	Downloads   int64
 	Channels    []channelRow
-}
-
-type portalPage struct {
-	pageChrome
-	Heading    string
-	Sub        string
-	StatsSince string
-	Products   []productCard
-	Site       *siteCard
-}
-
-// siteCard is the Site section of the portal (ADR 0016 step 5): the last
-// rebuild's per-sink results from the agent's site/status.json snapshot,
-// plus the live Pages deployment list when a makers config is wired.
-type siteCard struct {
-	At         string
-	DumpNote   string
-	Sinks      []sinkStatusRow
-	MakersRows []makersRow
-}
-
-type makersRow struct {
-	DeploymentID string
-	Status       string
-	Created      string
 }
 
 type artifactRow struct {
@@ -152,30 +104,12 @@ type channelSection struct {
 	Err            string
 }
 
+// productPage is the expanded form of one product: every channel with its
+// release chain and the downloadable files of the newest version. The name is
+// the display title when the product publishes webmeta, the id otherwise.
 type productPage struct {
-	pageChrome
-	Name        string
-	Description string
-	Homepage    string
-	Sub         string
-	StatsSince  string
-	Channels    []channelSection
-}
-
-type listingEntry struct {
-	Name  string
-	Href  string
-	Size  string
-	Mtime string
-	Dir   bool
-}
-
-type listingPage struct {
-	pageChrome
-	Display string
-	Count   int
-	Parent  string
-	Entries []listingEntry
+	Name     string
+	Channels []channelSection
 }
 
 // scanProducts reports the products this box distributes, derived from the
@@ -185,7 +119,7 @@ type listingPage struct {
 // A product with no parsable channel is left out entirely. That is what makes
 // the plain-static-host case fall back to a file listing instead of showing a
 // page full of parse errors.
-func (c *console) scanProducts(want platformGuess) []productCard {
+func (c *console) scanProducts() []productCard {
 	entries, err := c.adapter.ReadDir("index")
 	if err != nil {
 		return nil
@@ -195,7 +129,7 @@ func (c *console) scanProducts(want platformGuess) []productCard {
 		if !entry.IsDir {
 			continue
 		}
-		if card, ok := c.readProductCard(entry.Name, want); ok {
+		if card, ok := c.readProductCard(entry.Name); ok {
 			cards = append(cards, card)
 		}
 	}
@@ -203,7 +137,7 @@ func (c *console) scanProducts(want platformGuess) []productCard {
 	return cards
 }
 
-func (c *console) readProductCard(product string, want platformGuess) (productCard, bool) {
+func (c *console) readProductCard(product string) (productCard, bool) {
 	files, err := c.adapter.ReadDir(path.Join("index", product))
 	if err != nil {
 		return productCard{}, false
@@ -250,7 +184,6 @@ func (c *console) readProductCard(product string, want platformGuess) (productCa
 		} else {
 			row.Err = "no versions"
 		}
-		c.attachDownload(&row, product, channel, want)
 		card.Channels = append(card.Channels, row)
 	}
 
@@ -270,26 +203,6 @@ func (c *console) readProductCard(product string, want platformGuess) (productCa
 		card.Homepage = meta.Homepage
 	}
 	return card, true
-}
-
-// attachDownload points the row at the channel's fixed URL rather than at the
-// artifact the index currently names, so the link on the portal is the same one
-// a user may have bookmarked.
-func (c *console) attachDownload(row *channelRow, product, channel string, want platformGuess) {
-	if want.os == "" {
-		return
-	}
-	doc := c.readLatest(product, channel)
-	if doc == nil {
-		return
-	}
-	match := bestMatch(c.latestArtifacts(doc), want)
-	if match == nil {
-		return
-	}
-	row.DownloadHref = match.Href
-	row.DownloadName = match.Filename
-	row.DownloadSize = match.Size
 }
 
 // productDetail expands one product: every channel, its release chain, and the
@@ -448,34 +361,6 @@ func (c *console) readLatest(product, channel string) *webmeta.Latest {
 	return doc
 }
 
-func (c *console) latestArtifacts(doc *webmeta.Latest) []artifactRow {
-	if doc == nil {
-		return nil
-	}
-	rows := make([]artifactRow, 0, len(doc.Artifacts))
-	for _, artifact := range doc.Artifacts {
-		href := latestHref(doc.Product, doc.Channel, artifact.ID)
-		row := artifactRow{
-			ID:          artifact.ID,
-			Filename:    artifact.Filename,
-			Platform:    platformMapLabel(artifact.Selectors),
-			Size:        humanBytes(artifact.Size),
-			Sha256:      artifact.Sha256,
-			Sha256Short: shortHash(artifact.Sha256),
-			Href:        href,
-			OS:          artifact.Selectors["os"],
-			Arch:        artifact.Selectors["arch"],
-		}
-		if target := downloadHref(artifact.URLs); target != "" {
-			if key, ok := localKeyFromURL(target); ok {
-				row.Downloads = c.stats.count(key)
-			}
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}
-
 // fixedHref returns a copy-pasteable URL that keeps following one channel.
 func (c *console) fixedHref(product, channel, artifactID string) string {
 	doc := c.readLatest(product, channel)
@@ -494,141 +379,7 @@ func latestHref(product, channel, artifactID string) string {
 	return latestPathPrefix + url.PathEscape(product) + "/" + url.PathEscape(channel) + "/" + url.PathEscape(artifactID)
 }
 
-func (c *console) servePortal(w http.ResponseWriter, r *http.Request, products []productCard) {
-	heading := "Releases"
-	if c.site != nil && c.site.Title != "" {
-		heading = c.site.Title
-	}
-	page := &portalPage{
-		pageChrome: pageChrome{
-			Title:   heading + " · " + r.Host,
-			Version: version,
-			Note:    plural(len(products), "product", "products"),
-		},
-		Heading:  heading,
-		Sub:      r.Host,
-		Products: products,
-		Site:     c.siteCard(),
-	}
-	for _, product := range products {
-		if product.Downloads > 0 {
-			page.StatsSince = c.stats.startedAt()
-			break
-		}
-	}
-	c.renderPage(w, r, "portal", page)
-}
 
-// siteCard gathers the Site section: the rebuild snapshot from agent state
-// and, when a makers project is configured, the latest Pages deployments.
-// Every input is optional; a console without agent state or a Pages token
-// renders the card with only what it has, and a box with neither skips it.
-func (c *console) siteCard() *siteCard {
-	status, hasStatus := siteStatusView{StateDir: c.stateDir}.readStatus()
-	var rows []makersRow
-	if c.makers != nil {
-		for _, dep := range c.makers.latest(5) {
-			rows = append(rows, makersRow{
-				DeploymentID: dep.DeploymentID,
-				Status:       dep.Status,
-				Created:      formatTimestamp(dep.CreateTime, stampLayout),
-			})
-		}
-	}
-	if !hasStatus && len(rows) == 0 {
-		return nil
-	}
-	card := &siteCard{MakersRows: rows}
-	if hasStatus {
-		card.At = formatTimestamp(status.At, stampLayout)
-		card.Sinks = status.Sinks
-		if dumpAt, ok := c.dumpFreshness(); ok {
-			card.DumpNote = "Local dump copy refreshed " + dumpAt + "."
-		}
-	}
-	return card
-}
-
-// dumpFreshness reports when the local dump copy last changed, the freshness
-// half of the snapshot. It is agent state again: co-located read-only input,
-// not the release tree.
-func (c *console) dumpFreshness() (string, bool) {
-	if c.stateDir == "" {
-		return "", false
-	}
-	info, err := os.Stat(filepath.Join(c.stateDir, "site", "dump"))
-	if err != nil {
-		return "", false
-	}
-	return info.ModTime().Format(stampLayout), true
-}
-
-func (c *console) serveAdmin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	products := c.scanProducts(guessPlatform(r.UserAgent()))
-	if len(products) > 0 {
-		c.servePortal(w, r, products)
-		return
-	}
-	c.serveRootListing(w, r)
-}
-
-func (c *console) serveAdminFiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	c.serveRootListing(w, r)
-}
-
-func (c *console) serveRootListing(w http.ResponseWriter, r *http.Request) {
-	entries, err := c.adapter.ReadDir(".")
-	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	c.renderListing(w, r, ".", entries)
-}
-
-func (c *console) serveProduct(w http.ResponseWriter, r *http.Request) {
-	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, productPathPrefix), "/")
-	if rest == "" || strings.Contains(rest, "/") {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	product, err := url.PathUnescape(rest)
-	if err != nil || product != path.Clean(product) || strings.HasPrefix(product, ".") {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-
-	page, ok := c.productDetail(product)
-	if !ok {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	if meta := c.productSite(product); meta != nil {
-		if meta.Title != "" {
-			page.Name = meta.Title
-		}
-		page.Description = meta.Description
-		page.Homepage = meta.Homepage
-	}
-	page.pageChrome = pageChrome{
-		Title:   page.Name + " · releases",
-		Version: version,
-		Note:    plural(len(page.Channels), "channel", "channels"),
-		Crumbs:  []crumb{{Label: "Releases", Href: adminPath}, {Label: page.Name}},
-	}
-	page.Sub = r.Host
-	page.StatsSince = c.stats.startedAt()
-	c.renderPage(w, r, "product", page)
-}
 
 // serveLatest resolves /-/latest/<product>/<channel>/<artifact-id> from the
 // pointer written during publish. It performs no index/manifest scan.
@@ -670,24 +421,6 @@ func (c *console) serveLatest(w http.ResponseWriter, r *http.Request) {
 
 func safeSegment(s string) bool {
 	return s != "" && s == path.Clean(s) && !strings.HasPrefix(s, ".") && !strings.Contains(s, "/")
-}
-
-// renderPage buffers first so a template error cannot leave a half-written page
-// behind an already-sent 200.
-func (c *console) renderPage(w http.ResponseWriter, r *http.Request, name string, data any) {
-	c.stampChrome(r, data)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	if r.Method == http.MethodHead {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	var buf bytes.Buffer
-	if err := pageTemplates.ExecuteTemplate(&buf, name, data); err != nil {
-		http.Error(w, "cannot render page", http.StatusInternalServerError)
-		return
-	}
-	buf.WriteTo(w)
 }
 
 func readIndexDoc(a Adapter, name string) (*rupv2.Index, error) {
@@ -791,102 +524,6 @@ func channelRank(name string) int {
 	return 3
 }
 
-// platformGuess is what the visitor's browser says it is running on, expressed
-// in Go's GOOS/GOARCH vocabulary so that it can be compared with normalized
-// selector values.
-type platformGuess struct {
-	os   string
-	arch string
-}
-
-// guessPlatform reads the User-Agent. It is a hint for one link on the page and
-// nothing else: no content depends on it, and being wrong costs the visitor one
-// glance at the table below.
-func guessPlatform(userAgent string) platformGuess {
-	ua := strings.ToLower(userAgent)
-	switch {
-	case strings.Contains(ua, "android"):
-		// Android UAs carry "linux" too, so this has to come first.
-		return platformGuess{os: "android"}
-	case strings.Contains(ua, "iphone"), strings.Contains(ua, "ipad"):
-		return platformGuess{os: "ios"}
-	case strings.Contains(ua, "windows"):
-		return platformGuess{os: "windows", arch: uaArch(ua, "amd64")}
-	case strings.Contains(ua, "mac os x"), strings.Contains(ua, "macintosh"):
-		// Safari and Chrome report Intel on Apple Silicon as well, so the
-		// architecture here is deliberately left unknown.
-		return platformGuess{os: "darwin"}
-	case strings.Contains(ua, "linux"), strings.Contains(ua, "x11"):
-		return platformGuess{os: "linux", arch: uaArch(ua, "amd64")}
-	}
-	return platformGuess{}
-}
-
-func uaArch(ua, fallback string) string {
-	switch {
-	case strings.Contains(ua, "arm64"), strings.Contains(ua, "aarch64"):
-		return "arm64"
-	case strings.Contains(ua, "wow64"), strings.Contains(ua, "win64"),
-		strings.Contains(ua, "x86_64"), strings.Contains(ua, "x64"):
-		return "amd64"
-	}
-	return fallback
-}
-
-// bestMatch prefers an exact os+arch hit, then the right os with an
-// unspecified or unknown arch. Nothing else is offered: handing a visitor the
-// wrong binary is worse than handing them a table.
-func bestMatch(rows []artifactRow, want platformGuess) *artifactRow {
-	if want.os == "" {
-		return nil
-	}
-	var loose *artifactRow
-	for i := range rows {
-		row := &rows[i]
-		if row.Href == "" || normalizeOS(row.OS) != want.os {
-			continue
-		}
-		arch := normalizeArch(row.Arch)
-		if want.arch != "" && arch == want.arch {
-			return row
-		}
-		if arch == "" || want.arch == "" {
-			if loose == nil {
-				loose = row
-			}
-		}
-	}
-	return loose
-}
-
-func normalizeOS(value string) string {
-	switch strings.ToLower(value) {
-	case "windows", "win", "win32", "win64":
-		return "windows"
-	case "darwin", "macos", "mac", "osx", "mac-os":
-		return "darwin"
-	case "linux":
-		return "linux"
-	case "android":
-		return "android"
-	case "ios", "iphoneos":
-		return "ios"
-	}
-	return strings.ToLower(value)
-}
-
-func normalizeArch(value string) string {
-	switch strings.ToLower(value) {
-	case "amd64", "x64", "x86_64", "x86-64":
-		return "amd64"
-	case "arm64", "aarch64":
-		return "arm64"
-	case "386", "x86", "i386", "ia32":
-		return "386"
-	}
-	return strings.ToLower(value)
-}
-
 func selectorValue(selectors []*rupv2.Selector, key string) string {
 	for _, selector := range selectors {
 		if selector != nil && selector.Key == key {
@@ -910,21 +547,6 @@ func platformLabel(selectors []*rupv2.Selector) string {
 			extra = append(extra, selector.Key+"="+selector.Value)
 		}
 	}
-	return joinPlatformLabel(values, extra)
-}
-
-func platformMapLabel(selectors map[string]string) string {
-	values := map[string]string{
-		"os":   selectors["os"],
-		"arch": selectors["arch"],
-	}
-	var extra []string
-	for key, value := range selectors {
-		if key != "os" && key != "arch" {
-			extra = append(extra, key+"="+value)
-		}
-	}
-	sort.Strings(extra)
 	return joinPlatformLabel(values, extra)
 }
 
@@ -987,40 +609,6 @@ func formatTimestamp(raw, layout string) string {
 	return parsed.Format(layout)
 }
 
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return strconv.Itoa(n) + " " + many
-}
-
-func breadcrumbs(name string) []crumb {
-	crumbs := []crumb{{Label: "Releases", Href: adminPath}}
-	if name == "." {
-		crumbs = append(crumbs, crumb{Label: "files"})
-		return crumbs
-	}
-	crumbs = append(crumbs, crumb{Label: "files", Href: adminFilesPath})
-	segments := strings.Split(name, "/")
-	href := ""
-	for i, segment := range segments {
-		href += url.PathEscape(segment) + "/"
-		if i == len(segments)-1 {
-			crumbs = append(crumbs, crumb{Label: segment})
-			continue
-		}
-		crumbs = append(crumbs, crumb{Label: segment, Href: "/" + href})
-	}
-	return crumbs
-}
-
-//go:embed templates/*.html
-var templateFS embed.FS
-
-// Operator HTML lives in templates/. Edit those files and re-run tests, or
-// `go run ./internal/browse/preview` for the public dump pages.
-var pageTemplates = template.Must(template.New("pages").ParseFS(templateFS, "templates/*.html"))
-
 // localKeyFromURL extracts a manifest/ or artifact/ key from a published URL
 // that points at this box, so download links and counters stay local.
 func localKeyFromURL(raw string) (string, bool) {
@@ -1038,69 +626,3 @@ func localKeyFromURL(raw string) (string, bool) {
 	return "", false
 }
 
-// renderListing renders one directory from adapter entries: name, size,
-// mtime, nothing else. The operator view of the raw key space stays
-// deliberately dull (unchanged from serve).
-func (c *console) renderListing(w http.ResponseWriter, r *http.Request, name string, entries []Entry) {
-	// Same hiding rule as serve's listings: the admin state, stats counters and
-	// CAS key live in the tree but are not operator-visible objects.
-	kept := entries[:0]
-	for _, entry := range entries {
-		if c.hiddenKey(path.Join(name, entry.Name)) {
-			continue
-		}
-		kept = append(kept, entry)
-	}
-	entries = kept
-
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir != entries[j].IsDir {
-			return entries[i].IsDir
-		}
-		return entries[i].Name < entries[j].Name
-	})
-
-	display := "/"
-	if name != "." {
-		display = "/" + name + "/"
-	}
-
-	page := &listingPage{
-		pageChrome: pageChrome{
-			Title:   display,
-			Version: version,
-			Note:    plural(len(entries), "entry", "entries"),
-			Crumbs:  breadcrumbs(name),
-		},
-		Display: display,
-		Count:   len(entries),
-	}
-	if name != "." {
-		page.Parent = "../"
-	}
-
-	for _, entry := range entries {
-		row := listingEntry{
-			Name: entry.Name,
-			Href: entry.Name,
-			Size: "-",
-			Dir:  entry.IsDir,
-		}
-		if row.Dir {
-			row.Name += "/"
-			row.Href += "/"
-		}
-		if name == "." {
-			row.Href = "/" + row.Href
-		}
-		if !entry.Mtime.IsZero() {
-			if !row.Dir {
-				row.Size = humanBytes(entry.Size)
-			}
-			row.Mtime = entry.Mtime.Format(stampLayout)
-		}
-		page.Entries = append(page.Entries, row)
-	}
-
-	c.renderPage(w, r, "listing", page)
-}

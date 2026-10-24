@@ -8,12 +8,14 @@
 
 | 路径 | 作用 |
 |---|---|
-| `/etc/relkit-agent/relkit-agent.json` | 监听地址、`uploadTokens`、`products` map |
+| `/etc/relkit-agent/relkit-agent.json` | 监听地址、`uploadTokens`、`products` map、`productRootParent` |
 | `/etc/relkit-agent/tokens/<id>.token` | 独占产品的上传 Bearer（0600）。共用家族改名为 `tokens/shared.token`（冲突则 `shared-N`）。路径以 `init -list-products` 为准，不要用 share-with 的产品 id 去猜。CI 环境变量名是 `RELKIT_UPLOAD_TOKEN` |
 | `/etc/relkit-agent/env` | `RELKIT_PRIVATE_KEY`、`COS_SECRET_ID`、`COS_SECRET_KEY` 等（systemd `EnvironmentFile`） |
 | `/etc/relkit-agent/products/<id>.json` | 本机 **publish profile**（缺省；可用 `products.<id>.profile` 覆盖） |
-| `/srv/relkit/<id>/` | 产品树根：私钥文件、`.relkit/cache/staged/<version>/` |
+| `<productRootParent>/<id>/` | 产品树根：私钥文件、`.relkit/cache/staged/<version>/`。路径由 `products.<id>.root` 决定；未显式指定时用 `productRootParent`，再不行从已注册产品的共同父目录推断 |
 | `/var/lib/relkit-agent` | 幂等回放等状态 |
+
+`productRootParent` 是「没显式给 root 的产品落在哪」的配置项，通常写成机器上真实的发布父目录（内网是 `/data/relkit`）。相对路径按配置文件所在目录解析。留空时 agent 从已注册产品的共同父目录推断；没有产品、或产品分散在多个目录时不猜，注册请求直接被拒并提示显式给 root。**不存在** 写死的 `/srv/relkit` 兜底：那正是旧版的缺陷——`/srv` 多数机器属 root，服务用户建不出来，错误被推迟到发布时才爆。
 
 **没有**实例级 `/etc/relkit-agent/token`，也 **没有** `RELKIT_AGENT_TOKEN`。配置里出现 `uploadToken` / `uploadTokenFile`、或进程环境里出现 `RELKIT_AGENT_TOKEN`，agent **拒绝启动**。默认一条 token 文件对应一个 product id（`tokens/<id>.token`）；家族产品可用 `init -product <id> -share-with <existing>` 把多个 id 挂到**同一份** token 文件（一条 `uploadTokens` 条目），文件同时改名为 `tokens/shared.token`。两份文件不得写同一段 secret（启动失败）。路径仍按请求里的 product id 隔离：Bearer 对但产品不在该条目的 `products` 里是 **403**。chown / restart 读 `-list-products` 打出来的文件名，不要拼 `{share-with}.token`。
 

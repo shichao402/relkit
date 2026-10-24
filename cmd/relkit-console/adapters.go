@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -99,42 +98,6 @@ func (a *rootAdapter) ModTime(key string) time.Time {
 }
 
 var _ Adapter = (*rootAdapter)(nil)
-
-// siteStatusView is what the panel shows about the last site rebuild: the
-// dump's freshness plus per-sink deploy results. It reads agent state, which
-// is co-located read-only input, not the release tree itself.
-type siteStatusView struct {
-	StateDir string
-}
-
-func (v siteStatusView) readStatus() (siteStatus, bool) {
-	if v.StateDir == "" {
-		return siteStatus{}, false
-	}
-	data, err := os.ReadFile(filepath.Join(v.StateDir, "site", "status.json"))
-	if err != nil {
-		return siteStatus{}, false
-	}
-	var status siteStatus
-	if err := json.Unmarshal(data, &status); err != nil {
-		return siteStatus{}, false
-	}
-	return status, true
-}
-
-// siteStatus mirrors internal/site.Status for display. The console reads the
-// JSON; it does not import the site package to avoid a build dependency from
-// the management plane onto the rebuild engine.
-type siteStatus struct {
-	At    string          `json:"at"`
-	Sinks []sinkStatusRow `json:"sinks"`
-}
-
-type sinkStatusRow struct {
-	Name         string `json:"name"`
-	OK           bool   `json:"ok"`
-	DeploymentID string `json:"deploymentId,omitempty"`
-}
 
 // storeEntryJSON mirrors relkit-store's /-/list/ row shape. Duplicating four
 // fields beats importing the store package: the console must not depend on

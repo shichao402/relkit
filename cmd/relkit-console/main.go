@@ -16,12 +16,14 @@ import (
 )
 
 // Command relkit-console is the operator panel binary split out of
-// relkit-serve (ADR 0016). It renders the management plane: login/setup,
-// the live portal, product pages, file tree and download stats.
+// relkit-serve (ADR 0016). It serves the management plane: the JSON API behind
+// the single-page front end, the app shell, the fixed download URLs and the
+// health endpoint.
 //
-// It serves no files and accepts no uploads. Every storage fact arrives
-// through an Adapter (adapters.go); writes stay with relkit-store and
-// relkit-agent. Pointing a browser at the console cannot publish anything.
+// It serves no uploads and publishes nothing. Every storage fact arrives
+// through an Adapter (adapters.go); writes are forwarded to relkit-agent under
+// the operator's own bearer. Pointing a browser at the console cannot publish
+// anything.
 //
 // Usage:
 //
@@ -36,9 +38,9 @@ import (
 //
 //	{
 //	  "addr": "127.0.0.1:8081",
-//	  "dir": "/srv/releases",         // release tree, read-only
-//	  "stateDir": "/srv/relkit-agent-state", // agent state for site status
-//	  "site": {...}                   // portal title/product blurbs (unchanged)
+//	  "dir": "/srv/releases",   // release tree, read-only
+//	  "agent": "http://127.0.0.1:8787",
+//	  "site": {...}             // product blurbs for products without their own
 //	}
 //
 // Set by scripts/deploy/relkit.py build via -ldflags -X main.version=<stamp>.
@@ -53,15 +55,21 @@ var searchPaths = []string{ConfigName, "/etc/" + ConfigName}
 // FileConfig mirrors the config file. Everything is optional; the defaults
 // match what relkit-serve used for the panel.
 type FileConfig struct {
-	Addr           string         `json:"addr"`
-	Dir            string         `json:"dir"`
-	Store          string         `json:"store,omitempty"`
-	Agent          string         `json:"agent,omitempty"`
-	StateDir       string         `json:"stateDir,omitempty"`
-	StatsFile      string         `json:"statsFile,omitempty"`
-	AdminStateFile string         `json:"adminStateFile,omitempty"`
-	Site           *SiteConfig    `json:"site,omitempty"`
-	Makers         *makers.Config `json:"makers,omitempty"`
+	Addr           string      `json:"addr"`
+	Dir            string      `json:"dir"`
+	Store          string      `json:"store,omitempty"`
+	Agent          string      `json:"agent,omitempty"`
+	StatsFile      string      `json:"statsFile,omitempty"`
+	AdminStateFile string      `json:"adminStateFile,omitempty"`
+	Site           *SiteConfig `json:"site,omitempty"`
+
+	// The two keys below fed the server-rendered Site card, which the rebuilt
+	// front end does not have. They stay in the struct because decoding is
+	// strict about unknown fields: dropping them would make an existing
+	// relkit-console.json fail to load, and the deployment script still writes
+	// stateDir into it. Nothing reads the values.
+	StateDir string         `json:"stateDir,omitempty"`
+	Makers   *makers.Config `json:"makers,omitempty"`
 }
 
 func LoadFileConfig(explicit string) (*FileConfig, string, error) {
@@ -105,7 +113,7 @@ func main() {
 		dir         = flag.String("dir", ".", "release tree to read (read-only)")
 		store       = flag.String("store", "", "relkit-store base URL to read over HTTP instead of a local tree")
 		agentAddr   = flag.String("agent", "", "agent server base URL this panel manages (requirement 13.6)")
-		stateDir    = flag.String("state-dir", "", "agent state directory (site status)")
+		_           = flag.String("state-dir", "", "deprecated: accepted for old unit files, no longer read")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -135,24 +143,14 @@ func main() {
 		if fileCfg.Agent != "" && !explicit["agent"] {
 			*agentAddr = fileCfg.Agent
 		}
-		if fileCfg.StateDir != "" && !explicit["state-dir"] {
-			*stateDir = fileCfg.StateDir
-		}
 	}
 
 	console := &console{
-		adapter:  nil, // set below; failure to open is fatal
-		stateDir: *stateDir,
-		site:     nil,
+		adapter: nil, // set below; failure to open is fatal
+		site:    nil,
 	}
 	if fileCfg != nil {
 		console.site = fileCfg.Site
-		// The makers read path is optional: without a project configured the
-		// Site card renders the snapshot alone. A missing token at query time
-		// degrades the same way rather than failing the panel.
-		if fileCfg.Makers != nil {
-			console.makers = newMakersPanel(*fileCfg.Makers)
-		}
 	}
 
 	// The two adapters are the two deployment shapes of ADR 0016: co-located
@@ -207,9 +205,6 @@ func main() {
 		log.Printf("panel on http://%s reading %s via %s adapter (no local tree)", *addr, *store, adapter.Name())
 	} else {
 		log.Printf("panel on http://%s reading %s via %s adapter", *addr, *dir, adapter.Name())
-	}
-	if *stateDir != "" {
-		log.Printf("site status: %s", *stateDir)
 	}
 	log.Printf("panel: %s", admin.statusLog())
 

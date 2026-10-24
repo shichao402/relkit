@@ -233,6 +233,16 @@ func (c *agentClient) Whoami(session string) (agentUser, error) {
 	return payload.User, nil
 }
 
+// Settings reads the server-side facts the forms depend on, such as where a
+// product registered without a root will live (acceptance finding #2).
+func (c *agentClient) Settings(session string) (apiPanelSettings, error) {
+	var payload apiPanelSettings
+	if err := c.do(http.MethodGet, "/v1/admin/settings", session, nil, &payload); err != nil {
+		return apiPanelSettings{}, err
+	}
+	return payload, nil
+}
+
 func (c *agentClient) Users(session string) ([]agentUser, error) {
 	var payload struct {
 		Users []agentUser `json:"users"`

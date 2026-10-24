@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -82,21 +83,48 @@ func newLocalServer(t *testing.T, c *console) *httptest.Server {
 	return srv
 }
 
+// loginPanel signs in through the JSON API, which is the only sign-in path the
+// console has now: the old form endpoint answers a redirect.
 func loginPanel(t *testing.T, client *http.Client, srv *httptest.Server) {
 	t.Helper()
-	resp, err := client.PostForm(srv.URL+adminLoginPath, map[string][]string{
-		"username": {testPanelUser},
-		"password": {testPanelPassword},
+	body, err := json.Marshal(map[string]string{
+		"username": testPanelUser,
+		"password": testPanelPassword,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
-	// The jar follows the redirect: login already landed on the panel page.
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), testPanelUser) {
-		t.Fatalf("login = %d body=%s", resp.StatusCode, body)
+	req, err := http.NewRequest(http.MethodPost, srv.URL+apiPrefix+"session/login", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", srv.URL)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := bodyText(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login = %d body=%s", resp.StatusCode, answer)
+	}
+	var logged struct {
+		Gate string `json:"gate"`
+	}
+	if err := json.Unmarshal([]byte(answer), &logged); err != nil || logged.Gate != "ready" {
+		t.Fatalf("login = %d body=%s", resp.StatusCode, answer)
+	}
+}
+
+// bodyText reads a response body and closes it.
+func bodyText(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }
 
 func writeFile(t *testing.T, dir, name string, body []byte) {
@@ -131,43 +159,45 @@ func TestPanelRedirectsAnonymousToLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+	// The old portal root is a signpost now: the app shell gates itself through
+	// the session API, so this answers a redirect rather than a page.
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("panel = %d", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != adminLoginPath {
+	if loc := resp.Header.Get("Location"); loc != appPrefix+"products" {
 		t.Fatalf("Location = %q", loc)
 	}
 }
 
-func TestLoginServesPortalAndFiles(t *testing.T) {
+// TestLoginServesTheApp: after signing in the rebuilt front end is what answers,
+// and the file tree moved from a server-rendered listing to the JSON API.
+func TestLoginServesTheApp(t *testing.T) {
 	c, dir := newTestConsole(t)
 	writeFile(t, dir, "artifact/app/1.0.0/app.zip", []byte("pkg"))
 	srv := newLocalServer(t, c)
 	client := jarClient(t, srv)
 	loginPanel(t, client, srv)
 
-	resp, err := client.Get(srv.URL + adminPath)
+	// /-/admin/files kept its path: it is a route in the app now, so it answers
+	// the shell directly instead of redirecting anywhere.
+	resp, err := client.Get(srv.URL + adminFilesPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("portal = %d", resp.StatusCode)
-	}
-	// No parsable index documents: the panel falls back to the file listing,
-	// and the listing mentions the artifact directory.
-	if !strings.Contains(string(body), "app") {
-		t.Fatalf("listing missing app entry")
+	body := bodyText(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `<div id="root">`) {
+		t.Fatalf("files = %d body=%s", resp.StatusCode, body)
 	}
 
-	resp, err = client.Get(srv.URL + adminFilesPath)
+	// The old panel tabs are gone, so they redirect into the routes that
+	// replaced them.
+	resp, err = noRedirectClient().Get(srv.URL + panelUsersPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("files = %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != appPrefix+"users" {
+		t.Fatalf("users tab = %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
 
@@ -195,28 +225,6 @@ func TestRootAdapterListsAndReads(t *testing.T) {
 	}
 	if !a.ModTime("missing").IsZero() {
 		t.Fatal("missing key should be zero time")
-	}
-}
-
-func TestSiteStatusViewReadsSnapshot(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "site/status.json", []byte(
-		`{"at":"2026-09-25T10:00:00Z","sinks":[{"name":"makers:relkit-updates-index","ok":true,"deploymentId":"dep-1"}]}`))
-	v := siteStatusView{StateDir: dir}
-	status, ok := v.readStatus()
-	if !ok {
-		t.Fatal("snapshot missing")
-	}
-	if status.At != "2026-09-25T10:00:00Z" || len(status.Sinks) != 1 {
-		t.Fatalf("status=%+v", status)
-	}
-	if status.Sinks[0].DeploymentID != "dep-1" {
-		t.Fatalf("sink=%+v", status.Sinks[0])
-	}
-
-	v2 := siteStatusView{StateDir: filepath.Join(dir, "nowhere")}
-	if _, ok := v2.readStatus(); ok {
-		t.Fatal("missing snapshot should not be found")
 	}
 }
 
@@ -357,52 +365,100 @@ func TestStoreAdapterRejectsBadURLs(t *testing.T) {
 	}
 }
 
-func TestPortalRendersSiteCard(t *testing.T) {
+// TestLegacyPanelURLsRedirectToTheirReplacement: the old tab strip is gone from
+// the templates but stays valid as URLs (requirement 7.3), because operators
+// bookmarked it and release notes link to product pages by the old path.
+func TestLegacyPanelURLsRedirectToTheirReplacement(t *testing.T) {
 	c, dir := newTestConsole(t)
-	c.stateDir = dir
-	writeFile(t, dir, "site/status.json", []byte(
-		`{"at":"2026-09-25T18:00:00Z","sinks":[{"name":"makers:relkit-updates-index","ok":true,"deploymentId":"dep-7"},{"name":"directory:/srv/relkit-site","ok":false}]}`))
 	writeRelease(t, dir, "app", "stable", "1.0.0", 1)
 	srv := newLocalServer(t, c)
-	client := jarClient(t, srv)
-	loginPanel(t, client, srv)
 
-	resp, err := client.Get(srv.URL + adminPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("portal = %d", resp.StatusCode)
-	}
-	for _, want := range []string{
-		"<h2>Site</h2>",
-		"makers:relkit-updates-index",
-		"dep-7",
-		`<span class="warn">failed</span>`,
+	for _, tc := range []struct{ from, to string }{
+		{panelPath, "/-/admin/products"},
+		{panelUsersPath, "/-/admin/users"},
+		{panelRolesPath, "/-/admin/roles"},
+		{panelTokensPath, "/-/admin/tokens"},
+		{panelHostsPath, "/-/admin/products"},
+		{panelTokensPath + "?product=app", "/-/admin/products/app/tokens"},
+		{"/-/p/app", "/-/admin/products/app"},
+		{adminLoginPath, "/-/admin/sign-in"},
+		{adminSetupPath, "/-/admin/"},
 	} {
-		if !strings.Contains(string(body), want) {
-			t.Errorf("portal missing %q\n%s", want, body)
+		resp, err := noRedirectClient().Get(srv.URL + tc.from)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.from, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusFound {
+			t.Errorf("GET %s = %d, want 302", tc.from, resp.StatusCode)
+			continue
+		}
+		if loc := resp.Header.Get("Location"); loc != tc.to {
+			t.Errorf("GET %s Location = %q, want %q", tc.from, loc, tc.to)
+		}
+		// A cached redirect would outlive a change to the route table.
+		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("GET %s Cache-Control = %q, want no-store", tc.from, got)
 		}
 	}
 }
 
-func TestPortalSkipsSiteCardWithoutData(t *testing.T) {
+// TestLegacyProductURLRejectsJunk: a redirect to a page that cannot exist is
+// worse than a plain 404, so the old product path validates before it moves.
+func TestLegacyProductURLRejectsJunk(t *testing.T) {
+	c, dir := newTestConsole(t)
+	writeRelease(t, dir, "app", "stable", "1.0.0", 1)
+	srv := newLocalServer(t, c)
+
+	for _, path := range []string{"/-/p/", "/-/p/app/extra", "/-/p/..%2f..", "/-/p/.hidden"} {
+		resp, err := noRedirectClient().Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, resp.StatusCode)
+		}
+	}
+}
+
+// TestLegacyLogoutStillSignsOut: the one old URL with a side effect. A bookmark
+// to it must clear the cookie rather than just point at the sign-in page.
+func TestLegacyLogoutStillSignsOut(t *testing.T) {
 	c, dir := newTestConsole(t)
 	writeRelease(t, dir, "app", "stable", "1.0.0", 1)
 	srv := newLocalServer(t, c)
 	client := jarClient(t, srv)
 	loginPanel(t, client, srv)
 
-	resp, err := client.Get(srv.URL + adminPath)
+	// Read the redirect itself rather than the page it points at: the point of
+	// the test is that the old URL still answers a 302 and clears the cookie.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Get(srv.URL + adminLogoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	resp.Body.Close()
-	if strings.Contains(string(body), "<h2>Site</h2>") {
-		t.Errorf("portal should skip the Site card without snapshot or makers rows\n%s", body)
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != appPrefix+"sign-in" {
+		t.Fatalf("logout = %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	client.CheckRedirect = nil
+
+	// The session is really gone, not merely redirected around.
+	resp, err = client.Get(srv.URL + apiPrefix + "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		Gate string `json:"gate"`
+	}
+	if err := json.Unmarshal([]byte(bodyText(t, resp)), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Gate != "login" {
+		t.Fatalf("gate after logout = %q, want login", view.Gate)
 	}
 }
 
