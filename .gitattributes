@@ -1,0 +1,7 @@
+# Golden fixtures under conformance/ are compared byte for byte by the tests
+# that own them (internal/updater/conformance_test.go, internal/build). Git's
+# end-of-line conversion would rewrite them on checkout, so a Windows runner
+# with core.autocrlf=true would compare CRLF bytes against an LF generator and
+# report "drifted from the generator" for a file nobody edited. -text keeps the
+# checked-out bytes identical to the blob, on every platform.
+conformance/** -text

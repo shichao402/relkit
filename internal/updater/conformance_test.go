@@ -83,6 +83,24 @@ func fixturePath(t *testing.T, name string) string {
 	return filepath.Join(testutil.ConformanceRoot(t), "updater", name)
 }
 
+// fixtureBytes reads a golden fixture with its line endings normalized to LF.
+//
+// The comparison below is byte for byte against what the generator emits, and
+// the generator always emits LF. Git's end-of-line conversion can still hand us
+// CRLF on a Windows checkout — `.gitattributes` marks conformance/ as -text so
+// it should not, but a clone made before that file existed, or a checkout with
+// `--config core.autocrlf=true` overriding attributes, would otherwise report
+// "drifted from the generator" for a file nobody edited. Normalizing the read
+// side keeps the assertion about the JSON, which is what it is meant to guard.
+func fixtureBytes(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	return bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+}
+
 func TestRuntimeBootstrapConformanceFixture(t *testing.T) {
 	want := conformanceBootstrap(t)
 	path := fixturePath(t, "runtime-bootstrap.json")
@@ -92,10 +110,7 @@ func TestRuntimeBootstrapConformanceFixture(t *testing.T) {
 		}
 		return
 	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
+	got := fixtureBytes(t, path)
 	if !bytes.Equal(got, want) {
 		t.Fatal("runtime-bootstrap.json drifted from the generator; " +
 			"regenerate with -run RuntimeBootstrapConformance -args -update")
@@ -126,10 +141,7 @@ func TestRuntimeBootstrapNumericKeyConformanceFixture(t *testing.T) {
 		}
 		return
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
+	raw := fixtureBytes(t, path)
 	_, _, rerr := resolveBootstrap(&updaterv1.ClientProfile{Bootstrap: string(raw)}, "dev")
 	if rerr == nil {
 		t.Fatal("a numeric rootPublicKey must be rejected, not hashed")
