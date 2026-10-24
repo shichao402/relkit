@@ -1,12 +1,10 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
@@ -14,11 +12,6 @@ import (
 	"github.com/shichao402/relkit/internal/jsonio"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/publishproto"
-	"github.com/shichao402/relkit/internal/verify"
-	vnextbootstrap "github.com/shichao402/relkit/internal/vnext/bootstrap"
-	"github.com/shichao402/relkit/internal/vnext/project"
-	"github.com/shichao402/relkit/internal/vnext/resolution"
-	"github.com/shichao402/relkit/internal/vnext/trust"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -66,28 +59,22 @@ func run(argv []string) (code int) {
 	command := args[0]
 	rest := args[1:]
 	switch command {
-	case "resolve":
-		err = cmdResolve(rest)
-	case "doctor":
-		err = cmdDoctor(rest)
-	case "materialize":
-		err = cmdMaterialize(rest)
-	case "wrapper":
-		err = cmdWrapper(rest)
 	case "artifacts":
 		err = cmdArtifacts(rest)
+	case "bootstrap":
+		err = cmdBootstrap(rest)
 	case "payload":
 		err = cmdPayload(rest)
 	case "stage":
 		err = cmdStage(rest)
 	case "inspect":
 		err = cmdInspect(rest)
-	case "verify":
-		err = cmdVerify(rest)
 	case "release":
 		err = cmdRelease(rest)
 	case "build":
 		err = cmdBuild(rest)
+	case "custody":
+		err = cmdCustody(rest)
 	default:
 		err = fmt.Errorf("unknown command %q", command)
 	}
@@ -104,13 +91,10 @@ func cmdStage(args []string) error {
 	return cmdStageVNext(args)
 }
 
-// cmdInspect prints one resolved document. Without arguments (or with --json)
-// it reports the immutable resolution selected for this invocation; --file
-// prints a staged/derived protobuf document for diagnostics.
+// cmdInspect prints one protobuf or JSON document for diagnostics. It has no
+// notion of a "selected resolution" any more: hosts no longer hold one.
 func cmdInspect(args []string) error {
 	fileArg := ""
-	resolutionArg := ""
-	asJSON := false
 	raw := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -118,26 +102,22 @@ func cmdInspect(args []string) error {
 		case arg == "--file":
 			i++
 			fileArg = mustValue(args, i, "--file")
-		case arg == "--resolution":
-			i++
-			resolutionArg = mustValue(args, i, "--resolution")
 		case arg == "--json":
-			asJSON = true
+			// JSON documents are always printed as JSON; the flag is accepted
+			// for compatibility with older scripts.
 		case arg == "--raw":
 			raw = true
 		case strings.HasPrefix(arg, "-"):
 			return fmt.Errorf("unknown flag %q", arg)
 		default:
-			return fmt.Errorf("unexpected argument %q", arg)
+			if fileArg != "" {
+				return fmt.Errorf("unexpected argument %q", arg)
+			}
+			fileArg = arg
 		}
 	}
-
 	if fileArg == "" {
-		if resolutionArg == "" {
-			resolutionArg = selectedResolutionPath()
-		}
-		_ = asJSON
-		return inspectVNextResolution(resolutionArg)
+		return fmt.Errorf("usage: relkit inspect --file <document>")
 	}
 
 	var (
@@ -167,7 +147,7 @@ func cmdInspect(args []string) error {
 
 	if !raw {
 		if env, ok := message.(*model.Envelope); ok {
-			fmt.Fprintln(os.Stderr, "# envelope signatures are not re-verified by inspect; use `relkit verify released` for trust")
+			fmt.Fprintln(os.Stderr, "# envelope signatures are not re-verified by inspect; the updater verifies them at install time")
 			unsealed, err := unsealForInspection(env)
 			if err != nil {
 				return err
@@ -182,210 +162,6 @@ func cmdInspect(args []string) error {
 	}
 	_, err = os.Stdout.Write(data)
 	return err
-}
-
-// cmdVerify dispatches `relkit verify released`. ADR 0019 §1 retired the
-// backend-crawl verifier that read relkit.json: released verification always
-// runs against an immutable resolution plus a signed offline bundle.
-func cmdVerify(args []string) error {
-	if len(args) == 0 || args[0] != "released" {
-		return fmt.Errorf("usage: relkit verify released --version <v> --channel <dev|stable> --resolution <path>")
-	}
-	return cmdVerifyReleased(args[1:])
-}
-
-func cmdVerifyReleased(args []string) error {
-	options := verify.ReleasedOptions{}
-	resolutionPath := strings.TrimSpace(os.Getenv("RELKIT_RESOLUTION"))
-	projectPath := defaultProjectPath
-	consumerURL := ""
-	directoryURL := ""
-	var productRootPaths []string
-	for i := 0; i < len(args); i++ {
-		switch arg := args[i]; {
-		case arg == "--channel":
-			i++
-			options.Channel = mustValue(args, i, "--channel")
-		case arg == "--to":
-			i++
-			options.To = append(options.To, mustValue(args, i, "--to"))
-		case arg == "--deep":
-			options.Deep = true
-		case arg == "--version" || arg == "--expect-version":
-			i++
-			options.Version = mustValue(args, i, arg)
-		case arg == "--resolution":
-			i++
-			resolutionPath = mustValue(args, i, "--resolution")
-		case arg == "--project":
-			i++
-			projectPath = mustValue(args, i, "--project")
-		case arg == "--product-root":
-			i++
-			productRootPaths = append(productRootPaths, mustValue(args, i, "--product-root"))
-		case arg == "--consumer":
-			i++
-			consumerURL = mustValue(args, i, "--consumer")
-		case arg == "--directory":
-			i++
-			directoryURL = mustValue(args, i, "--directory")
-		case arg == "--resolution-digest":
-			i++
-			options.ResolutionDigest = mustValue(args, i, "--resolution-digest")
-		case arg == "--operator":
-			i++
-			options.OperatorDeploymentID = mustValue(args, i, "--operator")
-		case arg == "--min-index-sequence":
-			i++
-			value, err := strconv.ParseInt(mustValue(args, i, "--min-index-sequence"), 10, 64)
-			if err != nil {
-				return fmt.Errorf("--min-index-sequence: %w", err)
-			}
-			options.MinimumIndexSequence = value
-		case arg == "--min-directory-sequence":
-			i++
-			value, err := strconv.ParseInt(mustValue(args, i, "--min-directory-sequence"), 10, 64)
-			if err != nil {
-				return fmt.Errorf("--min-directory-sequence: %w", err)
-			}
-			options.MinimumDirectorySequence = value
-		default:
-			return fmt.Errorf("unknown flag %q", arg)
-		}
-	}
-	if resolutionPath == "" {
-		return fmt.Errorf("verify released requires --resolution or RELKIT_RESOLUTION")
-	}
-	resolved, err := resolution.Load(resolutionPath)
-	if err != nil {
-		return err
-	}
-	if options.ResolutionDigest != "" && options.ResolutionDigest != resolved.Digest {
-		return fmt.Errorf("--resolution-digest does not match %s", resolutionPath)
-	}
-	if options.OperatorDeploymentID != "" && options.OperatorDeploymentID != resolved.Operator.DeploymentID {
-		return fmt.Errorf("--operator does not match %s", resolutionPath)
-	}
-	options.ResolutionDigest = resolved.Digest
-	options.OperatorDeploymentID = resolved.Operator.DeploymentID
-	if options.Version == "" {
-		return fmt.Errorf("verify released requires --version")
-	}
-	return verifyReleasedVNext(projectPath, resolutionPath, consumerURL, directoryURL, productRootPaths, options)
-}
-
-func verifyReleasedVNext(
-	projectPath, resolutionPath, consumerURL, directoryURL string,
-	productRootPaths []string,
-	options verify.ReleasedOptions,
-) error {
-	if options.Channel == "" {
-		return fmt.Errorf("vNext verify released requires --channel")
-	}
-	productDocument, err := project.Load(projectPath)
-	if err != nil {
-		return err
-	}
-	resolved, err := resolution.Load(resolutionPath)
-	if err != nil {
-		return err
-	}
-	bundle, err := resolution.LoadBundle(filepath.Join(filepath.Dir(resolutionPath), "resolution-bundle.json"))
-	if err != nil {
-		return err
-	}
-	verified, err := bundle.Verify(resolution.BundlePolicy{
-		DistributionRootFingerprint: productDocument.TrustFingerprint,
-		CandidateRootFingerprint:    os.Getenv("RELKIT_CANDIDATE_ROOT_FINGERPRINT"),
-		OperatorDeploymentID:        resolved.Operator.DeploymentID,
-		Identity:                    resolved.Identity,
-	})
-	if err != nil {
-		return err
-	}
-	if verified.Digest != resolved.Digest {
-		return fmt.Errorf("resolution bundle does not match immutable resolution")
-	}
-	if len(productRootPaths) == 0 {
-		if value := os.Getenv("RELKIT_PRODUCT_ROOT"); value != "" {
-			productRootPaths = filepath.SplitList(value)
-		}
-	}
-	if len(productRootPaths) == 0 {
-		path, pathErr := vnextbootstrap.DefaultPath(productDocument.OperatorRef)
-		if pathErr != nil {
-			return pathErr
-		}
-		mapping, loadErr := vnextbootstrap.Load(path)
-		if loadErr != nil {
-			return loadErr
-		}
-		productRootPaths = releaseProductRootPaths(mapping, productDocument)
-	}
-	if len(productRootPaths) == 0 {
-		return fmt.Errorf("no Product RUP Root was provisioned for %s", productDocument.Product)
-	}
-	productRoots, err := loadDistributionKeys(productRootPaths)
-	if err != nil {
-		return err
-	}
-	if publication := productDocument.RuntimeProfilePublication; publication != nil {
-		matches := false
-		for _, key := range productRoots {
-			fingerprint, fingerprintErr := trust.Fingerprint(key)
-			if fingerprintErr != nil {
-				return fingerprintErr
-			}
-			if fingerprint == publication.RootFingerprint {
-				matches = true
-			}
-		}
-		if !matches {
-			return fmt.Errorf("provisioned product roots do not match runtimeProfilePublication.rootFingerprint")
-		}
-	}
-	if consumerURL == "" {
-		consumerURL = bundle.Operator.Endpoints["consumer"]
-	}
-	if directoryURL == "" {
-		directoryURL = bundle.Operator.Endpoints["directory"]
-	}
-	findings, err := verify.RunReleasedHTTP(context.Background(), verify.ReleasedHTTPOptions{
-		Product: productDocument.Product, Channel: options.Channel, Version: options.Version,
-		ConsumerBaseURL: consumerURL, DirectoryURL: directoryURL,
-		TrustedProductRoots: productRoots, ResolutionDigest: resolved.Digest,
-		OperatorDeploymentID: resolved.Operator.DeploymentID,
-		ResolutionIdentity:   string(resolved.Identity),
-	})
-	if err != nil {
-		return err
-	}
-	for _, note := range findings.Notes {
-		fmt.Println("NOTE: " + note)
-	}
-	for _, warning := range findings.Warnings {
-		fmt.Println("WARN: " + warning)
-	}
-	for _, finding := range findings.Errors {
-		fmt.Fprintln(os.Stderr, "ERROR: "+finding)
-	}
-	if !findings.OK() {
-		return exitCodeError{code: 1}
-	}
-	fmt.Printf("released verification passed for %s at resolution %s\n", options.Version, resolved.Digest)
-	return nil
-}
-
-func releaseProductRootPaths(mapping *vnextbootstrap.Document, productDocument *project.Document) []string {
-	if roots := mapping.ProductRoots[productDocument.Product]; len(roots) > 0 {
-		return append([]string(nil), roots...)
-	}
-	if productDocument.RuntimeProfilePublication != nil {
-		if runtimeProfile, ok := mapping.RuntimeProfiles[productDocument.Product]; ok {
-			return append([]string(nil), runtimeProfile.Roots...)
-		}
-	}
-	return nil
 }
 
 func unsealForInspection(env *model.Envelope) (proto.Message, error) {
@@ -486,16 +262,13 @@ func usage() string {
 relkit ` + version + `
 
 Commands:
-  resolve
-  doctor
-  materialize
-  wrapper
-  artifacts
-  payload
-  stage
-  inspect
-  verify
-  release
-  build
+  artifacts produce|merge   run the artifact producer / merge ArtifactSets
+  bootstrap build          build the Runtime Bootstrap a host embeds
+  payload build            build a payload table from a tree
+  stage                    stage an immutable ArtifactSet
+  inspect                  print a protobuf or JSON document
+  release                  publish a staged release to an agent
+  build                    build relkit components
+  custody                  read the credential manifest by keyId
 `)
 }
