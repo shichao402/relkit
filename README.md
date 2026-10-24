@@ -3,23 +3,19 @@
 Relkit 是一套稳定、可声明、可验证的发布与更新能力。宿主描述产品能力组合，
 Relkit 不识别 Loom、Launcher、SvnMergeTool、Dec 或任何仓库身份。
 
-版本跟随目标 Operator 的部署事实：
-
-- 固定自建服务使用 `exact`，客户端与服务端选择同一精确 distribution；
-- 滚动服务使用 `latest-compatible`，只选择已认证且合同匹配的 distribution；
-- 一次构建生成一份 immutable resolution，所有平台、阶段和发布证据共用其 digest；
-- candidate 使用独立身份、Catalog 与权限，不能污染 stable。
+版本跟随目标 Operator 的部署事实：服务端是唯一权威，宿主只声明服务器地址、
+服务器根公钥与产品名；本次发布用哪个版本的 relkit、Profile 与工具，全部由服务端
+决定。一份 ArtifactSet 描述一次构建产出什么，staged release 是不可变树。
 
 使用者验收入口是
 [`docs/design/vnext/USER-ACCEPTANCE.md`](docs/design/vnext/USER-ACCEPTANCE.md)。
 
 ## 产品边界
 
-- `relkit`：resolve、doctor、组件物化、ArtifactSet、发布事务、RUP 与 updater。
-- `relkit-ops`：Operator Profile、Catalog、离线 bundle、升级、凭据轮换与 fleet 认证。
+- `relkit`：ArtifactSet 生产与合并、staged 发布事务、Runtime Bootstrap、RUP 与 updater。
+- `relkit-ops`：服务端运维入口（状态、计划、升级、凭据轮换与管理面）。
 - `relkit-agent` / `relkit-store` / `relkit-console`：服务端发布、存储与管理面。
 - `relkit-updater`：统一更新状态机；Go、Dart、Rust facade 共用同一 IPC 合同。
-- `relkit-ops` Skill：只解释结构化证据和编排命令，不实现第二套门禁或步骤账本。
 
 机器、Token、mirror 凭据和部署参数属于 Operator；产品版本、业务构建、制品内容和
 UI 属于宿主。产品仓不得保存 Relkit 版本、服务 URL、Token、SSH 或私钥。
@@ -30,66 +26,63 @@ UI 属于宿主。产品仓不得保存 Relkit 版本、服务 URL、Token、SSH
 
 ```text
 relkit.project.json
-relkitw
-relkitw.cmd
+relkit.custody.json
 <宿主自己的 artifact producer 与产品代码>
 ```
 
-Operator 先 provision bootstrap，或向完全离线 CI 提供签名 distribution bundle。
-随后宿主统一执行：
+`relkit.project.json` 只允许 `product`、`server`、`rootPublicKey` 三个必填字段，加上
+可选的能力声明；读到未知字段直接报错。宿主不提交 CLI、不钉版本、不钉摘要。
+
+构建从取工具开始（`scripts/relkit_tool.py` 是各宿主自带的实现）：
 
 ```bash
-./relkitw inspect --json
-./relkitw doctor
-./relkitw artifacts produce \
+python3 scripts/relkit_tool.py --component cli --platform <os-arch> --out-dir .relkit-tools
+.relkit-tools/relkit-<os-arch> artifacts produce \
   --version <product-version> \
   --channel <dev|stable> \
   --target <os-arch>
 ```
 
-`relkitw` 验证 Catalog、Operator Profile、Runtime Profile 与 resolution，再按摘要把
-CLI、updater、SDK 和 projection 物化到 `.relkit/components/`。宿主不 clone Relkit，
-不从 PATH 猜 CLI，也不维护 consume lock、产品仓物化脚本或 onboarding 状态；这些
-legacy 控制面已按 ADR 0019 §1 整体删除。
+取工具固定三步：读 project 里的服务器与根公钥、下载 `<component>/<platform>` 与
+`.signature`、用构建机自带的 `ssh-keygen -Y verify` 验签。验签通过才执行，所以宿主
+从不需要知道服务器当前发的是哪个版本。
+
+需要把 Runtime Bootstrap 内嵌进产品的宿主（SvnMergeTool 这类自带更新面的产品）
+额外跑一次：
+
+```bash
+.relkit-tools/relkit-<os-arch> bootstrap build --project relkit.project.json --out .relkit/runtime-bootstrap.json
+```
+
+只在启动器里做更新的产品（Loom）不产出 bootstrap，这是 ADR 0047 的有意设计。
 
 项目声明合同见
-[`docs/adr/0020-vnext-catalog-operator-resolution.md`](docs/adr/0020-vnext-catalog-operator-resolution.md)；
-三个匿名组合场景见
-[`docs/design/vnext/representative-scenarios.md`](docs/design/vnext/representative-scenarios.md)。
+[`docs/adr/0023-desktop-updater-epoch.md`](docs/adr/0023-desktop-updater-epoch.md)。
 
 ## 构建与发布
 
-每个平台 producer 只生成 `relkit.artifact-set/1`。跨平台 Job 通过
-`relkit artifacts merge` 合并；product、version、channel 与 resolution digest
-任一不一致都会失败。
+每个平台 producer 只生成 `relkit.artifact-set/1`。多个平台用
+`relkit artifacts merge` 合并；product、version、releaseCode 与 channel 任一不一致
+都会失败。
 
-产品 CI 到 merged ArtifactSet 为止，不持发布 endpoint、上传 Token 或签名私钥。
-独立 Operator Job 执行同一 resolution 下的：
+产品 CI 到 ArtifactSet 为止，不持发布 endpoint、上传 Token 或签名私钥。平台之间
+传递 ArtifactSet 用普通文件传输（当前编排用 mirrors Generic 仓库的 zip），刻意不
+引入任何 relkit 子命令：stage 的产物路径必须与 ArtifactSet 同目录，所以 stage 与
+release 一定在同一个工作区、同一个 job 里跑：
 
 ```text
-stage → release plan → release execute → verify released
+stage → release plan → release execute
 ```
 
-artifact、manifest、index、directory、Runtime Profile 或多 backend 一致性任一关键
-步骤失败，事务不得报告成功。网页等非关键投影可独立重建。
-
-Runtime Profile 让管理器订阅另一个产品，或让产品自订阅，而不抄 URL、公钥与恢复
-入口。首次发布可由 Operator 用 `relkit-ops runtime-profile create` 建立签名 Profile。
+`relkit release --execute` 只允许 CI 调用（要求 `RELKIT_RELEASE_VIA_CI=1`），token
+按 keyId 从宿主的 `relkit.custody.json` 里取（需求 15），编排本身不出现 token 值。
 
 ## SDK 与组件
 
-distribution 由声明式 registry 生成和验证。常用物化路径：
-
-```text
-.relkit/components/sdk/go
-.relkit/components/sdk/dart
-.relkit/components/sdk/rust
-.relkit/components/bindings/ts
-.relkit/components/bin/relkit-updater[.exe]
-```
-
-Go 宿主使用生成的 `.relkit/components/sdk/go/relkit.mod`；Rust 与 TypeScript 使用
-物化 path dependency。项目的长期依赖文件不钉 Relkit 历史版本。
+引擎唯一：`relkit-updater` 承担全部更新逻辑，各语言只保留现役宿主的薄 IPC 客户端
+（`sdk/dart` 是 facade + frame，Rust 是薄壳），Dart/Node 的厚实现已删除。SDK 从
+服务器的 `/v1/tools/current/sdk-dart/<platform>` 等端点按需取回并验签，宿主仓库里
+没有一个 relkit 二进制或版本号。
 
 ## Operator 运维
 
@@ -109,21 +102,9 @@ relkit-ops rotate <credential> \
   --inventory <inventory> --execute --json
 ```
 
-将正式 Release 的组件同步到 Operator 声明的内容寻址 mirror：
-
-```bash
-relkit-ops distribution mirror \
-  --distribution relkit-distribution.json \
-  --release-assets-base https://github.com/example/relkit/releases/download/v1.2.3 \
-  --mirror-root https://mirror.example/relkit \
-  --json
-```
-
-命令从 `MIRRORS_USERNAME` / `MIRRORS_PASSWORD` 读取写凭据，逐项校验上游
-SHA-256，将 distribution 声明的全部组件及 Release 附件上传到
-`blobs/<sha256>`，并在上传后读回校验。产品 Job 与持 Token 的
-Operator Job 之间使用 `relkit-ops artifact-set push|pull` 传递不可变 ArtifactSet；
-产品 Job 不接触 `RELKIT_UPLOAD_TOKEN`。
+工具与 SDK 资产由服务器 `/v1/tools/` 面统一分发：每个组件按 `<component>/<platform>`
+发出，随附 `.signature`，都受同一把根公钥背书。宿主与 CI 只认 `current` 别名，
+不钉版本号或摘要，所以换代不需要改任何宿主仓库。
 
 升级只暴露完整旧 Profile 或完整新 Profile。轮换必须完成 mint、secret store 更新、
 reload/restart、健康与写权限验证、旧凭据吊销后才可激活。
@@ -138,14 +119,11 @@ reload/restart、健康与写权限验证、旧凭据吊销后才可激活。
 
 - [`SPEC.md`](SPEC.md)：RUP 规范。
 - [`proto/`](proto/)：protobuf 结构 SSOT。
-- [`docs/adr/0019-vnext-breaking-and-protocol-contracts.md`](docs/adr/0019-vnext-breaking-and-protocol-contracts.md)：
-  断代与稳定协议合同。
-- [`docs/adr/0020-vnext-catalog-operator-resolution.md`](docs/adr/0020-vnext-catalog-operator-resolution.md)：
-  Catalog、Operator 与 resolution。
-- [`docs/adr/0021-vnext-artifact-runtime-registry.md`](docs/adr/0021-vnext-artifact-runtime-registry.md)：
-  ArtifactSet、Runtime Profile 与 registry。
-- [`docs/adr/0022-vnext-certification-ops-skill.md`](docs/adr/0022-vnext-certification-ops-skill.md)：
-  认证、ops 与 Skill。
+- [`docs/adr/0023-desktop-updater-epoch.md`](docs/adr/0023-desktop-updater-epoch.md)：
+  桌面更新断代（现行）。
+- [`docs/adr/0019-0022-refutation.md`](docs/adr/0019-0022-refutation.md)：
+  0019~0022 的驳斥与退出说明。
+- [`docs/architecture.md`](docs/architecture.md)：现行架构定档。
 
 RUP Schema Set、Publish Protocol、Updater IPC 和 ArtifactSet 各自按合同窗口兼容；
 不承诺任意 Relkit release 组件混搭。v0.5 及更早控制面已冻结，只接受安全与正确性
@@ -169,5 +147,6 @@ cd sdk/dart && dart test
 cd bindings/ts && npm test
 ```
 
-`internal/vnext` 覆盖合同、签名、resolution、物化、ArtifactSet、Runtime Profile、
-发布事务、Operator 原子升级与认证；`conformance/` 覆盖协议和旧客户端窗口。
+`internal/vnext` 覆盖项目声明、ArtifactSet 生产与合并、staged 发布事务、工具分发与
+Runtime Bootstrap 解析；`internal/vnext/tools` 与服务端 `/v1/tools` 面共同保证「工具
+只从服务器来、只用宿主自带 ssh-keygen 验签」这一条不可绕过的路径。

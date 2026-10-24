@@ -45,22 +45,15 @@ type Artifact struct {
 	Relations Relations         `json:"relations,omitempty"`
 }
 
-type MergeIdentity struct {
-	Product string `json:"product"`
-	Version string `json:"version"`
-	Channel string `json:"channel"`
-}
-
 type Document struct {
-	Schema        string         `json:"schema"`
-	Product       string         `json:"product"`
-	Version       string         `json:"version"`
-	ReleaseCode   int            `json:"releaseCode"`
-	Channel       string         `json:"channel"`
-	Changelog     string         `json:"changelog,omitempty"`
-	Display       map[string]any `json:"display,omitempty"`
-	MergeIdentity *MergeIdentity `json:"mergeIdentity,omitempty"`
-	Artifacts     []Artifact     `json:"artifacts"`
+	Schema      string         `json:"schema"`
+	Product     string         `json:"product"`
+	Version     string         `json:"version"`
+	ReleaseCode int            `json:"releaseCode"`
+	Channel     string         `json:"channel"`
+	Changelog   string         `json:"changelog,omitempty"`
+	Display     map[string]any `json:"display,omitempty"`
+	Artifacts   []Artifact     `json:"artifacts"`
 }
 
 func Load(path string) (*Document, error) {
@@ -86,13 +79,6 @@ func (d Document) Validate() error {
 	}
 	if len(d.Artifacts) == 0 {
 		return fmt.Errorf("artifacts must not be empty")
-	}
-	if d.MergeIdentity != nil {
-		if d.MergeIdentity.Product != d.Product ||
-			d.MergeIdentity.Version != d.Version ||
-			d.MergeIdentity.Channel != d.Channel {
-			return fmt.Errorf("mergeIdentity does not match document identity")
-		}
 	}
 	seen := map[string]bool{}
 	artifactsByID := map[string]Artifact{}
@@ -224,9 +210,6 @@ func Merge(documents ...Document) (*Document, error) {
 		}
 	}
 	base := documents[0]
-	if len(documents) > 1 && base.MergeIdentity == nil {
-		return nil, fmt.Errorf("multi-platform merge requires mergeIdentity")
-	}
 	baseDisplayDigest, err := canonical.Digest(base.Display)
 	if err != nil {
 		return nil, err
@@ -239,9 +222,6 @@ func Merge(documents ...Document) (*Document, error) {
 			candidate.ReleaseCode != base.ReleaseCode ||
 			candidate.Channel != base.Channel {
 			return nil, fmt.Errorf("artifact set %d has a different product/version/releaseCode/channel identity", index)
-		}
-		if len(documents) > 1 && candidate.MergeIdentity == nil {
-			return nil, fmt.Errorf("artifact set %d is missing mergeIdentity", index)
 		}
 		if candidate.Changelog != base.Changelog {
 			return nil, fmt.Errorf("artifact set %d has different changelog metadata", index)

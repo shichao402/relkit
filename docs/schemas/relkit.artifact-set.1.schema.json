@@ -30,7 +30,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["product", "version", "channel"],
-      "description": "多平台合并的身份声明。单平台 drop 可省略；参与合并时三者必须与文档身份一致。",
+      "description": "【已删除，勿再写入】断代后宿主不再做合并身份声明：多平台合并只按 product/version/releaseCode/channel 判定一致。此条目仅为历史对照保留，写进文档会被 DisallowUnknownFields 拒绝。",
+      "deprecated": true,
       "properties": {
         "product": { "type": "string", "minLength": 1 },
         "version": { "type": "string", "minLength": 1 },

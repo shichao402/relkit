@@ -14,29 +14,40 @@ v0.5 控制面（`relkit.json` 发布配置、consume lock、`scripts/host`、Py
 1. **Go 单二进制，标准库为主。** 业务侧 CI 与本地直接跑 `relkit`，不必 vendor 源码、不必自写上传逻辑。
 2. **可单文件分发。** `go build` / GitHub Releases 多平台二进制；不要求 `go install`。
 3. **Ed25519 用运行时原生实现**（`crypto/ed25519`）。签名对象是文档的原始字节，见 SPEC §4。
-4. **产品仓只声明能力，不保存部署事实。** `relkit.project.json` 不写 Relkit 版本、服务器地址、Token、SSH 或私钥。
-5. **控制面一次构建产出一份 immutable resolution。** 所有平台、阶段与发布证据共用同一 digest（ADR 0020）。
-6. **协议按合同窗口兼容**：RUP Schema Set `rup.v2`、Publish Protocol `[2,3]`、Updater IPC `[3,3]`、ArtifactSet `relkit.artifact-set/1`。不承诺跨窗口混搭。
+4. **产品仓只声明身份，不保存部署事实。** `relkit.project.json` 只写产品名、服务器地址与服务器根公钥，不写 relkit 版本、摘要、Token、SSH 或私钥（需求 12.1）。
+5. **服务器是唯一权威。** 用哪个版本的 relkit、工具、Runtime Profile，全部由服务器决定；宿主只问 `current` 别名。
+6. **协议按合同窗口兼容**：RUP Schema Set `rup.v2`、Publish Protocol `[2,3]`、Updater IPC `[4,4]`、ArtifactSet `relkit.artifact-set/1`。不承诺跨窗口混搭。
 
 ---
 
-## 2. 三段式流程
+## 2. 两段式流程
 
-发布拆成三段，每段只持它必须持的东西：
+发布拆成两段，每段只持它必须持的东西：
 
 ```text
-产品 CI                         Operator Job
-────────                        ────────────
-resolve      → resolution.json
-artifacts    → artifact-set.json
-stage        → staged 树   ──▶  release plan
-                                release execute
-                                verify released
+产品 CI（每平台）                      Operator Job（同一工作区）
+────────────────                       ─────────────────────
+artifacts produce → artifact-set.json
+                     │（普通文件传输）
+                     ├──────────────▶  解包 ArtifactSet
+                     │                 stage → release plan → release execute
 ```
 
-- **产品 CI** 只做前三步。不持发布 endpoint、不持上传 Token、不持签名私钥。
-- **Operator Job** 持私钥与后端凭据，在**同一 resolution** 下执行 stage 之后的事务：`stage → release plan → release execute → verify released`。任一步失败，事务不得报告成功。
-- **candidate 车道**用独立身份、独立 Catalog 与独立权限，不得写 stable。
+- **产品 CI** 只做 produce。不持发布 endpoint、不持上传 Token、不持签名私钥。
+- **Operator Job** 持 token，并在**同一工作区**完成 stage 之后的全部动作。stage 以
+  `artifact-set.json` 所在目录为产物根逐字节校验，staged 树又落在项目根下，所以
+  stage 与 release 不能拆到两个 job 里。
+- 平台之间只传 ArtifactSet 这一个普通目录，编排用 mirrors Generic 仓库的 zip 传，
+  刻意不引入任何 relkit 子命令。
+
+### 2.1 工具从哪里来
+
+宿主与 CI 都不持有 relkit 二进制。取工具固定三步，代码在各宿主的
+`scripts/relkit_tool.py`：
+
+1. 读 `relkit.project.json` 的 `server` 与 `rootPublicKey`；
+2. `GET <server>/v1/tools/current/<component>/<platform>` 与其 `/signature`；
+3. 用构建机自带的 `ssh-keygen -Y verify -n relkit-tool` 对照 `<公钥行>` 验签，通过才用。
 
 ---
 
@@ -44,23 +55,28 @@ stage        → staged 树   ──▶  release plan
 
 | 命令 | 联网 | 作用 |
 |---|---|---|
-| `relkit resolve` | 是 | 按 Catalog + Operator Profile 选定 distribution，写 immutable resolution 与签名 bundle |
-| `relkit doctor` | 否 | 只读诊断：resolution、bundle、Runtime Profile 与能力合同是否自洽 |
-| `relkit materialize` | 是 | 按 resolution 摘要把 CLI / updater / SDK / projection 物化到 `.relkit/components/` |
-| `relkit wrapper` | 否 | 生成不可定制的 `relkitw` / `relkitw.cmd` 入口 |
 | `relkit artifacts` | 否 | `produce` 单平台出 `relkit.artifact-set/1`；`merge` 合并多平台 |
+| `relkit bootstrap` | 是 | `build` 产出 `relkit.runtime-bootstrap/2`，由宿主构建时内嵌 |
 | `relkit payload` | 否 | `build` 把树打成 payload zip 并出文件表（ADR 0013） |
-| `relkit stage` | 否 | 由 ArtifactSet + resolution 生成 staged 树（vNext 控制面五件套） |
-| `relkit inspect` | 否 | 打印 resolution 或某个 protobuf 文档，供人读 |
-| `relkit verify` | 是 | `released` 对已发布版本做签名、sequence 与摘要校验 |
+| `relkit stage` | 否 | 由 ArtifactSet 生成不可变 staged 树 |
+| `relkit inspect` | 否 | 打印某个 protobuf / JSON 文档，供人读 |
 | `relkit release` | 是 | 发布事务门：plan（dry-run）/ `--execute` |
 | `relkit build` | 否 | 按 components registry 交叉编译组件二进制与 Release 附件 |
+| `relkit custody` | 否 | 按 keyId 读凭据清单，报告载体与可用性（不含秘密） |
 
-只有这 11 个命令。`relkit --version` 打印版本。
+只有这 8 个命令。`relkit --version` 打印版本。
+
+`resolve` / `doctor` / `materialize` / `wrapper` / `verify` 五个命令已随
+「宿主持有 resolution」模型一起删除（ADR 0023）。再出现即视为回退。
 
 ---
 
 ## 4. 命令详解
+
+> **历史章节（已失效）。** 下面 4.1 `resolve`、4.2 `doctor`、4.3 `materialize`、4.4
+> `wrapper`、4.9 `verify released` 五节描述的是「宿主持有 resolution」时代，相关命令
+> 已随 ADR 0023 删除，执行会直接报 `unknown command`。现行命令面只有第 3 节列出的 8
+> 个；断代后的接入方式见 README 的「宿主接入」与 ADR 0023。
 
 ### 4.1 `relkit resolve`
 
@@ -224,23 +240,22 @@ agent 端点取自签名 Operator 的 `endpoints.agent`。CI 网络需要走不�
 
 ### 5.1 `relkit.project.json`（产品仓唯一声明）
 
-schema `relkit.project/1`。核心字段：
+schema `relkit.project/1`。允许的字段只有下列这些，读到未知字段直接报错：
 
-| 字段 | 说明 |
-|---|---|
-| `product` | 产品 id，发布与目录文档的键 |
-| `operatorRef` | 指向 Operator Profile |
-| `trustFingerprint` | 产品 distribution root 指纹 |
-| `channels` | 支持的渠道 |
-| `roles` | 声明本产品在分发拓扑中的角色 |
-| `requiredContracts` | 所需能力合同（域 + 对端 + 窗口） |
-| `artifactProducer` | 出 ArtifactSet 的命令 |
-| `versionProvider` | 出产品版本的命令（可空） |
-| `runtimeProfileSubscriptions` / `runtimeProfilePublication` | 订阅或自发布 Runtime Profile |
-| `capabilityFingerprint` | 能力指纹，参与 resolution 摘要 |
-| `site` | 可选人页声明；省略即不发人页文档 |
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `product` | 是 | 产品 id，发布与目录文档的键 |
+| `server` | 是 | 唯一写面地址（如 `http://publish.devcloud.woa.com`） |
+| `rootPublicKey` | 是 | 服务器根公钥，OpenSSH 单行格式 |
+| `channels` | 否 | 支持的渠道；声明了就只接受其中列出的 |
+| `selectorDimensions` | 否 | 产物选择维度，断代后只有 `["os-arch"]` |
+| `artifactProducer` | 否 | 出 ArtifactSet 的命令与 env allowlist |
+| `versionProvider` | 否 | 出产品版本的命令（可空，缺省读 `VERSION.json`） |
+| `site` | 否 | 可选人页声明；省略即不发人页文档 |
 
-可选 `recovery`、`osArch`、`facades`、`projections`、`topology`、`selectorDimensions`、`versionPolicy`。
+`operatorRef`、`trustFingerprint`、`roles`、`requiredContracts`、`capabilityFingerprint`、
+`runtimeProfileSubscriptions`、`runtimeProfilePublication`、`recovery`、`osArch`、
+`facades`、`projections`、`topology`、`versionPolicy` 全部已随 resolution 模型删除。
 
 ### 5.2 `VERSION.json`（版本 SSOT）
 

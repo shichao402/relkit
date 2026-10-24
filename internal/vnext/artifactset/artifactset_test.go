@@ -18,12 +18,7 @@ func platformSet(platform string, artifacts []Artifact) Document {
 		Version:     "1.2.3",
 		ReleaseCode: 12,
 		Channel:     "stable",
-		MergeIdentity: &MergeIdentity{
-			Product: "demo",
-			Version: "1.2.3",
-			Channel: "stable",
-		},
-		Artifacts: artifacts,
+		Artifacts:   artifacts,
 	}
 }
 
@@ -52,7 +47,6 @@ func TestMergeRejectsIdentityDrift(t *testing.T) {
 		{ID: "macos-installer", Path: "b", Kind: KindInstaller, Platform: "darwin-arm64", SHA256: artifactDigest, Size: 1},
 	})
 	right.Version = "1.2.4"
-	right.MergeIdentity.Version = "1.2.4"
 	if _, err := Merge(left, right); err == nil || !strings.Contains(err.Error(), "different") {
 		t.Fatalf("unexpected error: %v", err)
 	}
