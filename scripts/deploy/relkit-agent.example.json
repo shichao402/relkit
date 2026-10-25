@@ -8,6 +8,7 @@
   "maxPartConcurrency": 16,
   "uploadTTL": "24h",
   "stateDir": "/var/lib/relkit-agent",
+  "productRootParent": "",
   "site": {
     "makers": {
       "projectId": "makers-example",

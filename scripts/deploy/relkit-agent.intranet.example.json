@@ -8,6 +8,7 @@
   "maxPartConcurrency": 16,
   "uploadTTL": "24h",
   "stateDir": "/data/relkit-agent",
+  "productRootParent": "/data/relkit",
   "uploadTokens": [],
   "products": {}
 }

@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional, Sequence
 
 DEPLOY_DIR = Path(__file__).resolve().parent
@@ -876,6 +876,107 @@ def cmd_install_serve(args: argparse.Namespace) -> None:
         print(f"  export RELKIT_ADMIN_BOOTSTRAP='{new_bootstrap}'")
 
 
+def write_product_root_parent(config_path: Path, product_root: str) -> str:
+    """Record where product trees live so the agent gives the same answer.
+
+    The agent decides where a product registered without a root lands from
+    productRootParent, and it refuses to guess on a box that has no products
+    yet. The installer always knows the answer, because the same value just
+    became the service account's home and the unit's WorkingDirectory. Leaving
+    it out of the config is how an empty box ended up with one path in the unit
+    and no default at all inside the agent.
+
+    Paths are interpreted as POSIX, the target's own convention, not the
+    convention of whichever host runs the installer.
+    """
+    posix = PurePosixPath(str(product_root))
+    if not posix.is_absolute():
+        raise Fail(f"--product-root must be an absolute path, got {product_root}")
+    parent = str(posix).rstrip("/") or "/"
+    cfg = load_json_object(config_path.read_text(encoding="utf-8"))
+    existing = str(cfg.get("productRootParent") or "").strip().rstrip("/")
+    if existing and existing != parent:
+        raise Fail(
+            f"config already sets productRootParent to {existing}, but --product-root "
+            f"is {parent}; the unit's WorkingDirectory comes from the flag, so the two "
+            "must agree. Re-run with the configured value, or edit the config first"
+        )
+    if existing != parent:
+        cfg["productRootParent"] = parent
+        config_path.write_text(dump_json(cfg), encoding="utf-8")
+        os.chmod(config_path, 0o644)
+        print(f"productRootParent {parent} written to {config_path}")
+    return parent
+
+
+def _common_parent(roots: Sequence[str]) -> str:
+    """Return the one directory every root sits under, or "" when they differ.
+
+    Mirrors the agent's own rule: the registered products vote, and a machine
+    whose products are scattered has no convention worth writing down.
+    """
+    parent = ""
+    for root in roots:
+        text = str(root or "").strip()
+        if not text:
+            continue
+        directory = str(PurePosixPath(text).parent)
+        if not parent:
+            parent = directory
+            continue
+        if directory != parent:
+            return ""
+    return parent
+
+
+def backfill_product_root_parent(
+    cfg: dict[str, Any],
+    *,
+    working_directory: str,
+    product_roots: dict[str, str],
+) -> tuple[dict[str, Any], str]:
+    """Give an upgraded agent the productRootParent that install agent writes.
+
+    Boxes installed before the flag was mandatory carry no productRootParent, so
+    they work only while the agent can infer one from their products. That
+    inference disappears the moment a box has no products, which is the empty-box
+    case the mandatory flag exists to remove.
+
+    The registered products are the better evidence of the two. They show where
+    releases actually live on this machine. The unit's WorkingDirectory shows
+    what an older installer was told, and on the boxes that need this backfill
+    that value is very often the old /srv/relkit default, which is exactly the
+    guess this change deletes. Preferring the unit would therefore bake the
+    deleted default into boxes that never used it.
+
+    WorkingDirectory still decides when it is the only thing to go on, and a
+    disagreement is reported rather than hidden, because the two values mean
+    different things and an operator should see that they diverged.
+    """
+    if str(cfg.get("productRootParent") or "").strip():
+        return cfg, ""
+    inferred_parent = _common_parent(list(product_roots.values()))
+    unit_parent = ""
+    if working_directory.strip():
+        unit_parent = str(PurePosixPath(working_directory.strip())).rstrip("/")
+    chosen = inferred_parent or unit_parent
+    if not chosen:
+        return cfg, (
+            "left productRootParent unset: the registered products share no parent "
+            "and the unit names no WorkingDirectory, so there is nothing to infer from"
+        )
+    updated = dict(cfg)
+    updated["productRootParent"] = chosen
+    source = "the registered products" if inferred_parent else "the unit's WorkingDirectory"
+    note = f"productRootParent {chosen} backfilled from {source}"
+    if inferred_parent and unit_parent and unit_parent != inferred_parent:
+        note += (
+            f" (the unit still runs in {unit_parent}; that is the old installer "
+            "default, not where the products are)"
+        )
+    return updated, note
+
+
 def cmd_install_agent(args: argparse.Namespace) -> None:
     must_root()
     require_cmd("systemctl")
@@ -886,6 +987,9 @@ def cmd_install_agent(args: argparse.Namespace) -> None:
     config_dir = Path(args.config_dir)
     state_dir = Path(args.state_dir)
     product_root = Path(args.product_root)
+    posix_root = PurePosixPath(str(args.product_root))
+    if not posix_root.is_absolute():
+        die(f"--product-root must be an absolute path, got {args.product_root}")
     config_path = config_dir / "relkit-agent.json"
     dest_bin = Path(args.prefix) / "relkit-agent"
 
@@ -906,6 +1010,12 @@ def cmd_install_agent(args: argparse.Namespace) -> None:
         cfg["stateDir"] = str(state_dir)
         config_path.write_text(dump_json(cfg), encoding="utf-8")
         os.chmod(config_path, 0o644)
+    # The agent answers "where does a product registered without a root land"
+    # from productRootParent, and it has no hardcoded fallback on purpose. The
+    # installer already knows the answer, because the same value just became
+    # the service account's home and the unit's WorkingDirectory, so it writes
+    # it down instead of leaving the flag and the config disagreeing.
+    write_product_root_parent(config_path, str(args.product_root))
     install_file(binary, dest_bin, 0o755)
     run([str(dest_bin), "-version"])
     tokens = config_dir / "tokens"
@@ -1683,6 +1793,16 @@ def apply_agent_upgrade(
     cfg: dict[str, Any] = {}
     if config_file.is_file():
         cfg = load_json_object(config_file.read_text(encoding="utf-8"))
+    # The live unit names the directory install agent was handed. Read it before
+    # touching the config, because it is the best evidence for backfilling a
+    # productRootParent that older installs never wrote.
+    unit_path = Path(show.get("FragmentPath") or "/etc/systemd/system/relkit-agent.service")
+    live_working_dir = ""
+    if unit_path.is_file():
+        for line in unit_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("WorkingDirectory="):
+                live_working_dir = line.split("=", 1)[1].strip()
+                break
     # The custody manifest belongs beside the config: it describes this
     # machine's identity, not any one product's data.
     manifest_file = config_dir / (Path(custody_manifest).name if custody_manifest else "custody-manifest.json")
@@ -1762,8 +1882,11 @@ def apply_agent_upgrade(
             f"tool publishing enabled via {token_path}"
             + (" (new credential minted)" if minted else " (existing credential reused)")
         )
-    config_file.write_text(dump_json(cfg), encoding="utf-8")
-
+    # Registration now lives in the admin document, so the backfill reads the
+    # merged result: a box mid-migration still has its roots in the config file,
+    # and judging "do these share a parent" from the pre-merge value would miss
+    # the products that just arrived.
+    admin_products: dict[str, str] = dict(product_roots)
     if admin_doc.get("products") or admin_doc.get("tokens"):
         existing: dict[str, Any] = {}
         if admin_file.is_file():
@@ -1780,6 +1903,16 @@ def apply_agent_upgrade(
             pass
         notes.extend(f"admin state: {item}" for item in merge_notes)
         notes.append(f"admin state written to {admin_file}")
+        for entry in merged.get("products") or []:
+            if isinstance(entry, dict) and entry.get("id") and entry.get("root"):
+                admin_products[str(entry["id"])] = str(entry["root"])
+    cfg, backfill_note = backfill_product_root_parent(
+        cfg, working_directory=live_working_dir, product_roots=admin_products
+    )
+    if backfill_note:
+        notes.append(backfill_note)
+    config_file.write_text(dump_json(cfg), encoding="utf-8")
+
     if manifest_file.is_file():
         os.chmod(manifest_file, 0o600)
         try:
@@ -1801,12 +1934,6 @@ def apply_agent_upgrade(
     if binary:
         install_file(binary, dest_bin, 0o755)
         notes.append(f"installed {dest_bin}")
-    unit_text = Path(show.get("FragmentPath") or "/etc/systemd/system/relkit-agent.service").read_text(encoding="utf-8")
-    live_working_dir = ""
-    for line in unit_text.splitlines():
-        if line.startswith("WorkingDirectory="):
-            live_working_dir = line.split("=", 1)[1].strip()
-            break
     if not live_working_dir:
         raise Fail("cannot find WorkingDirectory in the live relkit-agent unit; refusing to guess")
     write_agent_unit(
@@ -1879,6 +2006,16 @@ def apply_console_upgrade(
     cfg: dict[str, Any] = {}
     if config_file.is_file():
         cfg = load_json_object(config_file.read_text(encoding="utf-8"))
+    # The live unit names the directory install agent was handed. Read it before
+    # touching the config, because it is the best evidence for backfilling a
+    # productRootParent that older installs never wrote.
+    unit_path = Path(show.get("FragmentPath") or "/etc/systemd/system/relkit-agent.service")
+    live_working_dir = ""
+    if unit_path.is_file():
+        for line in unit_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("WorkingDirectory="):
+                live_working_dir = line.split("=", 1)[1].strip()
+                break
     stale_panel_file = console_admin_path(cfg, str(config_file))
     backup_files(
         backup_root / "console",
@@ -2829,7 +2966,17 @@ def build_parser() -> argparse.ArgumentParser:
     agent_i.add_argument("--binary", required=True)
     agent_i.add_argument("--config-dir", default="/etc/relkit-agent")
     agent_i.add_argument("--state-dir", default="/var/lib/relkit-agent")
-    agent_i.add_argument("--product-root", default="/srv/relkit")
+    agent_i.add_argument(
+        "--product-root",
+        required=True,
+        help=(
+            "parent directory of the product trees, written to the agent config as "
+            "productRootParent; also becomes the service account's home and the unit's "
+            "WorkingDirectory. Must be absolute. There is no default: nothing on an empty "
+            "box says where releases live, and a guessed path the service account cannot "
+            "create only fails later, at publish time"
+        ),
+    )
     agent_i.add_argument(
         "--config-example",
         default="",

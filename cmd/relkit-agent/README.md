@@ -67,7 +67,7 @@ dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审
 
 ## 运维
 
-装机 / 换二进制：`python scripts/deploy/relkit.py install agent` / `upgrade`。给产品挂 profile：Operator 侧 `relkit-ops agent policy --config <cfg> --policy <relkit.agent-product-policy/1>`；同机共用既有发布凭据时在 policy 里显式声明同一 token 条目。`relkit-agent init` 是内部写配置接口，不是人用 CLI。
+装机 / 换二进制：`python scripts/deploy/relkit.py install agent --product-root <父目录>` / `upgrade`。`--product-root` 必填（绝对路径），它同时是服务账号家目录、unit 的 `WorkingDirectory`、以及写进 agent 配置的 `productRootParent`；装完配置里就有这一项，注册产品不填 root 时落到 `<productRootParent>/<id>`。给产品挂 profile：Operator 侧 `relkit-ops agent policy --config <cfg> --policy <relkit.agent-product-policy/1>`；同机共用既有发布凭据时在 policy 里显式声明同一 token 条目。`relkit-agent init` 是内部写配置接口，不是人用 CLI。
 
 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
@@ -88,7 +88,7 @@ dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审
 - `POST /v1/publish`
 - `POST /v1/unpublish`（从签名索引移除一个版本：删节点 + 重签提交指针 + 重投影 site/latest/channel + 删 release 文档；与 publish 共产品锁，并发 409；CLI 侧 `relkit-agent unpublish -product <id> -version <v>`）
 
-无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`python3 scripts/deploy/relkit.py install agent --binary …`。已有实例：`python scripts/deploy/relkit.py upgrade --host <Host>`。
+无任何产品 token 时写端点 405。Bearer 对但产品不对是 **403**。安装：`python3 scripts/deploy/relkit.py install agent --binary … --product-root <父目录>`。已有实例：`python scripts/deploy/relkit.py upgrade --host <Host>`。
 
 ## 删除旧后端前的四步部署顺序
 

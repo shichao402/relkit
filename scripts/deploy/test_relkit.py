@@ -876,6 +876,168 @@ class ConsoleInstallTests(unittest.TestCase):
         self.assertIn("relkit-store.service", names)
 
 
+class AgentInstallTests(unittest.TestCase):
+    """`install agent` must agree with the agent about default product roots.
+
+    The flag used to have a /srv/relkit default that was never written into the
+    agent config, so on an empty box the two disagreed: the unit ran with one
+    WorkingDirectory while productRootParent stayed empty, and the first blank
+    root registration was refused outright. The flag is mandatory now, and its
+    value lands in the config.
+    """
+
+    def test_product_root_is_mandatory(self):
+        parser = deploy_cli.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["install", "agent", "--binary", "dist/relkit-agent-linux-amd64"])
+        args = parser.parse_args(
+            [
+                "install",
+                "agent",
+                "--binary",
+                "dist/relkit-agent-linux-amd64",
+                "--product-root",
+                "/data/relkit",
+            ]
+        )
+        self.assertEqual(args.product_root, "/data/relkit")
+        self.assertEqual(args.state_dir, "/var/lib/relkit-agent")
+
+    def test_no_hardcoded_product_root_remains(self):
+        source = inspect.getsource(deploy_cli.build_parser)
+        self.assertNotIn('/srv/relkit', source)
+
+    def _drain(self, product_root, config):
+        """Run the config-writing half of install agent against a temp tree."""
+        tmp = Path(_TempDir().name)
+        config_dir = tmp / "etc"
+        config_dir.mkdir(parents=True)
+        config_path = config_dir / "relkit-agent.json"
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        return deploy_cli.write_product_root_parent(config_path, product_root), config_path
+
+    def test_product_root_is_written_as_product_root_parent(self):
+        parent, config_path = self._drain("/data/relkit", {"addr": "127.0.0.1:8787"})
+        self.assertEqual(parent, "/data/relkit")
+        written = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(written["productRootParent"], "/data/relkit")
+        # Everything else in the file survives: the installer patches one key.
+        self.assertEqual(written["addr"], "127.0.0.1:8787")
+
+    def test_trailing_slash_is_normalised(self):
+        parent, config_path = self._drain("/data/relkit/", {})
+        self.assertEqual(parent, "/data/relkit")
+        self.assertEqual(
+            json.loads(config_path.read_text(encoding="utf-8"))["productRootParent"],
+            "/data/relkit",
+        )
+
+    def test_relative_product_root_is_rejected(self):
+        with self.assertRaises(deploy_cli.Fail):
+            self._drain("data/relkit", {})
+
+    def test_configured_parent_must_match_the_flag(self):
+        with self.assertRaises(deploy_cli.Fail):
+            self._drain("/data/relkit", {"productRootParent": "/srv/relkit"})
+
+    def test_matching_parent_is_idempotent(self):
+        parent, config_path = self._drain("/data/relkit", {"productRootParent": "/data/relkit"})
+        self.assertEqual(parent, "/data/relkit")
+
+    def test_intranet_example_pins_the_real_tree(self):
+        example = json.loads(
+            (DEPLOY / "relkit-agent.intranet.example.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(example["productRootParent"], "/data/relkit")
+        self.assertEqual(example["stateDir"], "/data/relkit-agent")
+
+    def test_generic_example_states_the_key_without_guessing(self):
+        example = json.loads(
+            (DEPLOY / "relkit-agent.example.json").read_text(encoding="utf-8")
+        )
+        # The key is present so operators see it exists, empty so a template
+        # never decides where somebody else's releases live.
+        self.assertIn("productRootParent", example)
+        self.assertEqual(example["productRootParent"], "")
+
+
+class AgentUpgradeBackfillTests(unittest.TestCase):
+    """An upgraded box must end up with the same answer install agent writes.
+
+    These boxes carry no productRootParent, so they work only while the agent
+    can infer one from their products. That inference is exactly what fails on
+    an empty box, which is why the flag became mandatory.
+    """
+
+    def test_registered_products_decide_before_the_unit(self):
+        # The unit's WorkingDirectory on an old install is frequently the
+        # deleted /srv/relkit default. Trusting it would bake that default into
+        # boxes whose releases never lived there.
+        cfg, note = deploy_cli.backfill_product_root_parent(
+            {},
+            working_directory="/srv/relkit",
+            product_roots={"loom": "/data/relkit/loom", "svn": "/data/relkit/svn-auto-merge"},
+        )
+        self.assertEqual(cfg["productRootParent"], "/data/relkit")
+        self.assertIn("registered products", note)
+        self.assertIn("/srv/relkit", note)
+
+    def test_working_directory_decides_when_no_product_is_registered(self):
+        cfg, note = deploy_cli.backfill_product_root_parent(
+            {}, working_directory="/data/relkit", product_roots={}
+        )
+        self.assertEqual(cfg["productRootParent"], "/data/relkit")
+        self.assertIn("WorkingDirectory", note)
+
+    def test_scattered_products_fall_back_to_the_unit(self):
+        cfg, note = deploy_cli.backfill_product_root_parent(
+            {},
+            working_directory="/data/relkit",
+            product_roots={"a": "/data/relkit/a", "b": "/srv/b"},
+        )
+        self.assertEqual(cfg["productRootParent"], "/data/relkit")
+        self.assertIn("WorkingDirectory", note)
+
+    def test_configured_value_is_never_overwritten(self):
+        cfg, note = deploy_cli.backfill_product_root_parent(
+            {"productRootParent": "/data/relkit"},
+            working_directory="/srv/relkit",
+            product_roots={"loom": "/other/loom"},
+        )
+        self.assertEqual(cfg["productRootParent"], "/data/relkit")
+        self.assertEqual(note, "")
+
+    def test_trailing_slash_is_normalised(self):
+        cfg, _ = deploy_cli.backfill_product_root_parent(
+            {}, working_directory="/data/relkit/", product_roots={}
+        )
+        self.assertEqual(cfg["productRootParent"], "/data/relkit")
+
+    def test_nothing_to_go_on_leaves_the_key_absent(self):
+        cfg, note = deploy_cli.backfill_product_root_parent(
+            {}, working_directory="", product_roots={}
+        )
+        self.assertNotIn("productRootParent", cfg)
+        self.assertTrue(note)
+
+    def test_scattered_products_and_no_unit_write_nothing(self):
+        cfg, note = deploy_cli.backfill_product_root_parent(
+            {},
+            working_directory="",
+            product_roots={"a": "/data/relkit/a", "b": "/srv/b"},
+        )
+        self.assertNotIn("productRootParent", cfg)
+        self.assertIn("share no parent", note)
+
+    def test_common_parent_matches_the_agent_rule(self):
+        self.assertEqual(
+            deploy_cli._common_parent(["/data/relkit/a", "/data/relkit/b"]), "/data/relkit"
+        )
+        self.assertEqual(deploy_cli._common_parent(["/data/relkit/a", "/srv/b"]), "")
+        self.assertEqual(deploy_cli._common_parent([]), "")
+        self.assertEqual(deploy_cli._common_parent(["", None]), "")
+
+
 class ConsoleAdminPathTests(unittest.TestCase):
     """The panel writes one file; the unit has to be allowed to write there.
 

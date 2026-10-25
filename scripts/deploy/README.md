@@ -42,7 +42,7 @@ python scripts/deploy/verify-published-tools.py \
 | `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`）。stamp 读根目录 `VERSION.json` |
 | `version` | 打印 SSOT（`--field number\|version\|build\|tag`）；发版 CI 用 `--check-tag` |
 | `install serve` | 空机首装 systemd `relkit-store` |
-| `install agent` | 空机首装 systemd `relkit-agent` |
+| `install agent` | 空机首装 systemd `relkit-agent`。`--product-root` 必填：它同时是服务账号家目录、unit 的 `WorkingDirectory`、以及写进 agent 配置的 `productRootParent`（没默认值，空机无从推断，猜错要等发布时才爆） |
 | `install console` | 首装 systemd `relkit-console`（ADR 0016：管理面独立 unit；迁移盒子自动继承发布树里的操作员账户） |
 | `migrate-serve` | 现网仍在跑 `relkit-serve.service` 的盒子一步迁移到 `relkit-store.service`（ADR 0016 第 4 步：配置迁 `/etc/relkit-store/relkit-store.json`，树/token/数据文件不动，备份后可回滚） |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |
@@ -89,10 +89,14 @@ agent 对 publish profile 是 strict 解析：未知字段即拒（publish 阶�
 
 ```bash
 sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-store-linux-amd64
-sudo python3 scripts/deploy/relkit.py install agent --binary ./dist/relkit-agent-linux-amd64
+sudo python3 scripts/deploy/relkit.py install agent \
+  --binary ./dist/relkit-agent-linux-amd64 \
+  --product-root /srv/relkit
 ```
 
-内网 `update.devcloud.woa.com` 的数据放在 `/data`，不要用上面的默认值（`127.0.0.1:30341`、`/srv/releases`、`/var/lib/relkit-agent`、`/srv/relkit`）：
+`--product-root` 没有默认值，必须给绝对路径。它一次决定三件事：服务账号的家目录、unit 的 `WorkingDirectory`、agent 配置里的 `productRootParent`（注册产品不填 root 时落到 `<productRootParent>/<产品名>`）。装在哪个盘、服务账号能否写，只有装的人知道，脚本不猜。
+
+内网 `update.devcloud.woa.com` 的数据放在 `/data`，不要用上面的默认值（`127.0.0.1:30341`、`/srv/releases`、`/var/lib/relkit-agent`）：
 
 ```bash
 sudo python3 scripts/deploy/relkit.py install serve \
