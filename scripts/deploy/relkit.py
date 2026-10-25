@@ -909,6 +909,41 @@ def write_product_root_parent(config_path: Path, product_root: str) -> str:
     return parent
 
 
+def admin_document_products(doc: Any) -> dict[str, str]:
+    """Return ``{id: root}`` for every product registered in an admin document.
+
+    The document is JSON off disk, so nothing about its shape is guaranteed:
+    entries may be missing an id or a root, and a truncated file yields an empty
+    mapping rather than an exception.
+    """
+    roots: dict[str, str] = {}
+    if not isinstance(doc, dict):
+        return roots
+    for entry in doc.get("products") or []:
+        if isinstance(entry, dict) and entry.get("id") and entry.get("root"):
+            roots[str(entry["id"])] = str(entry["root"])
+    return roots
+
+def registered_products_for_backfill(
+    *,
+    config_products: dict[str, str],
+    existing_admin: dict[str, Any],
+    merged_admin: dict[str, Any],
+) -> dict[str, str]:
+    """Every product root this box knows, from all three places it can live.
+
+    All three count. The config map holds products on a box that has not
+    finished the epoch split; merged_admin holds the ones this run is about to
+    write; existing_admin holds the ones already on disk. Skipping the last is
+    how an epoch-finished box reported no products at all and let the backfill
+    fall back to the unit's WorkingDirectory instead of the paths the operator
+    actually registered.
+    """
+    roots = dict(config_products)
+    roots.update(admin_document_products(existing_admin))
+    roots.update(admin_document_products(merged_admin))
+    return roots
+
 def _common_parent(roots: Sequence[str]) -> str:
     """Return the one directory every root sits under, or "" when they differ.
 
@@ -942,12 +977,14 @@ def backfill_product_root_parent(
     inference disappears the moment a box has no products, which is the empty-box
     case the mandatory flag exists to remove.
 
-    The registered products are the better evidence of the two. They show where
-    releases actually live on this machine. The unit's WorkingDirectory shows
-    what an older installer was told, and on the boxes that need this backfill
-    that value is very often the old /srv/relkit default, which is exactly the
-    guess this change deletes. Preferring the unit would therefore bake the
-    deleted default into boxes that never used it.
+    The registered products are the better evidence of the two. Each root is the
+    path an operator typed for that product, so the set of them describes where
+    release trees actually sit. The unit's WorkingDirectory only reports the
+    argument some installer was handed, possibly long ago and possibly for a
+    directory that has since moved: the live box this was checked against runs
+    in /data/relkit while a /srv/relkit default was still sitting in the repo,
+    so a stale value of that shape would be copied forward as if it were fact.
+    Preferring the products keeps the config describing the disk.
 
     WorkingDirectory still decides when it is the only thing to go on, and a
     disagreement is reported rather than hidden, because the two values mean
@@ -971,8 +1008,8 @@ def backfill_product_root_parent(
     note = f"productRootParent {chosen} backfilled from {source}"
     if inferred_parent and unit_parent and unit_parent != inferred_parent:
         note += (
-            f" (the unit still runs in {unit_parent}; that is the old installer "
-            "default, not where the products are)"
+            f" (the unit still runs in {unit_parent}; the products are not there, "
+            "so the unit's value was not used)"
         )
     return updated, note
 
@@ -1886,15 +1923,15 @@ def apply_agent_upgrade(
     # merged result: a box mid-migration still has its roots in the config file,
     # and judging "do these share a parent" from the pre-merge value would miss
     # the products that just arrived.
-    admin_products: dict[str, str] = dict(product_roots)
+    existing_admin: dict[str, Any] = {}
+    if admin_file.is_file():
+        existing_admin = load_json_object(admin_file.read_text(encoding="utf-8"))
+    merged_admin: dict[str, Any] = {}
     if admin_doc.get("products") or admin_doc.get("tokens"):
-        existing: dict[str, Any] = {}
-        if admin_file.is_file():
-            existing = load_json_object(admin_file.read_text(encoding="utf-8"))
-        merged, merge_notes = admin_merge(existing, admin_doc)
+        merged_admin, merge_notes = admin_merge(existing_admin, admin_doc)
         admin_file.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(admin_file.parent, 0o700)
-        admin_file.write_text(dump_json(merged), encoding="utf-8")
+        admin_file.write_text(dump_json(merged_admin), encoding="utf-8")
         os.chmod(admin_file, 0o600)
         try:
             chown_path(admin_file, user)
@@ -1903,9 +1940,15 @@ def apply_agent_upgrade(
             pass
         notes.extend(f"admin state: {item}" for item in merge_notes)
         notes.append(f"admin state written to {admin_file}")
-        for entry in merged.get("products") or []:
-            if isinstance(entry, dict) and entry.get("id") and entry.get("root"):
-                admin_products[str(entry["id"])] = str(entry["root"])
+    # The document already on disk counts even when this run has nothing to
+    # merge. An epoch-finished box keeps every product there and nothing in the
+    # config, so ignoring it left the backfill with no products and let it
+    # conclude from the unit alone.
+    admin_products = registered_products_for_backfill(
+        config_products=product_roots,
+        existing_admin=existing_admin,
+        merged_admin=merged_admin,
+    )
     cfg, backfill_note = backfill_product_root_parent(
         cfg, working_directory=live_working_dir, product_roots=admin_products
     )
@@ -2006,16 +2049,6 @@ def apply_console_upgrade(
     cfg: dict[str, Any] = {}
     if config_file.is_file():
         cfg = load_json_object(config_file.read_text(encoding="utf-8"))
-    # The live unit names the directory install agent was handed. Read it before
-    # touching the config, because it is the best evidence for backfilling a
-    # productRootParent that older installs never wrote.
-    unit_path = Path(show.get("FragmentPath") or "/etc/systemd/system/relkit-agent.service")
-    live_working_dir = ""
-    if unit_path.is_file():
-        for line in unit_path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("WorkingDirectory="):
-                live_working_dir = line.split("=", 1)[1].strip()
-                break
     stale_panel_file = console_admin_path(cfg, str(config_file))
     backup_files(
         backup_root / "console",

@@ -970,9 +970,10 @@ class AgentUpgradeBackfillTests(unittest.TestCase):
     """
 
     def test_registered_products_decide_before_the_unit(self):
-        # The unit's WorkingDirectory on an old install is frequently the
-        # deleted /srv/relkit default. Trusting it would bake that default into
-        # boxes whose releases never lived there.
+        # A unit's WorkingDirectory records what an installer was handed, not
+        # where the trees ended up. The live box this was checked against runs
+        # in /data/relkit, so a stale unit value must never outvote the roots an
+        # operator actually registered.
         cfg, note = deploy_cli.backfill_product_root_parent(
             {},
             working_directory="/srv/relkit",
@@ -981,6 +982,7 @@ class AgentUpgradeBackfillTests(unittest.TestCase):
         self.assertEqual(cfg["productRootParent"], "/data/relkit")
         self.assertIn("registered products", note)
         self.assertIn("/srv/relkit", note)
+        self.assertIn("not there", note)
 
     def test_working_directory_decides_when_no_product_is_registered(self):
         cfg, note = deploy_cli.backfill_product_root_parent(
@@ -1036,6 +1038,68 @@ class AgentUpgradeBackfillTests(unittest.TestCase):
         self.assertEqual(deploy_cli._common_parent(["/data/relkit/a", "/srv/b"]), "")
         self.assertEqual(deploy_cli._common_parent([]), "")
         self.assertEqual(deploy_cli._common_parent(["", None]), "")
+
+    def test_products_already_on_disk_are_read_even_with_nothing_to_merge(self):
+        """The epoch-finished case: config has no products, so does this run.
+
+        Reading only the merge input therefore finds nothing, and the backfill
+        falls back to the unit's WorkingDirectory. On the live box that file is
+        /data/relkit while the unit said /srv/relkit, so the regression is
+        silent: a plausible path lands in the config, just not the right one.
+        """
+        roots = deploy_cli.registered_products_for_backfill(
+            config_products={},
+            existing_admin={
+                "products": [
+                    {"id": "loom", "root": "/data/relkit/loom"},
+                    {"id": "svn-auto-merge", "root": "/data/relkit/svn-auto-merge"},
+                ]
+            },
+            merged_admin={},
+        )
+        self.assertEqual(
+            roots, {"loom": "/data/relkit/loom", "svn-auto-merge": "/data/relkit/svn-auto-merge"}
+        )
+        cfg, note = deploy_cli.backfill_product_root_parent(
+            {}, working_directory="/srv/relkit", product_roots=roots
+        )
+        self.assertEqual(cfg["productRootParent"], "/data/relkit")
+        self.assertIn("registered products", note)
+
+    def test_all_three_sources_contribute_and_later_ones_win(self):
+        roots = deploy_cli.registered_products_for_backfill(
+            config_products={"loom": "/srv/relkit/loom", "legacy": "/srv/relkit/legacy"},
+            existing_admin={"products": [{"id": "loom", "root": "/data/relkit/loom"}]},
+            merged_admin={"products": [{"id": "fresh", "root": "/data/relkit/fresh"}]},
+        )
+        # The admin document is where registration really lives now, so it
+        # overrides a stale config entry for the same id instead of losing.
+        self.assertEqual(roots["loom"], "/data/relkit/loom")
+        self.assertEqual(roots["legacy"], "/srv/relkit/legacy")
+        self.assertEqual(roots["fresh"], "/data/relkit/fresh")
+
+    def test_malformed_admin_document_yields_no_products(self):
+        for doc in ({}, {"products": None}, {"products": [None, {}, {"id": "x"}]}, []):
+            self.assertEqual(deploy_cli.admin_document_products(doc), {})
+
+
+class AgentUpgradeBackfillWiringTests(unittest.TestCase):
+    """The backfill must be fed from disk, not only from this run's merge."""
+
+    def test_apply_agent_upgrade_reads_the_existing_admin_file(self):
+        source = inspect.getsource(deploy_cli.apply_agent_upgrade)
+        self.assertIn("registered_products_for_backfill", source)
+        # Reading it only inside the "is there anything to merge" branch is the
+        # exact shape of the bug this guards.
+        before_merge = source.split("if admin_doc.get(\"products\") or admin_doc.get(\"tokens\")")[0]
+        self.assertIn("existing_admin", before_merge)
+
+    def test_console_upgrade_does_not_read_the_agent_unit(self):
+        """It was copied there by accident and never used; it also reads a file
+        belonging to a different service, which misleads the next reader."""
+        source = inspect.getsource(deploy_cli.apply_console_upgrade)
+        self.assertNotIn("live_working_dir", source)
+        self.assertNotIn("relkit-agent.service", source)
 
 
 class ConsoleAdminPathTests(unittest.TestCase):

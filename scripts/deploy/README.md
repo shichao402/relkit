@@ -91,10 +91,10 @@ agent 对 publish profile 是 strict 解析：未知字段即拒（publish 阶�
 sudo python3 scripts/deploy/relkit.py install serve --binary ./dist/relkit-store-linux-amd64
 sudo python3 scripts/deploy/relkit.py install agent \
   --binary ./dist/relkit-agent-linux-amd64 \
-  --product-root /srv/relkit
+  --product-root /data/relkit
 ```
 
-`--product-root` 没有默认值，必须给绝对路径。它一次决定三件事：服务账号的家目录、unit 的 `WorkingDirectory`、agent 配置里的 `productRootParent`（注册产品不填 root 时落到 `<productRootParent>/<产品名>`）。装在哪个盘、服务账号能否写，只有装的人知道，脚本不猜。
+`--product-root` 没有默认值，必须给绝对路径，示例里的 `/data/relkit` 只是占位，换成目标机上真实的发布父目录。它一次决定三件事：服务账号的家目录、unit 的 `WorkingDirectory`、agent 配置里的 `productRootParent`（注册产品不填 root 时落到 `<productRootParent>/<产品名>`）。装在哪个盘、服务账号能否写，只有装的人知道，脚本不猜。
 
 内网 `update.devcloud.woa.com` 的数据放在 `/data`，不要用上面的默认值（`127.0.0.1:30341`、`/srv/releases`、`/var/lib/relkit-agent`）：
 

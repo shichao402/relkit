@@ -6,6 +6,8 @@ After=network.target
 Type=simple
 User=relkit
 Group=relkit
+# Placeholder only. install agent and upgrade both rewrite this line from the
+# --product-root they were given; nothing reads the value below as a default.
 WorkingDirectory=/srv/relkit
 ExecStart=/usr/local/bin/relkit-agent -config /etc/relkit-agent/relkit-agent.json
 Restart=on-failure
