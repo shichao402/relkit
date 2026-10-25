@@ -573,6 +573,30 @@ func (s *Server) adminProduct(w http.ResponseWriter, r *http.Request, id string,
 	}
 }
 
+// retireLeftoverNote describes what retirement necessarily leaves behind on
+// disk. Retiring a product forgets its registration and its tokens; it never
+// deletes the tree, because that directory belongs to the operator and a real
+// product tree may still hold published assets worth inspecting before they go.
+// Staying silent about it is how empty directories pile up unnoticed next to
+// live ones, so every retirement response names what is still there and leaves
+// the decision to the operator.
+func retireLeftoverNote(root string) string {
+	if root == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		return fmt.Sprintf("product tree %s could not be inspected: %v", root, err)
+	}
+	if len(entries) == 0 {
+		return fmt.Sprintf("product tree %s is still on disk and empty; remove it when convenient", root)
+	}
+	return fmt.Sprintf("product tree %s is still on disk with %d item(s); it was left untouched", root, len(entries))
+}
+
 // adminRetireProduct is requirement 8.3 and 13.5 in one place: retire the
 // published assets through the official path, then forget the registration, then
 // let the site rebuild reflect a product that no longer exists.
@@ -611,6 +635,7 @@ func (s *Server) adminRetireProduct(w http.ResponseWriter, r *http.Request, id s
 					"log": []string{
 						"product tree has no " + vnextrelease.ProjectFile + "; nothing was published",
 						fmt.Sprintf("would remove registration %q and its %d token(s)", id, len(store.Tokens(id))),
+						retireLeftoverNote(product.Root),
 					},
 				})
 				return
@@ -627,7 +652,10 @@ func (s *Server) adminRetireProduct(w http.ResponseWriter, r *http.Request, id s
 			s.triggerSiteRebuild(id, "")
 			writeJSON(w, http.StatusOK, map[string]any{
 				"ok": true, "dryRun": dryRun, "removedTokens": removedTokens,
-				"log": []string{"product tree has no " + vnextrelease.ProjectFile + "; nothing was published, registration removed"},
+				"log": []string{
+					"product tree has no " + vnextrelease.ProjectFile + "; nothing was published, registration removed",
+					retireLeftoverNote(product.Root),
+				},
 			})
 			return
 		}
@@ -666,6 +694,9 @@ func (s *Server) adminRetireProduct(w http.ResponseWriter, r *http.Request, id s
 		}
 		resp["removedTokens"] = removedTokens
 		s.triggerSiteRebuild(id, "")
+	}
+	if note := retireLeftoverNote(product.Root); note != "" {
+		resp["log"] = append(logs, note)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
