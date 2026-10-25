@@ -9,6 +9,11 @@ tmp/
 *.private.json
 coverage.out
 
+# scripts/deploy/test_relkit.py pins tempfile.tempdir here on purpose (this
+# Windows host cannot chmod a fresh directory under %TEMP%), and the per-test
+# directories it creates are never deleted. Keep the leftover tree out of git.
+.tmp-test/
+
 # The console front end's build output is committed on purpose: `go build` on a
 # Go-only checkout must work, since cmd/relkit-console/internal/webui embeds it.
 !cmd/relkit-console/internal/webui/dist/
