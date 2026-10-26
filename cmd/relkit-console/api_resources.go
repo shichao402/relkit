@@ -264,7 +264,12 @@ func (c *console) apiProduct(w http.ResponseWriter, r *http.Request, agent *agen
 		return
 	}
 	if r.Method == http.MethodDelete {
-		result, err := agent.DeleteProduct(session, id)
+		// A dry run goes all the way to the agent: only it can look at the
+		// published assets and say what retirement would actually remove.
+		// Preview answers are flagged so the panel can never mistake one for a
+		// completed retirement.
+		dryRun := isDryRun(r)
+		result, err := agent.DeleteProduct(session, id, dryRun)
 		if err != nil {
 			writeAgentFailure(w, err)
 			return
@@ -273,6 +278,11 @@ func (c *console) apiProduct(w http.ResponseWriter, r *http.Request, agent *agen
 			result = map[string]any{}
 		}
 		result["ok"] = true
+		if dryRun {
+			result["dryRun"] = true
+			writeAPIJSON(w, http.StatusOK, result)
+			return
+		}
 		writeAPIJSON(w, http.StatusOK, result)
 		return
 	}

@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiRequestError } from "@/lib/api";
-import type { ChannelDetail } from "@/lib/api-types";
+import type { ChannelDetail, RetireResult } from "@/lib/api-types";
 import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -12,6 +12,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatCount, formatStamp } from "@/lib/utils";
 import { ChevronRightIcon, DownloadIcon, TrashIcon } from "lucide-react";
 
@@ -21,16 +29,28 @@ export function ProductPage() {
   const isAdmin = session?.user?.role === "admin";
   const client = useQueryClient();
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [preview, setPreview] = React.useState<RetireResult | null>(null);
 
   const product = useQuery({
     queryKey: ["product", id],
     queryFn: ({ signal }) => api.product(id, signal),
   });
 
+  // The preview leads: an operator sees what would go before being offered the
+  // irreversible button, so the confirmation dialog is always opened with facts
+  // rather than a warning about consequences in the abstract.
+  const previewRemove = useMutation({
+    mutationFn: () => api.deleteProduct(id, { dryRun: true }),
+    onSuccess: (result) => setPreview(result),
+    onError: (error) => toast.error((error as ApiRequestError).message),
+  });
+
   const remove = useMutation({
     mutationFn: () => api.deleteProduct(id),
     onSuccess: async () => {
       toast.success(`产品 ${id} 已下线`);
+      setConfirmOpen(false);
+      setPreview(null);
       await client.invalidateQueries({ queryKey: ["products"] });
     },
     onError: (error) => {
@@ -83,10 +103,11 @@ export function ProductPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setConfirmOpen(true)}
+                disabled={previewRemove.isPending}
+                onClick={() => previewRemove.mutate()}
               >
                 <TrashIcon />
-                下线产品
+                {previewRemove.isPending ? "正在预演…" : "下线产品"}
               </Button>
             )}
           </>
@@ -127,6 +148,16 @@ export function ProductPage() {
         </div>
       )}
 
+      <PreviewDialog
+        id={id}
+        result={preview}
+        onClose={() => setPreview(null)}
+        onProceed={() => {
+          setPreview(null);
+          setConfirmOpen(true);
+        }}
+      />
+
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
@@ -142,9 +173,7 @@ export function ProductPage() {
         requirePhrase={id}
         pending={remove.isPending}
         onConfirm={() => {
-          remove.mutate(undefined, {
-            onSuccess: () => setConfirmOpen(false),
-          });
+          remove.mutate();
         }}
       />
       {detail.homepage && (
@@ -153,6 +182,66 @@ export function ProductPage() {
         </p>
       )}
     </>
+  );
+}
+
+/** Shows what a retirement would remove before the operator can commit to it.
+ *  Every line comes from the agent, so the preview and the real run cannot
+ *  disagree about what is on disk. */
+function PreviewDialog({
+  id,
+  result,
+  onClose,
+  onProceed,
+}: {
+  id: string;
+  result: RetireResult | null;
+  onClose: () => void;
+  onProceed: () => void;
+}) {
+  const lines = result?.log ?? [];
+
+  return (
+    <Dialog open={result !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>下线预演：{id}</DialogTitle>
+          <DialogDescription>
+            这一步不会改动任何东西。下面是 agent 检查发布树后，真实下线会做的事。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 text-sm">
+          {result?.removedTokens ? (
+            <p>
+              会吊销 <span className="num font-medium">{result.removedTokens}</span> 个令牌，
+              并删除产品注册信息。
+            </p>
+          ) : (
+            <p>会删除产品注册信息。该产品目前没有令牌。</p>
+          )}
+          {lines.length > 0 && (
+            <ul className="bg-muted/40 space-y-1 rounded-md border p-3 font-mono text-xs break-all">
+              {lines.map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          )}
+          {lines.some((line) => line.includes("still on disk")) && (
+            <p className="text-warning">
+              发布树目录不会被删除，下线后需要手工清理。
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="destructive" onClick={onProceed}>
+            继续下线
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

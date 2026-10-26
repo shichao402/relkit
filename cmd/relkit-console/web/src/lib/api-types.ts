@@ -126,3 +126,14 @@ export interface IssuedToken {
   token: Token;
   plaintext?: string;
 }
+
+/** What a retirement did, or would do when `dryRun` is set. The agent answers
+ *  both from the same code path so a preview cannot promise something the real
+ *  run will not do. */
+export interface RetireResult {
+  ok: true;
+  dryRun?: boolean;
+  removedTokens?: number;
+  log?: string[];
+  error?: string;
+}

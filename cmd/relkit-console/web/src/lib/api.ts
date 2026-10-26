@@ -5,6 +5,7 @@ import type {
   PanelSettings,
   ProductDetail,
   ProductSummary,
+  RetireResult,
   RoleView,
   SessionUser,
   SessionView,
@@ -157,10 +158,13 @@ export const api = {
     label: string;
   }) => request<IssuedToken>("/products", { method: "POST", body: input }),
 
-  deleteProduct: (id: string) =>
-    request<{ ok: true }>(`/products/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }),
+  // dryRun previews the retirement without touching anything: the agent looks at
+  // what is actually published and reports what removal would take away.
+  deleteProduct: (id: string, options: { dryRun?: boolean } = {}) =>
+    request<RetireResult>(
+      `/products/${encodeURIComponent(id)}${options.dryRun ? "?dryRun=1" : ""}`,
+      { method: "DELETE" },
+    ),
 
   tokens: (product: string, signal?: AbortSignal) =>
     request<{ ok: true; tokens: Token[] }>(

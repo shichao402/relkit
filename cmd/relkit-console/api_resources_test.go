@@ -189,6 +189,53 @@ func TestAPIDeleteProduct(t *testing.T) {
 	}
 }
 
+// A preview must reach the agent (only it can say what retirement would drop)
+// and must leave the product exactly where it was.
+func TestAPIDeleteProductDryRunChangesNothing(t *testing.T) {
+	api, stub, _ := newAPITestDir(t)
+	stub.addProduct("kept", "/data/relkit/kept")
+	api.login()
+
+	status, body := api.call(http.MethodDelete, apiPrefix+"products/kept?dryRun=1", nil, nil)
+	if status != http.StatusOK || body["ok"] != true {
+		t.Fatalf("dry run = %d %v", status, body)
+	}
+	if body["dryRun"] != true {
+		t.Fatalf("a preview must say so, otherwise a caller cannot tell it apart: %v", body)
+	}
+	if body["removedTokens"] != float64(0) {
+		t.Fatalf("a preview removed tokens: %v", body)
+	}
+
+	stub.mu.Lock()
+	previews := append([]string(nil), stub.dryRuns...)
+	stillThere := 0
+	for _, product := range stub.products {
+		if product.ID == "kept" {
+			stillThere++
+		}
+	}
+	stub.mu.Unlock()
+	if len(previews) != 1 || previews[0] != "kept" {
+		t.Fatalf("the panel did not forward the flag to the agent: %v", previews)
+	}
+	if stillThere != 1 {
+		t.Fatalf("a preview removed the product registration")
+	}
+
+	// The product is still usable, which is the point of previewing.
+	_, body = api.call(http.MethodGet, apiPrefix+"products", nil, nil)
+	found := false
+	for _, row := range asSlice(t, body["products"]) {
+		if asMap(t, row)["id"] == "kept" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("product missing after a preview: %v", body)
+	}
+}
+
 func TestAPITokenLifecycle(t *testing.T) {
 	api, stub, _ := newAPITestDir(t)
 	first := stub.addProduct("loom", "/data/relkit/loom")

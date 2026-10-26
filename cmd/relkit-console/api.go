@@ -215,6 +215,13 @@ func apiMethods(w http.ResponseWriter, r *http.Request, allowed ...string) bool 
 	return false
 }
 
+// isDryRun mirrors the spellings relkit-agent accepts so the panel and the CLI
+// cannot mean different things by the same query string.
+func isDryRun(r *http.Request) bool {
+	value := r.URL.Query().Get("dryRun")
+	return value == "1" || value == "true"
+}
+
 func gateName(gate panelGate) string {
 	switch gate {
 	case gateSetup:

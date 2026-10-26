@@ -327,9 +327,16 @@ func (c *agentClient) AddProduct(session, id, root, profile, label string) (map[
 	}, nil
 }
 
-func (c *agentClient) DeleteProduct(session, id string) (map[string]any, error) {
+// DeleteProduct retires a product. With dryRun it previews the retirement and
+// leaves the agent untouched, which is the only safe way to show an operator
+// what an irreversible action would drop before they commit to it.
+func (c *agentClient) DeleteProduct(session, id string, dryRun bool) (map[string]any, error) {
 	var payload map[string]any
-	if err := c.do(http.MethodDelete, "/v1/admin/products/"+url.PathEscape(id), session, nil, &payload); err != nil {
+	path := "/v1/admin/products/" + url.PathEscape(id)
+	if dryRun {
+		path += "?dryRun=1"
+	}
+	if err := c.do(http.MethodDelete, path, session, nil, &payload); err != nil {
 		return nil, err
 	}
 	return payload, nil

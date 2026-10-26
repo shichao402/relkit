@@ -38,6 +38,9 @@ type agentStub struct {
 	// bootstrapRefusals counts the bootstrap attempts, so a test can prove the
 	// panel forwards each one rather than caching a verdict.
 	bootstrapAttempts int
+	// dryRuns records every preview request, so a test can prove the panel
+	// forwarded the flag instead of taking the destructive path.
+	dryRuns []string
 }
 
 func newAgentStub() *agentStub {
@@ -427,6 +430,21 @@ func (s *agentStub) productRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		if user.Role != "admin" {
 			http.Error(w, "forbidden: only an admin retires products", http.StatusForbidden)
+			return
+		}
+		// Preview: report what would go, remove nothing. This mirrors the real
+		// agent closely enough for the console to be tested against it.
+		query := r.URL.Query()
+		if query.Get("dryRun") == "1" || query.Get("dryRun") == "true" {
+			s.mu.Lock()
+			held := len(s.tokens[id])
+			s.dryRuns = append(s.dryRuns, id)
+			s.mu.Unlock()
+			writeStubJSON(w, map[string]any{
+				"ok": true, "dryRun": true, "removedTokens": 0,
+				"log": []string{"would remove registration " + id},
+				"stubTokensHeld": held,
+			})
 			return
 		}
 		s.mu.Lock()
