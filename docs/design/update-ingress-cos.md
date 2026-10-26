@@ -72,62 +72,14 @@ https://updates.<your-domain>/artifact/...
 
 ## 4. 标准拓扑
 
-发布与下载是两条独立链路，唯一交汇点是 **COS 上的静态对象**。发布侧没有任何常驻服务需要被客户端访问；客户端也永远不连发布机。
+发布与下载是两条独立链路，唯一交汇点是数据面上的静态对象。发布侧没有任何常驻服务需要被客户端访问；客户端也永远不连发布机。
+
+现行拓扑见 [topology.md](topology.md)。本节保留当年的文字结论，原图已移入 [§12 历史图](#12-历史图)。
 
 ### 4.1 发布流程（构建 → CAS → 签名 → 提交）
 
 目标：发布机只做控制面（发预签名上传凭据、签名、Copy、写指针）。产物字节不进 CVM。  
-`POST /v1/cas/credentials`、S3/COS 长期钥 query 预签名 PUT、`relkit release --execute` 内联的 CAS 上传（原 `relkit cas-put`，已随 ADR 0019 §1 删除）、瘦 staged tar 与 `Materialize` 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。下图中的 `artifactTo` / `pointerTo` 字段拆分仍是目标态。
-
-```mermaid
-flowchart TB
-  subgraph ciSide [CI 不持私钥 不持长期 COS 密钥]
-    build["编译 / 打包产物"]
-    stageStep["relkit stage VERSION<br/>本地算 sha256 无网络<br/>产出 vNext 控制面五件套"]
-    hasUrl{"该产物已有可 GET URL?"}
-    declare["不进凭据文档<br/>URL 随 staged 申报"]
-    askTok["POST /v1/cas/credentials<br/>请求带 sha256 / size / 已有 URL"]
-    putCas["PUT cas/SHA256 到 ingest<br/>每个 blob 恰好一次"]
-    putMeta["PUT /v1/staged<br/>控制面五件套 几 KB"]
-  end
-
-  subgraph agentSide [发布机 控制面 大字节不驻留]
-    ingress["publish.your-domain → 127.0.0.1:8787"]
-    tokSvc["签发 requests[]<br/>目的地只有 ingest 一个<br/>COS query 预签名；serve 能力 URL"]
-    headCas["Head cas 比 size<br/>不重算 sha256"]
-    mergeStep["staged 控制面五件套 +<br/>本机 products/PRODUCT.json"]
-    publishStep["publish.Run<br/>不按 Type 分支"]
-    directoryStep["directory set<br/>directory_sequence 加一"]
-  end
-
-  subgraph dataPlane [数据面 本产品 ingest = COS]
-    casObj[("rup/cas/SHA256<br/>生命周期 Days=1")]
-    artObj[("rup/artifact/...")]
-    docs[("manifest / index / directory<br/>主：COS 自有域名")]
-  end
-
-  artOther[("其余 artifactTo 后端的副本<br/>默认为空")]
-  mirrorDir[("entryUrls 备<br/>第二个 COS 桶 异地域<br/>独立自有二级域名<br/>同一份 directory.pb 字节")]
-
-  build --> stageStep --> hasUrl
-  hasUrl -->|"没有"| askTok
-  hasUrl -->|"有 例如 GitHub Release"| declare
-  askTok -->|"Bearer 该产品 token"| tokSvc
-  tokSvc --> putCas
-  putCas ==> casObj
-  declare --> putMeta
-  stageStep --> putMeta --> mergeStep
-  putMeta -->|"POST /v1/publish"| headCas
-  headCas -.-> casObj
-  headCas --> publishStep
-  publishStep -->|"Promote 同桶 CopyObject"| artObj
-  publishStep -.->|"Materialize 仅当 artifactTo 还有别家"| artOther
-  publishStep --> docs
-  publishStep -.->|"仅当需要改引导时"| directoryStep
-  directoryStep --> docs
-  docs -.->|"同字节双写 主不可达客户端才去 GET"| mirrorDir
-  directoryStep --> mirrorDir
-```
+`POST /v1/cas/credentials`、S3/COS 长期钥 query 预签名 PUT、`relkit release --execute` 内联的 CAS 上传（原 `relkit cas-put`，已随 ADR 0019 §1 删除）、瘦 staged tar 与 `Materialize` 已落地；整包 `PUT /v1/staged`（含 `artifacts/`）继续可用。`artifactTo` / `pointerTo` 字段拆分从未落地，ADR 0023 后已不再需要。
 
 要点：
 
@@ -143,31 +95,6 @@ flowchart TB
 现网仍可整包 `PUT /v1/staged`。
 
 ### 4.2 下载流程（引导 → 选路 → 校验）
-
-```mermaid
-flowchart TB
-  client["客户端<br/>内嵌 entryUrls + 公钥集 + product / channel<br/>几乎不改"]
-
-  subgraph entries [entryUrls 镜像 directory 同字节]
-    entryCos[("COS 广州 自有域名<br/>主入口")]
-    entryBackup[("第二个 COS 桶 异地域<br/>独立自有二级域名<br/>备援 ADR 0007")]
-    entryTodo[["现网只有主一条<br/>备 entry 尚未落地"]]
-  end
-
-  directoryDoc["directory/PRODUCT.pb<br/>验签 → 校验 product → directory_sequence 防回滚<br/>services 按 channel 过滤 priority 升序 再按学习序重排"]
-  indexDoc["index/PRODUCT/CHANNEL.pb<br/>验签 → sequence 防回滚<br/>解升级链 minFrom → 选下一跳"]
-  manifestDoc["manifest/PRODUCT/VERSION.pb<br/>urls 顺序回退 禁止并行竞速<br/>size / sha256 / identity 校验"]
-  artifactFile["artifact/PRODUCT/VERSION/FILE<br/>urls 顺序回退 → Range 续传<br/>先 size 后 sha256"]
-  verifiedFile["校验通过的本地文件"]
-  applyStep["apply 宿主或 SDK 自替换"]
-
-  client -->|"串行 GET 逐个验签"| entryCos
-  client -.->|"仅当前一个失败或 sequence 回滚"| entryBackup
-  entryCos --> directoryDoc
-  entryBackup --> directoryDoc
-  directoryDoc --> indexDoc --> manifestDoc --> artifactFile
-  artifactFile -->|"协议止于此"| verifiedFile --> applyStep
-```
 
 要点：
 
@@ -406,3 +333,91 @@ https://raw.firoyang.com/rup/directory/<product>.pb
 - 给人看的索引站：[`sites/updates-index/README.md`](../../sites/updates-index/README.md)
 - 实装参数：本文 §10
 - 发布 agent（含内网）：[`publish-agent.md`](publish-agent.md)
+
+## 12. 历史图
+
+以下两张图出自本文 2026-09 的原稿，已停止维护，只作历史对照。
+现行拓扑见 [topology.md](topology.md)。
+
+这两张图的前提是「发布与下载的唯一交汇点是 COS 上的静态对象」，
+而现在交汇点是服务器本机的 store 发布树，COS 已于 2026-09-26 全部清零。
+图中 `entryUrls` 备桶、`artifactTo`/`pointerTo` 拆分、客户端直连数据面均未落地或已被 ADR 0023 删除。
+
+**历史图 1**（原文保留，不再适用）
+
+```mermaid
+flowchart TB
+  subgraph ciSide [CI 不持私钥 不持长期 COS 密钥]
+    build["编译 / 打包产物"]
+    stageStep["relkit stage VERSION<br/>本地算 sha256 无网络<br/>产出 vNext 控制面五件套"]
+    hasUrl{"该产物已有可 GET URL?"}
+    declare["不进凭据文档<br/>URL 随 staged 申报"]
+    askTok["POST /v1/cas/credentials<br/>请求带 sha256 / size / 已有 URL"]
+    putCas["PUT cas/SHA256 到 ingest<br/>每个 blob 恰好一次"]
+    putMeta["PUT /v1/staged<br/>控制面五件套 几 KB"]
+  end
+
+  subgraph agentSide [发布机 控制面 大字节不驻留]
+    ingress["publish.your-domain → 127.0.0.1:8787"]
+    tokSvc["签发 requests[]<br/>目的地只有 ingest 一个<br/>COS query 预签名；serve 能力 URL"]
+    headCas["Head cas 比 size<br/>不重算 sha256"]
+    mergeStep["staged 控制面五件套 +<br/>本机 products/PRODUCT.json"]
+    publishStep["publish.Run<br/>不按 Type 分支"]
+    directoryStep["directory set<br/>directory_sequence 加一"]
+  end
+
+  subgraph dataPlane [数据面 本产品 ingest = COS]
+    casObj[("rup/cas/SHA256<br/>生命周期 Days=1")]
+    artObj[("rup/artifact/...")]
+    docs[("manifest / index / directory<br/>主：COS 自有域名")]
+  end
+
+  artOther[("其余 artifactTo 后端的副本<br/>默认为空")]
+  mirrorDir[("entryUrls 备<br/>第二个 COS 桶 异地域<br/>独立自有二级域名<br/>同一份 directory.pb 字节")]
+
+  build --> stageStep --> hasUrl
+  hasUrl -->|"没有"| askTok
+  hasUrl -->|"有 例如 GitHub Release"| declare
+  askTok -->|"Bearer 该产品 token"| tokSvc
+  tokSvc --> putCas
+  putCas ==> casObj
+  declare --> putMeta
+  stageStep --> putMeta --> mergeStep
+  putMeta -->|"POST /v1/publish"| headCas
+  headCas -.-> casObj
+  headCas --> publishStep
+  publishStep -->|"Promote 同桶 CopyObject"| artObj
+  publishStep -.->|"Materialize 仅当 artifactTo 还有别家"| artOther
+  publishStep --> docs
+  publishStep -.->|"仅当需要改引导时"| directoryStep
+  directoryStep --> docs
+  docs -.->|"同字节双写 主不可达客户端才去 GET"| mirrorDir
+  directoryStep --> mirrorDir
+```
+
+**历史图 2**（原文保留，不再适用）
+
+```mermaid
+flowchart TB
+  client["客户端<br/>内嵌 entryUrls + 公钥集 + product / channel<br/>几乎不改"]
+
+  subgraph entries [entryUrls 镜像 directory 同字节]
+    entryCos[("COS 广州 自有域名<br/>主入口")]
+    entryBackup[("第二个 COS 桶 异地域<br/>独立自有二级域名<br/>备援 ADR 0007")]
+    entryTodo[["现网只有主一条<br/>备 entry 尚未落地"]]
+  end
+
+  directoryDoc["directory/PRODUCT.pb<br/>验签 → 校验 product → directory_sequence 防回滚<br/>services 按 channel 过滤 priority 升序 再按学习序重排"]
+  indexDoc["index/PRODUCT/CHANNEL.pb<br/>验签 → sequence 防回滚<br/>解升级链 minFrom → 选下一跳"]
+  manifestDoc["manifest/PRODUCT/VERSION.pb<br/>urls 顺序回退 禁止并行竞速<br/>size / sha256 / identity 校验"]
+  artifactFile["artifact/PRODUCT/VERSION/FILE<br/>urls 顺序回退 → Range 续传<br/>先 size 后 sha256"]
+  verifiedFile["校验通过的本地文件"]
+  applyStep["apply 宿主或 SDK 自替换"]
+
+  client -->|"串行 GET 逐个验签"| entryCos
+  client -.->|"仅当前一个失败或 sequence 回滚"| entryBackup
+  entryCos --> directoryDoc
+  entryBackup --> directoryDoc
+  directoryDoc --> indexDoc --> manifestDoc --> artifactFile
+  artifactFile -->|"协议止于此"| verifiedFile --> applyStep
+```

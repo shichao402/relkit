@@ -47,22 +47,9 @@ related: ADR 0005, ADR 0007, SPEC.md §1 / §4 / §12, docs/design/update-ingres
 
 ## 3. 逻辑链路
 
-```mermaid
-flowchart TB
-  app["App 内嵌 entryUrls<br/>极少改"]
-  bootstrap["Bootstrap Directory<br/>与 index 同钥签名<br/>主桶 + 异地域备桶同字节"]
-  rank["按学习序叠加目录默认序<br/>排列 services 的 indexUrl"]
-  indexStep["拉 index → 验签 → sequence → selectNext<br/>现有 RUP 第 12.1 节"]
-  payloadStep["manifest.urls / artifact.urls<br/>同样按学习序重排后顺序尝试"]
-  learn["成功 / 失败 / 字节 / 耗时<br/>写入 product 与 channel 维度的状态"]
+这一节描述客户端一侧的逻辑顺序：拿到目录、按学习序排 indexUrl、拉 index、再按同一顺序取 manifest 与 artifact。
 
-  app -->|"串行 GET 验签 directory"| bootstrap
-  bootstrap -->|"得到 services 的 indexUrl 及可选 meta"| rank
-  rank --> indexStep --> payloadStep --> learn
-  learn -.->|"供下次检查使用"| rank
-```
-
-本节只画客户端一侧。完整拓扑见 [`update-ingress-cos.md`](update-ingress-cos.md)：§4.1 发布流程（CI 只 stage、发布机持钥签名、写对象），§4.2 下载流程（与本节同链路，含 manifest / artifact 校验），§4.3 各方持有的凭据。
+现行拓扑见 [topology.md](topology.md)。2026-10-22 起客户端不再自己走这条链——解析 bootstrap、验签、选源全部收进 `relkit-updater` 引擎，宿主只剩薄 IPC 客户端。本文这一节的链路描述在引擎内部依然成立，原图已移入 [§11 历史图](#11-历史图)。
 
 ## 4. 与 SPEC 的对齐硬约束
 
@@ -172,3 +159,29 @@ flowchart TB
 - 规范性正文：[`SPEC.md`](../../SPEC.md) §1.1/§1.2、§2、§3、§4、§5.3、§12.1/§12.7、§14.1、**§16**
 - 决策记录：[ADR 0005](../adr/0005-signed-bootstrap-directory.md)、[ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)（备援选型准入）
 - 推荐入口拓扑（自有域名 + COS）：[`update-ingress-cos.md`](update-ingress-cos.md)
+
+## 11. 历史图
+
+下面这张图出自本文 2026-08-09 的原稿，已停止维护，只作历史对照。
+现行拓扑见 [topology.md](topology.md)。
+
+它假设客户端自己串行 GET directory、自己排 indexUrl、自己记账选源，
+即客户端承担协议解析。ADR 0023 之后客户端只剩薄 IPC 客户端，
+解析 bootstrap、验签、选源全部收进 relkit-updater 引擎。
+
+**历史图 1**（原文保留，不再适用）
+
+```mermaid
+flowchart TB
+  app["App 内嵌 entryUrls<br/>极少改"]
+  bootstrap["Bootstrap Directory<br/>与 index 同钥签名<br/>主桶 + 异地域备桶同字节"]
+  rank["按学习序叠加目录默认序<br/>排列 services 的 indexUrl"]
+  indexStep["拉 index → 验签 → sequence → selectNext<br/>现有 RUP 第 12.1 节"]
+  payloadStep["manifest.urls / artifact.urls<br/>同样按学习序重排后顺序尝试"]
+  learn["成功 / 失败 / 字节 / 耗时<br/>写入 product 与 channel 维度的状态"]
+
+  app -->|"串行 GET 验签 directory"| bootstrap
+  bootstrap -->|"得到 services 的 indexUrl 及可选 meta"| rank
+  rank --> indexStep --> payloadStep --> learn
+  learn -.->|"供下次检查使用"| rank
+```

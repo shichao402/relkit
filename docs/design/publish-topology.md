@@ -13,6 +13,8 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 开发者审阅用的当前拓扑。旧文继续当历史与细节 SSOT；本文只画**流程与进程切面**。  
 2026-08-30 晚：补「对外 browse / 对内 console 面板」，实现已按 §5 落地。
 
+> **本文的图已不再维护。** 现行拓扑只看 [topology.md](topology.md)——那里是拓扑图的唯一来源。下面 §3、§4 的两张图保留原样，作为 2026-09-26 前后那一代的形状记录，其中的 COS 主入口、异地域备桶、Makers 人页、`raw.` 兼容面、每产品一把签名密钥、`artifactTo`/`pointerTo` 拆分、客户端 SDK 直连数据面，都已被 ADR 0023 断代推翻。文中的文字结论（进程职责、域名分工、人页与面板分开）仍然有效。
+
 ## 1. 决议
 
 - 控制面只有一个 **publish 节点**：nginx/Caddy（`:443` 切面）+ 本机 `relkit-agent`（`127.0.0.1:8787`）。反代是 HTTPS / 证书 / 入口日志的外壳，不是独立架构角色，也不是安全隔离层。
@@ -37,84 +39,13 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 
 ## 3. 发布
 
-下图中 `cas/credentials`、CI 直传、瘦 staged tar 与 `Materialize` 已实现；`artifactTo` / `pointerTo` 尚未实现。整包 `PUT /v1/staged` 仍可并行保留。
-
-```mermaid
-flowchart TB
-  win["CI 构建 win"] --> stage
-  mac["CI 构建 mac"] --> stage
-  apk["CI 构建其他端"] --> stage
-  stage["relkit stage<br/>多端收成一棵树 本地算 sha256"]
-
-  stage --> tok["POST /v1/cas/credentials<br/>只返回 ingest 一个目的地"]
-  tok --> casPut["CI PUT cas/SHA256<br/>每个 blob 恰好一次"]
-  stage --> stagedMeta["PUT /v1/staged<br/>控制面五件套 几 KB<br/>已有 URL 的产物在此申报"]
-
-  casPut ==> ingestCas[("ingest 的 cas/<br/>COS 或 relkit-store")]
-  stagedMeta --> ngx["nginx 或 Caddy :443"]
-  ngx --> postPub["agent POST /v1/publish"]
-  postPub --> run["publish.Run"]
-
-  run --> promote["Head 比 size 不重算 sha256<br/>Promote cas → artifact"]
-  promote -.-> ingestCas
-  promote --> artIngest[("ingest 的 artifact/")]
-  run --> mat["Materialize<br/>agent 取字节再交给该后端"]
-  mat --> artOther[("其余 artifactTo 后端<br/>默认为空")]
-
-  artIngest --> man["PutImmutable manifest"]
-  artOther --> man
-  stagedMeta -.->|"产物已在 GitHub Release<br/>URL 直接当取货点"| man
-
-  man --> ptrFan{"写入 pointerTo 全部后端<br/>只有几 KB 签名 pb"}
-  ptrFan --> pIngest[("ingest 上的主入口<br/>COS 自有域名")]
-  ptrFan --> pMirror[("entryUrls 备桶<br/>异地域 COS + 独立自有二级域名<br/>同字节 ADR 0007")]
-
-  pIngest --> idx["PutPointer index = 真发布"]
-  pMirror --> idx
-  idx --> meta["site/id.json + latest/id/channel.json"]
-  meta -.-> rebuild["agent site rebuild<br/>读取全部 products"]
-  rebuild --> dump["完整静态 browse dump"]
-
-  dump --> sink{"site sink<br/>配置归 agent"}
-
-  sink --> makers["Makers<br/>已退役 2026-09-25 · 待清理云端项目"]
-  sink --> tree["HTTP GET 树 browse/<br/>现网内外网人页同款"]
-  sink --> other["其他 site 托管"]
-
-  makers --> done["发布完成"]
-  tree --> done
-  other --> done
-```
+现行发布链路见 [topology.md](topology.md) §二。下面这张图是 2026-09 那一代的形状，已移入 [§8 历史图](#8-历史图)。
 
 dump 包含 SPA 壳（`index.html` + `assets/`）、`catalog.json`（派生聚合）与数据文档快照（`site/`、`latest/`、`channel/`、`release/`）。协议客户端不读，rebuild 也不把它当输入。
 
 > 2026-09-25 更新：外网数据面已从 COS 迁至本机 relkit-store（`/srv/releases`，serve 已退役）。人页 Makers 退出服务路径：agent sinks 为 `backend:serve` + `directory:/srv/relkit/site` 双落点，`update.firoyang.com` 由本机 nginx 直接伺服静态目录，与内网拓扑完全一致。原因：hk CVM 到广州 COS 公网入口 443 跨境不通（见 golden-path 归档），COS 托管暂不可用。Makers 云端项目 `relkit-updates-index` 尚未删除（Pages API token 已失效，待续期后清理）。
 
 ## 4. 下载
-
-```mermaid
-flowchart TB
-  sdk["客户端 SDK 不连 8787"] --> get{"GET 数据面"}
-  get --> intGet["update-internal.firoyang.com / update-internal.devcloud.woa.com<br/>→ store 127.0.0.1:8080<br/>内嵌 SDK 读面 · SSOT · 外网 09-26 / 内网 10-19 起"]
-  get --> cosGet["COS raw.firoyang.com:443<br/>已退役 2026-09-25 · 见注"]
-  get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
-  get --> woaGet["update.devcloud.woa.com<br/>→ store 127.0.0.1:8080 读盘<br/>内网人页 + 存量兼容读 · 迁出中"]
-  get --> pubGet["publish.firoyang.com / publish.devcloud.woa.com<br/>→ 本机 store :8080 · CI 写面 + 旧代读兼容<br/>存量 entryUrls 靠自然升级迁出"]
-  get --> rawCompat["raw.firoyang.com<br/>已下线 2026-09-26 · DNS 删<br/>旧代 ≤1.13.92 靠自然升级"]
-  get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
-  cosGet --> verify["验签 · sequence · sha256"]
-  cosBackup --> verify
-  woaGet --> verify
-  pubGet --> verify
-  rawCompat --> verify
-  relGet --> verify
-
-  human["人用浏览器 · 对外目录"] --> site{"同一份 browse dump"}
-  site --> makersGet["Makers<br/>已退役 · 云端项目待删"]
-  site --> pages["GET / 或 /browse/<br/>内外网同款 · nginx 伺服"]
-
-    ops["操作员 · 自托管箱"] --> panel["console 现算面板 /-/admin<br/>以后 relkit 后台 · 不对外当目录"]
-```
 
 > 注：`raw.firoyang.com`（广州 COS）2026-09-25 起退出外网数据面。hk CVM 到广州 COS 公网入口 443 跨境不通，CI 发布与客户端下载均已切到 `publish.firoyang.com`（本机 store）。香港临时桶已验证 hk→HK COS 全链路可用（PUT/GET/LIST/HEAD/DELETE 5/5，桶已删），待跨境问题解决后可评估迁回。
 
@@ -193,3 +124,87 @@ flowchart TB
 **签名 Operator 端点落差：已闭环（2026-10-20 候选信任根轮换）。** 过渡期内，内网三产品使用的 candidate Operator Profile 曾把 `endpoints.agent/consumer/directory` 全签在 `update.devcloud.woa.com`，而该域 `/v1/` 写面已删，缺省 `release --execute` 因此不可用，CI 只能靠显式注入 `RELKIT_AGENT_TRANSPORT_URL` 撑着。旧根私钥在生成后未归档、已无法找回，故以**换信任根**闭环：新根 `relkit-candidate-2026b`（`sha256:3dc1ccb45c46f72f92e00b42bb15034b6ae2b28a5b32dba69eac0c86ef5bbf33`），私钥双处归档并逐一验签后才允许签发。新 Operator Profile 为 sequence 16，`agent` = `http://publish.devcloud.woa.com/`、`consumer`/`directory` = `http://update-internal.devcloud.woa.com/`；catalog 以新 keyId 重建（sequence 2，首行 v0.6.21）；候选 bundle 以 v0.6.21 + 新控制面重造并按 `-candidate-v2.zip` 上传（mirrors Generic 仓库 PUT 不可变，换摘要必须换文件名）。判据：Loom `dev/0.2.2+92`（构建 #55）以缺省路径发布成功，CI 日志为 `release plan: loom/0.2.2+92 via signed Operator tencent-internal`，无 transport 覆盖、无 blob 钉死 CLI、走 `./relkitw`；同轮 `verify released` 通过，本机独立复算同结论。**端点 scheme 的取值规则**：签名端点必须等于消费方实测可达的 scheme + 端口，不能按域名语义臆断 https——箱上无 443 监听（TLS 由 WOA 网关终结）、蓝盾池直连 443 被网络策略拦截，首版把 `consumer`/`directory` 签成 https 直接导致 `verify released` 十二次连接拒绝（Loom #54 红）。残留：SvnMergeTool `dev/0.2.0+209` 构建 #94 失败属该仓 Flutter 既有故障（#92/#93/#94 同一失败点，bootstrap 与 trustedKeys 链路均正常），与换根无关。
 
 > 2026-09-26 raw 兼容面下线：唯一还在打 /rup/ 的客户端（43.132.141.25，用户自有 CVM）日志核实已双轨访问新协议路径（/index、/manifest 直连，1.13.96 已装），/rup/ 轮询只是残留 cron；其余 /rup/ 流量全是验证 curl。三件套下线：DNSPod DeleteRecord 删 raw A 记录（RecordId 2380132895，回读 0 条，公共 DNS 返回 DNSPod 停放页与任意不存在子域一致）；nginx vhost 归档 raw-compat.conf.retired-20260926（非删除）；certbot delete 证书（Let's Encrypt 可随时重签）。Dec 仓 relkit.json 删除 backends.cos 死配置段（含嵌入副本，测试防回归断言保留），UPDATE_ARCHITECTURE.md 同步 relkit-store 现状（commit 7eb4dcd）。publish/update/update-internal 三面复验 200。以后需要旧代兼容面时重新加回（DNS A 记录 + certbot + vhost 三步）。
+
+## 8. 历史图
+
+以下两张图是本文 2026-08-30 至 2026-10-19 期间的形状，已停止维护，只作历史对照。
+现行拓扑见 [topology.md](topology.md)。
+
+它们与现行架构的差异集中在这些地方：COS 作为主入口与异地域备桶、Makers 作为人页 sink、
+`raw.firoyang.com` 兼容面、每产品一把签名密钥、`artifactTo`/`pointerTo` 拆分、
+以及客户端 SDK 直接 GET 数据面。这些全部被 [ADR 0023](../adr/0023-desktop-updater-epoch.md) 推翻。
+
+**历史图 1**（原文保留，不再适用）
+
+```mermaid
+flowchart TB
+  win["CI 构建 win"] --> stage
+  mac["CI 构建 mac"] --> stage
+  apk["CI 构建其他端"] --> stage
+  stage["relkit stage<br/>多端收成一棵树 本地算 sha256"]
+
+  stage --> tok["POST /v1/cas/credentials<br/>只返回 ingest 一个目的地"]
+  tok --> casPut["CI PUT cas/SHA256<br/>每个 blob 恰好一次"]
+  stage --> stagedMeta["PUT /v1/staged<br/>控制面五件套 几 KB<br/>已有 URL 的产物在此申报"]
+
+  casPut ==> ingestCas[("ingest 的 cas/<br/>COS 或 relkit-store")]
+  stagedMeta --> ngx["nginx 或 Caddy :443"]
+  ngx --> postPub["agent POST /v1/publish"]
+  postPub --> run["publish.Run"]
+
+  run --> promote["Head 比 size 不重算 sha256<br/>Promote cas → artifact"]
+  promote -.-> ingestCas
+  promote --> artIngest[("ingest 的 artifact/")]
+  run --> mat["Materialize<br/>agent 取字节再交给该后端"]
+  mat --> artOther[("其余 artifactTo 后端<br/>默认为空")]
+
+  artIngest --> man["PutImmutable manifest"]
+  artOther --> man
+  stagedMeta -.->|"产物已在 GitHub Release<br/>URL 直接当取货点"| man
+
+  man --> ptrFan{"写入 pointerTo 全部后端<br/>只有几 KB 签名 pb"}
+  ptrFan --> pIngest[("ingest 上的主入口<br/>COS 自有域名")]
+  ptrFan --> pMirror[("entryUrls 备桶<br/>异地域 COS + 独立自有二级域名<br/>同字节 ADR 0007")]
+
+  pIngest --> idx["PutPointer index = 真发布"]
+  pMirror --> idx
+  idx --> meta["site/id.json + latest/id/channel.json"]
+  meta -.-> rebuild["agent site rebuild<br/>读取全部 products"]
+  rebuild --> dump["完整静态 browse dump"]
+
+  dump --> sink{"site sink<br/>配置归 agent"}
+
+  sink --> makers["Makers<br/>已退役 2026-09-25 · 待清理云端项目"]
+  sink --> tree["HTTP GET 树 browse/<br/>现网内外网人页同款"]
+  sink --> other["其他 site 托管"]
+
+  makers --> done["发布完成"]
+  tree --> done
+  other --> done
+```
+
+**历史图 2**（原文保留，不再适用）
+
+```mermaid
+flowchart TB
+  sdk["客户端 SDK 不连 8787"] --> get{"GET 数据面"}
+  get --> intGet["update-internal.firoyang.com / update-internal.devcloud.woa.com<br/>→ store 127.0.0.1:8080<br/>内嵌 SDK 读面 · SSOT · 外网 09-26 / 内网 10-19 起"]
+  get --> cosGet["COS raw.firoyang.com:443<br/>已退役 2026-09-25 · 见注"]
+  get --> cosBackup["COS 备桶 异地域<br/>独立自有二级域名<br/>ADR 0007 · 尚未落地"]
+  get --> woaGet["update.devcloud.woa.com<br/>→ store 127.0.0.1:8080 读盘<br/>内网人页 + 存量兼容读 · 迁出中"]
+  get --> pubGet["publish.firoyang.com / publish.devcloud.woa.com<br/>→ 本机 store :8080 · CI 写面 + 旧代读兼容<br/>存量 entryUrls 靠自然升级迁出"]
+  get --> rawCompat["raw.firoyang.com<br/>已下线 2026-09-26 · DNS 删<br/>旧代 ≤1.13.92 靠自然升级"]
+  get --> relGet["GitHub Release 直链<br/>仅当 manifest urls 里写了"]
+  cosGet --> verify["验签 · sequence · sha256"]
+  cosBackup --> verify
+  woaGet --> verify
+  pubGet --> verify
+  rawCompat --> verify
+  relGet --> verify
+
+  human["人用浏览器 · 对外目录"] --> site{"同一份 browse dump"}
+  site --> makersGet["Makers<br/>已退役 · 云端项目待删"]
+  site --> pages["GET / 或 /browse/<br/>内外网同款 · nginx 伺服"]
+
+    ops["操作员 · 自托管箱"] --> panel["console 现算面板 /-/admin<br/>以后 relkit 后台 · 不对外当目录"]
+```
