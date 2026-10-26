@@ -10,9 +10,9 @@ Publishing is what makes /v1/catalog answer at all: the agent serves a document
 it only produces after a tool manifest has been signed, so a server that never
 published has an empty catalog and hosts cannot bootstrap the CLI from it.
 
-The URLs the agent signs come from --spec baseUrl, never from the address this
-script talks to. Talking over loopback is fine; signing loopback into the
-manifest is not, because hosts download from those URLs.
+The URLs the agent signs come from its own publicURL (the CI face hosts already
+use), never from the address this script talks to. Talking over loopback is
+fine; the agent refuses to sign a loopback origin.
 """
 
 from __future__ import annotations
@@ -118,7 +118,6 @@ def publish(base: str, token: str, version: str, spec: dict[str, Any], files: li
     payload = {
         "version": version,
         "commit": spec.get("commit") or "",
-        "baseUrl": spec["baseUrl"],
         "files": files,
     }
     status, body = request(
@@ -171,7 +170,7 @@ def verify(base: str, token: str, version: str) -> dict[str, Any]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="publish a release's tools to a local relkit agent")
     parser.add_argument("--server", required=True, help="agent base URL, loopback is fine")
-    parser.add_argument("--spec", required=True, help="JSON describing version, baseUrl and files")
+    parser.add_argument("--spec", required=True, help="JSON describing version and files")
     args = parser.parse_args(argv)
 
     token = os.environ.get("RELKIT_TOOLS_TOKEN", "").strip()
@@ -181,12 +180,8 @@ def main(argv: list[str]) -> int:
     spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
     spec["_root"] = str(Path(args.spec).parent)
     version = str(spec.get("version") or "").strip()
-    base_url = str(spec.get("baseUrl") or "").strip().rstrip("/")
     if not version:
         print("spec has no version", file=sys.stderr)
-        return 2
-    if not base_url.startswith(("http://", "https://")):
-        print(f"spec baseUrl {base_url!r} is not an absolute http(s) origin", file=sys.stderr)
         return 2
     base = args.server.rstrip("/")
     try:

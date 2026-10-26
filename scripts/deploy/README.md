@@ -19,13 +19,14 @@
 内网 nginx vhost 分工（`/etc/nginx/conf.d/`）：
 
 - `publish.devcloud.woa.com`：`/v1/` 转发到 agent（CI 写面）
-- `update-internal.devcloud.woa.com`：协议树转 store，另外必须把 `/v1/tools/` 与 `= /v1/catalog` 转发到 agent（示例见 `update-internal.example.conf`）。漏这条时工具发布会成功，但清单签出的下载 URL 在宿主机上全部 404。
+- `publish.devcloud.woa.com` 同时是 CI 取工具的入口：宿主 `relkit.project.json` 的 `server` 指向它，工具清单里的下载 URL 由 agent 的 `publicURL` 签出，也落在这个域。
+- `update-internal.devcloud.woa.com`：只把协议树转给 store，供 updater 读取；不转发 `/v1/tools/` 与 `/v1/catalog`。完整样例见 `nginx-intranet.example.conf`。
 
 发布工具后必须核对一次（换成主机实际使用的域名与刚发布的版本）：
 
 ```
 python scripts/deploy/verify-published-tools.py \
-  --base https://update-internal.devcloud.woa.com \
+  --base http://publish.devcloud.woa.com \
   --version "0.7.0+db0e150109e3-dirty"
 ```
 
@@ -62,7 +63,7 @@ python scripts/deploy/relkit.py upgrade --host update.devcloud.woa.com --apply
 
 `--plan` 只读并打印脱敏探测结果、本机 HEAD 与协议窗口。`--apply` 默认从当前干净 HEAD 构建 linux/amd64 的 agent+serve，在目标机 `/var/backups/relkit/<utc>/` 备份后换文件并重启。`--stage-only` 只写盘不重启，不得称为升级完成。`--unsafe-from-dist` 才使用已有 `dist/`，并持续告警。失败会从该备份回滚。
 
-upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、遇到 `static-http` 直接停（该类型已删除、不会改写成可写后端）、用显式 `--public-base-url` / `--public-upload-url` 修正已有 `relkit-compatible` 端点、按 live json 重写 `ReadWritePaths`。
+upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时修改 `addr`。它会：补 `gc.casGrace`、清 `casCredentials`、把可推导的 `local`/`http-put` 改成 `relkit-compatible`（推导不了就停）、遇到 `static-http` 直接停（该类型已删除、不会改写成可写后端）、用显式 `--public-upload-url` 修正已有 `relkit-compatible` 的 `uploadUrl`、按 live json 重写 `ReadWritePaths`。产品 `baseUrl` 是产品注册信息，upgrade 从不改写；旧 `local`/`http-put` 后端没声明 `baseUrl` 时直接停，先在 profile 里写好读面再升级。
 
 `uploadUrl` 与 COS 的 endpoint 同义，必须同时可被 agent 和 CI 访问；远程 CI 场景禁止配置 loopback。自建 `relkit-store` 应独立监听公开的数据面端口，不经 agent 的 nginx 搬运上传正文。`baseUrl` 可与 `uploadUrl` 相同，也可使用独立只读域名/CDN。nginx 样例的 `/` 仅保留旧签名 URL 的 GET 兼容入口，写操作必须直达 serve。
 
@@ -70,12 +71,9 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 `upgrade` 默认从当前 HEAD 构建；改完代码直接 `--apply` 即可。只有 `--unsafe-from-dist` 才会把盘上已有的 `dist/` 送上去。
 
-`--public-base-url` 有两个互相独立的用途，填错或留空都会失败：
+工具下载 URL 由 agent 自己的 `publicURL`（`/etc/relkit-agent/relkit-agent.json`）决定，调用方不再传。宿主 `relkit.project.json` 的 `server` 指向 publish 域，CI 从 `{server}/v1/tools/current/...` 取工具，所以 `publicURL` 必须就是 publish 域（内网 `http://publish.devcloud.woa.com`，外网 `https://publish.firoyang.com`）。没配或配成 loopback 时，工具发布返回 409 并触发整体回滚。update-internal 只给 updater 提供协议树，不转发 `/v1/tools/` 与 `/v1/catalog`。
 
-- 修正已有 `relkit-compatible` 端点的 `baseUrl`。内网机**不要**传，否则会覆盖现网 HTTPS `baseUrl`。
-- 给工具发布签下载 URL。只要本次 release 带工具件，这个值就是**必填**，且必须是宿主机能访问的工具下载面域名（内网 `http://update-internal.devcloud.woa.com/`，外网 `http://update-internal.firoyang.com/`）。留空或写成 `127.0.0.1` / `localhost` 会直接 `tool publishing needs a public base URL` 并触发整体回滚，二进制不会落盘。内网机确实需要发布工具时，用 `--public-base-url` 显式传工具下载面（与 `baseUrl` 同域的 HTTPS 值不同不冲突时，按实际域名填），不要用 `:8080` 裸端口。
-
-**agent 与 serve 固定配套。** 外网 `cvm-gz` 与内网 `update.devcloud.woa.com` 都必须跑两个进程（外网 serve 是操作面，数据面仍可在 COS；内网 serve 是 `relkit-compatible` 数据面，见 [publish-topology](../../docs/design/publish-topology.md) §5）。缺哪个先 `install` 哪个，不要用 `--agent-only` / `--serve-only` 当现网默认。内网不要带黄金路径里曾经写过的 `--public-base-url http://…:8080/`，否则会改掉已有 HTTPS `baseUrl`。要升的组件目标机没跑，upgrade 会在探测后报错并指出该跑哪条 `install`，不会抛栈。
+**agent 与 serve 固定配套。** 外网 `cvm-gz` 与内网 `update.devcloud.woa.com` 都必须跑两个进程（外网 serve 是操作面，数据面仍可在 COS；内网 serve 是 `relkit-compatible` 数据面，见 [publish-topology](../../docs/design/publish-topology.md) §5）。缺哪个先 `install` 哪个，不要用 `--agent-only` / `--serve-only` 当现网默认。要升的组件目标机没跑，upgrade 会在探测后报错并指出该跑哪条 `install`，不会抛栈。
 
 agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../../docs/adr/0009-publisher-protocol-negotiation.md)）。升级 agent 后必须用同一 release 的 publisher。滚动放行时可临时下调 `minPublishProtocol`（设 0 关闭）。
 

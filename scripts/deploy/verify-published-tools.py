@@ -5,8 +5,8 @@ Run this after publishing tools, from a machine that is not the server, over the
 origin the signed manifest actually names. Two failure modes are invisible from
 loopback on the server and both of them ship silently:
 
-- the manifest signs download URLs no host can reach (for example when the read
-  vhost does not proxy /v1/tools/ to the agent), and
+- the manifest signs download URLs no host can reach (for example when the
+  agent's publicURL is not the publish origin hosts name as `server`), and
 - the sidecar signature does not verify with the public key the manifest carries.
 
 Every digest and every verification step works on bytes read from disk. The
@@ -15,7 +15,7 @@ as text makes verification fail with "incorrect signature" for a reason that has
 nothing to do with the release.
 
 Usage:
-    python scripts/deploy/verify-published-tools.py --base https://update-internal.devcloud.woa.com --version <version>
+    python scripts/deploy/verify-published-tools.py --base http://publish.devcloud.woa.com --version <version>
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def head(url: str, timeout: float = 60.0) -> dict[str, str]:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="verify a published relkit toolchain")
-    parser.add_argument("--base", required=True, help="origin hosts download from, e.g. https://update-internal.devcloud.woa.com")
+    parser.add_argument("--base", required=True, help="publish origin hosts name as server in relkit.project.json, e.g. http://publish.devcloud.woa.com")
     parser.add_argument("--version", required=True, help="tool version to verify, as published")
     parser.add_argument("--keep", action="store_true", help="keep downloaded files for inspection")
     return parser.parse_args(argv)

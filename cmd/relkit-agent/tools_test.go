@@ -371,6 +371,11 @@ func TestAgentSignsCatalogWhenPublishingTools(t *testing.T) {
 			if row.Source.Kind != "server" || row.Source.URL == "" {
 				t.Fatalf("catalog component source=%+v", row.Source)
 			}
+			// Tools are signed onto the CI face hosts already know, never onto
+			// whatever origin the deploy pipeline happened to call from.
+			if !strings.HasPrefix(row.Source.URL, "https://publish.example/v1/tools/") {
+				t.Fatalf("catalog component url=%q, want the agent's publicURL", row.Source.URL)
+			}
 			if row.SHA256 == "" {
 				t.Fatal("catalog component has no digest")
 			}
@@ -378,6 +383,84 @@ func TestAgentSignsCatalogWhenPublishingTools(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("catalog release has no windows-amd64 component")
+	}
+}
+
+// TestAgentRefusesToolPublishWithoutPublicURL covers a server that has no
+// publicURL and is called on loopback, which is exactly how the deploy
+// pipeline publishes. Signing 127.0.0.1 URLs would report success while every
+// build machine fails to download.
+func TestAgentRefusesToolPublishWithoutPublicURL(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{deployToken: true, noPublicURL: true})
+	version := "0.7.0_nopublicurl"
+	name := "relkit-cli-linux-amd64"
+	payload := []byte("ELF fake cli payload")
+	if status, out := fx.uploadTool(t, version, name, payload, toolToken); status != http.StatusCreated {
+		t.Fatalf("tool upload status=%d body=%s", status, out)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"version": version,
+		"files": []any{map[string]any{
+			"component": "cli", "name": name, "os": "linux", "arch": "amd64",
+			"size": len(payload), "sha256": tools.Sum256(payload),
+		}},
+	})
+	status, out := fx.publishTools(t, body, toolToken)
+	if status != http.StatusConflict || !strings.Contains(string(out), "publicURL") {
+		t.Fatalf("publish without publicURL status=%d body=%s, want 409 naming publicURL", status, out)
+	}
+}
+
+// TestAgentIgnoresCallerChosenToolBase pins that the download prefix is not a
+// caller decision any more: an old pipeline that still sends baseUrl must not
+// be able to sign tools onto another domain.
+func TestAgentIgnoresCallerChosenToolBase(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{deployToken: true})
+	version := "0.7.0_callerbase"
+	name := "relkit-cli-linux-amd64"
+	payload := []byte("ELF fake cli payload")
+	if status, out := fx.uploadTool(t, version, name, payload, toolToken); status != http.StatusCreated {
+		t.Fatalf("tool upload status=%d body=%s", status, out)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"version": version,
+		"commit":  "abcdef0123456789",
+		"baseUrl": "https://update-internal.example",
+		"files": []any{map[string]any{
+			"component": "cli", "name": name, "os": "linux", "arch": "amd64",
+			"size": len(payload), "sha256": tools.Sum256(payload),
+		}},
+	})
+	if status, out := fx.publishTools(t, body, toolToken); status != http.StatusOK {
+		t.Fatalf("publish status=%d body=%s", status, out)
+	}
+	response := fx.toolsGet(t, "/v1/tools/"+version+"/manifest.json")
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(response.Body)
+	if strings.Contains(string(raw), "update-internal.example") {
+		t.Fatalf("manifest signed the caller's base URL: %s", raw)
+	}
+	if !strings.Contains(string(raw), "https://publish.example/v1/tools/"+version+"/") {
+		t.Fatalf("manifest does not use the agent publicURL: %s", raw)
+	}
+}
+
+func TestIsPublicOrigin(t *testing.T) {
+	cases := map[string]bool{
+		"http://publish.devcloud.woa.com": true,
+		"https://publish.firoyang.com":    true,
+		"http://127.0.0.1:8787":           false,
+		"https://127.0.0.1:8787":          false,
+		"http://localhost:8787":           false,
+		"http://[::1]:8787":               false,
+		"http://0.0.0.0:8787":             false,
+		"":                                false,
+		"publish.firoyang.com":            false,
+	}
+	for origin, want := range cases {
+		if got := isPublicOrigin(origin); got != want {
+			t.Errorf("isPublicOrigin(%q)=%v, want %v", origin, got, want)
+		}
 	}
 }
 

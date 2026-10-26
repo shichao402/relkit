@@ -1597,7 +1597,6 @@ def apply_serve_upgrade(
     user: str,
     prefix: str,
     listen_addr: Optional[str],
-    public_base_url: Optional[str],
     public_upload_url: Optional[str],
     restart: bool,
     backup_root: Path,
@@ -1707,17 +1706,16 @@ def publish_release_tools(
     files: list[dict[str, Any]],
     version: str,
     commit: str,
-    public_base: str,
     user: str,
     restart: bool,
 ) -> list[str]:
     """Publish this release's tool build to the local agent.
 
     Runs on the server, because both the credential and a reachable agent are
-    local. The signed manifest records absolute download URLs, so the public
-    origin must be stated: publishing against 127.0.0.1 would sign an address no
-    host can use, and every host's bootstrap would then fail at download time
-    while the publish itself reported success.
+    local. The signed manifest records absolute download URLs; the agent takes
+    them from its own publicURL (the address hosts already hold in
+    relkit.project.json) and refuses to sign a loopback origin, so this side
+    does not pass an address at all.
 
     Tool publishing is what makes /v1/catalog answer: the endpoint serves a
     document that only exists once something has been published, so an agent
@@ -1727,12 +1725,6 @@ def publish_release_tools(
         return []
     if not version:
         raise Fail("cannot publish tools without a release version")
-    base = (public_base or "").rstrip("/")
-    if not base or "127.0.0.1" in base or "localhost" in base:
-        raise Fail(
-            f"tool publishing needs a public base URL, got {base or '(empty)'}; "
-            "the URLs it signs are downloaded by hosts, not by this server"
-        )
     helper = DEPLOY_DIR / "relkit_tools_publish.py"
     if not helper.is_file():
         raise Fail(f"missing {helper.name}; the release cannot publish its tools")
@@ -1748,7 +1740,6 @@ def publish_release_tools(
     payload = {
         "version": version,
         "commit": commit,
-        "baseUrl": base,
         "files": [
             {
                 "name": Path(str(row["path"])).name,
@@ -1810,7 +1801,6 @@ def apply_agent_upgrade(
     binary: Optional[Path],
     user: str,
     prefix: str,
-    public_base_url: Optional[str],
     public_upload_url: Optional[str],
     serve_addr: str,
     restart: bool,
@@ -1968,7 +1958,6 @@ def apply_agent_upgrade(
             migrated, more = migrate_profile(
                 profile,
                 serve_addr=serve_addr,
-                public_base_url=public_base_url,
                 public_upload_url=public_upload_url,
             )
             if more:
@@ -2246,7 +2235,6 @@ def cmd_remote(args: argparse.Namespace) -> None:
         prefix = str(spec.get("prefix") or "/usr/local/bin")
         user = str(spec.get("user") or "relkit")
         restart = bool(spec.get("restart"))
-        public_base = spec.get("publicBaseUrl")
         public_upload = spec.get("publicUploadUrl")
         serve_bin = Path(spec["serveBinary"]) if spec.get("serveBinary") else None
         agent_bin = Path(spec["agentBinary"]) if spec.get("agentBinary") else None
@@ -2260,7 +2248,6 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         user=user,
                         prefix=prefix,
                         listen_addr=spec.get("serveListenAddr"),
-                        public_base_url=public_base,
                         public_upload_url=public_upload,
                         restart=restart,
                         backup_root=backup,
@@ -2277,7 +2264,6 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         binary=agent_bin,
                         user=user,
                         prefix=prefix,
-                        public_base_url=public_base,
                         public_upload_url=public_upload,
                         serve_addr=serve_addr,
                         restart=restart,
@@ -2324,7 +2310,6 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         files=tool_files,
                         version=str(spec.get("version") or ""),
                         commit=str(spec.get("commit") or ""),
-                        public_base=str(spec.get("toolsBaseUrl") or public_base or ""),
                         user=user,
                         restart=restart,
                     )
@@ -2502,7 +2487,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     if want_serve and isinstance(serve_cfg, dict):
         _, grace = ensure_cas_grace(serve_cfg)
         print("serve migrate notes:", grace or ["addr/dir preserved"])
-    public = args.public_base_url
     public_upload = args.public_upload_url
     for name, profile in (probe.get("profiles") or {}).items():
         if not isinstance(profile, dict) or profile.get("error"):
@@ -2511,7 +2495,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
             _, notes = migrate_profile(
                 profile,
                 serve_addr=str(serve_cfg.get("addr") or ""),
-                public_base_url=public,
                 public_upload_url=public_upload,
             )
             print(f"profile {name}:", notes or ["no changes"])
@@ -2553,7 +2536,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "prefix": args.prefix,
         "user": args.user,
         "serveListenAddr": args.serve_listen_addr,
-        "publicBaseUrl": public,
         "publicUploadUrl": public_upload,
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
         "keepBackups": keep_backups,
@@ -2563,7 +2545,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "enableToolPublish": want_tools,
         "version": git_stamp(load_ssot()["number"]),
         "commit": ident["commit"],
-        "toolsBaseUrl": public or public_upload,
     }
     uploads: list[Path] = []
     if not args.unsafe_from_dist:
@@ -2843,9 +2824,6 @@ def cmd_tools(args: argparse.Namespace) -> None:
     base = (args.server or "").rstrip("/")
     if not base:
         die("--server is required; it is the agent the tools are published to")
-    public_base = (args.base_url or "").rstrip("/")
-    if public_base and not re.match(r"^https?://[^/\s]+", public_base):
-        die(f"--base-url {public_base!r} is not an absolute http(s) origin")
     token = args.token or os.environ.get("RELKIT_TOOLS_TOKEN", "")
     if not token:
         die("--token or RELKIT_TOOLS_TOKEN is required (the deploy pipeline credential)")
@@ -2944,11 +2922,8 @@ def cmd_tools(args: argparse.Namespace) -> None:
             for row in plan
         ],
     }
-    if public_base:
-        # The signed manifest records where hosts download from. Publishing over
-        # loopback would otherwise sign 127.0.0.1 into every URL, which no host
-        # can reach, so the caller states the public origin explicitly.
-        payload["baseUrl"] = public_base
+    # The agent signs its own publicURL into every tool URL; the caller has no
+    # say, so publishing over loopback cannot leak 127.0.0.1 into the manifest.
     code, body = http_call(
         "POST", f"{base}/v1/tools",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -3063,7 +3038,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--serve-listen-addr",
         help="explicit relkit-store listen address (for example :8080)",
     )
-    upgrade.add_argument("--public-base-url")
     upgrade.add_argument(
         "--public-upload-url",
         help="CI- and agent-reachable relkit-compatible write endpoint",
@@ -3137,14 +3111,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tools_publish.add_argument("--version", default="", help="require the release version to equal this")
     tools_publish.add_argument("--token", default="", help="deploy token; defaults to RELKIT_TOOLS_TOKEN")
-    tools_publish.add_argument(
-        "--base-url",
-        default="",
-        help=(
-            "public origin hosts download from; required when --server is a loopback "
-            "address, because these URLs are signed into the manifest"
-        ),
-    )
     tools_publish.add_argument("--dry-run", action="store_true", help="print the plan, upload nothing")
 
     remote = sub.add_parser("remote", help=argparse.SUPPRESS)

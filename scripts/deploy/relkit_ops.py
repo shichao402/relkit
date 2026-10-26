@@ -219,9 +219,11 @@ def migrate_backend(
     backend: dict[str, Any],
     *,
     serve_addr: str,
-    public_base_url: Optional[str],
     public_upload_url: Optional[str] = None,
 ) -> tuple[dict[str, Any], list[str]]:
+    # A profile's baseUrl is the updater read plane the product was registered
+    # with. Upgrades never rewrite it: the only flag that used to was also the
+    # tool-signing origin, and the two jobs pointed at different domains.
     notes: list[str] = []
     kind = backend.get("type")
     cleaned, n = strip_cas_credentials(backend)
@@ -239,11 +241,6 @@ def migrate_backend(
         if not cleaned.get("tokenEnv"):
             cleaned["tokenEnv"] = TOKEN_ENV
             notes.append(f"set tokenEnv={TOKEN_ENV}")
-        if public_base_url:
-            base = public_base_url.rstrip("/") + "/"
-            if cleaned.get("baseUrl") != base:
-                cleaned["baseUrl"] = base
-                notes.append(f"set baseUrl={base}")
         if public_upload_url:
             upload = public_upload_url.rstrip("/") + "/"
             if cleaned.get("uploadUrl") != upload:
@@ -251,15 +248,15 @@ def migrate_backend(
                 notes.append(f"set uploadUrl={upload}")
         return cleaned, notes
 
-    base = public_base_url or cleaned.get("baseUrl") or cleaned.get("url")
+    base = cleaned.get("baseUrl") or cleaned.get("url")
     if isinstance(base, str) and base.strip():
         base = base.strip()
         if not base.endswith("/"):
             base += "/"
     else:
         raise ValueError(
-            f'cannot migrate backend type {kind!r}: need public baseUrl '
-            "(pass --public-base-url)"
+            f"cannot migrate backend type {kind!r}: it declares no baseUrl; "
+            "set the product's read-plane baseUrl in its profile first"
         )
     upload = public_upload_url.rstrip("/") + "/" if public_upload_url else _guess_upload_url(cleaned, serve_addr)
     if not upload:
@@ -281,7 +278,6 @@ def migrate_profile(
     profile: dict[str, Any],
     *,
     serve_addr: str,
-    public_base_url: Optional[str],
     public_upload_url: Optional[str] = None,
 ) -> tuple[dict[str, Any], list[str]]:
     cfg, n = strip_cas_credentials(deepcopy(profile))
@@ -308,7 +304,6 @@ def migrate_profile(
             migrated, more = migrate_backend(
                 backend,
                 serve_addr=serve_addr,
-                public_base_url=public_base_url,
                 public_upload_url=public_upload_url,
             )
             new_backends[name] = migrated

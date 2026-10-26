@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -367,9 +369,6 @@ type toolPublishRequest struct {
 	Version string            `json:"version"`
 	Commit  string            `json:"commit"`
 	Files   []toolPublishFile `json:"files"`
-	// BaseURL overrides the download prefix. Empty means "derive from the
-	// request", which is right for a deployment behind one public hostname.
-	BaseURL string `json:"baseUrl,omitempty"`
 }
 
 type toolPublishFile struct {
@@ -422,15 +421,23 @@ func (s *Server) handleToolPublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server root is not configured", http.StatusConflict)
 		return
 	}
+	// The signed URLs name the same server hosts already talk to: the address
+	// in their relkit.project.json, which is this agent's publicURL. Tools are
+	// a CI concern, so they live on the CI face, not on the updater read plane.
+	// A loopback origin is refused because no host could download from it,
+	// and the publish would otherwise report success while signing dead links.
+	baseURL := s.serverURL(r)
+	if !isPublicOrigin(baseURL) {
+		http.Error(w, fmt.Sprintf(
+			"tool URLs need this server's public address, got %q; set publicURL in the agent config to the address hosts put in relkit.project.json",
+			baseURL), http.StatusConflict)
+		return
+	}
 
 	dir := filepath.Join(s.toolStoreDir(), version)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		http.Error(w, "prepare tool directory: "+err.Error(), http.StatusInternalServerError)
 		return
-	}
-	baseURL := strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = requestBaseURL(r)
 	}
 
 	rows := make([]tools.Tool, 0, len(req.Files))
@@ -606,4 +613,22 @@ func requestBaseURL(r *http.Request) string {
 		host = r.Host
 	}
 	return scheme + "://" + host
+}
+
+// isPublicOrigin reports whether an absolute http(s) origin names a host other
+// than this machine. Signed tool URLs are fetched by build machines, so an
+// origin that only resolves on the server itself is never usable.
+func isPublicOrigin(origin string) bool {
+	parsed, err := neturl.Parse(strings.TrimSpace(origin))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	host := parsed.Hostname()
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
+		return false
+	}
+	return true
 }

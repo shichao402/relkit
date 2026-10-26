@@ -494,6 +494,11 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 			t.Fatal(err)
 		}
 		agentDoc["toolsTokenFile"] = filepath.ToSlash(filepath.Join("tokens", "deploy.token"))
+		// Tool URLs are signed with the agent's own public address, so a
+		// server that publishes tools always has one (see isPublicOrigin).
+		if !opts.noPublicURL {
+			agentDoc["publicURL"] = "https://publish.example"
+		}
 	}
 	agentBytes, _ := json.MarshalIndent(agentDoc, "", "  ")
 	if err := os.WriteFile(agentCfgPath, agentBytes, 0o644); err != nil {
@@ -548,6 +553,7 @@ type agentFixtureOpts struct {
 	artifacts          []vNextFixtureArtifact
 	tinyParts          bool
 	deployToken        bool
+	noPublicURL        bool
 }
 
 type vNextFixtureOptions struct {

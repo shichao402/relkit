@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
+import io
 import json
 import os
 import shutil
@@ -201,20 +203,19 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertNotIn("casCredentials", out["backends"]["x"])
 
-    def test_migrate_http_put_needs_public_base(self):
+    def test_migrate_http_put_needs_its_own_base(self):
         backend = {"type": "http-put", "baseUrl": "https://update.example/"}
         with self.assertRaises(ValueError):
             ops.migrate_backend(
                 {"type": "http-put", "outputDir": "/data"},
                 serve_addr="127.0.0.1:8080",
-                public_base_url=None,
             )
         migrated, notes = ops.migrate_backend(
             backend,
             serve_addr="127.0.0.1:8080",
-            public_base_url=None,
         )
         self.assertEqual(migrated["type"], "relkit-compatible")
+        self.assertEqual(migrated["baseUrl"], "https://update.example/")
         self.assertEqual(migrated["tokenEnv"], "RELKIT_SERVE_TOKEN")
         self.assertTrue(any("http-put" in item for item in notes))
 
@@ -223,15 +224,15 @@ class MigrateTests(unittest.TestCase):
             ops.migrate_backend(
                 {"type": "static-http", "baseUrl": "https://example.invalid/"},
                 serve_addr="127.0.0.1:8080",
-                public_base_url=None,
             )
         self.assertIn("static-http", str(raised.exception))
 
-    def test_migrate_local_with_public_url(self):
+    def test_migrate_local_keeps_declared_base(self):
         profile = {
             "backends": {
                 "intranet": {
                     "type": "local",
+                    "baseUrl": "http://update-internal.devcloud.woa.com/",
                     "outputDir": "/data/relkit-store",
                     "casCredentials": {"mode": "sts"},
                 }
@@ -240,37 +241,42 @@ class MigrateTests(unittest.TestCase):
         out, notes = ops.migrate_profile(
             profile,
             serve_addr="127.0.0.1:8080",
-            public_base_url="https://update.devcloud.woa.com/",
             public_upload_url="http://update.devcloud.woa.com/",
         )
         b = out["backends"]["intranet"]
         self.assertEqual(b["type"], "relkit-compatible")
-        self.assertEqual(b["baseUrl"], "https://update.devcloud.woa.com/")
+        self.assertEqual(b["baseUrl"], "http://update-internal.devcloud.woa.com/")
         self.assertEqual(b["uploadUrl"], "http://update.devcloud.woa.com/")
         self.assertNotIn("casCredentials", b)
         self.assertTrue(notes)
 
-    def test_public_upload_url_replaces_compatible_loopback(self):
+    def test_upgrade_never_rewrites_compatible_base(self):
+        """The read plane is the product's registration, not an upgrade knob."""
         backend = {
             "type": "relkit-compatible",
-            "baseUrl": "https://update.devcloud.woa.com/",
+            "baseUrl": "http://update-internal.devcloud.woa.com/",
             "uploadUrl": "http://127.0.0.1:8080/",
             "tokenEnv": "RELKIT_SERVE_TOKEN",
         }
         migrated, notes = ops.migrate_backend(
             backend,
             serve_addr="127.0.0.1:8080",
-            public_base_url="http://update.devcloud.woa.com:8080",
             public_upload_url="http://update.devcloud.woa.com:8080",
         )
         self.assertEqual(
-            migrated["baseUrl"], "http://update.devcloud.woa.com:8080/"
+            migrated["baseUrl"], "http://update-internal.devcloud.woa.com/"
         )
         self.assertEqual(
             migrated["uploadUrl"], "http://update.devcloud.woa.com:8080/"
         )
-        self.assertTrue(any("set baseUrl" in item for item in notes))
+        self.assertFalse(any("set baseUrl" in item for item in notes))
         self.assertTrue(any("set uploadUrl" in item for item in notes))
+
+    def test_upgrade_has_no_public_base_url_flag(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            deploy_cli.build_parser().parse_args(
+                ["upgrade", "--host", "box", "--public-base-url", "http://x/"]
+            )
 
     def test_migrate_profile_removes_product_owned_site(self):
         profile = {
@@ -285,7 +291,6 @@ class MigrateTests(unittest.TestCase):
         migrated, notes = ops.migrate_profile(
             profile,
             serve_addr="127.0.0.1:8080",
-            public_base_url=None,
         )
         self.assertNotIn("site", migrated)
         self.assertTrue(any("site.sinks" in item for item in notes))
@@ -293,7 +298,7 @@ class MigrateTests(unittest.TestCase):
     def test_unknown_backend_left_alone(self):
         backend = {"type": "s3-compatible", "bucket": "x"}
         out, notes = ops.migrate_backend(
-            backend, serve_addr=":8080", public_base_url=None
+            backend, serve_addr=":8080"
         )
         self.assertEqual(out["type"], "s3-compatible")
         self.assertEqual(notes, [])
@@ -1491,11 +1496,12 @@ class ToolPublishTests(unittest.TestCase):
         args = deploy_cli.build_parser().parse_args(["upgrade", "--host", "box", "--no-tools"])
         self.assertTrue(args.no_tools)
 
-    def test_tools_publish_accepts_a_public_base_url(self):
-        args = deploy_cli.build_parser().parse_args(
-            ["tools", "publish", "--server", "http://127.0.0.1:8787", "--base-url", "http://update-internal.example"]
-        )
-        self.assertEqual(args.base_url, "http://update-internal.example")
+    def test_tools_publish_has_no_base_url_flag(self):
+        """The agent signs its own publicURL; a caller cannot pick the domain."""
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            deploy_cli.build_parser().parse_args(
+                ["tools", "publish", "--server", "http://127.0.0.1:8787", "--base-url", "http://update-internal.example"]
+            )
 
     def test_token_path_sits_beside_the_agent_config(self):
         path = deploy_cli.tool_publish_token_path(Path("/etc/relkit-agent"))
@@ -1536,42 +1542,22 @@ class ToolPublishTests(unittest.TestCase):
             deploy_cli.ensure_tool_publish_token(config_dir, user="")
             self.assertEqual([p.name for p in config_dir.iterdir()], ["tools-publish.token"])
 
-    def test_publishing_refuses_a_loopback_download_url(self):
-        """Signing 127.0.0.1 into the manifest would break every host's bootstrap."""
-        with tempfile.TemporaryDirectory() as tmp:
-            staged = Path(tmp) / "cli-linux-amd64"
-            staged.write_bytes(b"binary")
-            with self.assertRaises(deploy_cli.Fail):
-                deploy_cli.publish_release_tools(
-                    files=[{"path": str(staged), "component": "cli", "os": "linux", "arch": "amd64"}],
-                    version="0.7.0+abc",
-                    commit="abc",
-                    public_base="http://127.0.0.1:8787",
-                    user="",
-                    restart=False,
-                )
-
-    def test_publishing_refuses_an_empty_base_url(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            staged = Path(tmp) / "cli-linux-amd64"
-            staged.write_bytes(b"binary")
-            with self.assertRaises(deploy_cli.Fail):
-                deploy_cli.publish_release_tools(
-                    files=[{"path": str(staged), "component": "cli", "os": "linux", "arch": "amd64"}],
-                    version="0.7.0+abc",
-                    commit="abc",
-                    public_base="",
-                    user="",
-                    restart=False,
-                )
-
     def test_publishing_a_missing_artifact_fails_loudly(self):
         with self.assertRaises(deploy_cli.Fail):
             deploy_cli.publish_release_tools(
                 files=[{"path": "/nonexistent/cli-linux-amd64", "component": "cli"}],
                 version="0.7.0+abc",
                 commit="abc",
-                public_base="http://update-internal.example",
+                user="",
+                restart=False,
+            )
+
+    def test_publishing_needs_a_version(self):
+        with self.assertRaises(deploy_cli.Fail):
+            deploy_cli.publish_release_tools(
+                files=[{"path": "/nonexistent/cli-linux-amd64", "component": "cli"}],
+                version="",
+                commit="abc",
                 user="",
                 restart=False,
             )
@@ -1579,7 +1565,7 @@ class ToolPublishTests(unittest.TestCase):
     def test_no_tool_files_means_no_work(self):
         self.assertEqual(
             deploy_cli.publish_release_tools(
-                files=[], version="", commit="", public_base="", user="", restart=False
+                files=[], version="", commit="", user="", restart=False
             ),
             [],
         )
