@@ -15,7 +15,7 @@ status: approved
 
 判据只有一条：图和文字里的每个事实，都能在代码或现网配置里找到对应。现网配置的样例在 `scripts/deploy/`（内网 `nginx-intranet.example.conf`，外网 `nginx-public.example.conf`）。
 
-五张图分工：图一总览一台服务器上有什么、域名转到哪；图二发布链路（CI 写面）；图三下载链路（updater 读面）；图四信任与凭据；图五一次发布的时序。
+六张图分工：图一总览一台服务器上有什么、域名转到哪；图二发布链路（CI 写面）；图三下载链路（updater 读面）；图四信任与凭据；图五一次发布的时序；图六可替换的接缝（adapter）。
 
 三句话概括现状：每台服务器三个进程；三组域名各管一件事；发布与下载是两条独立链路，唯一交汇点是 store 里的发布树。
 
@@ -265,6 +265,68 @@ client -> client : 逐层验签，通过才装
 ```
 
 时序上有一处容易误会：人页永远滞后于协议面。数据文档写在 index 提交之后，某次 rebuild 失败只让人页旧一会儿，不会回滚已经生效的协议 index。
+
+## 六、可替换的接缝
+
+图一到图五把 store 画成一个固定节点，那是现网实例。结构上，凡是"数据落在哪、从哪读"的地方都隔着一层小接口，调用方只认接口，不按实现类型分叉。共三处：
+
+```plantuml
+@startuml
+skinparam shadowing false
+skinparam componentStyle rectangle
+left to right direction
+
+component "relkit-agent\nCAS 凭据 / Promote / 写 manifest、index" as agent
+component "site rebuild" as rebuild
+component "relkit-console" as console
+
+interface "Backend\nPut* / Get / URLFor\n可选：CASUploadAuthorizer / Promote\nIngest / Deleter / Preflight" as IB
+interface "sink\nDeploy(dump)" as IS
+interface "Adapter（只读）\nReadKey / ReadDir / ModTime" as IA
+
+agent --> IB
+rebuild --> IS
+console --> IA
+
+package "存储面" {
+  [relkit-compatible\n→ relkit-store（现网）] as rc
+  [s3-compatible\n→ COS / S3 / MinIO（代码在，现网不用）] as s3
+}
+IB <|.. rc
+IB <|.. s3
+
+package "人页" {
+  [backend\n经 Backend 写 browse/] as sb
+  [directory\n写本机目录] as sd
+  [makers\n（代码在，现网不用）] as sm
+}
+IS <|.. sb
+IS <|.. sd
+IS <|.. sm
+sb ..> IB
+
+package "console 读" {
+  [rootAdapter\n本机发布树只读（内网现网）] as ra
+  [storeAdapter\nHTTP 读 store 的 /-/list/] as sa
+  [s3 读 adapter\n（缺，见 ROADMAP）] as s3r #line.dashed
+}
+IA <|.. ra
+IA <|.. sa
+IA <|.. s3r
+@enduml
+```
+
+| 接缝 | 接口位置 | 选择方式 | 决策 |
+| --- | --- | --- | --- |
+| 存储面 Backend | `internal/backends/base.go` | 产品配置的 `backends` 与 `publishTo`，agent 按产品 `backends.Create` | [ADR 0008](../adr/0008-cas-data-plane-contract.md) |
+| 人页 sink | `internal/site/site.go` | agent 配置 `site.sinks` | [ADR 0015](../adr/0015-declarative-site-sinks.md) |
+| console 读 Adapter | `cmd/relkit-console/adapters.go` | console 配置 `store` 有值走 storeAdapter，否则按 `dir` 走 rootAdapter | [ADR 0016](../adr/0016-serve-split-store-console.md) |
+
+要点：
+
+- 可选能力用独立小接口表达（`backend.(backends.CASUploadAuthorizer)` 这类断言），不往 Backend 主接口里塞。两种存储后端都实现了 CAS 直传授权和 Promote，所以图二的直传链路对 COS 同样成立，差别只是能力 URL 换成预签名 URL。
+- 三处接缝不对称：存储面能换成 COS，人页也能跟着写过去，但 console 没有 S3 读 adapter。数据面一旦换成 COS，面板会读不到发布树。现网内外都是 store，不受影响，缺口登记在 [ROADMAP](../ROADMAP.md)。
+- 换实现只改配置，不改调用方。这是这三个接口存在的全部理由；哪天某处开始按实现类型写 `if`，接缝就失效了。
 
 ## 相关
 

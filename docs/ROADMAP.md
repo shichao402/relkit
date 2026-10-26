@@ -70,5 +70,6 @@
 - **状态**：内外网面板都已上线，入口 `publish.*/-/admin`，管本机 relkit-store 发布树；用户、角色、产品、token 的写操作经 agent `/v1/admin/*`（ADR 0023 第 8 条），下线产品带预演。
 - **现网**：外网 COS 已于 2026-09-26 清零，外网数据面与内网一样只有本机 `relkit-store`（`/srv/releases`），面板看得到全部发布树。原先外网发布树在 COS、面板看不到的差距已随迁移消失。
 - **目标**：面板继续进化成 relkit 后台（发布记录、GC、日志）。
+- **已知缺口（不排期）**：console 读 adapter 只有 `rootAdapter`（本机目录）与 `storeAdapter`（HTTP 读 relkit-store），没有对应 `s3-compatible` 的实现。存储面 Backend 与人页 sink 都能换到 COS，面板不能。只在数据面真换成对象存储时才需要补；补时照 Backend 的形状实现 `Adapter` 三个方法，调用方不改。见 [topology.md 第六节](design/topology.md#六可替换的接缝)。
 - **不做（现阶段）**：把 `/-/admin` 当对外目录；在 agent 上再开一套未鉴权的浏览页。
 - **落点**：`cmd/relkit-console`（[ADR 0016](adr/0016-serve-split-store-console.md)），读走 adapter；拓扑变化时更新 [topology.md](design/topology.md)。
