@@ -70,7 +70,6 @@ type apiProductSummary struct {
 	Profile       string              `json:"profile,omitempty"`
 	CreatedAt     string              `json:"createdAt,omitempty"`
 	Updated       string              `json:"updated,omitempty"`
-	Downloads     int64               `json:"downloads"`
 	Channels      []apiChannelSummary `json:"channels"`
 	ConnectConfig map[string]any      `json:"connectConfig,omitempty"`
 }
@@ -85,7 +84,6 @@ type apiArtifact struct {
 	Sha256        string `json:"sha256"`
 	Href          string `json:"href,omitempty"`
 	PermanentHref string `json:"permanentHref,omitempty"`
-	Downloads     int64  `json:"downloads"`
 }
 
 type apiRelease struct {
@@ -114,8 +112,7 @@ type apiChannelDetail struct {
 
 type apiProductDetail struct {
 	apiProductSummary
-	StatsSince string             `json:"statsSince,omitempty"`
-	Detail     []apiChannelDetail `json:"detail"`
+	Detail []apiChannelDetail `json:"detail"`
 }
 
 type apiRoleView struct {
@@ -192,7 +189,6 @@ func (c *console) mergedProducts(agent *agentClient, session string, self agentU
 		row.Description = card.Description
 		row.Homepage = card.Homepage
 		row.Updated = card.Updated
-		row.Downloads = card.Downloads
 		for _, ch := range card.Channels {
 			row.Channels = append(row.Channels, apiChannelSummary{
 				Name: ch.Name, Version: ch.Version, Code: ch.Code,
@@ -317,7 +313,6 @@ func (c *console) apiProduct(w http.ResponseWriter, r *http.Request, agent *agen
 			detail.Homepage = meta.Homepage
 		}
 		detail.Display = page.Name
-		detail.StatsSince = c.stats.startedAt()
 		for _, section := range page.Channels {
 			detail.Detail = append(detail.Detail, channelDetailView(section))
 		}
@@ -344,7 +339,6 @@ func channelDetailView(section channelSection) apiChannelDetail {
 		view.Artifacts = append(view.Artifacts, apiArtifact{
 			ID: a.ID, Filename: a.Filename, Platform: a.Platform, OS: a.OS, Arch: a.Arch,
 			Size: a.Size, Sha256: a.Sha256, Href: a.Href, PermanentHref: a.PermanentHref,
-			Downloads: a.Downloads,
 		})
 	}
 	for _, rel := range section.Releases {

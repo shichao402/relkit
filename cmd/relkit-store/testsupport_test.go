@@ -37,14 +37,12 @@ func newTestConfig(t *testing.T, withToken bool) (*config, string) {
 		noCache:       []string{"index/"},
 		immutable:     []string{"manifest/", "artifact/"},
 		defaultMaxAge: 60,
-		stats:         newDownloadStats(defaultStatsPath(dir), dir),
 		casSecret:     bytes.Repeat([]byte{7}, 32),
 		gc:            newGCState(true, time.Hour, defaultGCDebounce, defaultCASGrace),
 	}
 	if withToken {
 		cfg.credentials = []credential{{hash: hashToken(testToken)}}
 	}
-	t.Cleanup(cfg.stats.stop)
 	return cfg, dir
 }
 

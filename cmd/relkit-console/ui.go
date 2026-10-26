@@ -62,7 +62,6 @@ type productCard struct {
 	Homepage    string
 	Href        string
 	Updated     string
-	Downloads   int64
 	Channels    []channelRow
 }
 
@@ -75,7 +74,6 @@ type artifactRow struct {
 	Sha256Short   string
 	Href          string
 	PermanentHref string
-	Downloads     int64
 	OS            string
 	Arch          string
 }
@@ -144,9 +142,8 @@ func (c *console) readProductCard(product string) (productCard, bool) {
 	}
 
 	card := productCard{
-		Display:   product,
-		Href:      productPathPrefix + url.PathEscape(product),
-		Downloads: c.stats.totalUnder("artifact/" + product + "/"),
+		Display: product,
+		Href:    productPathPrefix + url.PathEscape(product),
 	}
 	var newest time.Time
 	parsed := 0
@@ -314,9 +311,6 @@ func (c *console) artifactsFor(node *rupv2.VersionNode) []artifactRow {
 			if row.Filename == "" {
 				row.Filename = artifact.Id
 			}
-			if key, ok := localKeyFromURL(row.Href); ok {
-				row.Downloads = c.stats.count(key)
-			}
 			rows = append(rows, row)
 		}
 		sort.SliceStable(rows, func(i, j int) bool {
@@ -378,8 +372,6 @@ func (c *console) fixedHref(product, channel, artifactID string) string {
 func latestHref(product, channel, artifactID string) string {
 	return latestPathPrefix + url.PathEscape(product) + "/" + url.PathEscape(channel) + "/" + url.PathEscape(artifactID)
 }
-
-
 
 // serveLatest resolves /-/latest/<product>/<channel>/<artifact-id> from the
 // pointer written during publish. It performs no index/manifest scan.
@@ -625,4 +617,3 @@ func localKeyFromURL(raw string) (string, bool) {
 	}
 	return "", false
 }
-

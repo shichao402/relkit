@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // SiteConfig is the operator's copy for the human-facing pages, carried over
@@ -30,18 +29,6 @@ func (s *SiteConfig) product(id string) *ProductConfig {
 		return nil
 	}
 	return s.Products[id]
-}
-
-// casKeyFileName mirrors the serve-side CAS secret file name: the stats
-// loader refuses to serve it, so the reserved-key list stays aligned even
-// though the console never mints CAS URLs.
-const casKeyFileName = ".relkit-serve-cas.key"
-
-func resolveRelative(path, configPath string) string {
-	if filepath.IsAbs(path) || configPath == "" {
-		return path
-	}
-	return filepath.Join(filepath.Dir(configPath), path)
 }
 
 // generateToken is the shared secret mint (32 random bytes, url-safe base64).

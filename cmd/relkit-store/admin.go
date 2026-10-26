@@ -32,11 +32,11 @@ func reservedAdminKey(name string) bool {
 		strings.HasPrefix(base, "admin.json.")
 }
 
-// hiddenKey carries the hiding rule over the store boundary: the counters
-// file, the CAS key and any admin state are internal objects, not servable
-// or listable content.
+// hiddenKey carries the hiding rule over the store boundary: the CAS key, any
+// admin state and the retired counters file are internal objects, not
+// servable or listable content.
 func (c *config) hiddenKey(name string) bool {
-	return hiddenServeKey(name, c.stats) || reservedAdminKey(name)
+	return reservedServeKey(name)
 }
 
 // ---- template machinery (shared shape with console's ui.go) ----

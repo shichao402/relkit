@@ -72,6 +72,8 @@ rebuild 成功路径的末尾（`dump.sha256` 写入之后、members 写入之�
 4. 部署切换与收尾文档（已完成，2026-09-25）：两台机器实机切换——`migrate-serve` 迁移内网（relkit:relkit token 语义）与外网（root:relkit 组可读 token 语义）的 store 并停用 `relkit-serve.service`，`install console` 以 `keeping existing operators` 保留账户上线独立 unit，nginx 三段面板分流（`/-/admin`、`/-/p/`、`/-/latest/` → `127.0.0.1:8081`）两台机均已验证（内网 200；外网经正确 SNI 200/302，公网域名直达同验）。`/tmp/relkit-deploy` 引导目录已清理，nginx 示例配置已同步线上实态。
 5. console 读路径补全（已完成，2026-09-25）：store 新增 `/-/list/<dir>` 匿名 JSON 目录端点（服务端过滤保留键，console 远端模式下看不到 admin state/计数/CAS key）；console 落地 `storeAdapter`（`ReadKey` 走 GET 树、404 对齐 rootAdapter 的 error 语义、no-cache 前缀与 store 一致，`ReadDir` 解析 `/-/list/`），配置键 `store` / 标志 `-store` 挂载，store 模式下统计空计数降级；`internal/makers` 新增 `ListDeployments`（`DescribePagesDeployments` 只读查询）；portal 首屏接线 Site 卡片——`site/status.json` 快照（At/各 sink 成败/deploymentId）+ 本机 dump 副本刷新时间 + makers 最近部署列表（60s 缓存、token 缺失安静降级）。ADR 原文的 dumpAdapter（只读本机 agent state 的 `site/dump/`）经评估由快照 + dumpFreshness 覆盖同一事实面，未单独立实现。
 
+6. console 只走 store、删除下载计数（2026-10-26）：`rootAdapter`（本机目录直读）删除，`storeAdapter` 成为 Adapter 唯一实现，`store` 必填，console 不再有 `-dir`。理由是 rootAdapter 让内网 console 走本机盘捷径、外网走 HTTP，两边形态不同构。下载计数随之在 console 与 store 两侧整体删除（store 伺服热路径不再写树内 stats 文件），以后另行设计。面板会话 key 迁出发布树，落 `/var/lib/relkit-console/panel.json`（systemd `StateDirectory`），部署脚本 `upgrade` 自动搬迁旧文件并删除 console 配置里的 `dir`/`stateDir`。树内旧的 admin/stats 文件名仍由 store 隐藏。第 2、3、5 步中关于 rootAdapter 与计数的描述是当时状态。
+
 ## 后果
 
 - serve 命名已退役：`cmd/relkit-serve` 删除，`cmd/relkit-store` / `cmd/relkit-console` 为唯二服务二进制。协议、配置形状、数据文件名对客户端与运维面保持不变。

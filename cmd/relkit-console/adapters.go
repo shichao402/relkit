@@ -3,9 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"net/url"
-	"os"
 	"path"
 	"strings"
 	"time"
@@ -41,63 +39,12 @@ type Entry struct {
 	Mtime time.Time
 }
 
-// rootAdapter reads a release tree on this box through os.Root, exactly like
-// relkit-store does today. It is the "same box, read-only" case: the console
-// running next to relkit-store (or a store tree mounted read-only).
-type rootAdapter struct {
-	name string
-	root *os.Root
-}
-
-func newRootAdapter(name, dir string) (*rootAdapter, error) {
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", dir, err)
-	}
-	return &rootAdapter{name: name, root: root}, nil
-}
-
-func (a *rootAdapter) Name() string { return a.name }
-
-func (a *rootAdapter) ReadKey(key string) ([]byte, error) {
-	return a.root.ReadFile(key)
-}
-
-func (a *rootAdapter) ReadDir(dir string) ([]Entry, error) {
-	entries, err := fs.ReadDir(a.root.FS(), dir)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Entry, 0, len(entries))
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		out = append(out, Entry{
-			Name:  entry.Name(),
-			IsDir: entry.IsDir(),
-			Size:  info.Size(),
-			Mtime: info.ModTime(),
-		})
-	}
-	return out, nil
-}
-
-func (a *rootAdapter) ModTime(key string) time.Time {
-	file, err := a.root.Open(key)
-	if err != nil {
-		return time.Time{}
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return time.Time{}
-	}
-	return info.ModTime()
-}
-
-var _ Adapter = (*rootAdapter)(nil)
+// The console has exactly one implementation today, storeAdapter, and it
+// reads over the wire even when relkit-store runs on the same box. There is no
+// "same box, read the disk" shortcut on purpose: a shortcut that only exists
+// where the console happens to sit next to the tree makes two boxes that look
+// alike behave differently, and lets the panel see files the store would never
+// serve. Another data plane gets another implementation of this interface.
 
 // storeEntryJSON mirrors relkit-store's /-/list/ row shape. Duplicating four
 // fields beats importing the store package: the console must not depend on
@@ -109,15 +56,14 @@ type storeEntryJSON struct {
 	Mtime string `json:"mtime"`
 }
 
-// storeAdapter reads a remote relkit-store over HTTP (ADR 0016 step 5): the
-// console box that is not co-located with the release tree. It is the read
-// half of the same wire the backends package's relkit-compatible client
+// storeAdapter reads relkit-store over HTTP (ADR 0016 step 5). It is the
+// read half of the same wire the backends package's relkit-compatible client
 // speaks: plain GET on the tree, plus the store's /-/list/ JSON endpoint for
 // directory listings, which carries name/isDir/size/mtime per row.
 //
-// ReadKey translates httpx.Get's "404 is (nil, nil)" into rootAdapter's
-// "missing file is an error": scanProducts and friends treat an error as "no
-// data", and a nil body would decode as garbage.
+// ReadKey turns httpx.Get's "404 is (nil, nil)" into "missing key is an
+// error": scanProducts and friends treat an error as "no data", and a nil body
+// would decode as garbage.
 type storeAdapter struct {
 	name    string
 	baseURL string // absolute, no trailing slash
@@ -160,8 +106,7 @@ func (a *storeAdapter) ReadKey(key string) ([]byte, error) {
 		return nil, err
 	}
 	if body == nil {
-		// 404: align with rootAdapter, where os.Root.ReadFile errors on a
-		// missing file rather than returning nil.
+		// 404: a missing key is an error, never a nil body.
 		return nil, fmt.Errorf("GET %s: not found", key)
 	}
 	return body, nil

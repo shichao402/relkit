@@ -52,7 +52,6 @@ export interface ProductSummary {
   profile?: string;
   createdAt?: string;
   updated?: string;
-  downloads: number;
   channels: ChannelSummary[];
   connectConfig?: Record<string, unknown>;
 }
@@ -67,7 +66,6 @@ export interface Artifact {
   sha256: string;
   href?: string;
   permanentHref?: string;
-  downloads: number;
 }
 
 export interface Release {
@@ -95,7 +93,6 @@ export interface ChannelDetail {
 }
 
 export interface ProductDetail extends ProductSummary {
-  statsSince?: string;
   detail: ChannelDetail[];
 }
 

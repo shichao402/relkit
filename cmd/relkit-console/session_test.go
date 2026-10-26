@@ -45,10 +45,10 @@ func TestSessionCookieStaysOnAdminPrefix(t *testing.T) {
 // file, and the panel it configures reports the agent it was pointed at.
 func TestInitWritesConfigAndPanelState(t *testing.T) {
 	out := t.TempDir()
-	tree := t.TempDir()
+	state := filepath.Join(t.TempDir(), "panel.json")
 
 	var buf strings.Builder
-	if err := runInit(&buf, []string{"-dir", tree, "-out", out, "-agent", "https://agent.example.invalid"}); err != nil {
+	if err := runInit(&buf, []string{"-store", "http://127.0.0.1:8080", "-state", state, "-out", out, "-agent", "https://agent.example.invalid"}); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -56,14 +56,14 @@ func TestInitWritesConfigAndPanelState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
-	if path == "" || cfg.Dir != tree {
+	if path == "" || cfg.Store != "http://127.0.0.1:8080" || cfg.AdminStateFile != state {
 		t.Fatalf("config=%+v path=%q", cfg, path)
 	}
 	if cfg.Agent != "https://agent.example.invalid" {
 		t.Fatalf("agent = %q", cfg.Agent)
 	}
 
-	session, err := openPanelSession(filepath.Join(tree, adminStateFileName), tree, cfg.Agent)
+	session, err := openPanelSession(state, cfg.Agent)
 	if err != nil {
 		t.Fatalf("openPanelSession: %v", err)
 	}
@@ -75,13 +75,35 @@ func TestInitWritesConfigAndPanelState(t *testing.T) {
 	}
 }
 
+// TestInitRequiresStore: the store is the only way the panel reads the tree,
+// so a config without one is not a config.
+func TestInitRequiresStore(t *testing.T) {
+	var buf strings.Builder
+	err := runInit(&buf, []string{"-out", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "-store is required") {
+		t.Fatalf("err = %v, want -store is required", err)
+	}
+}
+
+// TestPanelStateMustBeAbsolute: a relative state path would land wherever the
+// service happened to start, which is how panel keys ended up in the tree.
+func TestPanelStateMustBeAbsolute(t *testing.T) {
+	if _, err := resolveAdminPath("panel.json"); err == nil {
+		t.Fatal("relative adminStateFile must be rejected")
+	}
+	got, err := resolveAdminPath("")
+	if err != nil || got != defaultPanelStatePath {
+		t.Fatalf("default = %q err=%v", got, err)
+	}
+}
+
 // TestInitRefusesExistingConfig keeps the guard: init on a box that already has a
 // config must not silently sign everyone out.
 func TestInitRefusesExistingConfig(t *testing.T) {
 	out := t.TempDir()
 	writeFile(t, out, ConfigName, []byte("{}\n"))
 	var buf strings.Builder
-	err := runInit(&buf, []string{"-dir", t.TempDir(), "-out", out})
+	err := runInit(&buf, []string{"-store", "http://127.0.0.1:8080", "-state", filepath.Join(t.TempDir(), "panel.json"), "-out", out})
 	if err == nil {
 		t.Fatal("init over an existing config must fail")
 	}
@@ -94,14 +116,13 @@ func TestInitRefusesExistingConfig(t *testing.T) {
 // accounts are not the panel's to keep any more.
 func TestInitResetAdmin(t *testing.T) {
 	out := t.TempDir()
-	tree := t.TempDir()
+	path := filepath.Join(t.TempDir(), "panel.json")
 
-	quoted, err := json.Marshal(tree)
+	quoted, err := json.Marshal(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, out, ConfigName, []byte("{\"dir\":"+string(quoted)+"}\n"))
-	path := filepath.Join(tree, adminStateFileName)
+	writeFile(t, out, ConfigName, []byte("{\"store\":\"http://127.0.0.1:8080\",\"adminStateFile\":"+string(quoted)+"}\n"))
 	first, err := mintPanelDoc()
 	if err != nil {
 		t.Fatal(err)
@@ -139,12 +160,15 @@ func TestInitResetAdminRejectsForce(t *testing.T) {
 	}
 }
 
-// TestPanelStateIsNotServed: the cookie key is panel state and must never be
-// readable over HTTP. The file tree moved to the JSON API, so this asks the API
-// rather than the old listing page.
-func TestPanelStateIsNotServed(t *testing.T) {
+// TestLeftoverStateIsNotListed: the panel state no longer lives in the tree,
+// but a box migrated from the old layout can still have the files there. The
+// store hides its own names; the console hides the panel's, so neither shows up
+// in the file tree even behind a store that does not know them.
+func TestLeftoverStateIsNotListed(t *testing.T) {
 	api, _, dir := newAPITestDir(t)
 	writeFile(t, dir, adminStateFileName, []byte(`{"sessionKey":"leaked"}`))
+	writeFile(t, dir, "admin.json", []byte(`{"sessionKey":"leaked"}`))
+	writeFile(t, dir, "artifact/app/1.0.0/app.zip", []byte("pkg"))
 	api.login()
 
 	status, body := api.call(http.MethodGet, apiPrefix+"files", nil, nil)
@@ -152,8 +176,11 @@ func TestPanelStateIsNotServed(t *testing.T) {
 		t.Fatalf("files = %d %v", status, body)
 	}
 	dump := fmtJSON(body)
-	if strings.Contains(dump, adminStateFileName) {
-		t.Fatalf("listing leaked the panel state file: %s", dump)
+	if !strings.Contains(dump, "artifact") {
+		t.Fatalf("listing should still show the tree: %s", dump)
+	}
+	if strings.Contains(dump, adminStateFileName) || strings.Contains(dump, "admin.json") {
+		t.Fatalf("listing leaked a panel state file: %s", dump)
 	}
 	if strings.Contains(dump, "sessionKey") {
 		t.Fatal("listing leaked key material")

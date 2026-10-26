@@ -24,36 +24,40 @@ const (
 )
 
 // newTestConsole assembles a console over a temp release tree plus a stub
-// agent holding one operator, the test counterpart of main(): adapter over the
-// tree, panel state in it, stats at the default hidden path. The agent is a
+// agent holding one operator, the test counterpart of main(): the tree is
+// served by a fake store and read through storeAdapter, exactly the path
+// production takes, and the panel state lives outside the tree. The agent is a
 // stub because the panel has no accounts of its own any more (requirement
 // 13.6); a test that needs a specific agent answer builds its own with
 // newPanelConsole.
 func newTestConsole(t *testing.T) (*console, string) {
 	t.Helper()
 	dir := t.TempDir()
-	adapter, err := newRootAdapter("local", dir)
-	if err != nil {
-		t.Fatalf("newRootAdapter: %v", err)
-	}
-	// os.Root pins the temp dir on Windows: without Close, t.TempDir's
-	// RemoveAll cleanup fails with "being used by another process" on
-	// every test. relkit-store's tests already close theirs; same here.
-	t.Cleanup(func() { _ = adapter.root.Close() })
+	adapter := newTreeAdapter(t, dir)
 	stub, agentURL := newAgentStubServer(t)
 	stub.bootstrapLive = false
 	stub.addUser(testPanelUser, testPanelPassword, "admin", nil)
-	admin, err := openPanelSession(filepath.Join(dir, adminStateFileName), dir, agentURL)
+	admin, err := openPanelSession(filepath.Join(t.TempDir(), "panel.json"), agentURL)
 	if err != nil {
 		t.Fatalf("openPanelSession: %v", err)
 	}
 	c := &console{
 		adapter: adapter,
-		stats:   newDownloadStats(defaultStatsPath(dir), dir),
 		admin:   admin,
 	}
-	t.Cleanup(c.stats.stop)
 	return c, dir
+}
+
+// newTreeAdapter serves dir through a fake store and returns the adapter the
+// console would build for it. There is no other adapter to build.
+func newTreeAdapter(t *testing.T, dir string) Adapter {
+	t.Helper()
+	srv := newFakeStoreServer(t, dir)
+	adapter, err := newStoreAdapter("store:test", srv.URL)
+	if err != nil {
+		t.Fatalf("newStoreAdapter: %v", err)
+	}
+	return adapter
 }
 
 // readyTestAdmin is the serve version carried over: one user, deterministic
@@ -64,12 +68,12 @@ func readyTestAdmin(t *testing.T, dir string) *panelSession {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	path := filepath.Join(dir, adminStateFileName)
+	path := filepath.Join(dir, "panel.json")
 	doc := panelDoc{SessionKey: base64.RawURLEncoding.EncodeToString(key)}
 	if err := writePanelDoc(path, doc); err != nil {
 		t.Fatal(err)
 	}
-	admin, err := openPanelSession(path, dir, "")
+	admin, err := openPanelSession(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,33 +205,6 @@ func TestLoginServesTheApp(t *testing.T) {
 	}
 }
 
-func TestRootAdapterListsAndReads(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "index/loom/dev.pb", []byte("x"))
-	a, err := newRootAdapter("local", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.root.Close() })
-	if a.Name() != "local" {
-		t.Fatalf("name = %q", a.Name())
-	}
-	entries, err := a.ReadDir("index/loom")
-	if err != nil || len(entries) != 1 || entries[0].Name != "dev.pb" {
-		t.Fatalf("entries=%+v err=%v", entries, err)
-	}
-	raw, err := a.ReadKey("index/loom/dev.pb")
-	if err != nil || string(raw) != "x" {
-		t.Fatalf("read=%q err=%v", raw, err)
-	}
-	if a.ModTime("index/loom/dev.pb").IsZero() {
-		t.Fatal("modtime missing")
-	}
-	if !a.ModTime("missing").IsZero() {
-		t.Fatal("missing key should be zero time")
-	}
-}
-
 // fakeStore is a hand-rolled stand-in for relkit-store inside the console
 // package's tests: main packages cannot be imported, and the adapter's
 // contract is the wire (GET tree + /-/list/ JSON), which this fake mirrors
@@ -315,7 +292,7 @@ func TestStoreAdapterReadsRemoteTree(t *testing.T) {
 		t.Fatalf("name = %q", a.Name())
 	}
 
-	// ReadKey: same semantics as rootAdapter, including 404 → error.
+	// ReadKey: a 404 is an error, never an empty body.
 	raw, err := a.ReadKey("index/loom/dev.pb")
 	if err != nil || string(raw) != "x" {
 		t.Fatalf("read=%q err=%v", raw, err)

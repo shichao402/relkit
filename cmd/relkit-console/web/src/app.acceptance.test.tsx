@@ -126,7 +126,7 @@ describe("finding #5: an owner needs a product at creation time", () => {
           return jsonResponse({
             ok: true,
             products: [
-              { id: "loom", display: "Loom", registered: true, published: false, downloads: 0, channels: [] },
+              { id: "loom", display: "Loom", registered: true, published: false, channels: [] },
             ],
           });
         }

@@ -152,12 +152,11 @@ class UnitRenderTests(unittest.TestCase):
     def test_read_write_paths_include_tree_and_external_files(self):
         cfg = {
             "dir": "/data/relkit-store",
-            "statsFile": "/var/lib/stats.json",
-            "adminStateFile": "/data/relkit-store/.relkit-serve-admin.json",
+            "adminStateFile": "/var/lib/relkit-store/admin.json",
         }
         paths = ops.read_write_paths(cfg)
         self.assertEqual(paths[0], "/data/relkit-store")
-        self.assertIn("/var/lib/stats.json", paths)
+        self.assertIn("/var/lib/relkit-store/admin.json", paths)
 
     def test_render_store_unit_uses_live_paths_and_low_port_caps(self):
         template = (DEPLOY / "relkit-store.service").read_text(encoding="utf-8")
@@ -842,23 +841,36 @@ class ExtractExportTests(unittest.TestCase):
 
 
 class ConsoleInstallTests(unittest.TestCase):
-    def test_render_console_unit_rewrites_exec_and_paths(self):
+    def test_render_console_unit_rewrites_exec_and_keeps_tree_out(self):
         template = (DEPLOY / "relkit-console.service").read_text(encoding="utf-8")
         unit = ops.render_console_unit(
             template,
             user="relkit",
             prefix="/usr/local/bin",
             config_path="/etc/relkit-console/relkit-console.json",
-            read_write_paths=["/data/relkit-serve"],
-            state_dir="/data/relkit-agent",
+            extra_write_paths=[],
         )
         self.assertIn(
             "ExecStart=/usr/local/bin/relkit-console -config /etc/relkit-console/relkit-console.json",
             unit,
         )
-        self.assertIn("ReadWritePaths=/data/relkit-serve", unit)
         self.assertIn("User=relkit", unit)
-        self.assertNotIn("/srv/releases", unit.split("ReadWritePaths=")[1].splitlines()[0])
+        self.assertIn("StateDirectory=relkit-console", unit)
+        # The panel reads the tree through the store; the unit grants it nothing
+        # under the tree, on this box or any other.
+        self.assertNotIn("ReadWritePaths=", unit)
+        self.assertNotIn("/srv/releases", unit)
+
+    def test_render_console_unit_lists_a_deliberate_state_location(self):
+        template = (DEPLOY / "relkit-console.service").read_text(encoding="utf-8")
+        unit = ops.render_console_unit(
+            template,
+            user="relkit",
+            prefix="/usr/local/bin",
+            config_path="/etc/relkit-console/relkit-console.json",
+            extra_write_paths=["/opt/panel"],
+        )
+        self.assertIn("ReadWritePaths=/opt/panel", unit)
 
     def test_console_template_exists_and_is_panel_only(self):
         template = (DEPLOY / "relkit-console.service").read_text(encoding="utf-8")
@@ -1108,126 +1120,95 @@ class AgentUpgradeBackfillWiringTests(unittest.TestCase):
 
 
 class ConsoleAdminPathTests(unittest.TestCase):
-    """The panel writes one file; the unit has to be allowed to write there.
+    """The panel writes one file, in its own state directory, never the tree."""
 
-    A serve-era config carried a relative adminStateFile. The console resolves
-    that against the *config directory*, so on a box with ProtectSystem=strict
-    the panel died writing /etc/...tmp~ while a perfectly good session key sat
-    in the release tree.
-    """
-
-    def test_unset_setting_lands_in_the_release_tree(self):
-        cfg = {"dir": "/data/relkit-serve"}
+    def test_unset_setting_is_the_state_directory(self):
         self.assertEqual(
-            deploy_cli.console_admin_path(cfg, "/etc/relkit-console/relkit-console.json"),
-            Path("/data/relkit-serve") / deploy_cli.CONSOLE_PANEL_FILE,
-        )
-
-    def test_relative_setting_follows_the_config_directory(self):
-        """This is the bug, stated as a test: relative means beside the config."""
-        cfg = {"dir": "/data/relkit-serve", "adminStateFile": ".relkit-serve-admin.json"}
-        self.assertEqual(
-            deploy_cli.console_admin_path(cfg, "/etc/relkit-console/relkit-console.json"),
-            Path("/etc/relkit-console/.relkit-serve-admin.json"),
+            str(deploy_cli.console_admin_path({})),
+            deploy_cli.CONSOLE_STATE_FILE,
         )
 
     def test_absolute_setting_is_used_as_is(self):
-        cfg = {"dir": "/data/relkit-serve", "adminStateFile": "/var/lib/relkit-console/panel.json"}
-        self.assertEqual(
-            deploy_cli.console_admin_path(cfg, "/etc/relkit-console/relkit-console.json"),
-            Path("/var/lib/relkit-console/panel.json"),
-        )
+        cfg = {"adminStateFile": "/opt/panel/panel.json"}
+        self.assertEqual(str(deploy_cli.console_admin_path(cfg)), "/opt/panel/panel.json")
 
-    def test_legacy_panel_file_is_opened_in_place(self):
-        """A migrated box keeps its session key, so nobody is signed out."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            legacy = tree / ".relkit-serve-admin.json"
-            legacy.write_text('{"sessionKey":"x"}\n', encoding="utf-8")
-            self.assertEqual(deploy_cli.console_panel_file(tree), legacy)
+    def test_default_location_needs_no_extra_write_paths(self):
+        self.assertEqual(deploy_cli.console_read_write_paths({}), [])
 
-    def test_fresh_tree_gets_the_current_panel_file_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            self.assertEqual(
-                deploy_cli.console_panel_file(tree),
-                tree / deploy_cli.CONSOLE_PANEL_FILE,
-            )
+    def test_deliberate_location_is_writable(self):
+        cfg = {"adminStateFile": "/opt/panel/panel.json"}
+        self.assertEqual(deploy_cli.console_read_write_paths(cfg), ["/opt/panel"])
 
-    def test_read_write_paths_cover_the_state_file_directory(self):
+    def test_legacy_files_cover_every_old_layout(self):
         cfg = {"dir": "/data/relkit-serve", "adminStateFile": ".relkit-serve-admin.json"}
-        paths = deploy_cli.console_read_write_paths(cfg, "/etc/relkit-console/relkit-console.json")
-        self.assertIn("/data/relkit-serve", paths)
-        # The resolved location is /etc, which the unit cannot write; the deploy
-        # path lists it anyway rather than silently leaving the panel unable to
-        # start. apply_console_upgrade rewrites the value so this stays unused.
-        self.assertIn("/etc/relkit-console", paths)
-
-    def test_read_write_paths_do_not_repeat_the_tree(self):
-        cfg = {"dir": "/data/relkit-serve"}
-        paths = deploy_cli.console_read_write_paths(cfg, "/etc/relkit-console/relkit-console.json")
-        self.assertEqual(paths, ["/data/relkit-serve"])
+        files = [
+            p.as_posix()
+            for p in deploy_cli.console_legacy_panel_files(cfg, "/etc/relkit-console/relkit-console.json")
+        ]
+        self.assertEqual(files[0], "/etc/relkit-console/.relkit-serve-admin.json")
+        self.assertIn("/data/relkit-serve/.relkit-serve-admin.json", files)
+        self.assertIn("/data/relkit-serve/.relkit-console-panel.json", files)
+        self.assertEqual(len(files), len(set(files)))
 
     def test_upgrade_parser_exposes_console_switches(self):
         args = deploy_cli.build_parser().parse_args(["upgrade", "--host", "box", "--apply"])
         self.assertEqual(args.console_binary, "dist/relkit-console-linux-amd64")
         self.assertFalse(args.no_console)
 
+    def test_install_console_takes_a_store_not_a_tree(self):
+        args = deploy_cli.build_parser().parse_args(
+            ["install", "console", "--binary", "b", "--store", "http://127.0.0.1:8080"]
+        )
+        self.assertEqual(args.store, "http://127.0.0.1:8080")
+        self.assertFalse(hasattr(args, "dir"))
+        self.assertFalse(hasattr(args, "state_dir"))
 
-class ConsoleAdminNormalizeTests(unittest.TestCase):
-    """The rewrite must produce an absolute path, or nothing changes at all.
 
-    Writing back a bare file name looked like a fix but resolved to the same
-    read-only /etc directory, so the panel kept crash-looping.
-    """
+class ConsoleConfigNormalizeTests(unittest.TestCase):
+    """The live config must decode on the new binary, which is strict."""
 
-    def test_relative_name_becomes_absolute_in_the_tree(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "relkit-serve"
-            tree.mkdir()
-            cfg = {"dir": str(tree), "adminStateFile": ".relkit-serve-admin.json"}
-            updated, note = deploy_cli.normalize_console_admin_config(
-                cfg, str(Path(tmp) / "etc" / "relkit-console.json")
-            )
-            self.assertTrue(note)
-            self.assertEqual(
-                updated["adminStateFile"], str(tree / ".relkit-console-panel.json")
-            )
-            self.assertTrue(Path(updated["adminStateFile"]).is_absolute())
+    LIVE = {
+        "addr": "127.0.0.1:8081",
+        "dir": "/data/relkit-serve",
+        "adminStateFile": "/data/relkit-serve/.relkit-serve-admin.json",
+        "stateDir": "/data/relkit-agent",
+        "agent": "http://127.0.0.1:8787",
+    }
 
-    def test_legacy_file_in_the_tree_is_kept_under_its_old_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "relkit-serve"
-            tree.mkdir()
-            legacy = tree / ".relkit-serve-admin.json"
-            legacy.write_text('{"sessionKey":"keepme"}\n', encoding="utf-8")
-            cfg = {"dir": str(tree), "adminStateFile": ".relkit-serve-admin.json"}
-            updated, _ = deploy_cli.normalize_console_admin_config(
-                cfg, str(Path(tmp) / "etc" / "relkit-console.json")
-            )
-            self.assertEqual(updated["adminStateFile"], str(legacy))
+    def test_intranet_config_moves_onto_the_store(self):
+        updated, notes = deploy_cli.normalize_console_config(dict(self.LIVE), "http://127.0.0.1:8080")
+        self.assertEqual(
+            updated,
+            {"addr": "127.0.0.1:8081", "agent": "http://127.0.0.1:8787", "store": "http://127.0.0.1:8080"},
+        )
+        self.assertTrue(notes)
 
-    def test_already_correct_config_is_untouched(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            target = tree / deploy_cli.CONSOLE_PANEL_FILE
-            cfg = {"dir": str(tree), "adminStateFile": str(target)}
-            updated, note = deploy_cli.normalize_console_admin_config(
-                cfg, str(Path(tmp) / "relkit-console.json")
-            )
-            self.assertEqual(note, "")
-            self.assertIs(updated, cfg)
+    def test_retired_keys_are_dropped(self):
+        updated, _ = deploy_cli.normalize_console_config(dict(self.LIVE), "http://127.0.0.1:8080")
+        for key in deploy_cli.CONSOLE_RETIRED_KEYS:
+            self.assertNotIn(key, updated)
+
+    def test_chosen_store_is_kept(self):
+        cfg = {"store": "https://store.example.invalid"}
+        updated, notes = deploy_cli.normalize_console_config(cfg, "http://127.0.0.1:8080")
+        self.assertEqual(updated["store"], "https://store.example.invalid")
+        self.assertEqual(notes, [])
+
+    def test_relative_state_file_is_dropped(self):
+        cfg = {"store": "http://s", "adminStateFile": ".relkit-serve-admin.json"}
+        updated, _ = deploy_cli.normalize_console_config(cfg, "")
+        self.assertNotIn("adminStateFile", updated)
+
+    def test_state_file_outside_the_tree_is_kept(self):
+        cfg = {"store": "http://s", "dir": "/data/t", "adminStateFile": "/opt/panel/panel.json"}
+        updated, _ = deploy_cli.normalize_console_config(cfg, "")
+        self.assertEqual(updated["adminStateFile"], "/opt/panel/panel.json")
 
     def test_second_run_is_idempotent(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "tree"
-            tree.mkdir()
-            cfg = {"dir": str(tree), "adminStateFile": ".relkit-serve-admin.json"}
-            config_path = str(Path(tmp) / "etc" / "relkit-console.json")
-            once, _ = deploy_cli.normalize_console_admin_config(cfg, config_path)
-            twice, note = deploy_cli.normalize_console_admin_config(once, config_path)
-            self.assertEqual(note, "")
-            self.assertEqual(once, twice)
+        once, _ = deploy_cli.normalize_console_config(dict(self.LIVE), "http://127.0.0.1:8080")
+        twice, notes = deploy_cli.normalize_console_config(once, "http://127.0.0.1:8080")
+        self.assertEqual(notes, [])
+        self.assertEqual(once, twice)
 
 
 class ListenerOwnershipTests(unittest.TestCase):

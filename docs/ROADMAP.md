@@ -52,7 +52,7 @@
 - **目标**：要计数，但只在统计后台看，不把次数画在产品卡片上。browse dump 的 HTML 嵌 51.la JS，PV 与下载点击用自定义事件上报到 51.la。请求打他们的服务，不打自己的发布机。
 - **不做**：边缘 KV / Blob 热路径 `+1`；为计数开边缘函数；腾讯分析 / 灯塔；自建 Redis 或计数 API；把实时次数写进 `catalog.json`。
 - **边缘函数**：继续留给无状态改写（鉴权、跳转、geo、功能开关）。KV 只当偶尔更新的配置盘，不当账本。
-- **落点（规划）**：`internal/browse` 生成的 HTML 嵌入 51.la；契约 README 写明。内网数据面同一份 dump 会带上脚本；精确下载次数仍以 serve 面板已有计数为准，不在此重复造账本。
+- **落点（规划）**：`internal/browse` 生成的 HTML 嵌入 51.la；契约 README 写明。内网数据面同一份 dump 会带上脚本；面板侧下载计数已删除（见下方操作面板缺口），精确计数另行设计，不在此重复造账本。
 
 ## SDK 物化路径：改名摆脱 third_party 语义（挂下次大版本）
 
@@ -70,6 +70,7 @@
 - **状态**：内外网面板都已上线，入口 `publish.*/-/admin`，管本机 relkit-store 发布树；用户、角色、产品、token 的写操作经 agent `/v1/admin/*`（ADR 0023 第 8 条），下线产品带预演。
 - **现网**：外网 COS 已于 2026-09-26 清零，外网数据面与内网一样只有本机 `relkit-store`（`/srv/releases`），面板看得到全部发布树。原先外网发布树在 COS、面板看不到的差距已随迁移消失。
 - **目标**：面板继续进化成 relkit 后台（发布记录、GC、日志）。
-- **已知缺口（不排期）**：console 读 adapter 只有 `rootAdapter`（本机目录）与 `storeAdapter`（HTTP 读 relkit-store），没有对应 `s3-compatible` 的实现。存储面 Backend 与人页 sink 都能换到 COS，面板不能。只在数据面真换成对象存储时才需要补；补时照 Backend 的形状实现 `Adapter` 三个方法，调用方不改。见 [topology.md 第六节](design/topology.md#六可替换的接缝)。
+- **已知缺口（不排期）**：console 读 adapter 只有 `storeAdapter`（HTTP 读 relkit-store，内外网同一实现；本机目录直读的 `rootAdapter` 已于 2026-10-26 删除），没有对应 `s3-compatible` 的实现。存储面 Backend 与人页 sink 都能换到 COS，面板不能。只在数据面真换成对象存储时才需要补；补时照 Backend 的形状实现 `Adapter` 三个方法，调用方不改。见 [topology.md 第六节](design/topology.md#六可替换的接缝)。
+- **已知缺口（不排期）**：下载计数暂缺。原实现由 store 在伺服热路径里写树内 `.relkit-serve-stats.json`、console 直读本机文件展示，这条捷径让内外网形态不同，2026-10-26 与 `rootAdapter` 一并删除。以后另行设计（例如独立计数接口、下载时异步上报一次），不得重新引入 console 直读本机发布树。
 - **不做（现阶段）**：把 `/-/admin` 当对外目录；在 agent 上再开一套未鉴权的浏览页。
 - **落点**：`cmd/relkit-console`（[ADR 0016](adr/0016-serve-split-store-console.md)），读走 adapter；拓扑变化时更新 [topology.md](design/topology.md)。

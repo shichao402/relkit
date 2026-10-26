@@ -49,11 +49,6 @@ type FileConfig struct {
 	Site    *SiteConfig    `json:"site,omitempty"`
 	Publish *PublishConfig `json:"publish,omitempty"`
 
-	// StatsFile is the download-counter JSON. Empty means
-	// <dir>/.relkit-serve-stats.json, which is writable under the default
-	// systemd unit. Point it outside the tree if you add another ReadWritePaths.
-	StatsFile string `json:"statsFile,omitempty"`
-
 	// AdminStateFile is the operator-account JSON (bootstrap hash, password
 	// hashes, session key). Empty means <dir>/.relkit-serve-admin.json, which
 	// is writable under the default systemd unit so the first-account setup

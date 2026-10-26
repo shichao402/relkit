@@ -11,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/shichao402/relkit/internal/makers"
 )
 
 // Command relkit-console is the operator panel binary split out of
@@ -20,26 +18,28 @@ import (
 // the single-page front end, the app shell, the fixed download URLs and the
 // health endpoint.
 //
-// It serves no uploads and publishes nothing. Every storage fact arrives
-// through an Adapter (adapters.go); writes are forwarded to relkit-agent under
-// the operator's own bearer. Pointing a browser at the console cannot publish
-// anything.
+// It serves no uploads and publishes nothing. Every storage fact arrives over
+// HTTP from relkit-store through the store adapter (adapters.go), whether or
+// not the store runs on the same box; writes are forwarded to relkit-agent
+// under the operator's own bearer. Pointing a browser at the console cannot
+// publish anything.
 //
 // Usage:
 //
-//	relkit-console [-config PATH]              run the panel
-//	relkit-console init [-dir DIR] [-out DIR]  write a panel config and a
-//	                                           one-shot bootstrap token
-//	relkit-console init -reset-admin           issue a new bootstrap; existing
-//	                                           operators are wiped
+//	relkit-console [-config PATH]                     run the panel
+//	relkit-console init -store URL [-out DIR]         write a panel config and
+//	                                                  the panel's cookie key
+//	relkit-console init -reset-admin                  issue a new cookie key;
+//	                                                  every session signs out
 //	relkit-console -version
 //
 // Config (relkit-console.json, next to the binary or /etc):
 //
 //	{
 //	  "addr": "127.0.0.1:8081",
-//	  "dir": "/srv/releases",   // release tree, read-only
+//	  "store": "http://127.0.0.1:8080",          // relkit-store, read over HTTP
 //	  "agent": "http://127.0.0.1:8787",
+//	  "adminStateFile": "/var/lib/relkit-console/panel.json",
 //	  "site": {...}             // product blurbs for products without their own
 //	}
 //
@@ -50,26 +50,21 @@ var version = "dev"
 // omitted. Which one was used is always logged at startup.
 const ConfigName = "relkit-console.json"
 
+// defaultPanelStatePath is where the cookie key lives when the config does not
+// say. It is the unit's StateDirectory, outside the release tree: the panel
+// owns this file, the store must never see it.
+const defaultPanelStatePath = "/var/lib/relkit-console/panel.json"
+
 var searchPaths = []string{ConfigName, "/etc/" + ConfigName}
 
-// FileConfig mirrors the config file. Everything is optional; the defaults
-// match what relkit-serve used for the panel.
+// FileConfig mirrors the config file. Decoding is strict: a key this binary
+// does not know is a startup error, not a silently ignored setting.
 type FileConfig struct {
 	Addr           string      `json:"addr"`
-	Dir            string      `json:"dir"`
-	Store          string      `json:"store,omitempty"`
+	Store          string      `json:"store"`
 	Agent          string      `json:"agent,omitempty"`
-	StatsFile      string      `json:"statsFile,omitempty"`
 	AdminStateFile string      `json:"adminStateFile,omitempty"`
 	Site           *SiteConfig `json:"site,omitempty"`
-
-	// The two keys below fed the server-rendered Site card, which the rebuilt
-	// front end does not have. They stay in the struct because decoding is
-	// strict about unknown fields: dropping them would make an existing
-	// relkit-console.json fail to load, and the deployment script still writes
-	// stateDir into it. Nothing reads the values.
-	StateDir string         `json:"stateDir,omitempty"`
-	Makers   *makers.Config `json:"makers,omitempty"`
 }
 
 func LoadFileConfig(explicit string) (*FileConfig, string, error) {
@@ -110,10 +105,8 @@ func main() {
 	var (
 		configPath  = flag.String("config", "", "path to "+ConfigName)
 		addr        = flag.String("addr", "127.0.0.1:8081", "address to listen on")
-		dir         = flag.String("dir", ".", "release tree to read (read-only)")
-		store       = flag.String("store", "", "relkit-store base URL to read over HTTP instead of a local tree")
+		store       = flag.String("store", "", "relkit-store base URL the panel reads (required)")
 		agentAddr   = flag.String("agent", "", "agent server base URL this panel manages (requirement 13.6)")
-		_           = flag.String("state-dir", "", "deprecated: accepted for old unit files, no longer read")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -134,9 +127,6 @@ func main() {
 		if fileCfg.Addr != "" && !explicit["addr"] {
 			*addr = fileCfg.Addr
 		}
-		if fileCfg.Dir != "" && !explicit["dir"] {
-			*dir = fileCfg.Dir
-		}
 		if fileCfg.Store != "" && !explicit["store"] {
 			*store = fileCfg.Store
 		}
@@ -144,49 +134,32 @@ func main() {
 			*agentAddr = fileCfg.Agent
 		}
 	}
-
-	console := &console{
-		adapter: nil, // set below; failure to open is fatal
-		site:    nil,
-	}
-	if fileCfg != nil {
-		console.site = fileCfg.Site
+	if *store == "" {
+		log.Fatalf("no relkit-store configured: set \"store\" in %s or pass -store", ConfigName)
 	}
 
-	// The two adapters are the two deployment shapes of ADR 0016: co-located
-	// (os.Root over the tree store serves) and remote (HTTP against a store,
-	// with -dir repurposed as the local anchor for admin state and stats).
-	var adapter Adapter
-	if *store != "" {
-		adapter, err = newStoreAdapter("store:"+hostOf(*store), *store)
-	} else {
-		adapter, err = newRootAdapter("local", *dir)
-	}
+	adapter, err := newStoreAdapter("store:"+hostOf(*store), *store)
 	if err != nil {
 		log.Fatalf("cannot open data source: %v", err)
 	}
-	console.adapter = adapter
+	console := &console{adapter: adapter}
+	if fileCfg != nil {
+		console.site = fileCfg.Site
+	}
 
 	// Panel state is one cookie signing key; the authority for users, roles,
 	// products and tokens lives on the agent (requirement 13.6). A box with no
 	// agent configured still serves the read-only pages, it just cannot render
 	// the management screens.
-	adminPath := resolveAdminPath(*dir, usedPath, adminStateFileFrom(fileCfg))
-	admin, err := openPanelSession(adminPath, *dir, *agentAddr)
+	adminPath, err := resolveAdminPath(adminStateFileFrom(fileCfg))
+	if err != nil {
+		log.Fatalf("admin: %v", err)
+	}
+	admin, err := openPanelSession(adminPath, *agentAddr)
 	if err != nil {
 		log.Fatalf("admin: %v", err)
 	}
 	console.admin = admin
-
-	// Download counters are recorded by whoever serves the tree. In store
-	// mode the console has no shared counters file; an empty path yields the
-	// zero counter, which the panel renders as no stats at all (StatsSince
-	// stays blank) rather than as a broken page.
-	var statsPath string
-	if *store == "" {
-		statsPath = statsPathOrDefault(*dir, fileCfg)
-	}
-	console.stats = newDownloadStats(statsPath, *dir)
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -201,11 +174,8 @@ func main() {
 	} else {
 		log.Printf("config: none (flags and defaults only)")
 	}
-	if *store != "" {
-		log.Printf("panel on http://%s reading %s via %s adapter (no local tree)", *addr, *store, adapter.Name())
-	} else {
-		log.Printf("panel on http://%s reading %s via %s adapter", *addr, *dir, adapter.Name())
-	}
+	log.Printf("panel on http://%s reading %s via %s adapter", *addr, *store, adapter.Name())
+	log.Printf("panel state: %s", adminPath)
 	log.Printf("panel: %s", admin.statusLog())
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -214,12 +184,13 @@ func main() {
 }
 
 // skeletonBytes renders the panel config a fresh box starts from. Only the
-// paths matter; the site section is left for the operator to shape.
-func skeletonBytes(dir, agent string) []byte {
+// endpoints matter; the site section is left for the operator to shape.
+func skeletonBytes(store, agent, statePath string) []byte {
 	cfg := &FileConfig{
-		Addr:  "127.0.0.1:8081",
-		Dir:   dir,
-		Agent: agent,
+		Addr:           "127.0.0.1:8081",
+		Store:          store,
+		Agent:          agent,
+		AdminStateFile: statePath,
 	}
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -228,22 +199,22 @@ func skeletonBytes(dir, agent string) []byte {
 	return append(raw, '\n')
 }
 
-// runInit writes a panel config skeleton plus a freshly minted one-shot
-// bootstrap, so that a fresh console box needs no hand-written secrets.
+// runInit writes a panel config skeleton plus a freshly minted cookie key, so
+// that a fresh console box needs no hand-written secrets.
 //
-// It is the admin half of serve's old init (ADR 0016): the storage half
-// (config skeleton, upload tokens, product tokens) lives in
-// `relkit-store init`, and a console box has no upload tokens of its own.
+// It is the admin half of serve's old init (ADR 0016): the storage half lives
+// in `relkit-store init`, and a console box has no upload tokens of its own.
 //
 // Usage:
 //
-//	relkit-console init [-dir DIR] [-out DIR] [-force]
-//	relkit-console init -reset-admin
+//	relkit-console init -store URL [-agent URL] [-state FILE] [-out DIR] [-force]
+//	relkit-console init -reset-admin [-state FILE] [-out DIR]
 func runInit(out io.Writer, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	dir := fs.String("dir", "/srv/releases", "release tree the panel reads (read-only)")
-	target := fs.String("out", ".", "where to write the config and panel state")
+	storeURL := fs.String("store", "", "relkit-store base URL the panel reads (required)")
+	target := fs.String("out", ".", "where to write the config")
 	agentURL := fs.String("agent", "", "agent server base URL this panel manages")
+	statePath := fs.String("state", "", "panel state file (default "+defaultPanelStatePath+")")
 	force := fs.Bool("force", false, "overwrite an existing config")
 	resetAdmin := fs.Bool("reset-admin", false, "regenerate the panel cookie key; every session is signed out")
 	fs.Parse(args)
@@ -253,19 +224,28 @@ func runInit(out io.Writer, args []string) error {
 
 	// The reset path runs before MkdirAll: bringing /etc/relkit-console into
 	// existence is the panel's job on a fresh box, not the break-glass path on
-	// a broken one. -dir and -out stay valid: they locate the config, exactly
-	// like serve's init did.
+	// a broken one.
 	if *resetAdmin {
 		if *force {
 			return fmt.Errorf("-reset-admin cannot be combined with -force")
 		}
-		return runInitResetAdmin(out, configPath, *dir)
+		return runInitResetAdmin(out, configPath, *statePath)
+	}
+
+	if *storeURL == "" {
+		return fmt.Errorf("-store is required: the panel reads relkit-store over HTTP")
+	}
+	if _, err := newStoreAdapter("init", *storeURL); err != nil {
+		return err
+	}
+	panelPath, err := resolveAdminPath(*statePath)
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-
 	if _, err := os.Stat(configPath); err == nil && !*force {
 		return fmt.Errorf("%s already exists; pass -force to overwrite "+
 			"(this signs every operator out)", configPath)
@@ -273,22 +253,20 @@ func runInit(out io.Writer, args []string) error {
 
 	// Config first, panel state second. A crash between the two leaves a config
 	// with no cookie key: the panel mints one on first start.
-	if err := os.WriteFile(configPath, skeletonBytes(*dir, *agentURL), 0o644); err != nil {
+	if err := os.WriteFile(configPath, skeletonBytes(*storeURL, *agentURL, panelPath), 0o644); err != nil {
 		return err
 	}
-
-	adminPath, adminRel, err := writeNewPanelState(*dir, outDir)
+	doc, err := mintPanelDoc()
 	if err != nil {
+		return err
+	}
+	if err := writePanelDoc(panelPath, doc); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(out, "config %s\n", configPath)
-	if adminRel != "" {
-		fmt.Fprintf(out, "NOTE: %s did not exist; panel state is next to the config.\n", *dir)
-		fmt.Fprintf(out, "      Move it into the release directory before first start.\n")
-	}
-	printPanelNote(out, adminPath)
-	fmt.Fprintf(out, "\nPanel reads %s read-only; relkit-store serves the same tree.\n", *dir)
+	printPanelNote(out, panelPath)
+	fmt.Fprintf(out, "\nPanel reads %s over HTTP; it never opens the release tree.\n", *storeURL)
 	fmt.Fprintf(out, "Then: relkit-console -config %s\n", configPath)
 	return nil
 }
@@ -297,23 +275,21 @@ func runInit(out io.Writer, args []string) error {
 // It does not touch accounts: those live on the agent now (requirement 13.6).
 //
 // This is the break-glass path the locked panel points at: it must work even
-// when the config is gone, so it locates the state file through the -dir
-// default rather than a config lookup.
-func runInitResetAdmin(out io.Writer, configPath, dirFlag string) error {
-	cfg, _, err := LoadFileConfig(configPath)
+// when the config is gone, so a missing config falls back to the default state
+// path rather than failing.
+func runInitResetAdmin(out io.Writer, configPath, stateFlag string) error {
+	configured := stateFlag
+	if configured == "" {
+		cfg, _, err := LoadFileConfig(configPath)
+		if err != nil {
+			return err
+		}
+		configured = adminStateFileFrom(cfg)
+	}
+	path, err := resolveAdminPath(configured)
 	if err != nil {
 		return err
 	}
-	serveDir := dirFlag
-	adminRel := ""
-	if cfg != nil {
-		serveDir = cfg.Dir
-		if serveDir == "" {
-			serveDir = dirFlag
-		}
-		adminRel = cfg.AdminStateFile
-	}
-	path := resolveAdminPath(serveDir, configPath, adminRel)
 	doc, err := mintPanelDoc()
 	if err != nil {
 		return err
@@ -326,13 +302,6 @@ func runInitResetAdmin(out io.Writer, configPath, dirFlag string) error {
 	fmt.Fprintf(out, "\nEvery operator session is signed out. Restart to load it:\n")
 	fmt.Fprintf(out, "  systemctl restart relkit-console\n")
 	return nil
-}
-
-func statsPathOrDefault(dir string, cfg *FileConfig) string {
-	if cfg != nil && cfg.StatsFile != "" {
-		return resolveStatsPath(dir, cfg.StatsFile)
-	}
-	return defaultStatsPath(dir)
 }
 
 // hostOf extracts host:port from a URL for adapter naming; unparsable input

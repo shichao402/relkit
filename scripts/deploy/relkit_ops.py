@@ -72,7 +72,7 @@ def read_write_paths(serve_cfg: dict[str, Any]) -> list[str]:
     directory = serve_cfg.get("dir")
     if isinstance(directory, str) and directory.strip():
         paths.append(directory.strip())
-    for key in ("statsFile", "adminStateFile"):
+    for key in ("adminStateFile",):
         value = serve_cfg.get(key)
         if isinstance(value, str) and value.startswith("/"):
             paths.append(value)
@@ -141,21 +141,28 @@ def render_console_unit(
     user: str,
     prefix: str,
     config_path: str,
-    read_write_paths: list[str],
-    state_dir: str,
+    extra_write_paths: list[str],
 ) -> str:
     """Render relkit-console.service.
 
-    The panel is read-only over the release tree and the agent state dir; the
-    only writable surface is the admin-account file inside the release tree,
-    same layout a serve box had (ADR 0016). state_dir may be empty (no site
-    status view); it is read, never written.
+    The panel reads the release tree through relkit-store over HTTP and never
+    opens it, so the unit grants no access to it. Its only write is the cookie
+    key under StateDirectory; extra_write_paths is non-empty only when an
+    operator pointed adminStateFile somewhere else on purpose.
     """
     text = template
     text = re.sub(r"^User=.*$", f"User={user}", text, flags=re.M)
     text = re.sub(r"^Group=.*$", f"Group={user}", text, flags=re.M)
-    rwp = " ".join(read_write_paths) if read_write_paths else "/srv/releases"
-    text = re.sub(r"^ReadWritePaths=.*$", f"ReadWritePaths={rwp}", text, flags=re.M)
+    text = re.sub(r"^ReadWritePaths=.*\n", "", text, flags=re.M)
+    if extra_write_paths:
+        rwp = " ".join(extra_write_paths)
+        text = re.sub(
+            r"^(StateDirectoryMode=.*)$",
+            lambda m: f"{m.group(1)}\nReadWritePaths={rwp}",
+            text,
+            count=1,
+            flags=re.M,
+        )
     exec_line = f"ExecStart={prefix.rstrip('/')}/relkit-console -config {config_path}"
     text = re.sub(r"^ExecStart=.*$", exec_line, text, flags=re.M)
     return text

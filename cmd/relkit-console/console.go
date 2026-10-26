@@ -16,7 +16,6 @@ import (
 type console struct {
 	adapter Adapter
 	admin   *panelSession
-	stats   *downloadStats
 	// site is the server-side product metadata fallback: a product that has not
 	// published its own site document still gets its configured title.
 	site *SiteConfig

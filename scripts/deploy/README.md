@@ -44,7 +44,7 @@ python scripts/deploy/verify-published-tools.py \
 | `version` | 打印 SSOT（`--field number\|version\|build\|tag`）；发版 CI 用 `--check-tag` |
 | `install serve` | 空机首装 systemd `relkit-store` |
 | `install agent` | 空机首装 systemd `relkit-agent`。`--product-root` 必填：它同时是服务账号家目录、unit 的 `WorkingDirectory`、以及写进 agent 配置的 `productRootParent`（没默认值，空机无从推断，猜错要等发布时才爆） |
-| `install console` | 首装 systemd `relkit-console`（ADR 0016：管理面独立 unit；迁移盒子自动继承发布树里的操作员账户） |
+| `install console` | 首装 systemd `relkit-console`（ADR 0016：管理面独立 unit）。`--store` 指向 store（缺省取本机 store unit 的回环地址），console 只经 store 读树；面板状态落 `/var/lib/relkit-console/panel.json`（`StateDirectory`） |
 | `migrate-serve` | 现网仍在跑 `relkit-serve.service` 的盒子一步迁移到 `relkit-store.service`（ADR 0016 第 4 步：配置迁 `/etc/relkit-store/relkit-store.json`，树/token/数据文件不动，备份后可回滚） |
 | `upgrade` | 已在跑的机器：探测、迁移、换二进制、可选重启 |
 

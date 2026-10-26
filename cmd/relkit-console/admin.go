@@ -61,11 +61,10 @@ type panelDoc struct {
 // panelSession is the panel's view of "who is signed in here": one signing key
 // plus the agent client that answers everything else.
 type panelSession struct {
-	mu       sync.Mutex
-	path     string
-	serveKey string
-	key      []byte
-	agent    *agentClient
+	mu    sync.Mutex
+	path  string
+	key   []byte
+	agent *agentClient
 }
 
 type panelGate int
@@ -77,18 +76,18 @@ const (
 	gateLogin
 )
 
-func resolveAdminPath(rootPath, configPath, configured string) string {
+// resolveAdminPath picks where the cookie key lives. It is the console's own
+// state, so it lives in the console's state directory, never inside the release
+// tree: the console reads that tree only through the store, like any client.
+func resolveAdminPath(configured string) (string, error) {
 	configured = strings.TrimSpace(configured)
 	if configured == "" {
-		return filepath.Join(rootPath, adminStateFileName)
+		return defaultPanelStatePath, nil
 	}
-	if filepath.IsAbs(configured) {
-		return filepath.Clean(configured)
+	if !filepath.IsAbs(configured) {
+		return "", fmt.Errorf("adminStateFile must be an absolute path, got %q", configured)
 	}
-	if configPath != "" {
-		return resolveRelative(configured, configPath)
-	}
-	return filepath.Join(rootPath, filepath.FromSlash(configured))
+	return filepath.Clean(configured), nil
 }
 
 func adminStateFileFrom(cfg *FileConfig) string {
@@ -115,21 +114,13 @@ func reservedAdminKey(name string) bool {
 // not read it; it is reserved so a leftover copy is never listed or served.
 const legacyAdminStateFileName = ".relkit-serve-admin.json"
 
-func hiddenAdminKey(name string, s *panelSession) bool {
-	if reservedAdminKey(name) {
-		return true
-	}
-	if s == nil || s.serveKey == "" {
-		return false
-	}
-	return name == s.serveKey || name == s.serveKey+".tmp~"
-}
-
-// hiddenKey carries serve's hiding rule over the adapter boundary: the
-// counters file, the CAS key and the panel state are internal, not objects the
-// panel should list.
+// hiddenKey is a second line behind the store's own filter: the store already
+// refuses its internal files, and this keeps a leftover account or panel file
+// from an older layout out of the file tree even if a store in front of an old
+// tree does not know its name.
 func (c *console) hiddenKey(name string) bool {
-	return hiddenServeKey(name, c.stats) || hiddenAdminKey(name, c.admin)
+	base := path.Base(name)
+	return reservedAdminKey(name) || strings.HasPrefix(base, ".relkit-serve-")
 }
 
 func mintPanelDoc() (panelDoc, error) {
@@ -162,8 +153,8 @@ func writePanelDoc(path string, doc panelDoc) error {
 // openPanelSession loads the signing key, minting one on first start so a fresh
 // box needs no hand-written secret. The agent connection is separate: a panel
 // with no agent configured still renders, it just cannot show any data.
-func openPanelSession(path, rootPath, agentURL string) (*panelSession, error) {
-	s := &panelSession{path: path, serveKey: statsServeKey(rootPath, path)}
+func openPanelSession(path, agentURL string) (*panelSession, error) {
+	s := &panelSession{path: path}
 	if agentURL != "" {
 		agent, err := newAgentClient(agentURL)
 		if err != nil {
@@ -210,30 +201,6 @@ func decodeSessionKey(raw string) ([]byte, error) {
 		return nil, fmt.Errorf("sessionKey is missing or too short")
 	}
 	return key, nil
-}
-
-// writeNewPanelState mints a fresh cookie key and writes it where the running
-// panel will look for it. It mirrors the old bootstrap writer's placement rule:
-// inside the release directory when that directory exists, next to the config
-// otherwise, so a box whose tree is not mounted yet can still be prepared.
-func writeNewPanelState(rootDir, configDir string) (string, string, error) {
-	doc, err := mintPanelDoc()
-	if err != nil {
-		return "", "", err
-	}
-	path := filepath.Join(rootDir, adminStateFileName)
-	rel := ""
-	if _, err := os.Stat(rootDir); err != nil {
-		if !os.IsNotExist(err) {
-			return "", "", err
-		}
-		path = filepath.Join(configDir, adminStateFileName)
-		rel = adminStateFileName
-	}
-	if err := writePanelDoc(path, doc); err != nil {
-		return "", "", err
-	}
-	return path, rel, nil
 }
 
 // agentClientOrNil keeps the "no agent configured" case explicit at call sites
@@ -419,4 +386,3 @@ func printPanelNote(out io.Writer, path string) {
 	fmt.Fprintf(out, "  relkit-agent init -bootstrap\n")
 	fmt.Fprintf(out, "then open /-/admin here and paste the value it prints.\n")
 }
-

@@ -129,7 +129,6 @@ function ProductRow({ row }: { row: ProductSummary }) {
           <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
             {row.root && <span className="font-mono break-all">{row.root}</span>}
             {row.updated && <span>更新于 {formatStamp(row.updated)}</span>}
-            <span className="num">下载 {formatCount(row.downloads)}</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">

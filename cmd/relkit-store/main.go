@@ -50,7 +50,6 @@ type config struct {
 	logRequests        bool
 	gc                 *gcState
 	casSecret          []byte
-	stats              *downloadStats
 	minPublishProtocol int
 	maxPublishProtocol int
 }
@@ -212,7 +211,6 @@ func runServer() {
 		logRequests:   !*quiet,
 		gc:            newGCState(gcOn, *gcInterval, defaultGCDebounce, *gcCASGrace),
 		casSecret:     casSecret,
-		stats:         newDownloadStats(resolveStatsPath(root.Name(), statsFileFrom(fileCfg)), root.Name()),
 	}
 	if fileCfg != nil {
 		if fileCfg.Publish != nil {
@@ -224,7 +222,6 @@ func runServer() {
 			}
 		}
 	}
-	defer cfg.stats.stop()
 
 	srv := &http.Server{
 		Addr:    *addr,
@@ -264,9 +261,6 @@ func runServer() {
 		log.Printf("gc enabled (interval %s)", *gcInterval)
 	} else {
 		log.Printf("gc disabled")
-	}
-	if cfg.stats != nil && cfg.stats.path != "" {
-		log.Printf("download stats: %s (since %s)", cfg.stats.path, cfg.stats.startedAt())
 	}
 	for _, warning := range warnings {
 		log.Printf("WARNING: %s", warning)

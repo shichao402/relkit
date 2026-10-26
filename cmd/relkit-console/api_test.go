@@ -90,20 +90,15 @@ func newAPITest(t *testing.T) (*apiClient, *agentStub) {
 func newAPITestDir(t *testing.T) (*apiClient, *agentStub, string) {
 	t.Helper()
 	dir := t.TempDir()
-	adapter, err := newRootAdapter("local", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = adapter.root.Close() })
+	adapter := newTreeAdapter(t, dir)
 	stub, agentURL := newAgentStubServer(t)
 	stub.bootstrapLive = false
 	stub.addUser(testPanelUser, testPanelPassword, "admin", nil)
-	admin, err := openPanelSession(dir+"/"+adminStateFileName, dir, agentURL)
+	admin, err := openPanelSession(t.TempDir()+"/panel.json", agentURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &console{adapter: adapter, stats: newDownloadStats(defaultStatsPath(dir), dir), admin: admin}
-	t.Cleanup(c.stats.stop)
+	c := &console{adapter: adapter, admin: admin}
 	srv := newLocalServer(t, c)
 	return newAPIClient(t, srv), stub, dir
 }

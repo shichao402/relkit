@@ -91,7 +91,6 @@ export function ProductPage() {
               <Badge variant="neutral">尚未发布</Badge>
             )}
             {detail.updated && <span>更新于 {formatStamp(detail.updated)}</span>}
-            <span className="num">下载 {formatCount(detail.downloads)}</span>
           </span>
         }
         actions={
@@ -293,9 +292,6 @@ function ChannelCard({ channel }: { channel: ChannelDetail }) {
                   <Badge variant="outline">{artifact.platform}</Badge>
                   <span className="text-muted-foreground num text-xs">
                     {artifact.size}
-                  </span>
-                  <span className="text-muted-foreground num text-xs">
-                    下载 {formatCount(artifact.downloads)}
                   </span>
                   {artifact.href && (
                     <a

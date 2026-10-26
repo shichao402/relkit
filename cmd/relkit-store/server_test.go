@@ -465,7 +465,6 @@ func TestUploadScopedTokenIsolatesProducts(t *testing.T) {
 		noCache:       []string{"index/"},
 		immutable:     []string{"manifest/", "artifact/"},
 		defaultMaxAge: 60,
-		stats:         newDownloadStats(defaultStatsPath(dir), dir),
 		casSecret:     bytes.Repeat([]byte{7}, 32),
 		gc:            newGCState(false, 0, defaultGCDebounce, defaultCASGrace),
 		credentials: []credential{{
@@ -473,7 +472,6 @@ func TestUploadScopedTokenIsolatesProducts(t *testing.T) {
 			products: []string{"app"},
 		}},
 	}
-	t.Cleanup(cfg.stats.stop)
 	srv := newLocalServer(t, cfg)
 
 	put := func(path string) int {

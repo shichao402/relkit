@@ -134,11 +134,6 @@ func (c *config) download(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct)
 	}
 
-	if r.Method == http.MethodGet && strings.HasPrefix(name, "artifact/") &&
-		countableRange(r.Header.Get("Range")) {
-		c.stats.record(name)
-	}
-
 	// ServeContent handles Range, If-Range, If-Modified-Since and 206
 	// responses. Passing the *os.File rather than a wrapper is what lets the
 	// copy reach sendfile(2) on Linux.

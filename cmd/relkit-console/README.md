@@ -82,15 +82,14 @@ type Adapter interface {
 }
 ```
 
-- `rootAdapter`：只读本机发布树（`os.Root` 沙箱）。与 store 同机部署时的默认形态。
-- `storeAdapter`（ADR 0016 第 5 步已落地）：经 HTTP 读远端 relkit-store——`ReadKey` 走 GET 树（no-cache 前缀与 store 一致），`ReadDir` 走 store 的 `/-/list/<dir>` JSON 端点（服务端已过滤保留键，console 看不到 admin state/计数/CAS key 的存在）。挂载方式：配置 `{"store": "http://<host>:8080"}` 或 `-store` 标志；store 模式下下载计数为空。
+- `storeAdapter`：唯一实现。经 HTTP 读 relkit-store，`ReadKey` 走 GET 树（no-cache 前缀与 store 一致），`ReadDir` 走 store 的 `/-/list/<dir>` JSON 端点（服务端已过滤保留键）。配置 `{"store": "http://<host>:8080"}` 或 `-store` 标志，必填。console 与 store 同机也走这条路，不直接读本机目录，内外网同一形态。原先的 `rootAdapter`（本机目录直读）已删除。
 
-## 布局约定（与 store 同形，方便迁移）
+## 布局约定
 
-- 发布树：`-dir` 指向 store 伺服的同一目录（只读）。
-- admin state：由 agent 持有，console 通过 agent 的 API 读写。
-- 下载计数：`<dir>/.relkit-serve-stats.json`，与 store 共享；console 只读展示，计数由伺服树的一方记录。
-- `-state-dir` 与配置里的 `stateDir`/`makers` 段现在只为兼容旧配置文件而接受，不再读取：新界面没有 Site 卡片。
+- 发布树：只经 store 读，console 没有 `-dir`。
+- 面板状态（会话签名 key）：`/var/lib/relkit-console/panel.json`，由 systemd `StateDirectory=relkit-console` 提供，不在发布树里。`-state`/配置 `adminStateFile` 可改，必须是绝对路径。
+- 账户与 token：由 agent 持有，console 通过 agent 的 API 读写。
+- 下载计数：暂不提供（console 与 store 两侧均已删除），以后另行设计。
 
 ## 与旧界面的差异
 

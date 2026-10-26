@@ -12,12 +12,13 @@ RestartSec=2
 User=relkit
 Group=relkit
 
-# The panel renders storage facts read-only through its adapter; the only
-# thing it writes is the operator-account state file inside the release tree
-# (login sessions, bcrypt hashes), same layout the old serve box had.
-# Everything else stays flat files on the release tree, untouched.
+# The panel reads the release tree only through relkit-store over HTTP, the
+# same way it would on a box of its own; it opens nothing under the tree. The
+# one file it writes is its cookie signing key, kept in its own state directory
+# (/var/lib/relkit-console, created by systemd and owned by User=).
 ProtectSystem=strict
-ReadWritePaths=/srv/releases
+StateDirectory=relkit-console
+StateDirectoryMode=0700
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true

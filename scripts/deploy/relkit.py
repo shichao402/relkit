@@ -677,62 +677,66 @@ def write_agent_unit(
     os.chmod(dest, 0o644)
 
 
-# The panel's own state file inside the release tree. It holds one cookie
-# signing key and nothing else; losing it only signs operators out.
-CONSOLE_PANEL_FILE = ".relkit-console-panel.json"
+# The panel's own state: one cookie signing key, nothing else; losing it only
+# signs operators out. It lives in the console's systemd StateDirectory, never
+# in the release tree: the panel reads that tree through relkit-store like any
+# other client, and keeps no shortcut into it (same shape on every box).
+CONSOLE_STATE_DIR = "/var/lib/relkit-console"
+CONSOLE_STATE_FILE = CONSOLE_STATE_DIR + "/panel.json"
+
+# Config keys a console no longer accepts. Its config is strict-decoded, so a
+# box still carrying them would refuse to start on the new binary.
+CONSOLE_RETIRED_KEYS = ("dir", "stateDir")
 
 
-def console_admin_path(console_cfg: dict[str, Any], config_path: str) -> Path:
-    """Where the panel will open its cookie-key file, given this config.
-
-    Mirrors resolveAdminPath in cmd/relkit-console: an empty setting means
-    <dir>/.relkit-console-panel.json, an absolute path is used as is, and a
-    relative one is joined onto the *config file's* directory rather than the
-    release tree. That last rule is how a serve-era config naming
-    ".relkit-serve-admin.json" pointed the panel at /etc, which
-    ProtectSystem=strict keeps read-only. The deploy path therefore never
-    leaves a relative name in place.
-    """
-    tree = Path(str(console_cfg.get("dir") or "/srv/releases"))
+def console_admin_path(console_cfg: dict[str, Any]) -> PurePosixPath:
+    """Where the panel opens its cookie-key file, mirroring resolveAdminPath:
+    empty means the StateDirectory default; anything else must be absolute."""
     configured = str(console_cfg.get("adminStateFile") or "").strip()
-    if not configured:
-        return tree / CONSOLE_PANEL_FILE
-    candidate = Path(configured)
-    if candidate.is_absolute():
-        return candidate
-    if config_path:
-        return Path(config_path).parent / candidate
-    return tree / candidate
+    if configured.startswith("/"):
+        return PurePosixPath(configured)
+    return PurePosixPath(CONSOLE_STATE_FILE)
 
 
-def console_panel_file(tree: Path) -> Path:
-    """The panel state file inside the release tree, legacy name first.
+def console_legacy_panel_files(console_cfg: dict[str, Any], config_path: str) -> list[Path]:
+    """Where an older console kept its cookie key, in preference order.
 
-    A box migrated from relkit-serve keeps its session key under the old name;
-    opening that file in place signs nobody out, and relkit-store already hides
-    the name from every listing. A fresh tree gets the current name.
+    Older layouts put it in the release tree (named in `adminStateFile`, or
+    under the serve-era or panel-era default name), or, through a relative
+    `adminStateFile`, beside the config. Moving the first one that exists keeps
+    every operator signed in across the upgrade.
     """
-    legacy = tree / ADMIN_STATE_FILE
-    if legacy.is_file():
-        return legacy
-    return tree / CONSOLE_PANEL_FILE
+    out: list[Path] = []
+    configured = str(console_cfg.get("adminStateFile") or "").strip()
+    tree = str(console_cfg.get("dir") or "").strip()
+    if configured:
+        if configured.startswith("/"):
+            out.append(Path(configured))
+        else:
+            if config_path:
+                out.append(Path(config_path).parent / configured)
+            if tree:
+                out.append(Path(tree) / configured)
+    if tree:
+        out.append(Path(tree) / ".relkit-console-panel.json")
+        out.append(Path(tree) / ADMIN_STATE_FILE)
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in out:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
 
 
-def console_read_write_paths(console_cfg: dict[str, Any], config_path: str) -> list[str]:
-    """Directories the console unit must be able to write.
-
-    The panel writes exactly one file: its cookie-key document. The unit runs
-    with ProtectSystem=strict, so the directory holding that file has to be
-    listed explicitly; the release tree alone is not enough when a config still
-    points somewhere else. Paths are rendered POSIX-style because they end up in
-    a systemd unit, not on the machine that happens to run this script.
-    """
-    tree = Path(str(console_cfg.get("dir") or "/srv/releases")).as_posix()
-    paths = [tree]
-    parent = console_admin_path(console_cfg, config_path).parent.as_posix()
-    if parent and parent not in paths:
-        paths.append(parent)
-    return paths
+def console_read_write_paths(console_cfg: dict[str, Any]) -> list[str]:
+    """Writable paths the unit needs beyond its StateDirectory: none, unless an
+    operator deliberately put the panel state file somewhere else."""
+    parent = console_admin_path(console_cfg).parent.as_posix()
+    if parent == CONSOLE_STATE_DIR:
+        return []
+    return [parent]
 
 
 def write_console_unit(
@@ -743,15 +747,12 @@ def write_console_unit(
     console_cfg: dict[str, Any],
 ) -> None:
     template = (DEPLOY_DIR / "relkit-console.service").read_text(encoding="utf-8")
-    state_dir = str(console_cfg.get("stateDir") or "")
-    rwp = console_read_write_paths(console_cfg, config_path)
     unit = render_console_unit(
         template,
         user=user,
         prefix=prefix,
         config_path=config_path,
-        read_write_paths=rwp,
-        state_dir=state_dir,
+        extra_write_paths=console_read_write_paths(console_cfg),
     )
     dest = Path("/etc/systemd/system/relkit-console.service")
     dest.write_text(unit, encoding="utf-8")
@@ -1074,6 +1075,17 @@ def cmd_install_agent(args: argparse.Namespace) -> None:
     print("new product: vNext relkit-ops agent policy --config <cfg> --policy <relkit.agent-product-policy/1>")
 
 
+def local_service_url(unit: str) -> str:
+    """Loopback base URL of a service on this box, read from its live config.
+    Empty when the unit or its config is absent."""
+    show = systemd_show(unit, "ExecStart")
+    cfg_path = parse_exec_config(show.get("ExecStart") or "")
+    if not cfg_path or not Path(cfg_path).is_file():
+        return ""
+    addr = str(load_json_object(Path(cfg_path).read_text(encoding="utf-8")).get("addr") or "")
+    return loopback_base(addr) if addr else ""
+
+
 def cmd_install_console(args: argparse.Namespace) -> None:
     must_root()
     require_cmd("systemctl")
@@ -1086,12 +1098,16 @@ def cmd_install_console(args: argparse.Namespace) -> None:
     config_path = config_dir / "relkit-console.json"
     dest_bin = Path(prefix) / "relkit-console"
 
+    # The panel reads the tree through relkit-store over HTTP, on this box the
+    # same as on any other, so the one thing it must be told is where the store
+    # is. A co-located store is found from its own config.
+    store_url = args.store or local_service_url("relkit-store")
+    if not store_url:
+        die("no relkit-store found on this box; pass --store URL")
+    agent_url = args.agent or local_service_url("relkit-agent")
+
     step(f"Service account: {user}")
-    ensure_user(user, args.dir)
-    tree = Path(args.dir)
-    if not tree.is_dir():
-        die(f"release tree {tree} does not exist; the panel reads it read-only")
-    os.chmod(tree, 0o755)
+    ensure_user(user, CONSOLE_STATE_DIR)
 
     step(f"Binary: {dest_bin}")
     install_file(binary, dest_bin, 0o755)
@@ -1102,45 +1118,23 @@ def cmd_install_console(args: argparse.Namespace) -> None:
     os.chmod(config_dir, 0o750)
     chown_path(config_dir, user)
 
-    state_dir = args.state_dir or ""
-    new_bootstrap = ""
     if not config_path.is_file():
-        # A migrated serve box already has .relkit-serve-admin.json in the
-        # tree with live operator accounts; console opens it in place, no
-        # bootstrap minted. Only a fresh tree gets a one-shot bootstrap.
-        if (tree / ADMIN_STATE_FILE).is_file():
-            print(f"found {tree / ADMIN_STATE_FILE}; keeping existing operators")
-            cfg_doc = {
-                "addr": args.addr,
-                "dir": str(tree),
-                "adminStateFile": ADMIN_STATE_FILE,
-            }
-            if state_dir:
-                cfg_doc["stateDir"] = state_dir
-            config_path.write_text(dump_json(cfg_doc), encoding="utf-8")
-        else:
-            init = run(
-                [str(dest_bin), "init", "-dir", str(tree), "-out", str(config_dir), "-force"],
-                capture=True,
-            )
-            new_bootstrap = extract_export("RELKIT_ADMIN_BOOTSTRAP", init.stdout or "") or ""
-            cfg_doc = load_json_object(config_path.read_text(encoding="utf-8"))
-            cfg_doc["addr"] = args.addr
-            if state_dir:
-                cfg_doc["stateDir"] = state_dir
-            config_path.write_text(dump_json(cfg_doc), encoding="utf-8")
+        init_args = [str(dest_bin), "init", "-store", store_url, "-out", str(config_dir), "-force"]
+        if agent_url:
+            init_args += ["-agent", agent_url]
+        run(init_args, capture=True)
+        cfg_doc = load_json_object(config_path.read_text(encoding="utf-8"))
+        cfg_doc["addr"] = args.addr
+        config_path.write_text(dump_json(cfg_doc), encoding="utf-8")
     else:
         print("keeping existing config")
         cfg_doc = load_json_object(config_path.read_text(encoding="utf-8"))
-        if state_dir and not cfg_doc.get("stateDir"):
-            cfg_doc["stateDir"] = state_dir
-            config_path.write_text(dump_json(cfg_doc), encoding="utf-8")
     chown_path(config_path, user)
-
-    admin_file = tree / ADMIN_STATE_FILE
-    if admin_file.is_file():
-        os.chmod(admin_file, 0o600)
-        chown_path(admin_file, user)
+    panel_file = Path(str(console_admin_path(cfg_doc)))
+    if panel_file.is_file():
+        os.chmod(panel_file, 0o600)
+        chown_path(panel_file, user)
+        chown_path(panel_file.parent, user)
 
     step("Unit")
     write_console_unit(user=user, prefix=prefix, config_path=str(config_path), console_cfg=cfg_doc)
@@ -1151,11 +1145,9 @@ def cmd_install_console(args: argparse.Namespace) -> None:
     step("Self-check")
     addr = str(cfg_doc.get("addr") or args.addr)
     wait_health(loopback_base(addr), "relkit-console")
-    print(f"panel on {addr} reading {cfg_doc.get('dir')}")
+    print(f"panel on {addr} reading {cfg_doc.get('store')}")
     print(f"config {config_path}")
-    if new_bootstrap:
-        print("\nOne-shot admin bootstrap (do not store):\n")
-        print(f"  export RELKIT_ADMIN_BOOTSTRAP='{new_bootstrap}'")
+    print("first operator: relkit-agent init -bootstrap, then open /-/admin")
     print("break-glass: relkit-console init -reset-admin -out " + str(config_dir))
 
 
@@ -1399,7 +1391,7 @@ def prune_backups(
 def probe_local() -> dict[str, Any]:
     probe: dict[str, Any] = {"hostname": os.uname().nodename if hasattr(os, "uname") else ""}
     for unit, kind in (("relkit-store", "serve"), ("relkit-agent", "agent"), ("relkit-console", "console")):
-        show = systemd_show(unit, "FragmentPath", "User", "Group", "ExecStart", "ReadWritePaths", "ProtectSystem", "ActiveState")
+        show = systemd_show(unit, "FragmentPath", "User", "Group", "ExecStart", "ReadWritePaths", "StateDirectory", "ProtectSystem", "ActiveState")
         entry: dict[str, Any] = {"unit": show}
         exec_start = show.get("ExecStart") or ""
         config_path = parse_exec_config(exec_start)
@@ -1423,14 +1415,20 @@ def probe_local() -> dict[str, Any]:
             # whether the unit may write there. A mismatch is the serve-era
             # relative adminStateFile, and it only shows up as a crash loop.
             cfg = entry.get("config") if isinstance(entry.get("config"), dict) else {}
-            panel_file = console_admin_path(cfg, config_path or "")
+            panel_file = console_admin_path(cfg)
             entry["panelStateFile"] = str(panel_file)
-            entry["panelStateFilePresent"] = panel_file.is_file()
-            writable = str((entry.get("unit") or {}).get("ReadWritePaths") or "").split()
+            entry["panelStateFilePresent"] = Path(str(panel_file)).is_file()
+            unit_props = entry.get("unit") or {}
+            writable = str(unit_props.get("ReadWritePaths") or "").split()
+            writable += [
+                "/var/lib/" + name.strip("/")
+                for name in str(unit_props.get("StateDirectory") or "").split()
+            ]
             entry["panelStateWritable"] = any(
                 str(panel_file).startswith(path.rstrip("/") + "/") or str(panel_file) == path
                 for path in writable
             )
+            entry["retiredConfigKeys"] = [key for key in CONSOLE_RETIRED_KEYS if key in cfg]
         probe[kind] = entry
     agent_cfg_path = probe.get("agent", {}).get("configPath")
     products_dir = Path("/etc/relkit-agent/products")
@@ -1988,27 +1986,33 @@ def apply_agent_upgrade(
     return notes
 
 
-def normalize_console_admin_config(
-    console_cfg: dict[str, Any], config_path: str
-) -> tuple[dict[str, Any], str]:
-    """Point the panel's state file at the place it actually belongs.
+def normalize_console_config(
+    console_cfg: dict[str, Any], store_url: str
+) -> tuple[dict[str, Any], list[str]]:
+    """Bring a console config onto the store-only shape.
 
-    Returns the new config plus one note (empty when nothing changed). The value
-    written is always absolute: a relative name is resolved against the config
-    directory by the binary, so leaving one in place would keep the panel pointed
-    at read-only /etc no matter what the unit lists as writable.
+    The console reads the tree through relkit-store and nothing else, so `dir`
+    and `stateDir` are gone (and fatal: the config is strict-decoded), `store`
+    must be set, and the panel state may not sit in the release tree. A store
+    URL an operator already chose is kept; store_url only fills a gap.
+    Returns the new config and one note per change.
     """
-    tree = Path(str(console_cfg.get("dir") or "/srv/releases"))
-    panel_file = console_panel_file(tree)
-    current = console_admin_path(console_cfg, config_path)
-    if current.resolve() == panel_file.resolve():
-        return console_cfg, ""
-    updated = dict(console_cfg)
-    updated["adminStateFile"] = str(panel_file)
-    return updated, (
-        f"adminStateFile {console_cfg.get('adminStateFile') or '(unset)'} resolved to "
-        f"{current}; pointing it at {panel_file}"
-    )
+    cfg = dict(console_cfg)
+    notes: list[str] = []
+    tree = str(cfg.get("dir") or "").strip().rstrip("/")
+    for key in CONSOLE_RETIRED_KEYS:
+        if key in cfg:
+            notes.append(f"dropped retired console key {key}={cfg.pop(key)!r}")
+    if not str(cfg.get("store") or "").strip() and store_url:
+        cfg["store"] = store_url
+        notes.append(f"panel now reads the tree through {store_url}")
+    configured = str(cfg.get("adminStateFile") or "").strip()
+    if configured:
+        in_tree = bool(tree) and (configured == tree or configured.startswith(tree + "/"))
+        if not configured.startswith("/") or in_tree:
+            cfg.pop("adminStateFile", None)
+            notes.append(f"panel state moves from {configured} to {CONSOLE_STATE_FILE}")
+    return cfg, notes
 
 
 def apply_console_upgrade(
@@ -2017,18 +2021,17 @@ def apply_console_upgrade(
     user: str,
     prefix: str,
     agent_addr: str,
+    store_url: str,
     restart: bool,
     backup_root: Path,
 ) -> list[str]:
-    """Upgrade relkit-console in place, repairing a serve-era admin path.
+    """Upgrade relkit-console in place onto the store-only layout.
 
-    A console inherited from the serve split may still carry a relative
-    `adminStateFile`. The binary resolves that against the config directory, so
-    on a box with ProtectSystem=strict the panel dies on first start trying to
-    write /etc/...tmp~. The panel's real state file lives in the release tree,
-    so the fix is to name that file explicitly: the running session key is then
-    opened in place (nobody is signed out) and the directory is already the one
-    the unit may write.
+    The panel used to open the release tree directly when it shared a box with
+    the store, and kept its cookie key inside that tree. Both are gone: it reads
+    through relkit-store like any client, and its key lives under its own
+    StateDirectory. The existing key is carried over so nobody is signed out,
+    and the copy left in the tree is removed (it is in the backup).
     """
     notes: list[str] = []
     show = systemd_show("relkit-console", "ExecStart", "User", "FragmentPath")
@@ -2038,33 +2041,36 @@ def apply_console_upgrade(
     cfg: dict[str, Any] = {}
     if config_file.is_file():
         cfg = load_json_object(config_file.read_text(encoding="utf-8"))
-    stale_panel_file = console_admin_path(cfg, str(config_file))
+    legacy_files = console_legacy_panel_files(cfg, str(config_file))
     backup_files(
         backup_root / "console",
         [
             dest_bin,
             config_file,
             Path("/etc/systemd/system/relkit-console.service"),
-            stale_panel_file,
+            *legacy_files,
         ],
     )
 
-    # Resolve the state file first: the answer decides both the config value and
-    # the unit's writable paths, and those two must agree or the panel dies.
-    cfg, path_note = normalize_console_admin_config(cfg, str(config_file))
-    if path_note:
-        notes.append(path_note)
-    panel_file = Path(str(cfg.get("adminStateFile")))
-    # A panel that started once under the broken path minted a fresh cookie key
-    # in the read-only-by-policy directory. That key is a stray: the real one,
-    # with the operator accounts, is the file now named above. Removing it keeps
-    # the box honest about having exactly one panel state file.
-    if stale_panel_file != panel_file and stale_panel_file.is_file():
-        try:
-            stale_panel_file.unlink()
-            notes.append(f"removed stray panel state {stale_panel_file} (superseded by {panel_file})")
-        except OSError as exc:
-            notes.append(f"left stray panel state {stale_panel_file}: {exc}")
+    cfg, cfg_notes = normalize_console_config(cfg, store_url)
+    notes.extend(cfg_notes)
+    if not str(cfg.get("store") or "").strip():
+        raise Fail("relkit-console needs a store URL and none was found on this box")
+    panel_file = Path(str(console_admin_path(cfg)))
+    if not panel_file.is_file():
+        source = next((p for p in legacy_files if p != panel_file and p.is_file()), None)
+        if source is not None:
+            panel_file.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(panel_file.parent, 0o700)
+            shutil.copy2(source, panel_file)
+            notes.append(f"panel cookie key carried over from {source} to {panel_file}")
+    for stray in legacy_files:
+        if stray != panel_file and stray.is_file():
+            try:
+                stray.unlink()
+                notes.append(f"removed old panel state {stray} (backed up)")
+            except OSError as exc:
+                notes.append(f"left old panel state {stray}: {exc}")
     # The panel is the human face of the agent (requirement 13.6): without the
     # agent URL it renders read-only pages and cannot manage anything.
     if agent_addr and str(cfg.get("agent") or "") != agent_addr:
@@ -2082,6 +2088,7 @@ def apply_console_upgrade(
         os.chmod(panel_file, 0o600)
         try:
             chown_path(panel_file, user)
+            chown_path(panel_file.parent, user)
         except LookupError:
             pass
 
@@ -2293,6 +2300,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         user=user,
                         prefix=prefix,
                         agent_addr=agent_addr,
+                        store_url=loopback_base(serve_addr) if serve_addr else "",
                         restart=restart,
                         backup_root=backup,
                     )
@@ -2994,9 +3002,17 @@ def build_parser() -> argparse.ArgumentParser:
     agent_i.add_argument("--prefix", default="/usr/local/bin")
     console_i = install_sub.add_parser("console")
     console_i.add_argument("--binary", required=True)
-    console_i.add_argument("--dir", default="/srv/releases")
+    console_i.add_argument(
+        "--store",
+        default="",
+        help="relkit-store base URL the panel reads (default: the store on this box)",
+    )
+    console_i.add_argument(
+        "--agent",
+        default="",
+        help="relkit-agent base URL the panel manages (default: the agent on this box)",
+    )
     console_i.add_argument("--config-dir", default="/etc/relkit-console")
-    console_i.add_argument("--state-dir", default="")
     console_i.add_argument("--addr", default="127.0.0.1:8081")
     console_i.add_argument("--user", default="relkit")
     console_i.add_argument("--prefix", default="/usr/local/bin")

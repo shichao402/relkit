@@ -42,8 +42,8 @@ Linux + systemd：`sudo python3 scripts/deploy/relkit.py install serve --binary 
 | 项 | 值 | 说明 |
 |---|---|---|
 | 环境变量 | `RELKIT_SERVE_TOKEN` | systemd drop-in 换二进制后继续可用 |
-| admin state | `<dir>/.relkit-serve-admin.json` | console 继续持有，账户不丢 |
-| 下载计数 | `<dir>/.relkit-serve-stats.json` | console 只读共享 |
+| admin state | `<dir>/.relkit-serve-admin.json` | 旧布局残留，store 继续隐藏；console 面板状态已迁到 `/var/lib/relkit-console/panel.json` |
+| 下载计数 | `<dir>/.relkit-serve-stats.json` | 计数功能已删除；旧文件仍被隐藏，不对外伺服 |
 | CAS 签名密钥 | `<dir>/.relkit-serve-cas.key` | 能力 URL 验签密钥 |
 
 配置文件与 token 文件改用 `relkit-store.json` / `relkit-store.token`（新装机）；`/etc/relkit-serve` 时代的老盒子用 `upgrade` 路径迁移时由部署脚本处理。

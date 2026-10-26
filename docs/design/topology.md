@@ -306,11 +306,9 @@ IS <|.. sm
 sb ..> IB
 
 package "console 读" {
-  [rootAdapter\n本机发布树只读（内网现网）] as ra
-  [storeAdapter\nHTTP 读 store 的 /-/list/] as sa
+  [storeAdapter\nHTTP 读 store 的 /-/list/（内外网同一实现）] as sa
   [s3 读 adapter\n（缺，见 ROADMAP）] as s3r #line.dashed
 }
-IA <|.. ra
 IA <|.. sa
 IA <|.. s3r
 @enduml
@@ -320,7 +318,7 @@ IA <|.. s3r
 | --- | --- | --- | --- |
 | 存储面 Backend | `internal/backends/base.go` | 产品配置的 `backends` 与 `publishTo`，agent 按产品 `backends.Create` | [ADR 0008](../adr/0008-cas-data-plane-contract.md) |
 | 人页 sink | `internal/site/site.go` | agent 配置 `site.sinks` | [ADR 0015](../adr/0015-declarative-site-sinks.md) |
-| console 读 Adapter | `cmd/relkit-console/adapters.go` | console 配置 `store` 有值走 storeAdapter，否则按 `dir` 走 rootAdapter | [ADR 0016](../adr/0016-serve-split-store-console.md) |
+| console 读 Adapter | `cmd/relkit-console/adapters.go` | console 配置 `store`（必填）；只有 storeAdapter 一个实现，console 不直接读本机目录，内外网同构 | [ADR 0016](../adr/0016-serve-split-store-console.md) |
 
 要点：
 
