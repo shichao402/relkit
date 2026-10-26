@@ -1,21 +1,23 @@
-# 更新入口拓扑：自有域名 + COS（推荐方案）
+# 更新入口拓扑：自有域名 + COS（已退役方案，历史记录）
 
 ---
-title: 更新入口拓扑（COS 固定入口）
+title: 更新入口拓扑（COS 固定入口，已退役）
 category: design
 created: 2026-08-11
-updated: 2026-09-07
-status: approved
-related: ADR 0005, ADR 0007, docs/design/bootstrap-directory.md, docs/design/publish-topology.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
+updated: 2026-10-26
+status: superseded
+related: ADR 0005, ADR 0007, ADR 0023, docs/design/bootstrap-directory.md, docs/design/topology.md, SPEC.md §1 / §3 / §13 / §16, CLI.md §6.5 / §6.6
 ---
 
-## 1. 决议
+> **本文已失效，只作历史记录。** 现行拓扑只看 [topology.md](topology.md)。本文以 COS 为外网数据面与主入口，COS 已于 2026-09-26 整体清零；外网与内网一样，数据面只有发布机上的 relkit-store，读面是 `update-internal.*`。文中的"每产品发布钥"、公钥集、异地域备桶、Makers 人页、Dec 外网产品均已被 ADR 0023 推翻或退役。仍然有效的只有与数据面类型无关的原则：CI 不持私钥、字节只跨「CI → 数据面」一次、写 index 指针才是真发布、客户端禁止自行拼接 URL、镜像必须字节一致。
+
+## 1. 决议（历史）
 
 **只记一套角色：CI 打包 → 控制面 agent 签发上传说明并编排发布 → CI 直传数据面 → 数据面完成 Promote 与受控写入 → 客户端匿名 GET。** 数据面不是只读：COS 与 relkit-store 都提供完整、受鉴权保护的写入 API；只有客户端读取正式对象时匿名。
 
 发布完成之后，树上每一项都已经是普通文件（或 COS 里的普通对象），URL 和路径一一对应。下载路径上不再查库、不现场拼给人看的索引、不验 Bearer（Bearer 只在控制面）。公网文件在 COS，内网文件在 WOA 磁盘上；看起来都是「按路径取文件」。
 
-| 角色 | 公网（如 Dec） | 内网（如 SvnMergeTool） |
+| 角色 | 公网（当年示例，产品已退出） | 内网（如 SvnMergeTool） |
 |---|---|---|
 | CI | `relkit stage`，把 staged 树交给 agent | 同左 |
 | 控制面 | `relkit-agent`（如 `publish.firoyang.com`） | 同一套 agent，写本机目录 |

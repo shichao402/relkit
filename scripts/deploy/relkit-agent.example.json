@@ -11,11 +11,10 @@
   "stateDir": "/var/lib/relkit-agent",
   "productRootParent": "",
   "site": {
-    "makers": {
-      "projectId": "makers-example",
-      "tokenEnv": "EDGEONE_PAGES_API_TOKEN",
-      "region": "china"
-    }
+    "sinks": [
+      {"type": "backend", "backend": "serve"},
+      {"type": "directory", "path": "/srv/relkit/site"}
+    ]
   },
   "uploadTokens": [],
   "products": {}

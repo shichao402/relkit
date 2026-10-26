@@ -13,39 +13,40 @@ supersedes: 不取代既有文。`publish-agent.md` 与 `update-ingress-cos.md` 
 开发者审阅用的当前拓扑。旧文继续当历史与细节 SSOT；本文只画**流程与进程切面**。  
 2026-08-30 晚：补「对外 browse / 对内 console 面板」，实现已按 §5 落地。
 
-> **本文的图已不再维护。** 现行拓扑只看 [topology.md](topology.md)——那里是拓扑图的唯一来源。下面 §3、§4 的两张图保留原样，作为 2026-09-26 前后那一代的形状记录，其中的 COS 主入口、异地域备桶、Makers 人页、`raw.` 兼容面、每产品一把签名密钥、`artifactTo`/`pointerTo` 拆分、客户端 SDK 直连数据面，都已被 ADR 0023 断代推翻。文中的文字结论（进程职责、域名分工、人页与面板分开）仍然有效。
+> **本文的图已不再维护，现行拓扑只看 [topology.md](topology.md)。** 本文现在只保证这些仍然有效：§1 的进程与域名职责决议、§5 人页与操作面板分开、§6 站点重建约定、§7 现网落地与 7.1 同构定稿。§3、§4 里带日期的段落是迁移过程记录，§8 是历史图，两者描述的 COS 主入口、异地域备桶、Makers 人页、`raw.` 兼容面、每产品一把签名密钥、`artifactTo`/`pointerTo` 拆分、客户端 SDK 直连数据面，都已被 ADR 0023 断代推翻或已退役，只作历史对照。
 
 ## 1. 决议
 
-- 控制面只有一个 **publish 节点**：nginx/Caddy（`:443` 切面）+ 本机 `relkit-agent`（`127.0.0.1:8787`）。反代是 HTTPS / 证书 / 入口日志的外壳，不是独立架构角色，也不是安全隔离层。
-- CI 各平台 Job 只构建并把产物上传到按本次 `buildId` 隔离的 drop；依赖全部平台成功的独立汇总 Job 才执行 `relkit stage`、版本闸门、`relkit release --execute`（内含 CAS 上传与唯一一次 publish）。任何平台 Job 都不是发布协调者，drop 不得跨流水线构建复用。`relkit release --execute` 对 agent 走同一套 CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 缺失的 `cas/{sha256}` → 交瘦 staged tar → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**：CI 只喂第一个 ingest；其余 `publishTo` 由 agent `Materialize`。整包 `PUT /v1/staged` 仍是兼容路径。`artifactTo` / `pointerTo` 拆分尚未实现。**写 index 指针才是真发布**。
-- **`artifactTo` 与 `pointerTo` 分开（目标，profile 字段尚未落地）。** 几百 MiB 的 `artifact/` 只发给能当数据面的后端（`s3-compatible`、`relkit-compatible`），默认就 ingest 一家；几 KB 的签名 pb 才扇给 `entryUrls` 备桶。现网仍用一份 `publishTo`。用一个 `publishTo` 把产物也镜像进 git 仓，等于每次发版往历史灌一份删不掉的大文件。承载 `entryUrls` 的备援须过 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 三条准入（目标网络可达、`Cache-Control` 我方可配、失效域与主正交）；CNB / GitHub raw 不合格，当前形态是异地域第二个 COS 桶 + 独立自有二级域名。
-- 协议对象走 **Backend adapter**。CAS 的 `cas/{sha256}` inbox **只存在于 ingest 后端**；其余后端只有 `artifact/...`。**切面不因 type 分叉**：CI、`publish.Run`、客户端看到的接口对所有后端相同。query 预签名 / 能力 URL / COPY / 字节从哪儿来都是实现细节，禁止 `if backend.Type()=="s3-compatible"` 出现在 publish 或 CI 脚本里。
-- **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。它由 agent 对全部产品的数据面事实静态重建，外网落 Makers、内网落 `browse/`。产品 publish 不拥有站点。
-- **relkit-console 现算的门户**（今 GET `/` 那套主题页、`/-/p/`、`?files=1`）是打到自托管箱上的操作面：容量就是这一台机，以后长成 relkit 后台面板。它不是对外目录，内外网对外都不要再把人指到这里。
+- 控制面只有一个 **publish 节点**：nginx（外网 `:443` 经 SNI 分流，内网由 WOA 网关终结 TLS 后进 `:80`）+ 本机 `relkit-agent`（`127.0.0.1:8787`）。反代是 HTTPS / 证书 / 入口日志的外壳，不是独立架构角色，也不是安全隔离层。
+- CI 各平台 Job 只构建并把产物上传到按本次 `buildId` 隔离的 drop；依赖全部平台成功的独立汇总 Job 才执行 `relkit stage`、版本闸门、`relkit release --execute`（内含 CAS 上传与唯一一次 publish）。任何平台 Job 都不是发布协调者，drop 不得跨流水线构建复用。`relkit release --execute` 对 agent 走同一套 CAS 上传协议（要凭据 → 按返回的**唯一**目的地 PUT 缺失的 `cas/{sha256}` → 交瘦 staged tar → `POST /v1/publish`）。**字节只跨「CI → 数据面」一次**。整包 `PUT /v1/staged` 仍是兼容路径。**写 index 指针才是真发布**。
+- 数据面现在每台服务器只有一个：本机 `relkit-store`。`artifactTo` / `pointerTo` 拆分从未落地，只剩一个后端时没有对象可拆，ADR 0023 后不再需要。将来真要加第二入口，准入条件仍按 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 决策 1 的三条判断。
+- 协议对象走 **Backend adapter**。**切面不因 type 分叉**：CI、`publish.Run`、客户端看到的接口对所有后端相同。能力 URL / COPY / 字节从哪儿来都是实现细节，禁止 `if backend.Type()==...` 出现在 publish 或 CI 脚本里。
+- **给人看的目录页只有一套：browse dump**（`index.html` / `<product>.html` / `catalog.json`）。它由 agent 对全部产品的数据面事实静态重建，外网落 `/srv/relkit/site` 由 nginx 直接伺服，内网落发布树 `browse/`。产品 publish 不拥有站点。
+- **relkit-console 是操作面板**（`/-/admin`、`/-/p/`、`/-/latest/`），入口在 `publish.*/-/admin`。它不是对外目录，内外网对外都不要把人指到这里。
 - 环境差只在节点旁注明现网用法，不要为内外网发明第二种发布流程。人页皮肤也不分叉：dump 一份，托管地方按 sink 选。
 
 ## 2. 进程与端口
 
 | 进程 | listen | 切面 |
 |---|---|---|
-| nginx / Caddy | `0.0.0.0:443`（内网 WOA 入口终止 TLS，箱上 `:80`/`:443` 均可） | 写面 `publish.*:443`（外网 `publish.firoyang.com`，内网 `publish.devcloud.woa.com`；CI 写面 + 存量 entryUrls 兼容读）；SDK 读面 `update-internal.*:443`（外网 `update-internal.firoyang.com` 2026-09-26 起，内网 `update-internal.devcloud.woa.com` 2026-10-19 起；内嵌 SDK 协议 GET，SSOT）；人页 `update.*:443`（外网 `update.firoyang.com`，内网 `update.devcloud.woa.com`）。内外网三域名绝对同构 |
-| relkit-agent | `127.0.0.1:8787` | 不直接对外；经入口提供 drop · staged 元数据 · CAS 凭据 · `POST /v1/publish`，不代理 CAS 正文 |
-| relkit-store（[ADR 0016](../adr/0016-serve-split-store-console.md)，由 relkit-serve 拆出） | `127.0.0.1:8080` | 内网是完整 `relkit-compatible` 数据面；外网只作存储壳，本机空目录不是 COS 数据面 |
-| relkit-console（[ADR 0016](../adr/0016-serve-split-store-console.md)） | `127.0.0.1:8081`（已落地） | serve 的管理面拆出的独立二进制：`/-/admin` 面板、账户、统计、目录浏览、`/-/latest/`，只读经 adapter；两台机的 nginx 面板分流均已上线 |
-| COS / Makers / CNB / GitHub | 无本机进程 | 见 Backend / 站点 sink 节点 |
+| nginx | 外网 `0.0.0.0:443` stream 按 SNI 分流 → `127.0.0.1:4443 ssl proxy_protocol`；内网 `:80`（WOA 网关在箱外终结 TLS） | 写面 `publish.*`（外网 `publish.firoyang.com`，内网 `publish.devcloud.woa.com`；CI 写面 + 运营面板入口）；SDK 读面 `update-internal.*`（只 GET/HEAD，SSOT）；人页 `update.*`。内外网三域名同构，只有 scheme 不同（内网 `http`，偏离 D2） |
+| relkit-agent | `127.0.0.1:8787` | 不直接对外；经 `publish.*` 提供工具与 Catalog、CAS 凭据、staged、`POST /v1/publish`、`/v1/unpublish`、`/v1/admin/*`，不代理 CAS 正文 |
+| relkit-store（[ADR 0016](../adr/0016-serve-split-store-console.md)，由 relkit-serve 拆出） | 外网 `127.0.0.1:8080`，内网 `:8080` | 唯一数据面（外网 `/srv/releases`，内网 `/data/relkit-serve`） |
+| relkit-console（[ADR 0016](../adr/0016-serve-split-store-console.md)） | `127.0.0.1:8081` | 操作面板：只读读取发布树，写操作经 agent `/v1/admin/*`（ADR 0023 第 8 条） |
 
-同机可以是一个 nginx、三个 `server_name`（publish 的 `/v1/*` → 8787，update-internal 的协议 GET → 8080，update 的人页 → 8080 或读盘）。CI 一律打域名（外网 `publish.firoyang.com`，内网 `publish.devcloud.woa.com`），不打裸 IP、回环 hostname，也不建 SSH 隧道借道 loopback 端口（2026-10-19 起）。
+同机一个 nginx、三个 `server_name`：publish 的 `/v1/*` → 8787、面板 → 8081、其余 → 8080；update-internal 只 GET → 8080；update 人页（外网读静态目录，内网转 8080 读 `browse/`）。CI 一律打域名，不打裸 IP、回环 hostname，也不建 SSH 隧道借道 loopback 端口（2026-10-19 起）。
 
 ## 3. 发布
 
-现行发布链路见 [topology.md](topology.md) §二。下面这张图是 2026-09 那一代的形状，已移入 [§8 历史图](#8-历史图)。
+现行发布链路见 [topology.md](topology.md) §二。下面这张图是 2026-09 那一代的形状，已移入 [§8 历史图](#8-历史图)；本节下方带日期的段落是迁移过程记录。
 
 dump 包含 SPA 壳（`index.html` + `assets/`）、`catalog.json`（派生聚合）与数据文档快照（`site/`、`latest/`、`channel/`、`release/`）。协议客户端不读，rebuild 也不把它当输入。
 
 > 2026-09-25 更新：外网数据面已从 COS 迁至本机 relkit-store（`/srv/releases`，serve 已退役）。人页 Makers 退出服务路径：agent sinks 为 `backend:serve` + `directory:/srv/relkit/site` 双落点，`update.firoyang.com` 由本机 nginx 直接伺服静态目录，与内网拓扑完全一致。原因：hk CVM 到广州 COS 公网入口 443 跨境不通（见 golden-path 归档），COS 托管暂不可用。Makers 云端项目 `relkit-updates-index` 尚未删除（Pages API token 已失效，待续期后清理）。
 
 ## 4. 下载
+
+现行下载链路见 [topology.md](topology.md) §三。下面带日期的段落是 2026-09-25 至 2026-10-19 外网迁出 COS、拆分读面的过程记录，其中的 COS、`raw.`、dec/cronkit 产品均已退役，只作历史对照。
 
 > 注：`raw.firoyang.com`（广州 COS）2026-09-25 起退出外网数据面。hk CVM 到广州 COS 公网入口 443 跨境不通，CI 发布与客户端下载均已切到 `publish.firoyang.com`（本机 store）。香港临时桶已验证 hk→HK COS 全链路可用（PUT/GET/LIST/HEAD/DELETE 5/5，桶已删），待跨境问题解决后可评估迁回。
 
@@ -70,12 +71,12 @@ dump 包含 SPA 壳（`index.html` + `assets/`）、`catalog.json`（派生聚�
 | | 对外目录（browse） | 操作面板（console 现算） |
 |---|---|---|
 | 谁看 | 装包的人、书签、内网同事打开更新域名 | 运营 / 开发，知道这台箱 |
-| 是什么 | 发布时写好的静态 HTML | 请求时扫盘画出来的门户 |
-| 代码 | `internal/browse` dump | `cmd/relkit-console/ui.go` |
-| 外网落地 | Makers（HTML 不进 COS） | `publish.firoyang.com/-/admin`；当前只扫本机空目录，尚不能管理 COS |
-| 内网落地 | 数据面 `browse/`，更新域名 GET `/`（无文件则短 stub，不现算门户） | `/-/admin`（今 `/-/p/`、`?files=1` 一并收进来） |
-| 容量 | 静态站 / CDN / Makers | 这一台自托管进程 |
-| 以后 | 还是 dump，换 sink 即可 | 长成能管本机与 COS 的 relkit 后台（产品、token、GC、日志），见 [ROADMAP](../ROADMAP.md#操作面板从本机盘长成发布管理) |
+| 是什么 | 发布时写好的静态 HTML | 请求时读发布树画出来的门户，写操作转 agent |
+| 代码 | `internal/browse` dump | `cmd/relkit-console` |
+| 外网落地 | `update.firoyang.com`，nginx 直接伺服 `/srv/relkit/site` | `publish.firoyang.com/-/admin` |
+| 内网落地 | 数据面 `browse/`，更新域名 GET `/`（无文件则短 stub，不现算门户） | `publish.devcloud.woa.com/-/admin`（`update.devcloud.woa.com/-/admin` 为迁移期残留） |
+| 容量 | 静态目录 | 这一台自托管进程 |
+| 以后 | 还是 dump，换 sink 即可 | 继续长成 relkit 后台（产品、token、GC、日志），见 [ROADMAP](../ROADMAP.md#操作面板从本机盘长成发布管理) |
 
 实现时（本文审过再动代码）：
 
@@ -89,7 +90,7 @@ dump 包含 SPA 壳（`index.html` + `assets/`）、`catalog.json`（派生聚�
 `publish.Run` 在签名 index 提交之后写人面数据文档：`site/<product>.json`、`latest/<product>/<channel>.json`、`channel/<product>/<channel>.json`（渠道目录，从最终 index 全量投影，历史深度等于 retainVersions 窗口）与 `release/<product>/<channel>/<version>.json`（immutable 版本详情）。不渲染 HTML，也不打开站点 sink。发布成功后 agent 触发同一条 `site rebuild`；失败只使人页滞后，不回滚已提交的协议 index。数据文档写在 index commit 之后，人面永不超前协议面。
 
 - agent 的 `products` map 是站点产品集合。rebuild 物化 SPA 表现面（embed 的 `index.html` + `assets/`，无构建步骤、零框架）并聚合 `catalog.json`（跨产品、单次发布写不出，只能整站聚合），再把收集到的数据文档（`site/`、`latest/`、`channel/`、`release/`）原样平铺进 dump 快照，表现与数据同源伺服。对缺 `release/` 文档的存量版本，rebuild 从 manifest backfill（同一投影逻辑；manifest 已被 GC 只警告不阻断）。
-- agent 顶层 `site.sinks[]` 声明 dump 去向（ADR 0015）：`{"type":"backend","backend":"<name>"}` 把完整 dump `PutPointer` 到该 backend 的 `browse/`（backend 须 `HostsBrowse()==true`）；`{"type":"makers",...}` Folder 部署到 EdgeOne Makers；`{"type":"directory","path":...}` 原子写目录给外部静态宿主。sink 配置不属于产品 policy/profile，`HostsBrowse` 只做能力校验、不再自动注册 sink。
+- agent 顶层 `site.sinks[]` 声明 dump 去向（ADR 0015）：`{"type":"backend","backend":"<name>"}` 把完整 dump `PutPointer` 到该 backend 的 `browse/`（backend 须 `HostsBrowse()==true`）；`{"type":"makers",...}` Folder 部署到 EdgeOne Makers（代码仍支持，现网已不用）；`{"type":"directory","path":...}` 原子写目录给外部静态宿主。sink 配置不属于产品 policy/profile，`HostsBrowse` 只做能力校验、不再自动注册 sink。现网：内网 `backend`，外网 `backend` + `directory:/srv/relkit/site`。
 - rebuild 先把 dump 写入 agent state 目录 `site/dump/`（本机审计/回滚参照），再分发到各 sink；某 sink 失败不阻断协议发布，重跑 rebuild 即全量重发。
 - `catalog.json` 只是派生输出，禁止读回后 merge。相同输入的 dump 哈希不变，跳过重复部署。
 - 以后加 Cloudflare / GitHub Pages：给站点 rebuild 加 sink，不改产品 `relkit.json`。
@@ -97,7 +98,7 @@ dump 包含 SPA 壳（`index.html` + `assets/`）、`catalog.json`（派生聚�
 
 ## 7. 现网落地（2026-09-25 ADR 0016 切换后）
 
-外网 CVM 已运行 agent（`/v1/` → `127.0.0.1:8787`）、store 数据面（`location /` → `127.0.0.1:8080`，本机树是操作面壳、不是 COS 数据面）与 console 操作面板（`/-/admin`、`/-/p/`、`/-/latest/` → `127.0.0.1:8081`）；`location = /` 设计性 404，对外目录在 Makers。配置见 `scripts/deploy/nginx-public.example.conf`。内网同一切面，本机 origin 先 `:80`：
+外网发布机运行 agent（`/v1/` → `127.0.0.1:8787`）、store 数据面（`location /` → `127.0.0.1:8080`，`/srv/releases` 是唯一数据面）与 console 操作面板（`/-/admin`、`/-/p/`、`/-/latest/` → `127.0.0.1:8081`）。TLS 由 nginx stream 按 SNI 分流到 `127.0.0.1:4443 ssl proxy_protocol`；人页 `update.firoyang.com` 由 nginx 直接伺服 `/srv/relkit/site`。配置见 `scripts/deploy/nginx-public.example.conf`。内网同一切面，本机 origin 是 `:80`：
 
 - 内网三 vhost 与外网绝对同构（2026-10-19，样例 `scripts/deploy/nginx-intranet.example.conf`）：`publish.devcloud.woa.com`（`/v1/`、`/-/health`、`/-/site` → agent `127.0.0.1:8787`；`/-/admin`、`/-/p/`、`/-/latest/` → console `127.0.0.1:8081`；其余 → store `127.0.0.1:8080`，承载 CI 写面与存量 entryUrls 兼容读）；`update-internal.devcloud.woa.com`（协议树 GET/HEAD + Range → store，无 `/v1/`、无 console、无 browse）；`update.devcloud.woa.com`（人页 browse + 旧签名 URL 只读兼容；旧单域混载的 `/v1/` 写面迁出至 publish 后收敛）。匿名 GET/HEAD、运营方 Bearer 写操作和对象能力 PUT 均由 store 自己鉴权
 - 客户端与 CI 看到的 `https://publish.devcloud.woa.com:443` / `https://update-internal.devcloud.woa.com:443` 由 WOA 入口终止 TLS，再转到本机 vhost。箱上无证书时 `listen 80`，有证后加 `listen 443 ssl`，流程不变

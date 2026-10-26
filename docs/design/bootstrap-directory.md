@@ -4,24 +4,26 @@
 title: 更新服务目录（Bootstrap Directory）
 category: design
 created: 2026-08-09
-updated: 2026-09-04
+updated: 2026-10-26
 status: approved
-related: ADR 0005, ADR 0007, SPEC.md §1 / §4 / §12, docs/design/update-ingress-cos.md
+related: ADR 0005, ADR 0007, ADR 0023, SPEC.md §1 / §4 / §12, docs/design/topology.md
 ---
+
+> **现状（2026-10-26）**：directory 这一层仍在，是引擎的入口文档。与原稿不同的有三点：签名用每台服务器唯一的根（ADR 0023），不再有"发布钥"或公钥集；entryUrls 写在根签的 Runtime Profile 里，宿主不手写；现网每台服务器只有一个数据面（本机 relkit-store，读面 `update-internal.*`），没有 COS、没有第二入口。下文的目标、风险与选源算法仍是引擎内的设计意图。现行拓扑见 [topology.md](topology.md)。
 
 ## 1. 已确认目标
 
 | # | 目标 | 验收口径 |
 |---|---|---|
-| G1 | **性价比优先** | 不依赖付费 Geo-DNS / Anycast / 大流量 CDN；**推荐主入口**为自有域名绑定 COS（静态对象）；单台外网 CVM 仅作可选/调试，不作默认主入口。详见 [`update-ingress-cos.md`](update-ingress-cos.md) |
-| G2 | **稳定对外入口** | App 只内嵌极少变更的 `entryUrls`；机房/域名变更优先改目录，不改客户端常量 |
-| G3 | **一主多备拉目录** | 顺序：**自有域名 COS（主）** → 第二个 COS 桶（异地域 + 独立自有二级域名）；主不可达才试备。备援准入三条见 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)：目标网络可达、`Cache-Control` 我方可配、失效域与主正交。**git 托管的 raw 端点不合格** |
+| G1 | **性价比优先** | 不依赖付费 Geo-DNS / Anycast / 大流量 CDN。现网入口是服务器读面 `update-internal.*`（本机 relkit-store）。原稿推荐的"自有域名绑定 COS"已随 COS 清零失效 |
+| G2 | **稳定对外入口** | App 只内嵌极少变更的入口；机房/域名变更优先改目录，不改客户端常量 |
+| G3 | **一主多备拉目录** | entryUrls 有序，主不可达才试备。现网只有一条入口。将来加第二入口时，准入三条见 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 决策 1：目标网络可达、`Cache-Control` 我方可配、失效域与主正交。**git 托管的 raw 端点不合格** |
 | G4 | **目录即协议面** | 目录 schema 与签名规则跟项目/协议走，视为对外契约，不轻易破坏兼容 |
 | G5 | **接回现有 RUP** | 拿到目录后仍走 index 验签 → manifest → artifact；不另发明自动安装通道 |
 | G6 | **历史经验选源** | 用真实下载的成功/失败/吞吐排序下次尝试；**禁止**独立探测、禁止为测速浪费流量 |
 | G7 | **不浪费下载** | `urls` / 多源之间**顺序**尝试；禁止并行拉同一 artifact（与 SPEC §12.3 一致） |
-| G8 | **与现钥合一** | 目录用与 index/fallback **同一组** ed25519 发布钥签名；签一次、多处上传同一字节 |
-| G9 | **多区域仍一份 index** | 各 serve / 镜像上的 index（及对应 manifest 对象）字节一致；多机房只体现在 `urls[]` |
+| G8 | **一把根签全部** | 目录与 index/manifest 都由这台服务器唯一的根签名；签一次，多处上传同一字节 |
+| G9 | **多区域仍一份 index** | 各镜像上的 index（及对应 manifest 对象）字节一致；多机房只体现在 `urls[]` |
 
 ## 2. 已确认风险与对策
 
@@ -30,8 +32,8 @@ related: ADR 0005, ADR 0007, SPEC.md §1 / §4 / §12, docs/design/update-ingres
 | R1 | 目录被劫持指向「错/坏」serve | **内容**：无私钥无法伪造可过验的 index → 装不上假包。**对策**：目录同样验签，降低「指引错路/半宕机」面 |
 | R2 | 旧签名 index 重放（降级） | 已有 `lastSeenSequence` 防降级（SPEC §12.4）；目录不能削弱该规则 |
 | R3 | 三处目录互不一致 | 发布必须推**同一签名字节**；客户端按 entry 串行，先拿到且验签通过者生效；可用 `directorySequence` 拒绝明显过旧目录（可选，见 §5） |
-| R4 | 某一 raw 宿主被写穿 | 无钥无法伪造合法目录；该 entry 验签失败则跳过 |
-| R5 | 主入口（自有域名 COS）不可达 | 备桶（异地域第二 backend + 独立域名）承接目录。同桶多 CNAME **不算**第二 backend。全网都不可达时走宿主编译期内嵌 `recovery`（ADR 0007） |
+| R4 | 某一入口宿主被写穿 | 无根私钥无法伪造合法目录；该 entry 验签失败则跳过 |
+| R5 | 唯一入口不可达 | 现网只有一条入口，不可达时走宿主编译期内嵌 `recovery`（ADR 0007 决策 4）。将来加第二入口须是独立失效域，同一主机的多个域名别名**不算**第二入口 |
 | R6 | 冷启动无历史、选源次优 | **接受**；按目录 `priority` / 声明顺序试；跑过真实下载后再学习 |
 | R7 | 中国/欧洲各自签「不同 URL 的 index」 | **拒绝**（违反 SPEC）；否则多源学习、双写、排错都会碎 |
 | R8 | 「连通性测试」暗中耗流量 | **禁止**；只允许真实 check/download 路径记账 |
@@ -92,7 +94,7 @@ related: ADR 0005, ADR 0007, SPEC.md §1 / §4 / §12, docs/design/update-ingres
 - `services` 内各 `indexUrl` 在成功发布后必须能下到**相同** index 字节（发布方责任）。
 - `priority` 越小越优先（无学习数据时）。
 - `directorySequence` 单调递增；客户端**可以**持久化 `lastSeenDirectorySequence`，拒绝明显倒退的目录（推荐，类比 index `sequence`）。
-- 整份 payload 套 RUP envelope，密钥与 index 相同。
+- 整份 payload 套 RUP envelope，由服务器根签名，与 index 相同。
 
 **入口 `entryUrls`：** 仅指向上述已签名目录文件的绝对 URL，不是 HTML 页。
 
@@ -127,20 +129,20 @@ related: ADR 0005, ADR 0007, SPEC.md §1 / §4 / §12, docs/design/update-ingres
 
 1. `relkit publish`（或等效）生成**一份**签名 index/manifest，artifact 的 `urls` 含各区域取货点。
 2. 将相同对象双写（或多写）到各 `relkit-store` / 静态后端。
-3. 生成并签名 directory → 上传**自有域名 COS 主入口**与各备桶（字节完全一致，见 ADR 0007）。发布机（CVM）持钥；写 COS 走 `s3-compatible`，不要假设客户端去打 CVM。
+3. agent 生成并用服务器根签名 directory，经 store 写入数据面（现网只有本机 relkit-store 一处）。将来若有第二入口，各处字节必须完全一致。客户端不连 agent。
 4. 私钥只在签名步骤出现；各处上传不需要也不应该各持一把钥。
 
 ## 8. 客户端内嵌面（合约）
 
-长期内嵌且视为对外协议关联配置：
+长期内嵌且视为对外协议关联配置（ADR 0023 后全部经 Runtime Bootstrap/2 交给引擎，宿主不解析）：
 
-- `entryUrls: Uri[]`（有序，主→备）
-- 既有：公钥集、`product`、`channel`
+- 服务器根公钥（单值，不是公钥集）、`product`
+- `entryUrls`：写在根签 Runtime Profile 里，不由宿主手写；`channel` 由宿主运行时传入
 
 可变、不跟发版强绑：
 
 - 目录里的 `services`
-- 各 serve 与 raw 上的文件内容
+- 数据面上的文件内容
 
 ## 9. 实现阶段（文档冻结后）
 
@@ -154,11 +156,11 @@ related: ADR 0005, ADR 0007, SPEC.md §1 / §4 / §12, docs/design/update-ingres
 
 - 目标 G1–G9：**确认**  
 - 风险 R1–R10 及对策：**确认**  
-- 签名：与 index **同钥**；上传可多点，签名动作集中：**确认**
+- 签名：由服务器唯一的根签名（ADR 0023）；上传可多点，签名动作集中：**确认**
 - 禁止分区异构 index、禁止选源探测：**确认**
 - 规范性正文：[`SPEC.md`](../../SPEC.md) §1.1/§1.2、§2、§3、§4、§5.3、§12.1/§12.7、§14.1、**§16**
-- 决策记录：[ADR 0005](../adr/0005-signed-bootstrap-directory.md)、[ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)（备援选型准入）
-- 推荐入口拓扑（自有域名 + COS）：[`update-ingress-cos.md`](update-ingress-cos.md)
+- 决策记录：[ADR 0005](../adr/0005-signed-bootstrap-directory.md)、[ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)（第二入口准入，备桶选型已作废）、[ADR 0023](../adr/0023-desktop-updater-epoch.md)
+- 现行拓扑：[topology.md](topology.md)
 
 ## 11. 历史图
 

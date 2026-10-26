@@ -1,20 +1,20 @@
-# Publish Agent（CI → 发布机 → COS）
+# Publish Agent（CI → 发布机 → 数据面）
 
 ---
 title: Publish Agent
 category: design
 created: 2026-08-12
-updated: 2026-09-26
+updated: 2026-10-26
 status: approved
-related: docs/design/update-ingress-cos.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md, docs/adr/0009-publisher-protocol-negotiation.md
+related: docs/design/topology.md, docs/design/publish-topology.md, CLI.md, cmd/relkit-agent/README.md, docs/adr/0009-publisher-protocol-negotiation.md
 ---
 
 ## 1. 决议
 
-CI **不持** RUP 签名私钥，也 **不持** 长期后端写密钥。  
-CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯一一个**目的地上传一次；agent 持钥 `publish.Run`（Promote / Materialize + 签指针），其余后端的副本由 agent 在数据面之间分发。现网代码仍接受整包 `PUT /v1/staged`。
+CI **不持** 签名私钥，也 **不持** 长期后端写密钥。  
+CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯一一个**目的地上传一次；agent 用服务器根签名并执行 `publish.Run`（Promote + 签指针）。现网代码仍接受整包 `PUT /v1/staged`。
 
-数据面只是 API 不同：公网 `s3-compatible` → COS；内网 `relkit-compatible` → relkit-store。客户端永远不连 agent。这条改动是为了让发布机只做管理角色，**不是**为了跨境加速。
+数据面现网内外网都是本机 `relkit-store`（`relkit-compatible`）。`s3-compatible` 后端代码仍在，外网 COS 已于 2026-09-26 清零，现网不用。客户端永远不连 agent。拓扑见 [topology.md](topology.md)。
 
 ## 2. 信任边界
 
@@ -22,12 +22,12 @@ CI `relkit stage` 后走 **同一套** CAS 协议：向凭据文档里那**唯�
 
 | 文件 | 谁写、放哪 | 装什么 | 禁止装什么 |
 |---|---|---|---|
-| publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product` + 签名密钥引用（`signing.keyId` / `signing.keys`）、公钥集、backends、`ingest`、`artifactTo` / `pointerTo`、directory 发布目标 | 通道与版本策略、通道级 entryUrls、全部 Makers 配置 |
+| publish profile | 发布机 `/etc/relkit-agent/products/<product>.json` | `product`、`backends`、`publishTo`、`directory`（`publishTo` / `entryUrls` / `services`），字段集以 `internal/config/policy.go` 为准；签名一律用服务器根（ADR 0023），profile 里没有任何密钥引用 | 签名密钥或公钥集、通道与版本策略、站点配置 |
 | staged vNext 控制面 | CI 侧 `relkit stage` 写入 staged 树，随元数据上传 | `staged.pb`、`resolution.json`、`resolution-bundle.json`、`relkit.project.json`、`artifact-set.json` | 私钥、后端凭据、publish 目标 |
 
 ADR 0019 §1 已整体退役 `release-policy.json`：它不再是发布输入，agent 也不接受缺 resolution digest 的 staged 树。产品根上的 `relkit.json` **不是** agent 发布配置，agent 从不读它，仓内也不再有读取它的代码路径。
 
-`product` 与 `signing.keyId` 必须两边一致，否则拒绝发布。产品树根永远是 agent 配置里的 `products.<id>.root`，不以 JSON 文档里的路径为准。
+请求里的 `product` 与 profile 的 `product` 必须一致，否则拒绝发布。产品树根永远是 agent 配置里的 `products.<id>.root`，不以 JSON 文档里的路径为准。
 
 | 角色 | 持有 | 不持有 |
 |---|---|---|
@@ -56,18 +56,17 @@ staged 树缺 `resolution.json` 的 digest 时，`PUT /v1/staged`（整包与分
 
 缺省路径：与 `relkit-agent.json` 同目录的 `products/<product>.json`（安装后即 `/etc/relkit-agent/products/<id>.json`）。`products.<id>.profile` 可覆盖。profile 只含端点与环境变量**名**，不含密钥明文；init 写成 `0644`，以便 root 跑 init 后 `relkit` 用户仍能读。
 
-字段语义表（机器 profile 的合法字段集 = `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` / `PublicKeyConfig` 结构体字段集）：
+字段语义表（机器 profile 的合法字段集 = `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` 结构体字段集）：
 
 | 字段 | 语义 |
 |---|---|
 | `product` | 必须与请求的产品一致，否则拒绝发布 |
-| `signing.keyId` | 主签名密钥；`signing.keys` 存在时改用轮换窗口 |
-| `signing.privateKeyEnv` / `signing.privateKeyPath` | 私钥引用（env 名或路径） |
-| `signing.publicKeys` | 客户端内嵌的验签公钥集，轮换窗口与 `signing.keys` 共用 |
 | `backends` | 各后端端点与凭据 env 名 |
 | `publishTo` | 发布目标后端列表 |
 | `directory.publishTo` | directory 指针发布目标 |
 | `directory.entryUrls` / `directory.services` | directory 文档内容 |
+
+签名不在 profile 里：agent 一律用本服务器唯一的根签名（ADR 0023），钥匙位置只登记在凭据清单。旧 profile 里的 `signing.*` 段现在是未知字段，会被 strict 拒绝。
 
 通道与版本策略在 vNext 断代后既不在 profile 也不在 staged 文档里：它们由 `relkit.project.json` 与 resolution 决定，profile 出现这些字段即被 strict 拒绝。
 
@@ -100,14 +99,16 @@ profile 里每个产品声明一个 `ingest`，取值是 `artifactTo` 中某个�
 | `publish.Run` | 对 ingest：`Head(casKey)` → `Promote(casKey, artifactKey)`；对其余 artifact 后端：`Materialize(blob, artifactKey)`；再 `PutImmutable` / `PutPointer` | `Type()=="s3-compatible"` 分支、腾讯云 STS SDK |
 | CI | `POST /v1/cas/credentials` → 对**尚无可 GET URL** 的 blob 各 PUT 一次 → 元数据里带上已有 URL → `POST /v1/publish` | 本轮有几个后端；按托管商写两套脚本；自己签 index |
 
-#### artifactTo / pointerTo
+#### artifactTo / pointerTo（不再实施）
+
+> 2026-10-26：这一拆分从未落地，ADR 0023 后不再需要。现网每台服务器只有一个数据面（本机 relkit-store），没有第二个后端可拆，也没有 `entryUrls` 备援（[ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md) 已标 Superseded）。下面保留当年的设计理由，只作历史对照。
 
 `publishTo` 一把扇给所有后端是上一版的错。profile 拆两份：
 
 | | 装什么 | 谁适合 |
 |---|---|---|
 | `artifactTo` | `artifact/`（几十~几百 MiB） | COS、`relkit-compatible`。默认只有 ingest 一家 |
-| `pointerTo` | `manifest/` `index/` `directory/` `fallback/`（几 KB 签名 pb） | ingest + `entryUrls` 备桶（异地域 COS，见 [ADR 0007](../adr/0007-entry-mirror-must-be-reachable-and-cacheable.md)） |
+| `pointerTo` | `manifest/` `index/` `directory/` `fallback/`（几 KB 签名 pb） | ingest + 当年设想的 entryUrls 第二入口（ADR 0007，已作废） |
 
 `pointerTo` 里承载 `entryUrls` 的那些后端必须过 ADR 0007 三条准入：目标网络可达、`Cache-Control` 我方可配、失效域与主正交。**CNB / GitHub raw 不合格**——大陆不可达且 raw 端点缓存由平台定，而 `directory/` 是要求短缓存的可变指针。它们可以出现在签名文档的 `urls[]` 里当额外取货点，但不写进客户端常量，也不是一种 relkit 后端。
 
@@ -315,8 +316,8 @@ Agent 的 token 与 serve 的 `uploadTokens` 一样按产品拆。不要把某�
 
 | | 公网 | 内网 |
 |---|---|---|
-| 托管 | EdgeOne Makers（契约在本仓库 `sites/updates-index/`，**不要把 dump 拷进该目录当发版步骤**） | 数据面 `browse/` |
-| 怎么上去 | agent 顶层 `site.sinks[]` 持有 `{"type":"makers"}`（projectId/region/tokenEnv）；rebuild 后 Folder 整站 Upload | rebuild 按 `site.sinks[]` 把完整 dump 写入声明的 backend（须 `HostsBrowse`）或 `directory` 目录 |
-| 动态 | 现在没有 `edge-functions/`，就是静态站。计数走 51.la（见 `docs/ROADMAP.md`），不要 KV。以后要函数只加在该子目录，且不当账本；内网不跟 |
+| 托管 | 发布机静态目录 `/srv/relkit/site`，nginx 直接伺服 `update.firoyang.com` | 数据面 `browse/` |
+| 怎么上去 | agent 顶层 `site.sinks[]`：`backend` + `directory:/srv/relkit/site`；rebuild 后原子替换目录 | rebuild 按 `site.sinks[]` 把完整 dump 写入声明的 backend（须 `HostsBrowse`） |
+| 动态 | 纯静态站。计数走 51.la（见 `docs/ROADMAP.md`），不要 KV | 同左 |
 
-COS 不放 HTML。不要为此打开静态网站源站。页上不把 `.pb` 当导航，也不加载外链字体或图。
+人页不放进协议树以外的对象存储。页上不把 `.pb` 当导航，也不加载外链字体或图。`{"type":"makers"}` sink 代码仍支持，现网已不用。

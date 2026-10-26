@@ -1,8 +1,8 @@
 # ADR 0007: entryUrls 备援必须国内可达且缓存可控
 
-- Status: Accepted
+- Status: Superseded（2026-10-26：「第二个 COS 桶（异地域）」这条备援选型已无落点。COS 已于 2026-09-26 整体清零，外网数据面只剩发布机上的 relkit-store；ADR 0023 后每台服务器自成一个信任域，现网 entryUrls 只有一条，没有第二入口。决策 1 的三条准入条件与决策 4 的内嵌 `recovery` 保底仍是将来加第二入口时的判据。现行拓扑见 [topology.md](../design/topology.md)）
 - Date: 2026-09-04
-- Updated: 2026-09-04
+- Updated: 2026-10-26
 - Supersedes: [ADR 0005](0005-signed-bootstrap-directory.md) 决策 2 中「CNB raw 备 → GitHub raw 备」的选型部分。ADR 0005 的其余决策（bootstrap directory 本身、同一把钥签名、镜像字节相同、禁止测速探测）继续有效。
 
 ## 背景

@@ -1,6 +1,6 @@
 # ADR 0005: 签名的更新服务目录（bootstrap directory）
 
-- Status: Accepted（决策 2 的备援选型已被 [ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md) 取代）
+- Status: Accepted（部分取代：决策 1 bootstrap directory 本身、决策 4 同字节、决策 5 禁止探测仍有效；决策 2 的入口选型（COS 主入口、备援）已失效，备援选型先由 [ADR 0007](0007-entry-mirror-must-be-reachable-and-cacheable.md) 取代、0007 又于 2026-10-26 标为 Superseded，现网 entryUrls 只有一条，指向 store 读面 `update-internal.*`；决策 3 的"发布钥"现在是每台服务器唯一的根，见 [ADR 0023](0023-desktop-updater-epoch.md) 与 [topology.md](../design/topology.md)）
 - Date: 2026-08-09
 
 ## 背景

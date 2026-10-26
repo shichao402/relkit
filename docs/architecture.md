@@ -52,6 +52,8 @@ Go 侧 facade 在 `internal/updaterfacade`，属仓内实现，不对外发布�
 
 Runtime Bootstrap（`relkit.runtime-bootstrap/2`）内嵌这一把根公钥，本身不签名：它携带的 Runtime Profile 由同一把根签名，updater 用内嵌公钥验证。bootstrap 是构建输入，不是信任对象。
 
+客户端的入口文档是 directory（`directory/<product>.pb`），这一层仍在，由同一把服务器根签名。updater 先用内嵌公钥验 Runtime Profile，从中取 entryUrls，再按 directory → index → manifest → artifact 逐层取，每层文档都验根签并防回滚。entryUrls 只来自根签的 Profile，宿主侧另行声明时必须与之一致。拓扑见 [topology.md](design/topology.md) 第三节。
+
 不设计换根流程，不做新旧根重叠窗口。保管是唯一手段：服务器一份、离线备份一份、登记在凭据清单、启动自检与定期自检都做签名往返确认归属。
 
 ## 三、凭据

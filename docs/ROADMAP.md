@@ -27,7 +27,8 @@
 - **Promote 用 Copy 不是 Move**：COS 没有改 key 的真正 Move（文档里的移动 = Copy + Delete）。Promote 必须 Copy，才能留下 `cas/{sha256}` 供下一版 Head；Move 会拆掉跨版本去重。同桶 Copy 仍占第二份存储，靠下面的 cas 回收压住。
 - **现网**：`relkit-compatible` / `s3-compatible` 实现统一 `Ingest`（Head 比 size；Promote = COPY / CopyObject）和 `Deleter`。`local` / `http-put` / `static-http` 已删除。
 - **cas 回收**：仍被任意 channel 的 index → manifest 点名的 sha256 保留。`relkit-store` GC 扫 `cas/`。`publish.Run` 在写完 index 后，只删本产品本轮裁掉且其他 channel 也不再引用的 cas（不 List 整棵 `cas/`）。删除失败只打日志。
-- **未走**：已有可 GET URL 的 artifact 直接申报、`artifactTo` / `pointerTo` 拆分，以及宿主 CI 统一切到 `relkit release --execute` 的 CAS 路径。设计见 [`design/publish-agent.md`](design/publish-agent.md)。
+- **未走**：已有可 GET URL 的 artifact 直接申报。设计见 [`design/publish-agent.md`](design/publish-agent.md)。
+- **不再做**：`artifactTo` / `pointerTo` 拆分。现网每台服务器只有一个数据面（本机 relkit-store），没有第二个后端可拆，ADR 0023 后不再需要。
 - **未变判定**：sha256（及 size），不是文件名、不是版本号。
 - **产品构建**：宿主每次把 `BuildTime` 打进二进制，哈希会变，发布侧也跳不过。relkit 不替宿主改编译。
 - **落点**：`internal/backends` + `publish.Run` + serve GC。客户端契约不变。不改 SPEC 去做 delta/patch。
@@ -47,9 +48,9 @@
 ## 公网 browse：访问计数用 51.la
 
 - **状态**：意向（方向已拍，未嵌代码）
-- **背景**：公网给人看的目录在 EdgeOne Makers（契约 `sites/updates-index/`，现纯静态）。曾评估用 Edge Function + KV 做点击/下载计数。KV 是最终一致（边缘缓存最长 60s）、没有原子 `INCR`，全国并发会大量丢数；Blob 强一致仍是 `get` 再 `put`，又慢又不准；运行时拿不到边缘节点 ID，按节点分片做不成。自建 Redis/API 对个人目录页不划算。腾讯分析（MTA）已停服；灯塔偏腾讯系 App/游戏，个人静态站开不顺、也不把数字画回页面。
-- **目标**：要计数，但只在统计后台看，不把次数画在产品卡片上。browse dump 的 HTML 嵌 51.la JS，PV 与下载点击用自定义事件上报到 51.la。请求打他们的服务，不打自己的 CVM / COS / Makers 函数。
-- **不做**：Makers KV / Blob 热路径 `+1`；为计数开 `edge-functions/`；腾讯分析 / 灯塔；自建 Redis 或计数 API；把实时次数写进 `catalog.json`。
+- **背景**：公网给人看的目录现在是发布机上的静态目录（`update.firoyang.com`，nginx 直接伺服 browse dump）。早期目录托管在 EdgeOne Makers 时，曾评估用 Edge Function + KV 做点击/下载计数。KV 是最终一致（边缘缓存最长 60s）、没有原子 `INCR`，全国并发会大量丢数；Blob 强一致仍是 `get` 再 `put`，又慢又不准；运行时拿不到边缘节点 ID，按节点分片做不成。自建 Redis/API 对个人目录页不划算。腾讯分析（MTA）已停服；灯塔偏腾讯系 App/游戏，个人静态站开不顺、也不把数字画回页面。
+- **目标**：要计数，但只在统计后台看，不把次数画在产品卡片上。browse dump 的 HTML 嵌 51.la JS，PV 与下载点击用自定义事件上报到 51.la。请求打他们的服务，不打自己的发布机。
+- **不做**：边缘 KV / Blob 热路径 `+1`；为计数开边缘函数；腾讯分析 / 灯塔；自建 Redis 或计数 API；把实时次数写进 `catalog.json`。
 - **边缘函数**：继续留给无状态改写（鉴权、跳转、geo、功能开关）。KV 只当偶尔更新的配置盘，不当账本。
 - **落点（规划）**：`internal/browse` 生成的 HTML 嵌入 51.la；契约 README 写明。内网数据面同一份 dump 会带上脚本；精确下载次数仍以 serve 面板已有计数为准，不在此重复造账本。
 
@@ -66,9 +67,8 @@
 
 ## 操作面板：从本机盘长成发布管理
 
-- **状态**：后台壳已部署，COS 管理未实现。内网 `/-/admin` 管本机数据面（ADR 0006）；外网 `publish.firoyang.com/-/admin` 已接到只监听 loopback 的 `relkit-console`（读 `relkit-store` 本机树）。
-- **现网差**：外网 ingest 仍是 COS。CVM 上的 serve 只管理 `/srv/releases` 空目录，**看不到 COS 发布树**；它先提供受鉴权的后台进程与稳定 URL，不是假装已经恢复了发布管理。外网发布目前仍需 COS 控制台、browse dump 和 SSH；Dec 发版仍走 agent → COS，不经过 serve。
-- **目标**：面板继续进化成 relkit 后台（产品、发布、token、GC、日志），而且**外网 COS 上的发布也要管得到**，不要把「后台」锁死在 `relkit-store` 扫本机目录这一种实现上。拓扑里「以后长成 relkit 后台」就是这条，不是给内网再画一张更好看的首页。
-- **还没拍（落地前再写 ADR）**：现有外网 serve 如何读 COS 而不把 CAS 正文经 agent 转发、COS 与本机统计怎么统一、鉴权是否继续复用 ADR 0006 的实例运营账户。签发 / 吊销上传 token 继续只走 SSH + 本机 `init`，不要做成公网管理 API。
-- **不做（现阶段）**：为了有面板，把外网数据面从 COS 迁回本机盘；把 `/-/admin` 当对外目录；在 agent 上再开一套未鉴权的浏览页。
-- **落点（规划）**：`cmd/relkit-console`（serve 面板拆出的管理面，[ADR 0016](adr/0016-serve-split-store-console.md)）是起点：读已统一走 adapter，换数据面不再重写面板；进化时改这里并更新 [publish-topology §5](design/publish-topology.md)。
+- **状态**：内外网面板都已上线，入口 `publish.*/-/admin`，管本机 relkit-store 发布树；用户、角色、产品、token 的写操作经 agent `/v1/admin/*`（ADR 0023 第 8 条），下线产品带预演。
+- **现网**：外网 COS 已于 2026-09-26 清零，外网数据面与内网一样只有本机 `relkit-store`（`/srv/releases`），面板看得到全部发布树。原先外网发布树在 COS、面板看不到的差距已随迁移消失。
+- **目标**：面板继续进化成 relkit 后台（发布记录、GC、日志）。
+- **不做（现阶段）**：把 `/-/admin` 当对外目录；在 agent 上再开一套未鉴权的浏览页。
+- **落点**：`cmd/relkit-console`（[ADR 0016](adr/0016-serve-split-store-console.md)），读走 adapter；拓扑变化时更新 [topology.md](design/topology.md)。
