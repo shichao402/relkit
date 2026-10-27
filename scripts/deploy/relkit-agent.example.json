@@ -15,7 +15,5 @@
       {"type": "backend", "backend": "serve"},
       {"type": "directory", "path": "/srv/relkit/site"}
     ]
-  },
-  "uploadTokens": [],
-  "products": {}
+  }
 }
