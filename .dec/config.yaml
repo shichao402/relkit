@@ -1,0 +1,24 @@
+# Dec 项目配置
+# kind: project
+# version: 配置字段版本
+# layout_version: cache/secrets 布局版本
+# project_name: 绑定项目名
+
+kind: project
+version: v2
+layout_version: 1
+project_name: relkit
+provides_root: DecAssets
+provides:
+    relkit-ops:
+        source: DecAssets/skills/relkit-ops
+        visibility: public
+        plane: local
+        type: skill
+        name: relkit-ops
+    relkit-deploy:
+        source: DecAssets/skills/relkit-deploy
+        visibility: public
+        plane: local
+        type: skill
+        name: relkit-deploy
