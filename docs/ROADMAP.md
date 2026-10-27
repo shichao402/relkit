@@ -2,19 +2,13 @@
 
 尚未排期的意向，不等于已接受的 ADR。落地前再写决策。
 
-## vNext 断代重构（已实现，按认证域进入生产）
+## 桌面更新断代（已实现）
 
-- **审查入口（产品/宿主视角）**：[design/vnext/USER-ACCEPTANCE.md](design/vnext/USER-ACCEPTANCE.md)
-- **ADR**：[0019](adr/0019-vnext-breaking-and-protocol-contracts.md) 断代与协议 · [0020](adr/0020-vnext-catalog-operator-resolution.md) Catalog/Operator/Resolution · [0021](adr/0021-vnext-artifact-runtime-registry.md) ArtifactSet/Runtime Profile · [0022](adr/0022-vnext-certification-ops-skill.md) 认证/ops/Skill
-- **状态**：core / wrapper / ops、合同与组合 conformance、四宿主迁移样本均已落地；
-  生产按 Operator 认证域独立推进。首个公网 Dec 窗口见
-  [切换手册](design/vnext/cutover.md) 与
-  [推进记录](design/vnext/first-production-rollout.md)。
-- **接入面**：Loom、Loom-Launcher、SvnMergeTool、Dec 四宿主，没有第五个待迁移宿主。
-  cronkit 已由 2026-10-21 裁决退出接入范围，按“从未接入”处理，Relkit 不为它保留
-  兼容分支。
-- **原则**：不先修单仓倒推 Relkit；仓库身份不进入 core。使用者验收以
-  USER-ACCEPTANCE 的运行证据为准，ADR 正文不算“通过”。
+- **现行依据**：[architecture.md](architecture.md) 与 [ADR 0023](adr/0023-desktop-updater-epoch.md)。
+  ADR 0019–0022 描述的 vNext 形态已被 ADR 0023 取代，相应设计目录 `design/vnext/` 已删除。
+- **接入面**：Loom、Loom-Launcher、SvnMergeTool 三宿主。cronkit 已由 2026-10-21
+  裁决退出接入范围，按“从未接入”处理，Relkit 不为它保留兼容分支。
+- **原则**：不先修单仓倒推 Relkit；仓库身份不进入 core。
 
 内容寻址只保留发布侧去重：stage 之后往 COS/ingest 推产物时，blob 已存在则
 不重复上传。客户端不再规划把已装路径伪装成 `destPath` 来跳过整 artifact；

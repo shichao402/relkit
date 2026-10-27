@@ -6,6 +6,6 @@
 
 - 文中出现的 `scripts/host/relkit_host.py`、`release-policy.json`、`relkit.lock.json`、`.relkit/onboarding.json`、
   `relkit ci`、`relkit cas-put`、`relkit staged-put` 等命令与文件名，反映的是当时的控制面形态。
-- 这些入口已按 [ADR 0019](../adr/0019-vnext-breaking-and-protocol-contracts.md) §1 从代码中整体删除，
-  vNext 的接入与发布路径见 [`docs/design/vnext/`](../design/vnext/) 与 [README](../../README.md)。
+- 这些入口已从代码中整体删除，现行接入与发布路径见 [`docs/architecture.md`](../architecture.md)、
+  [ADR 0023](../adr/0023-desktop-updater-epoch.md) 与 [README](../../README.md)。
 - 历史文档里的旧路径文字不构成可执行入口，也不作为验收依据。

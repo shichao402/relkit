@@ -7,8 +7,8 @@ Relkit 不识别 Loom、Launcher、SvnMergeTool、Dec 或任何仓库身份。
 服务器根公钥与产品名；本次发布用哪个版本的 relkit、Profile 与工具，全部由服务端
 决定。一份 ArtifactSet 描述一次构建产出什么，staged release 是不可变树。
 
-使用者验收入口是
-[`docs/design/vnext/USER-ACCEPTANCE.md`](docs/design/vnext/USER-ACCEPTANCE.md)。
+现行架构与决策依据见 [`docs/architecture.md`](docs/architecture.md) 与
+[ADR 0023](docs/adr/0023-desktop-updater-epoch.md)。
 
 ## 产品边界
 
