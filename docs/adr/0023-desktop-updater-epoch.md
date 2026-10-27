@@ -4,7 +4,7 @@
 - 日期：2026-10-22
 - 取代：[ADR 0019](0019-vnext-breaking-and-protocol-contracts.md)、[ADR 0020](0020-vnext-catalog-operator-resolution.md)、[ADR 0021](0021-vnext-artifact-runtime-registry.md)、[ADR 0022](0022-vnext-certification-ops-skill.md) 与本次决策冲突的部分（逐条驳斥见 [驳斥文档](0019-0022-refutation.md)）
 - 关联：[ADR 0010](0010-single-updater-engine.md)（单引擎决策的前身，本 ADR 将其推到底）、[ADR 0013](0013-internal-update-payload.md)（payload 形态继续有效）、[ADR 0016](0016-serve-split-store-console.md)（console 只读定位由本 ADR 更新）、[`docs/architecture.md`](../architecture.md)（现行架构，与本 ADR 一致）
-- 需求：`.agent/desktop-updater-epoch/requirements.md` 需求 1.1、10、11、12、13、14、15、16、17
+- 依据：本 ADR 正文即为完整决策依据；现行实现以 [`docs/architecture.md`](../architecture.md) 为准
 
 ## 背景
 
