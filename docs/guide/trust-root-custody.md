@@ -10,8 +10,8 @@
 
 | 服务器 | 根 keyId | 指纹 | 私钥位置 |
 | --- | --- | --- | --- |
-| 内网（tencent-internal） | `relkit-candidate-2026b`（断代部署时改名为内网服务器根） | `sha256:3dc1ccb4…bf33` | 归档中 |
-| 外网（firoyang.com） | 断代部署时生成后登记 | 待登记 | 生成后登记 |
+| 内网（tencent-internal） | `tencent-internal-server-root`（原 `relkit-candidate-2026b`） | `sha256:3dc1ccb4…bf33` | 归档中 |
+| 外网（firoyang.com） | `firoyang-public-root`（2026-10-27 整机重建时生成） | `sha256:06253482…8e4c` | 归档中，服务器副本 `/etc/relkit-agent/keys/` |
 
 外网那把是**新服务器身份**，不是"私钥找不到后换根"，不违反下文硬规则。
 

@@ -79,7 +79,7 @@ agent 的写端点要求 publisher 双向窗口握手（[ADR 0009](../../docs/ad
 
 agent 对 publish profile 是 strict 解析：未知字段即拒（publish 阶段 400），不承诺向后兼容。升级前扫一遍目标机 `/etc/relkit-agent/products/*.json` 是否带结构体外字段（合法字段集 = relkit 源码 `internal/config/policy.go` 的 `PublishProfile` / `PublishDirectoryProfile` / `PublicKeyConfig`），有则删字段再升级。vNext 断代后通道与版本策略既不在 profile 也不在 staged 文档里，出现即拒；排障链路见 [`cmd/relkit-agent/README.md`](../../cmd/relkit-agent/README.md)。
 
-人页静态目录由 agent 顶层 `site.sinks[]`（ADR 0015）拥有；产品 profile 不携带站点配置。现网形态：外网 `[{"type":"backend","backend":"serve"},{"type":"directory","path":"/srv/relkit/site"}]`（nginx 直接伺服该目录），内网 `[{"type":"backend",...}]`（写进发布树 `browse/`），通用样例 `relkit-agent.example.json` 即外网形态。upgrade 仍会把遗留的 `site.makers` 迁移为 `site.sinks: [{"type":"makers",...}]`，但不会猜 projectId，也不会覆盖现网 agent JSON；Makers 现网已不用。改完 sinks 重启后用 `curl -fsS http://127.0.0.1:8787/-/site` 检查脱敏 readiness，再运行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。修人页不需要重发产品版本。
+人页由 agent 顶层 `site.sinks[]`（ADR 0015）拥有；产品 profile 不携带站点配置。现网形态内外网一致，都是 `[{"type":"backend","backend":"serve"}]`，写进发布树 `browse/` 后由 store 在 `update.*` 根路径渲染。通用样例 `relkit-agent.example.json` 仍带一个 `type: directory` 的落点，那是可选的第二落点（静态容灾），不是现网配置。upgrade 仍会把遗留的 `site.makers` 迁移为 `site.sinks: [{"type":"makers",...}]`，但不会猜 projectId，也不会覆盖现网 agent JSON；Makers 现网已不用。改完 sinks 重启后用 `curl -fsS http://127.0.0.1:8787/-/site` 检查脱敏 readiness，再运行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。修人页不需要重发产品版本。
 
 目标机必须已有 Python 3.9+（`python3` 或 `/usr/bin/python3`）、`systemctl`、sudo。CAS 探针的 key 必须是 body 的 sha256，能力 PUT 不要带 publish protocol 头。
 

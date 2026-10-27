@@ -52,7 +52,7 @@ node "服务器（内网 1 台 / 外网 1 台，同构）" {
   interface "读 Adapter\n按 tree.type 选" as ia
   database "发布树\n内 /data/relkit-serve\n外 /srv/releases" as tree
   folder "根私钥\n凭据清单" as key
-  folder "人页静态目录\n外 /srv/relkit/site\n内 发布树 browse/" as site
+  folder "人页\n内 发布树 browse/\n外 发布树 browse/" as site
 }
 
 ci --> vpub : 取工具 / CAS 直传 / 发布
@@ -85,7 +85,7 @@ store --> tree
 | --- | --- | --- |
 | `publish.*` | CI 写面 + 运营面板入口 | `/v1/`、`/-/health`、`/-/site` → agent 8787；`/-/admin`、`/-/p/`、`/-/latest/` → console 8081；其余 → store 8080 |
 | `update-internal.*` | updater 读面（SSOT） | 全部 → store 8080，仅 GET/HEAD；不转发 `/v1/`，所以不提供 `/v1/tools/` 与 `/v1/catalog` |
-| `update.*` | 人页 | 外网：nginx 直接伺服静态目录 `/srv/relkit/site`，没有 console。内网：转 store，读发布树里的 `browse/`；该 vhost 上残留的 `/-/admin` 等 console 路由属于迁移期遗留，面板的正式入口是 `publish.*/-/admin` |
+| `update.*` | 人页 | 全部 → store 8080，仅 GET；store 从发布树渲染 Releases 页，空目录时自己输出「No published catalog yet」。内外网同一形状，没有 console |
 
 三个进程的职责边界：
 
@@ -104,7 +104,7 @@ store --> tree
 | CI 写面 scheme | `http://`（蓝盾池到 443 被拦，箱上无 443 监听；已接受的偏离 D2） | `https://` |
 | store 数据目录 | `/data/relkit-serve` | `/srv/releases` |
 | agent 产品根 | `/data/relkit` | `/srv/relkit` |
-| 人页 sink | `type: backend`，写进发布树 `browse/` | `type: backend` + `type: directory`（`/srv/relkit/site`），nginx 直接伺服目录 |
+| 人页 sink | `type: backend`，写进发布树 `browse/` | 同左，`type: backend`（`serve`） |
 | agent `publicURL` | `http://publish.devcloud.woa.com` | `https://publish.firoyang.com` |
 
 CI 一律打域名，不打裸 IP、不打回环 hostname，也不建 SSH 隧道借道 loopback 端口。
