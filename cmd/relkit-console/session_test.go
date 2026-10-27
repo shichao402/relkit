@@ -48,7 +48,7 @@ func TestInitWritesConfigAndPanelState(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "panel.json")
 
 	var buf strings.Builder
-	if err := runInit(&buf, []string{"-store", "http://127.0.0.1:8080", "-state", state, "-out", out, "-agent", "https://agent.example.invalid"}); err != nil {
+	if err := runInit(&buf, []string{"-tree", `{"type":"relkit-compatible","url":"http://127.0.0.1:8080"}`, "-state", state, "-out", out, "-agent", "https://agent.example.invalid"}); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func TestInitWritesConfigAndPanelState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
-	if path == "" || cfg.Store != "http://127.0.0.1:8080" || cfg.AdminStateFile != state {
+	if path == "" || !sameSpec(t, cfg.Tree, `{"type":"relkit-compatible","url":"http://127.0.0.1:8080"}`) || cfg.AdminStateFile != state {
 		t.Fatalf("config=%+v path=%q", cfg, path)
 	}
 	if cfg.Agent != "https://agent.example.invalid" {
@@ -75,13 +75,41 @@ func TestInitWritesConfigAndPanelState(t *testing.T) {
 	}
 }
 
-// TestInitRequiresStore: the store is the only way the panel reads the tree,
-// so a config without one is not a config.
-func TestInitRequiresStore(t *testing.T) {
+// TestInitRequiresTree: the tree adapter is the only way the panel reads the
+// tree, so a config without one is not a config.
+func TestInitRequiresTree(t *testing.T) {
 	var buf strings.Builder
 	err := runInit(&buf, []string{"-out", t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "-store is required") {
-		t.Fatalf("err = %v, want -store is required", err)
+	if err == nil || !strings.Contains(err.Error(), "-tree is required") {
+		t.Fatalf("err = %v, want -tree is required", err)
+	}
+}
+
+// TestInitValidatesTreeThroughTheFactory: init refuses a spec the factory
+// would refuse, and accepts the same spec from a file.
+func TestInitValidatesTreeThroughTheFactory(t *testing.T) {
+	var buf strings.Builder
+	err := runInit(&buf, []string{"-tree", `{"type":"local-disk"}`, "-out", t.TempDir(),
+		"-state", filepath.Join(t.TempDir(), "panel.json")})
+	if err == nil || !strings.Contains(err.Error(), "unknown tree adapter type") {
+		t.Fatalf("err = %v, want unknown type", err)
+	}
+
+	specFile := filepath.Join(t.TempDir(), "tree.json")
+	if err := os.WriteFile(specFile, []byte(`{"type":"relkit-compatible","url":"http://127.0.0.1:8080"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if err := runInit(&buf, []string{"-tree", "@" + specFile, "-out", out,
+		"-state", filepath.Join(t.TempDir(), "panel.json")}); err != nil {
+		t.Fatalf("runInit @file: %v", err)
+	}
+	cfg, _, err := LoadFileConfig(filepath.Join(out, ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameSpec(t, cfg.Tree, `{"type":"relkit-compatible","url":"http://127.0.0.1:8080"}`) {
+		t.Fatalf("tree = %s", cfg.Tree)
 	}
 }
 
@@ -103,7 +131,7 @@ func TestInitRefusesExistingConfig(t *testing.T) {
 	out := t.TempDir()
 	writeFile(t, out, ConfigName, []byte("{}\n"))
 	var buf strings.Builder
-	err := runInit(&buf, []string{"-store", "http://127.0.0.1:8080", "-state", filepath.Join(t.TempDir(), "panel.json"), "-out", out})
+	err := runInit(&buf, []string{"-tree", `{"type":"relkit-compatible","url":"http://127.0.0.1:8080"}`, "-state", filepath.Join(t.TempDir(), "panel.json"), "-out", out})
 	if err == nil {
 		t.Fatal("init over an existing config must fail")
 	}
@@ -122,7 +150,7 @@ func TestInitResetAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, out, ConfigName, []byte("{\"store\":\"http://127.0.0.1:8080\",\"adminStateFile\":"+string(quoted)+"}\n"))
+	writeFile(t, out, ConfigName, []byte("{\"tree\":{\"type\":\"relkit-compatible\",\"url\":\"http://127.0.0.1:8080\"},\"adminStateFile\":"+string(quoted)+"}\n"))
 	first, err := mintPanelDoc()
 	if err != nil {
 		t.Fatal(err)

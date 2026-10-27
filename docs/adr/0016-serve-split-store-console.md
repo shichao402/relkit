@@ -74,6 +74,8 @@ rebuild 成功路径的末尾（`dump.sha256` 写入之后、members 写入之�
 
 6. console 只走 store、删除下载计数（2026-10-26）：`rootAdapter`（本机目录直读）删除，`storeAdapter` 成为 Adapter 唯一实现，`store` 必填，console 不再有 `-dir`。理由是 rootAdapter 让内网 console 走本机盘捷径、外网走 HTTP，两边形态不同构。下载计数随之在 console 与 store 两侧整体删除（store 伺服热路径不再写树内 stats 文件），以后另行设计。面板会话 key 迁出发布树，落 `/var/lib/relkit-console/panel.json`（systemd `StateDirectory`），部署脚本 `upgrade` 自动搬迁旧文件并删除 console 配置里的 `dir`/`stateDir`。树内旧的 admin/stats 文件名仍由 store 隐藏。第 2、3、5 步中关于 rootAdapter 与计数的描述是当时状态。
 
+7. console 读 adapter 只露抽象条目（2026-10-27）：第 6 步把 `-dir` 换成顶层 `store` 键与 `-store` 参数，实现名和它的地址仍然暴露在配置顶层、命令行和部署脚本里（部署脚本还会翻本机 store 的 unit 找地址），其他切面照样认识实现，这只是过渡形态。现在照存储面 Backend 的形状收敛：console 配置只有一个 `tree` 条目 `{"type": ..., 该实现的参数}`，工厂 `newAdapter` 按 type 选实现，入口只持有 `Adapter` 接口；原 storeAdapter 注册为 `relkit-compatible`（与 Backend 共用 type 名，参数 `url`）。`init` 改为 `-tree`，部署脚本 `install console` 从样例配置整块搬运 `tree` 条目、不读内容、不探测 store；顶层 `dir`/`store`/`stateDir` 启动即拒，只由 `upgrade` 的一次性迁移改写成 `tree` 条目。第 6 步原文是当时状态。
+
 ## 后果
 
 - serve 命名已退役：`cmd/relkit-serve` 删除，`cmd/relkit-store` / `cmd/relkit-console` 为唯二服务二进制。协议、配置形状、数据文件名对客户端与运维面保持不变。

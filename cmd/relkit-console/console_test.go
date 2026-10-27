@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,8 @@ const (
 
 // newTestConsole assembles a console over a temp release tree plus a stub
 // agent holding one operator, the test counterpart of main(): the tree is
-// served by a fake store and read through storeAdapter, exactly the path
+// served by a fake store and read through the adapter newAdapter builds from a
+// "tree" spec, exactly the path
 // production takes, and the panel state lives outside the tree. The agent is a
 // stub because the panel has no accounts of its own any more (requirement
 // 13.6); a test that needs a specific agent answer builds its own with
@@ -48,16 +50,34 @@ func newTestConsole(t *testing.T) (*console, string) {
 	return c, dir
 }
 
-// newTreeAdapter serves dir through a fake store and returns the adapter the
-// console would build for it. There is no other adapter to build.
+// newTreeAdapter serves dir through a fake store and builds the adapter the
+// way main() does: from a "tree" spec, through the factory.
 func newTreeAdapter(t *testing.T, dir string) Adapter {
 	t.Helper()
 	srv := newFakeStoreServer(t, dir)
-	adapter, err := newStoreAdapter("store:test", srv.URL)
+	adapter, err := newAdapter(treeSpec(srv.URL))
 	if err != nil {
-		t.Fatalf("newStoreAdapter: %v", err)
+		t.Fatalf("newAdapter: %v", err)
 	}
 	return adapter
+}
+
+// sameSpec reports whether two specs carry the same fields and values.
+func sameSpec(t *testing.T, got AdapterSpec, want string) bool {
+	t.Helper()
+	var a, b any
+	if err := json.Unmarshal(got, &a); err != nil {
+		t.Fatalf("decode got: %v", err)
+	}
+	if err := json.Unmarshal([]byte(want), &b); err != nil {
+		t.Fatalf("decode want: %v", err)
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+// treeSpec is the relkit-compatible spec for a test store URL.
+func treeSpec(url string) AdapterSpec {
+	return AdapterSpec(`{"type":"relkit-compatible","url":"` + url + `"}`)
 }
 
 // readyTestAdmin is the serve version carried over: one user, deterministic
@@ -249,12 +269,12 @@ func (f fakeStore) serveList(w http.ResponseWriter, r *http.Request) {
 	hidden := func(name string) bool {
 		return strings.HasPrefix(name, ".relkit-serve-")
 	}
-	rows := make([]storeEntryJSON, 0, len(dirEntries))
+	rows := make([]relkitEntryJSON, 0, len(dirEntries))
 	for _, entry := range dirEntries {
 		if hidden(entry.Name()) {
 			continue
 		}
-		row := storeEntryJSON{Name: entry.Name(), IsDir: entry.IsDir()}
+		row := relkitEntryJSON{Name: entry.Name(), IsDir: entry.IsDir()}
 		if info, err := entry.Info(); err == nil {
 			row.Size = info.Size()
 			row.Mtime = info.ModTime().UTC().Format(time.RFC3339)
@@ -277,18 +297,18 @@ func newFakeStoreServer(t *testing.T, dir string) *httptest.Server {
 	return srv
 }
 
-func TestStoreAdapterReadsRemoteTree(t *testing.T) {
+func TestRelkitCompatibleAdapterReadsRemoteTree(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "index/loom/dev.pb", []byte("x"))
 	writeFile(t, dir, "artifact/loom/1.0.0/loom.zip", []byte("pkg"))
 	writeFile(t, dir, ".relkit-serve-admin.json", []byte(`{}`))
 
 	srv := newFakeStoreServer(t, dir)
-	a, err := newStoreAdapter("store:test", srv.URL)
+	a, err := newAdapter(treeSpec(srv.URL))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Name() != "store:test" {
+	if !strings.HasPrefix(a.Name(), "relkit-compatible:") {
 		t.Fatalf("name = %q", a.Name())
 	}
 
@@ -331,14 +351,79 @@ func TestStoreAdapterReadsRemoteTree(t *testing.T) {
 	}
 }
 
-func TestStoreAdapterRejectsBadURLs(t *testing.T) {
+func TestRelkitCompatibleAdapterRejectsBadURLs(t *testing.T) {
 	for _, raw := range []string{"", "ftp://example.com", "http://", "not a url"} {
-		if _, err := newStoreAdapter("store:test", raw); err == nil {
-			t.Errorf("newStoreAdapter(%q) should fail", raw)
+		if _, err := newAdapter(treeSpec(raw)); err == nil {
+			t.Errorf("url %q should be rejected", raw)
 		}
 	}
-	if _, err := newStoreAdapter("store:test", "http://127.0.0.1:9999"); err != nil {
+	if _, err := newAdapter(treeSpec("http://127.0.0.1:9999")); err != nil {
 		t.Fatalf("valid URL rejected: %v", err)
+	}
+	// Parameters are the implementation's own and decoded strictly.
+	if _, err := newAdapter(AdapterSpec(`{"type":"relkit-compatible","url":"http://127.0.0.1:9999","dir":"/x"}`)); err == nil {
+		t.Fatal("unknown parameter must be rejected")
+	}
+}
+
+// TestAdapterFactoryRejectsMissingOrUnknownType: the factory is the only way
+// in, and it names what it accepts rather than guessing.
+func TestAdapterFactoryRejectsMissingOrUnknownType(t *testing.T) {
+	cases := map[string]AdapterSpec{
+		"absent":  nil,
+		"null":    AdapterSpec(`null`),
+		"no type": AdapterSpec(`{"url":"http://127.0.0.1:9999"}`),
+		"unknown": AdapterSpec(`{"type":"local-disk","path":"/srv/releases"}`),
+	}
+	for name, spec := range cases {
+		_, err := newAdapter(spec)
+		if err == nil {
+			t.Errorf("%s: want error", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "relkit-compatible") {
+			t.Errorf("%s: error should list available types: %v", name, err)
+		}
+	}
+}
+
+// TestConfigRejectsRetiredKeys: a config that still names one implementation's
+// parameters at the top level refuses to start and says how to migrate.
+func TestConfigRejectsRetiredKeys(t *testing.T) {
+	for _, body := range []string{
+		`{"addr":"127.0.0.1:8081","store":"http://127.0.0.1:8080"}`,
+		`{"addr":"127.0.0.1:8081","dir":"/data/relkit-serve"}`,
+		`{"tree":{"type":"relkit-compatible","url":"http://127.0.0.1:8080"},"stateDir":"/data/relkit-agent"}`,
+	} {
+		dir := t.TempDir()
+		writeFile(t, dir, ConfigName, []byte(body))
+		_, _, err := LoadFileConfig(filepath.Join(dir, ConfigName))
+		if err == nil || !strings.Contains(err.Error(), "upgrade") {
+			t.Errorf("config %s: err = %v, want a pointer to upgrade", body, err)
+		}
+	}
+}
+
+// TestConfigKeepsTreeSpecAsWritten: the console never edits an
+// implementation's block; a load keeps it as written and a save carries the
+// same fields and values.
+func TestConfigKeepsTreeSpecAsWritten(t *testing.T) {
+	dir := t.TempDir()
+	spec := `{"type":"relkit-compatible","url":"http://127.0.0.1:8080"}`
+	writeFile(t, dir, ConfigName, []byte(`{"addr":"127.0.0.1:8081","tree":`+spec+`}`))
+	cfg, _, err := LoadFileConfig(filepath.Join(dir, ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cfg.Tree) != spec {
+		t.Fatalf("tree = %s", cfg.Tree)
+	}
+	var saved FileConfig
+	if err := json.Unmarshal(skeletonBytes(cfg.Tree, "", "/var/lib/relkit-console/panel.json"), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if !sameSpec(t, saved.Tree, spec) {
+		t.Fatalf("skeleton changed the spec: %s", saved.Tree)
 	}
 }
 

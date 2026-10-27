@@ -145,8 +145,8 @@ def render_console_unit(
 ) -> str:
     """Render relkit-console.service.
 
-    The panel reads the release tree through relkit-store over HTTP and never
-    opens it, so the unit grants no access to it. Its only write is the cookie
+    The panel reads the release tree through its tree adapter and never opens
+    it, so the unit grants no access to it. Its only write is the cookie
     key under StateDirectory; extra_write_paths is non-empty only when an
     operator pointed adminStateFile somewhere else on purpose.
     """

@@ -19,6 +19,8 @@ status: approved
 
 三句话概括现状：每台服务器三个进程；三组域名各管一件事；发布与下载是两条独立链路，唯一交汇点是 store 里的发布树。
 
+图一里的三个圆圈节点是接缝，不是进程：agent 写存储、site rebuild 写人页、console 读发布树，都只经过一个按 `type` 选实现的抽象层，虚线才落到现网的具体实现。换实现只改那一个配置条目，图上的实线不变。接缝本身见第六节。
+
 ## 一、总览
 
 ```plantuml
@@ -45,6 +47,9 @@ node "服务器（内网 1 台 / 外网 1 台，同构）" {
   [relkit-agent\n127.0.0.1:8787] as agent
   [relkit-store\n:8080] as store
   [relkit-console\n127.0.0.1:8081] as console
+  interface "存储面 Backend\n按 backends.<名>.type 选" as ib
+  interface "人页 sink\n按 site.sinks[].type 选" as isk
+  interface "读 Adapter\n按 tree.type 选" as ia
   database "发布树\n内 /data/relkit-serve\n外 /srv/releases" as tree
   folder "根私钥\n凭据清单" as key
   folder "人页静态目录\n外 /srv/relkit/site\n内 发布树 browse/" as site
@@ -63,10 +68,13 @@ vint --> store : 只 GET/HEAD
 vupd --> site : 人页
 
 agent --> key : 签名
-agent --> store : Promote / 写 manifest / 写 index 指针
-agent --> site : site rebuild
+agent --> ib : Promote / 写 manifest / 写 index 指针
+agent --> isk : site rebuild
 console --> agent : 写操作走 /v1/admin/*
-console ..> tree : 只读
+console --> ia : 只读
+ib ..> store : relkit-compatible（现网）
+isk ..> site : directory / backend（现网）
+ia ..> store : relkit-compatible（现网）
 store --> tree
 @enduml
 ```
@@ -83,7 +91,7 @@ store --> tree
 
 - `relkit-agent` 是唯一持有根私钥、唯一做签名的进程。它签 Profile / Catalog / directory / index / manifest 与工具的 SSH 签名，签发 CAS 上传凭据，接收 `POST /v1/publish`，经 store 的接口完成 Promote、写 manifest、写 index 指针，最后跑 site rebuild。它自己不经手产物正文。
 - `relkit-store` 管发布树：匿名 GET/HEAD（含 Range），凭能力 URL 接收 CI 直传的 `cas/<sha256>`，接受 agent 的受控写入。不含签名能力。
-- `relkit-console` 按 adapter 只读读取发布树（本机目录，或 `-store` 指定的 store URL）。用户、角色、产品、token 这些写操作全部转 agent 的 `/v1/admin/*`，自己不写发布树。
+- `relkit-console` 只经读 Adapter 读取发布树，Adapter 由配置里的 `tree` 条目决定（现网 `relkit-compatible`，即经 HTTP 读本机 store），console 不直接打开本机目录。用户、角色、产品、token 这些写操作全部转 agent 的 `/v1/admin/*`，自己不写发布树。
 
 所以"谁写发布树"有两个入口：CI 凭 agent 签发的能力 URL 直接 PUT `cas/`；其余写入（`artifact/`、`manifest/`、`index/`、人面数据文档）都由 agent 经 store 接口完成。
 
@@ -268,7 +276,7 @@ client -> client : 逐层验签，通过才装
 
 ## 六、可替换的接缝
 
-图一到图五把 store 画成一个固定节点，那是现网实例。结构上，凡是"数据落在哪、从哪读"的地方都隔着一层小接口，调用方只认接口，不按实现类型分叉。共三处：
+图二到图五把 store 画成一个固定节点，那是现网实例。结构上，凡是"数据落在哪、从哪读"的地方都隔着一层小接口，调用方只认接口，不按实现类型分叉。共三处，三处同形：调用方手里只有一个带 `type` 的配置条目，工厂按 `type` 选实现，实现自己解析条目里的其余参数。
 
 ```plantuml
 @startuml
@@ -280,13 +288,27 @@ component "relkit-agent\nCAS 凭据 / Promote / 写 manifest、index" as agent
 component "site rebuild" as rebuild
 component "relkit-console" as console
 
+rectangle "产品配置 backends.<名>\n{type, 该实现的参数}" as cb
+rectangle "agent 配置 site.sinks[]\n{type, 该实现的参数}" as cs
+rectangle "console 配置 tree\n{type, 该实现的参数}" as ct
+
+control "backends.Create(type)" as fb
+control "resolveSinks(type)" as fs
+control "newAdapter(type)" as fa
+
 interface "Backend\nPut* / Get / URLFor\n可选：CASUploadAuthorizer / Promote\nIngest / Deleter / Preflight" as IB
 interface "sink\nDeploy(dump)" as IS
 interface "Adapter（只读）\nReadKey / ReadDir / ModTime" as IA
 
-agent --> IB
-rebuild --> IS
-console --> IA
+agent --> cb
+rebuild --> cs
+console --> ct
+cb --> fb
+cs --> fs
+ct --> fa
+fb --> IB
+fs --> IS
+fa --> IA
 
 package "存储面" {
   [relkit-compatible\n→ relkit-store（现网）] as rc
@@ -306,8 +328,8 @@ IS <|.. sm
 sb ..> IB
 
 package "console 读" {
-  [storeAdapter\nHTTP 读 store 的 /-/list/（内外网同一实现）] as sa
-  [s3 读 adapter\n（缺，见 ROADMAP）] as s3r #line.dashed
+  [relkit-compatible\nHTTP 读 store 的树与 /-/list/（现网，内外网同一实现）] as sa
+  [s3-compatible\n（缺，见 ROADMAP）] as s3r #line.dashed
 }
 IA <|.. sa
 IA <|.. s3r
@@ -316,15 +338,17 @@ IA <|.. s3r
 
 | 接缝 | 接口位置 | 选择方式 | 决策 |
 | --- | --- | --- | --- |
-| 存储面 Backend | `internal/backends/base.go` | 产品配置的 `backends` 与 `publishTo`，agent 按产品 `backends.Create` | [ADR 0008](../adr/0008-cas-data-plane-contract.md) |
-| 人页 sink | `internal/site/site.go` | agent 配置 `site.sinks` | [ADR 0015](../adr/0015-declarative-site-sinks.md) |
-| console 读 Adapter | `cmd/relkit-console/adapters.go` | console 配置 `store`（必填）；只有 storeAdapter 一个实现，console 不直接读本机目录，内外网同构 | [ADR 0016](../adr/0016-serve-split-store-console.md) |
+| 存储面 Backend | `internal/backends/base.go` | 产品配置 `backends.<名>.type`（`publishTo` 选用哪些），工厂 `backends.Create` | [ADR 0008](../adr/0008-cas-data-plane-contract.md) |
+| 人页 sink | `internal/site/site.go` | agent 配置 `site.sinks[].type`，工厂 `resolveSinks` | [ADR 0015](../adr/0015-declarative-site-sinks.md) |
+| console 读 Adapter | `cmd/relkit-console/adapters.go` | console 配置 `tree.type`，工厂 `newAdapter`；现网只有 `relkit-compatible`，内外网同一条目形状 | [ADR 0016](../adr/0016-serve-split-store-console.md) |
 
 要点：
 
 - 可选能力用独立小接口表达（`backend.(backends.CASUploadAuthorizer)` 这类断言），不往 Backend 主接口里塞。两种存储后端都实现了 CAS 直传授权和 Promote，所以图二的直传链路对 COS 同样成立，差别只是能力 URL 换成预签名 URL。
 - 三处接缝不对称：存储面能换成 COS，人页也能跟着写过去，但 console 没有 S3 读 adapter。数据面一旦换成 COS，面板会读不到发布树。现网内外都是 store，不受影响，缺口登记在 [ROADMAP](../ROADMAP.md)。
 - 换实现只改配置，不改调用方。这是这三个接口存在的全部理由；哪天某处开始按实现类型写 `if`，接缝就失效了。
+- 实现不外露。对其他切面（进程入口、配置文件顶层、命令行参数、部署脚本、本文以外的文档）来说，只看得见抽象条目 `{type, ...}`；实现名和实现专属参数（如 `url`、`bucket`）只在条目内部，由该实现的构造函数解析。部署脚本整块搬运 `tree` 条目、不读其内容，也不去探测本机装了哪个 store。反例是已删除的 console `rootAdapter` 与过渡期的顶层 `store` 键：前者让一个实现直接和本机目录打交道，后者把实现名和它的地址提到了配置顶层，两者都让其他切面认识了实现。
+- type 名在三处接缝间共用：console 的 `relkit-compatible` 读的就是存储面 `relkit-compatible` 写进去的同一套协议，一个协议一个名字；将来的 S3 读 adapter 同样叫 `s3-compatible`。
 
 ## 相关
 

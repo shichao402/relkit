@@ -1155,16 +1155,61 @@ class ConsoleAdminPathTests(unittest.TestCase):
         self.assertEqual(args.console_binary, "dist/relkit-console-linux-amd64")
         self.assertFalse(args.no_console)
 
-    def test_install_console_takes_a_store_not_a_tree(self):
+    def test_install_console_names_no_adapter_implementation(self):
         args = deploy_cli.build_parser().parse_args(
-            ["install", "console", "--binary", "b", "--store", "http://127.0.0.1:8080"]
+            ["install", "console", "--binary", "b", "--config-example", "x.json"]
         )
-        self.assertEqual(args.store, "http://127.0.0.1:8080")
-        self.assertFalse(hasattr(args, "dir"))
-        self.assertFalse(hasattr(args, "state_dir"))
+        self.assertEqual(args.config_example, "x.json")
+        for name in ("store", "dir", "state_dir", "tree"):
+            self.assertFalse(hasattr(args, name), name)
+        with self.assertRaises(SystemExit):
+            deploy_cli.build_parser().parse_args(
+                ["install", "console", "--binary", "b", "--store", "http://127.0.0.1:8080"]
+            )
 
 
-class ConsoleConfigNormalizeTests(unittest.TestCase):
+class ConsoleTreeSpecTests(unittest.TestCase):
+    """The deploy layer carries the tree adapter entry whole and never reads it."""
+
+    def _example(self, body: str) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = tmp / "relkit-console.json"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_entry_is_returned_unchanged(self):
+        path = self._example('{"tree": {"type": "anything", "whatever": [1, 2]}}')
+        self.assertEqual(
+            json.loads(deploy_cli.console_tree_spec(path)),
+            {"type": "anything", "whatever": [1, 2]},
+        )
+
+    def test_missing_entry_fails_instead_of_guessing(self):
+        for body in ('{}', '{"tree": {}}', '{"store": "http://127.0.0.1:8080"}'):
+            with self.assertRaises(SystemExit, msg=body):
+                deploy_cli.console_tree_spec(self._example(body))
+
+    def test_missing_example_fails(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with self.assertRaises(SystemExit):
+            deploy_cli.console_tree_spec(tmp / "absent.json")
+
+    def test_examples_share_one_shape(self):
+        public = json.loads((DEPLOY / "relkit-console.example.json").read_text(encoding="utf-8"))
+        intranet = json.loads((DEPLOY / "relkit-console.intranet.example.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(public), set(intranet))
+        self.assertEqual(set(public["tree"]), set(intranet["tree"]))
+        self.assertEqual(public["tree"]["type"], intranet["tree"]["type"])
+
+    def test_install_console_does_not_probe_the_store(self):
+        source = inspect.getsource(deploy_cli.cmd_install_console)
+        self.assertNotIn('local_service_url("relkit-store")', source)
+        self.assertNotIn("args.store", source)
+
+
+class ConsoleConfigMigrationTests(unittest.TestCase):
     """The live config must decode on the new binary, which is strict."""
 
     LIVE = {
@@ -1174,41 +1219,61 @@ class ConsoleConfigNormalizeTests(unittest.TestCase):
         "stateDir": "/data/relkit-agent",
         "agent": "http://127.0.0.1:8787",
     }
+    LOCAL = "http://127.0.0.1:8080"
 
-    def test_intranet_config_moves_onto_the_store(self):
-        updated, notes = deploy_cli.normalize_console_config(dict(self.LIVE), "http://127.0.0.1:8080")
+    def test_intranet_config_becomes_a_tree_entry(self):
+        updated, notes = deploy_cli.migrate_console_config(dict(self.LIVE), self.LOCAL)
         self.assertEqual(
             updated,
-            {"addr": "127.0.0.1:8081", "agent": "http://127.0.0.1:8787", "store": "http://127.0.0.1:8080"},
+            {
+                "addr": "127.0.0.1:8081",
+                "agent": "http://127.0.0.1:8787",
+                "tree": {"type": "relkit-compatible", "url": self.LOCAL},
+            },
         )
-        self.assertTrue(notes)
+        self.assertTrue(any("tree adapter" in note for note in notes))
 
-    def test_retired_keys_are_dropped(self):
-        updated, _ = deploy_cli.normalize_console_config(dict(self.LIVE), "http://127.0.0.1:8080")
-        for key in deploy_cli.CONSOLE_RETIRED_KEYS:
-            self.assertNotIn(key, updated)
+    def test_store_key_becomes_a_tree_entry(self):
+        updated, _ = deploy_cli.migrate_console_config({"store": "https://s.example.invalid"}, self.LOCAL)
+        self.assertEqual(updated, {"tree": {"type": "relkit-compatible", "url": "https://s.example.invalid"}})
 
-    def test_chosen_store_is_kept(self):
-        cfg = {"store": "https://store.example.invalid"}
-        updated, notes = deploy_cli.normalize_console_config(cfg, "http://127.0.0.1:8080")
-        self.assertEqual(updated["store"], "https://store.example.invalid")
+    def test_legacy_keys_are_dropped(self):
+        updated, _ = deploy_cli.migrate_console_config(dict(self.LIVE, store="http://x"), self.LOCAL)
+        self.assertEqual(deploy_cli.console_retired_keys(updated), [])
+
+    def test_existing_tree_entry_is_never_opened(self):
+        tree = {"type": "s3-compatible", "bucket": "b", "anything": True}
+        updated, notes = deploy_cli.migrate_console_config({"tree": dict(tree)}, self.LOCAL)
+        self.assertEqual(updated, {"tree": tree})
         self.assertEqual(notes, [])
 
+    def test_nothing_to_migrate_from_is_left_without_a_tree(self):
+        updated, _ = deploy_cli.migrate_console_config({"addr": "127.0.0.1:8081"}, self.LOCAL)
+        self.assertNotIn("tree", updated)
+
     def test_relative_state_file_is_dropped(self):
-        cfg = {"store": "http://s", "adminStateFile": ".relkit-serve-admin.json"}
-        updated, _ = deploy_cli.normalize_console_config(cfg, "")
+        cfg = {"tree": {"type": "relkit-compatible"}, "adminStateFile": ".relkit-serve-admin.json"}
+        updated, _ = deploy_cli.migrate_console_config(cfg, "")
         self.assertNotIn("adminStateFile", updated)
 
     def test_state_file_outside_the_tree_is_kept(self):
-        cfg = {"store": "http://s", "dir": "/data/t", "adminStateFile": "/opt/panel/panel.json"}
-        updated, _ = deploy_cli.normalize_console_config(cfg, "")
+        cfg = {"dir": "/data/t", "adminStateFile": "/opt/panel/panel.json"}
+        updated, _ = deploy_cli.migrate_console_config(cfg, self.LOCAL)
         self.assertEqual(updated["adminStateFile"], "/opt/panel/panel.json")
 
     def test_second_run_is_idempotent(self):
-        once, _ = deploy_cli.normalize_console_config(dict(self.LIVE), "http://127.0.0.1:8080")
-        twice, notes = deploy_cli.normalize_console_config(once, "http://127.0.0.1:8080")
+        once, _ = deploy_cli.migrate_console_config(dict(self.LIVE), self.LOCAL)
+        twice, notes = deploy_cli.migrate_console_config(once, self.LOCAL)
         self.assertEqual(notes, [])
         self.assertEqual(once, twice)
+
+    def test_legacy_names_live_only_in_the_migration(self):
+        source = inspect.getsource(deploy_cli)
+        migration = inspect.getsource(deploy_cli.migrate_console_config)
+        retired = inspect.getsource(deploy_cli.console_retired_keys)
+        outside = source.replace(migration, "").replace(retired, "")
+        self.assertNotIn('cfg.get("store")', outside)
+        self.assertNotIn('"-store"', outside)
 
 
 class ListenerOwnershipTests(unittest.TestCase):

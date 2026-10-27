@@ -679,14 +679,15 @@ def write_agent_unit(
 
 # The panel's own state: one cookie signing key, nothing else; losing it only
 # signs operators out. It lives in the console's systemd StateDirectory, never
-# in the release tree: the panel reads that tree through relkit-store like any
-# other client, and keeps no shortcut into it (same shape on every box).
+# in the release tree: the panel reads that tree through its tree adapter like
+# any other client, and keeps no shortcut into it (same shape on every box).
 CONSOLE_STATE_DIR = "/var/lib/relkit-console"
 CONSOLE_STATE_FILE = CONSOLE_STATE_DIR + "/panel.json"
 
-# Config keys a console no longer accepts. Its config is strict-decoded, so a
-# box still carrying them would refuse to start on the new binary.
-CONSOLE_RETIRED_KEYS = ("dir", "stateDir")
+# The example a fresh console config is cut from. Its "tree" entry is the
+# panel's tree adapter; this script copies the entry whole and never reads
+# inside it, so the deploy layer does not know which adapter a box uses.
+CONSOLE_CONFIG_EXAMPLE = "relkit-console.example.json"
 
 
 def console_admin_path(console_cfg: dict[str, Any]) -> PurePosixPath:
@@ -1086,6 +1087,22 @@ def local_service_url(unit: str) -> str:
     return loopback_base(addr) if addr else ""
 
 
+def console_tree_spec(example: Path) -> str:
+    """The "tree" entry of a console config example, serialized unchanged.
+
+    The entry is the panel's tree adapter: a type plus that type's own
+    parameters. Only relkit-console interprets it; this returns it as an
+    opaque JSON block.
+    """
+    if not example.is_file():
+        die(f"{example} does not exist; a console config needs a \"tree\" adapter entry")
+    doc = load_json_object(example.read_text(encoding="utf-8"))
+    tree = doc.get("tree")
+    if not isinstance(tree, dict) or not tree:
+        die(f"{example} has no \"tree\" adapter entry; the panel cannot read the tree without one")
+    return json.dumps(tree, separators=(",", ":"))
+
+
 def cmd_install_console(args: argparse.Namespace) -> None:
     must_root()
     require_cmd("systemctl")
@@ -1098,12 +1115,11 @@ def cmd_install_console(args: argparse.Namespace) -> None:
     config_path = config_dir / "relkit-console.json"
     dest_bin = Path(prefix) / "relkit-console"
 
-    # The panel reads the tree through relkit-store over HTTP, on this box the
-    # same as on any other, so the one thing it must be told is where the store
-    # is. A co-located store is found from its own config.
-    store_url = args.store or local_service_url("relkit-store")
-    if not store_url:
-        die("no relkit-store found on this box; pass --store URL")
+    # The panel reads the tree through its tree adapter. Which adapter, and
+    # with what parameters, is the "tree" entry of the config example; it is
+    # carried over whole, so this script never learns what is behind it.
+    example = Path(args.config_example) if args.config_example else DEPLOY_DIR / CONSOLE_CONFIG_EXAMPLE
+    tree_spec = console_tree_spec(example)
     agent_url = args.agent or local_service_url("relkit-agent")
 
     step(f"Service account: {user}")
@@ -1119,7 +1135,7 @@ def cmd_install_console(args: argparse.Namespace) -> None:
     chown_path(config_dir, user)
 
     if not config_path.is_file():
-        init_args = [str(dest_bin), "init", "-store", store_url, "-out", str(config_dir), "-force"]
+        init_args = [str(dest_bin), "init", "-tree", tree_spec, "-out", str(config_dir), "-force"]
         if agent_url:
             init_args += ["-agent", agent_url]
         run(init_args, capture=True)
@@ -1145,7 +1161,7 @@ def cmd_install_console(args: argparse.Namespace) -> None:
     step("Self-check")
     addr = str(cfg_doc.get("addr") or args.addr)
     wait_health(loopback_base(addr), "relkit-console")
-    print(f"panel on {addr} reading {cfg_doc.get('store')}")
+    print(f"panel on {addr}")
     print(f"config {config_path}")
     print("first operator: relkit-agent init -bootstrap, then open /-/admin")
     print("break-glass: relkit-console init -reset-admin -out " + str(config_dir))
@@ -1428,7 +1444,7 @@ def probe_local() -> dict[str, Any]:
                 str(panel_file).startswith(path.rstrip("/") + "/") or str(panel_file) == path
                 for path in writable
             )
-            entry["retiredConfigKeys"] = [key for key in CONSOLE_RETIRED_KEYS if key in cfg]
+            entry["retiredConfigKeys"] = console_retired_keys(cfg)
         probe[kind] = entry
     agent_cfg_path = probe.get("agent", {}).get("configPath")
     products_dir = Path("/etc/relkit-agent/products")
@@ -1986,29 +2002,46 @@ def apply_agent_upgrade(
     return notes
 
 
-def normalize_console_config(
-    console_cfg: dict[str, Any], store_url: str
-) -> tuple[dict[str, Any], list[str]]:
-    """Bring a console config onto the store-only shape.
+# Old console configs named one tree adapter's parameters at the top level:
+# `dir` (read the tree from this box's disk) and later `store` (read it from
+# this relkit-store URL), plus a serve-era `stateDir`. The new binary is
+# strict-decoded and refuses all three; this migration is the only place in
+# the deploy layer that knows what they meant.
+_CONSOLE_LEGACY_KEYS = ("dir", "store", "stateDir")
 
-    The console reads the tree through relkit-store and nothing else, so `dir`
-    and `stateDir` are gone (and fatal: the config is strict-decoded), `store`
-    must be set, and the panel state may not sit in the release tree. A store
-    URL an operator already chose is kept; store_url only fills a gap.
-    Returns the new config and one note per change.
+
+def console_retired_keys(console_cfg: dict[str, Any]) -> list[str]:
+    """Legacy top-level keys a console config still carries."""
+    return [key for key in _CONSOLE_LEGACY_KEYS if key in console_cfg]
+
+
+def migrate_console_config(
+    console_cfg: dict[str, Any], local_store_url: str
+) -> tuple[dict[str, Any], list[str]]:
+    """Rewrite a legacy console config into the "tree" adapter shape, once.
+
+    `store` becomes a relkit-compatible tree entry with that URL. A config with
+    only `dir` read this box's disk; the same tree is served by this box's
+    store, so it becomes a relkit-compatible entry with local_store_url. An
+    existing "tree" entry is never opened or changed. The panel state may not
+    sit in the release tree or on a relative path. Returns the new config and
+    one note per change; a migrated config yields no notes.
     """
     cfg = dict(console_cfg)
     notes: list[str] = []
-    tree = str(cfg.get("dir") or "").strip().rstrip("/")
-    for key in CONSOLE_RETIRED_KEYS:
+    tree_dir = str(cfg.get("dir") or "").strip().rstrip("/")
+    legacy_store = str(cfg.get("store") or "").strip()
+    for key in _CONSOLE_LEGACY_KEYS:
         if key in cfg:
             notes.append(f"dropped retired console key {key}={cfg.pop(key)!r}")
-    if not str(cfg.get("store") or "").strip() and store_url:
-        cfg["store"] = store_url
-        notes.append(f"panel now reads the tree through {store_url}")
+    if "tree" not in cfg:
+        url = legacy_store or (local_store_url if tree_dir else "")
+        if url:
+            cfg["tree"] = {"type": "relkit-compatible", "url": url}
+            notes.append(f"panel tree adapter set to relkit-compatible at {url}")
     configured = str(cfg.get("adminStateFile") or "").strip()
     if configured:
-        in_tree = bool(tree) and (configured == tree or configured.startswith(tree + "/"))
+        in_tree = bool(tree_dir) and (configured == tree_dir or configured.startswith(tree_dir + "/"))
         if not configured.startswith("/") or in_tree:
             cfg.pop("adminStateFile", None)
             notes.append(f"panel state moves from {configured} to {CONSOLE_STATE_FILE}")
@@ -2021,17 +2054,17 @@ def apply_console_upgrade(
     user: str,
     prefix: str,
     agent_addr: str,
-    store_url: str,
+    local_store_url: str,
     restart: bool,
     backup_root: Path,
 ) -> list[str]:
-    """Upgrade relkit-console in place onto the store-only layout.
+    """Upgrade relkit-console in place onto the tree-adapter layout.
 
     The panel used to open the release tree directly when it shared a box with
     the store, and kept its cookie key inside that tree. Both are gone: it reads
-    through relkit-store like any client, and its key lives under its own
-    StateDirectory. The existing key is carried over so nobody is signed out,
-    and the copy left in the tree is removed (it is in the backup).
+    through the "tree" adapter entry like any client, and its key lives under
+    its own StateDirectory. The existing key is carried over so nobody is
+    signed out, and the copy left in the tree is removed (it is in the backup).
     """
     notes: list[str] = []
     show = systemd_show("relkit-console", "ExecStart", "User", "FragmentPath")
@@ -2052,10 +2085,11 @@ def apply_console_upgrade(
         ],
     )
 
-    cfg, cfg_notes = normalize_console_config(cfg, store_url)
+    # local_store_url is only consulted to migrate a legacy `dir` config.
+    cfg, cfg_notes = migrate_console_config(cfg, local_store_url)
     notes.extend(cfg_notes)
-    if not str(cfg.get("store") or "").strip():
-        raise Fail("relkit-console needs a store URL and none was found on this box")
+    if "tree" not in cfg:
+        raise Fail("relkit-console config has no \"tree\" adapter entry and none could be migrated")
     panel_file = Path(str(console_admin_path(cfg)))
     if not panel_file.is_file():
         source = next((p for p in legacy_files if p != panel_file and p.is_file()), None)
@@ -2300,7 +2334,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         user=user,
                         prefix=prefix,
                         agent_addr=agent_addr,
-                        store_url=loopback_base(serve_addr) if serve_addr else "",
+                        local_store_url=loopback_base(serve_addr) if serve_addr else "",
                         restart=restart,
                         backup_root=backup,
                     )
@@ -3003,9 +3037,9 @@ def build_parser() -> argparse.ArgumentParser:
     console_i = install_sub.add_parser("console")
     console_i.add_argument("--binary", required=True)
     console_i.add_argument(
-        "--store",
+        "--config-example",
         default="",
-        help="relkit-store base URL the panel reads (default: the store on this box)",
+        help="config whose \"tree\" adapter entry the panel uses (default: " + CONSOLE_CONFIG_EXAMPLE + ")",
     )
     console_i.add_argument(
         "--agent",

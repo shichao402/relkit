@@ -2,11 +2,11 @@
 
 > 本目录是 [`github.com/shichao402/relkit`](https://github.com/shichao402/relkit) 仓库的一部分（`cmd/relkit-console`），与发布 CLI 同仓。设计决策见 [ADR 0016](../../docs/adr/0016-serve-split-store-console.md)。
 
-relkit-serve 拆分出的**管理面**：单页管理界面、账户/会话（ADR 0006 的 bootstrap 流程不变）、产品与令牌管理、下载统计、文件树浏览、`/-/latest/` 固定链接跳转。单个静态链接的可执行文件，前端产物用 `go:embed` 打进二进制，无运行时依赖。
+relkit-serve 拆分出的**管理面**：单页管理界面、账户/会话（ADR 0006 的 bootstrap 流程不变）、产品与令牌管理、文件树浏览、`/-/latest/` 固定链接跳转。单个静态链接的可执行文件，前端产物用 `go:embed` 打进二进制，无运行时依赖。
 
 **角色：** 管理与观察面。它不伺服发布树（GET `/` 不是它的职责，那是 store/browse 的），也不直接写发布树：注册产品、签发/轮换/吊销令牌、下线产品这些写操作都转发给 relkit-agent，用操作员自己的 Bearer 代为执行。面板是人类鉴权面（用户名密码 + 会话 cookie），与数据面令牌（Bearer PUT）是两种信任域，进程隔离让一个 0day 拿不到写者权限。
 
-store 拆包已完成（ADR 0016 第 3 步）：`cmd/relkit-serve` 已删除，`cmd/relkit-store` 承载纯存储面。console 与 store 可同机部署（同 `-dir`）。
+store 拆包已完成（ADR 0016 第 3 步）：`cmd/relkit-serve` 已删除，`cmd/relkit-store` 承载纯存储面。console 与 store 可同机部署，console 照样只经读 adapter 读树，不直接打开本机目录。
 
 ## 前端技术栈
 
@@ -41,8 +41,8 @@ npm run build    # 产物写入 ../internal/webui/dist/，随后 go build 即为
 ## 快速开始
 
 ```bash
-# 生成配置与一次性 bootstrap 令牌
-relkit-console init -dir /srv/releases -out /etc/relkit-console
+# 生成配置与面板 cookie key；-tree 是读 adapter 条目（JSON 文本，或 @文件 指向只含条目的 JSON）
+relkit-console init -tree '{"type":"relkit-compatible","url":"http://127.0.0.1:8080"}' -out /etc/relkit-console
 
 # 起服务（默认只听本机，按需加 -addr）
 relkit-console -config /etc/relkit-console/relkit-console.json
@@ -64,14 +64,18 @@ systemctl restart relkit-console
 注册产品、签发/轮换/吊销令牌、下线产品都需要 agent。用 `-agent` 或配置里的 `"agent"` 指向它：
 
 ```json
-{"addr": "127.0.0.1:8081", "dir": "/srv/releases", "agent": "http://127.0.0.1:8787"}
+{
+  "addr": "127.0.0.1:8081",
+  "tree": {"type": "relkit-compatible", "url": "http://127.0.0.1:8080"},
+  "agent": "http://127.0.0.1:8787"
+}
 ```
 
 产品根目录留空时，由 agent 决定落在哪：优先用它配置的 `productRootParent`，否则从已注册产品的共同父目录推断。两者都得不到时注册会被拒（报 `no default product root is configured ...`），不会退回到某个写死的路径。
 
 ## 数据从哪来：adapter
 
-console 不直接假设数据在本机盘上。所有读取走一个 adapter 接口（`adapters.go`）：
+console 不认识任何具体存储。所有读取走一个 adapter 接口（`adapters.go`），具体实现由配置里的 `tree` 条目决定：条目写 `type` 和该实现自己的参数，工厂 `newAdapter` 按 `type` 选实现，入口只拿到 `Adapter` 接口。形状与存储面 Backend（`internal/backends`）相同，type 名也共用。
 
 ```go
 type Adapter interface {
@@ -82,11 +86,23 @@ type Adapter interface {
 }
 ```
 
-- `storeAdapter`：唯一实现。经 HTTP 读 relkit-store，`ReadKey` 走 GET 树（no-cache 前缀与 store 一致），`ReadDir` 走 store 的 `/-/list/<dir>` JSON 端点（服务端已过滤保留键）。配置 `{"store": "http://<host>:8080"}` 或 `-store` 标志，必填。console 与 store 同机也走这条路，不直接读本机目录，内外网同一形态。原先的 `rootAdapter`（本机目录直读）已删除。
+```json
+"tree": {"type": "relkit-compatible", "url": "http://127.0.0.1:8080"}
+```
+
+可用实现：
+
+| type | 参数 | 说明 |
+|---|---|---|
+| `relkit-compatible` | `url`（必填，http/https） | 经 HTTP 读 relkit-compatible 树：`ReadKey` 走 GET（no-cache 前缀与 store 一致），`ReadDir` 走 `/-/list/<dir>` JSON 端点（服务端已过滤保留键）。console 与 store 同机也走这条路，内外网同一形态 |
+
+`tree` 必填；缺 `type`、未知 `type`、条目里出现该实现不认识的参数都会在启动时报错并列出可用 type。命令行 `-tree` 可覆盖配置（JSON 或 `@文件`）。新增实现（例如 `s3-compatible`）只在 `adapters.go` 注册一个 type，入口、部署脚本、配置顶层都不用改。
+
+旧配置的顶层 `dir`、`store`、`stateDir` 会被拒绝启动，提示用部署脚本 `upgrade` 迁移；本机目录直读的 `rootAdapter` 已删除。
 
 ## 布局约定
 
-- 发布树：只经 store 读，console 没有 `-dir`。
+- 发布树：只经读 adapter 读，console 没有 `-dir`。
 - 面板状态（会话签名 key）：`/var/lib/relkit-console/panel.json`，由 systemd `StateDirectory=relkit-console` 提供，不在发布树里。`-state`/配置 `adminStateFile` 可改，必须是绝对路径。
 - 账户与 token：由 agent 持有，console 通过 agent 的 API 读写。
 - 下载计数：暂不提供（console 与 store 两侧均已删除），以后另行设计。

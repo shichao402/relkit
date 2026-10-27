@@ -70,7 +70,7 @@
 - **状态**：内外网面板都已上线，入口 `publish.*/-/admin`，管本机 relkit-store 发布树；用户、角色、产品、token 的写操作经 agent `/v1/admin/*`（ADR 0023 第 8 条），下线产品带预演。
 - **现网**：外网 COS 已于 2026-09-26 清零，外网数据面与内网一样只有本机 `relkit-store`（`/srv/releases`），面板看得到全部发布树。原先外网发布树在 COS、面板看不到的差距已随迁移消失。
 - **目标**：面板继续进化成 relkit 后台（发布记录、GC、日志）。
-- **已知缺口（不排期）**：console 读 adapter 只有 `storeAdapter`（HTTP 读 relkit-store，内外网同一实现；本机目录直读的 `rootAdapter` 已于 2026-10-26 删除），没有对应 `s3-compatible` 的实现。存储面 Backend 与人页 sink 都能换到 COS，面板不能。只在数据面真换成对象存储时才需要补；补时照 Backend 的形状实现 `Adapter` 三个方法，调用方不改。见 [topology.md 第六节](design/topology.md#六可替换的接缝)。
+- **已知缺口（不排期）**：console 读 adapter 只注册了 `relkit-compatible` 一个 `tree.type`（经 HTTP 读 relkit-store，内外网同一条目形状；本机目录直读的 `rootAdapter` 已于 2026-10-26 删除），没有 `s3-compatible`。存储面 Backend 与人页 sink 都能换到 COS，面板不能。只在数据面真换成对象存储时才需要补；补时在 `adapters.go` 新增一个 `tree.type`，实现 `Adapter` 三个方法，入口、配置顶层、部署脚本都不改。见 [topology.md 第六节](design/topology.md#六可替换的接缝)。
 - **已知缺口（不排期）**：下载计数暂缺。原实现由 store 在伺服热路径里写树内 `.relkit-serve-stats.json`、console 直读本机文件展示，这条捷径让内外网形态不同，2026-10-26 与 `rootAdapter` 一并删除。以后另行设计（例如独立计数接口、下载时异步上报一次），不得重新引入 console 直读本机发布树。
 - **不做（现阶段）**：把 `/-/admin` 当对外目录；在 agent 上再开一套未鉴权的浏览页。
 - **落点**：`cmd/relkit-console`（[ADR 0016](adr/0016-serve-split-store-console.md)），读走 adapter；拓扑变化时更新 [topology.md](design/topology.md)。
