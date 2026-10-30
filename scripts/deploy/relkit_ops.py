@@ -413,11 +413,26 @@ def epoch_split_agent_config(
             "file into the admin document; the plaintext and its hash are unchanged"
         )
 
-    if root_key_id:
+    # The pair is one setting. `custody_manifest` used to be written on its own
+    # because the caller derives a default path, which produced a config that
+    # named a keyring without naming a key — the exact state the server rejects
+    # at startup with "custodyManifest is set but rootKeyId is missing". Writing
+    # neither is the honest representation of "this box has no root yet", and is
+    # what an upload-only box looks like.
+    if root_key_id or custody_manifest:
+        if not root_key_id:
+            raise ValueError(
+                "custodyManifest is set but rootKeyId is missing; name the keyId to "
+                "read from the manifest (--root-key-id)"
+            )
+        if not custody_manifest:
+            raise ValueError(
+                f"rootKeyId {root_key_id!r} is set but custodyManifest is missing; a "
+                "server reads its root only through the custody manifest"
+            )
         cfg["rootKeyId"] = root_key_id
-        notes.append(f"set rootKeyId={root_key_id}")
-    if custody_manifest:
         cfg["custodyManifest"] = custody_manifest
+        notes.append(f"set rootKeyId={root_key_id}")
         notes.append(f"set custodyManifest={custody_manifest}")
     return cfg, admin, notes
 

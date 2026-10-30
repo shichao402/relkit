@@ -53,6 +53,24 @@ relkit.py install console --binary dist/relkit-console-linux-amd64 [--agent <age
 `--product-root` 必填，没有默认值（内网 `/data/relkit`，外网 `/srv/relkit`）。console
 从配置的 `tree` 适配器读发布树，不再接受 `--dir` / `--state-dir`。
 
+首装必须同时定下这台服务器的根身份，否则 agent 起得来但签不了任何东西：
+
+```text
+relkit.py install agent --binary dist/relkit-agent-linux-amd64 \
+  --product-root <发布树父目录> \
+  --root-key-id <keyId> --custody-manifest <清单路径>
+```
+
+两个参数是一对，缺一个直接报错，不写半截配置。`--root-key-id` 取自托管清单登记的
+keyId（内网 `tencent-internal-server-root`，外网 `firoyang-public-root`），清单要先放到
+服务器上；相对路径按配置目录解析。keyId 不在清单里会当场报错——装机时改名字比签过
+东西之后才发现便宜得多。
+
+不配根也能起（只收上传、不签发的机器是合法形态），但那个 agent 的 `/v1/catalog` 与
+`/v1/tools/root.pub` 一律 404、`publish` 报 `server root is required`。**这两个 404 是没
+配根，不是没产品**：没有产品会返回空 catalog，不会 404。2026-10-27 外网重建后曾把它
+误判成"空机无产品"，实际是 `install` 当时根本没有配根这一步。
+
 仍在跑 `relkit-serve.service` 的老服务器先 `migrate-serve` 迁到 `relkit-store.service`，
 之后才可走 `upgrade`。
 
@@ -69,7 +87,8 @@ relkit.py install console --binary dist/relkit-console-linux-amd64 [--agent <age
 5. 三个进程一起升。console 配置有旧键时，`upgrade` 会一次性迁移成 `tree` 适配器并
    带上 cookie 密钥，新二进制直接拒绝旧配置，所以 console 只能走 `upgrade`。
 6. `upgrade` 会回填 agent 配置的 `productRootParent`（取已注册产品的共同父目录），
-   有分歧时在输出中说明。
+   有分歧时在输出中说明。根身份不改：已配置则原样继承，没传 `--root-key-id` 时读
+   盒上配置；原本没根的机器保持没根，不会被塞一个空清单路径导致启不来。
 7. 工具 URL 由 agent 配置的 `publicURL` 签发（内网 `http://publish.devcloud.woa.com`，
    外网 `https://publish.firoyang.com`）。
 8. 升级后检查三个服务 `active`、`/-/health`，以及各域名主入口。

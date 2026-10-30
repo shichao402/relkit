@@ -911,6 +911,62 @@ def write_product_root_parent(config_path: Path, product_root: str) -> str:
     return parent
 
 
+def write_agent_root_identity(config_path: Path, root_key_id: str, custody_manifest: str) -> None:
+    """Record which root this server signs with, or record nothing at all.
+
+    The agent signs every catalog, profile and tool manifest it emits, and it
+    reaches that key only through the custody manifest by keyId. The two fields
+    are one setting: naming a keyId without the manifest that carries it leaves
+    the server unable to start, and pointing at a manifest without naming a key
+    leaves it holding a keyring it cannot choose from. Before this existed only
+    `upgrade` could write the pair, so a freshly installed box always came up
+    rootless: it answered health checks, then refused every publish with
+    "server root is required" and served /v1/catalog and /v1/tools/root.pub as
+    404, which reads like an empty server rather than an unconfigured one.
+
+    Running with neither is legitimate (a box that only stores uploads), so an
+    absent pair is left absent instead of written as two empty strings.
+
+    The keyId is checked against the manifest here rather than left for the
+    server's first publish, because a typo in a machine identity is only cheap
+    to fix before anything has been signed with it.
+    """
+    key_id = str(root_key_id or "").strip()
+    manifest = str(custody_manifest or "").strip()
+    if not key_id and not manifest:
+        return
+    if not key_id or not manifest:
+        raise Fail(
+            "rootKeyId and custodyManifest are one setting; pass both --root-key-id "
+            "and --custody-manifest, or neither"
+        )
+    manifest_path = Path(manifest)
+    if not manifest_path.is_absolute():
+        manifest_path = config_path.parent / manifest
+    if not manifest_path.is_file():
+        raise Fail(
+            f"custody manifest {manifest_path} does not exist; the agent reads its "
+            "root only through that file"
+        )
+    doc = load_json_object(manifest_path.read_text(encoding="utf-8"))
+    known = {
+        str(entry.get("keyId") or "").strip()
+        for entry in (doc.get("keys") or [])
+        if isinstance(entry, dict)
+    }
+    if key_id not in known:
+        raise Fail(
+            f"custody manifest {manifest_path} registers no keyId {key_id!r}"
+            + (f"; it has {', '.join(sorted(known))}" if known else "; it registers no keys")
+        )
+    cfg = load_json_object(config_path.read_text(encoding="utf-8"))
+    cfg["rootKeyId"] = key_id
+    cfg["custodyManifest"] = str(manifest_path)
+    config_path.write_text(dump_json(cfg), encoding="utf-8")
+    os.chmod(config_path, 0o644)
+    print(f"root identity {key_id} (manifest {manifest_path}) written to {config_path}")
+
+
 def admin_document_products(doc: Any) -> dict[str, str]:
     """Return ``{id: root}`` for every product registered in an admin document.
 
@@ -1055,6 +1111,14 @@ def cmd_install_agent(args: argparse.Namespace) -> None:
     # the service account's home and the unit's WorkingDirectory, so it writes
     # it down instead of leaving the flag and the config disagreeing.
     write_product_root_parent(config_path, str(args.product_root))
+    # A new box has no identity of its own yet: the root it signs with is chosen
+    # here, at install time, so the server is complete the moment it starts
+    # instead of waiting for a later `upgrade` to bolt one on.
+    write_agent_root_identity(
+        config_path,
+        getattr(args, "root_key_id", ""),
+        getattr(args, "custody_manifest", ""),
+    )
     install_file(binary, dest_bin, 0o755)
     run([str(dest_bin), "-version"])
     tokens = config_dir / "tokens"
@@ -1901,12 +1965,16 @@ def apply_agent_upgrade(
     effective_key_id = root_key_id
     if not effective_key_id:
         effective_key_id = str(cfg.get("rootKeyId") or "").strip()
+    # The manifest path is only meaningful together with a keyId. Passing it on
+    # its own used to write custodyManifest alone, and the server then refused
+    # to start; a box that genuinely has no root keeps both fields absent.
+    effective_manifest = str(manifest_file) if effective_key_id else ""
     cfg, admin_doc, split_notes = epoch_split_agent_config(
         cfg,
         product_roots=product_roots,
         token_hashes=token_hashes,
         root_key_id=effective_key_id,
-        custody_manifest=str(manifest_file),
+        custody_manifest=effective_manifest,
     )
     notes.extend(split_notes)
     if enable_tool_publish:
@@ -3031,6 +3099,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--config-example",
         default="",
         help="JSON copied when relkit-agent.json is absent (default: relkit-agent.example.json)",
+    )
+    agent_i.add_argument(
+        "--root-key-id",
+        default="",
+        help=(
+            "keyId of the server's one root; requires --custody-manifest. Without it the "
+            "agent starts rootless and refuses to publish or serve a catalog"
+        ),
+    )
+    agent_i.add_argument(
+        "--custody-manifest",
+        default="",
+        help="custody manifest the agent reads its root from (default: custody-manifest.json beside the config)",
     )
     agent_i.add_argument("--user", default="relkit")
     agent_i.add_argument("--prefix", default="/usr/local/bin")

@@ -451,6 +451,111 @@ class EpochSplitTests(unittest.TestCase):
         self.assertEqual(cfg["addr"], "127.0.0.1:8787")
         self.assertEqual(cfg["stateDir"], "/data/relkit-agent")
 
+    def test_manifest_without_key_id_is_rejected(self):
+        # Writing custodyManifest alone is exactly the state that made the
+        # server refuse to start, so it is a hard error instead of a half config.
+        with self.assertRaises(ValueError) as ctx:
+            ops.epoch_split_agent_config(
+                self.LEGACY_AGENT,
+                token_hashes={"tokens/shared.token": "f" * 64},
+                custody_manifest="/etc/relkit-agent/custody-manifest.json",
+            )
+        self.assertIn("rootKeyId", str(ctx.exception))
+
+    def test_key_id_without_manifest_is_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            ops.epoch_split_agent_config(
+                self.LEGACY_AGENT,
+                token_hashes={"tokens/shared.token": "f" * 64},
+                root_key_id="k",
+            )
+        self.assertIn("custodyManifest", str(ctx.exception))
+
+    def test_no_root_leaves_both_fields_absent(self):
+        cfg, _, notes = ops.epoch_split_agent_config(
+            self.LEGACY_AGENT, token_hashes={"tokens/shared.token": "f" * 64}
+        )
+        self.assertNotIn("rootKeyId", cfg)
+        self.assertNotIn("custodyManifest", cfg)
+        self.assertFalse(any("set rootKeyId" in item for item in notes))
+
+
+class WriteAgentRootIdentityTest(unittest.TestCase):
+    """`install agent` chooses the server's root instead of leaving it for a later upgrade."""
+
+    def setUp(self):
+        self.root = Path(_TempDir().name)
+        self.config = self.root / "relkit-agent.json"
+        self.config.write_text(json.dumps({"addr": "127.0.0.1:8787"}), encoding="utf-8")
+
+    def _manifest(self, name="custody-manifest.json", keys=("firoyang-public-root",)):
+        path = self.root / name
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": "relkit.custody-manifest/1",
+                    "keys": [{"keyId": key, "kind": "root"} for key in keys],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_writes_both_fields(self):
+        manifest = self._manifest()
+        deploy_cli.write_agent_root_identity(self.config, "firoyang-public-root", str(manifest))
+        cfg = json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertEqual(cfg["rootKeyId"], "firoyang-public-root")
+        self.assertEqual(cfg["custodyManifest"], str(manifest))
+
+    def test_relative_manifest_resolves_beside_the_config(self):
+        self._manifest()
+        deploy_cli.write_agent_root_identity(self.config, "firoyang-public-root", "custody-manifest.json")
+        cfg = json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertEqual(cfg["custodyManifest"], str(self.root / "custody-manifest.json"))
+
+    def test_absent_pair_is_left_absent(self):
+        deploy_cli.write_agent_root_identity(self.config, "", "")
+        cfg = json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertNotIn("rootKeyId", cfg)
+        self.assertNotIn("custodyManifest", cfg)
+
+    def test_key_id_alone_is_rejected(self):
+        with self.assertRaises(deploy_cli.Fail) as ctx:
+            deploy_cli.write_agent_root_identity(self.config, "firoyang-public-root", "")
+        self.assertIn("one setting", str(ctx.exception))
+
+    def test_manifest_alone_is_rejected(self):
+        self._manifest()
+        with self.assertRaises(deploy_cli.Fail) as ctx:
+            deploy_cli.write_agent_root_identity(self.config, "", "custody-manifest.json")
+        self.assertIn("one setting", str(ctx.exception))
+
+    def test_missing_manifest_file_is_rejected(self):
+        with self.assertRaises(deploy_cli.Fail) as ctx:
+            deploy_cli.write_agent_root_identity(self.config, "firoyang-public-root", "absent.json")
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_key_id_not_in_manifest_is_rejected(self):
+        # A typo in the machine's identity is only cheap to fix before anything
+        # has been signed with it.
+        manifest = self._manifest()
+        with self.assertRaises(deploy_cli.Fail) as ctx:
+            deploy_cli.write_agent_root_identity(self.config, "typo-root", str(manifest))
+        self.assertIn("registers no keyId", str(ctx.exception))
+        self.assertIn("firoyang-public-root", str(ctx.exception))
+
+
+class EpochSplitSiteSinksTest(unittest.TestCase):
+    """Site sinks outlive the epoch split unchanged."""
+
+    LEGACY_AGENT = {
+        "addr": "127.0.0.1:8787",
+        "products": {"loom": {"root": "/data/relkit/loom"}},
+        "uploadTokens": [{"file": "tokens/shared.token", "products": ["loom"]}],
+        "stateDir": "/data/relkit-agent",
+    }
+
     def test_site_sinks_survive_the_split(self):
         data = dict(self.LEGACY_AGENT)
         data["site"] = {"sinks": [{"type": "backend", "backend": "intranet"}]}

@@ -10,6 +10,8 @@
   "uploadTTL": "24h",
   "stateDir": "/var/lib/relkit-agent",
   "productRootParent": "",
+  "rootKeyId": "",
+  "custodyManifest": "",
   "site": {
     "sinks": [
       {"type": "backend", "backend": "serve"},
