@@ -138,7 +138,10 @@ Dec 改为在线服务，不再有客户端版本，不参与 relkit 更新链�
 
 - 外网发布服务器上的 Dec 产品及全部在线资产删除。
 - 断代后宿主只剩 SvnMergeTool、Loom、Loom-Launcher 三个。
-- relkit 仓库内的 `DecAssets` 是 Skill 资产，与 Dec 更新产品无关，保留；`dec-publish.yml` 发布的是这些资产，同样保留。
+- relkit 仓库内的 `DecAssets` 是 Skill 资产，与 Dec 更新产品无关，保留。发布通路已
+  于 2026-10-30 改为云端 SSOT：资产经 `dec_vault` 直接写入云端 git（`dec_write_asset`
+  / `dec_edit_asset_file`），`dec-publish.yml` 与 `.dec/config.yaml` 均已删除；
+  `DecAssets` 变更仍须提升 `VERSION.json` build，作为人工同步云端的标记。
 
 > **2026-10-30 补记（推翻上条后半句）**：`dec-publish.yml` 已删除。Dec 新架构改为云端 SSOT，资产经 `dec_vault` 直接写入云端 git，不再由 GitHub Action 推 registry。该 workflow 依赖的 `publish-provides` action 在 Dec v1.13.73 起取不到 `dec-registry-linux-amd64`，近六次运行五次失败，通路事实上早已失效。
 
