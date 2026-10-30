@@ -29,8 +29,9 @@
 2. Dec Skill **只分发 Skill 说明与编排**；同时可索引 ops binary 的获取方式（来自同一 distribution），但不在 Skill 内嵌第二份逻辑
 3. Skill 唯一 SSOT：`DecAssets/skills/relkit-ops`；仓内副本只允许 `dec pull` 生成并校验 digest
 4. 删除 onboarding 账本；替代命令：`relkit inspect`、`relkit doctor --resolution`、`relkit release verify --resolution`、`relkit-ops plan/status`（均 `--json`）
-5. `DecAssets` 变更必须提升 `VERSION.json` build 并由 `publish-provides` 产生不可变 registry ref；
-   发布验收比较 registry commit/tree 中的 Skill blob 与源码 blob，不只看 workflow 退出码
+5. `DecAssets` 变更必须提升 `VERSION.json` build 并产出不可变 ref；
+   发布验收比较该 ref 的 commit/tree 中的 Skill blob 与源码 blob，不只看 workflow 退出码
+   （2026-10-30 补记：承载该职责的 `publish-provides` / `dec-publish.yml` 已删除，改为 Dec 云端 SSOT 直接写入，验收对象相应变为云端 bundle 内容）
 6. 提供方仓若同时是 Dec `Home` 项目，`dec pull` 可能解析作者 vault/home 资产而非刚发布的
    registry ref，因此不能作为消费者读回证据。应使用声明该 ref 的独立 consumer，或直接
    校验 registry tree；若 self-pull 令生成副本回退，不得提交该差异
