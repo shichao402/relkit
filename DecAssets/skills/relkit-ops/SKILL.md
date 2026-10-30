@@ -58,6 +58,28 @@ Relkit 只做 Windows 与 macOS 桌面应用的更新。服务器是唯一事实
 缺少用户意图时，只问会实质改变产品行为的问题（产品名、渠道、注册到哪台服务器）。
 能从服务器或仓库查到的事实不要反问用户。
 
+## 只读查询
+
+现场事实优先用脚本查，不要凭记忆回答服务器状态。[`scripts/relkit_query.py`](scripts/relkit_query.py)
+直连 agent 的 REST 面：
+
+```text
+python scripts/relkit_query.py health|version|root-pub|catalog
+python scripts/relkit_query.py products|tokens|whoami --admin-user <u> --admin-password <p>
+```
+
+要点：
+
+- 服务器与产品缺省读当前项目的 `relkit.project.json`，不必重复声明。
+- **token 不出现在命令行里**。`RELKIT_UPLOAD_TOKEN` 由脚本自己从环境或
+  `.secrets/relkit/env/*.env` 读出，直接放进 Authorization 头，不打印、不回显。
+  不要把 token 当参数传，也不要把脚本输出里的凭据贴回对话。
+- `catalog` 与 `root-pub` 是公开读，不需要凭据；`products`/`tokens`/`whoami` 需要
+  admin 会话。两种凭据不通用：产品 token 只授权一个产品，拿到别的产品会 403 并
+  点名双方。
+- 只做读。写操作（发布、撤回、轮换）不在这里实现——服务端已有幂等键与产品锁，
+  重复调用是安全的，在脚本层再加一道确认反而会把真正的保护拆成两处。
+
 ## 产品与 token 管理
 
 全部在面板（`<server>/-/admin/`）或 agent 管理 API 上做：
