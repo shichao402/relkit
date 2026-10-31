@@ -4,6 +4,121 @@ All notable changes to relkit are recorded here. The version in `VERSION.json`
 is the single source of truth; this file explains what changed and, above all,
 what will break.
 
+## 0.7.2+4 — console seams, deployment root, cloud skill source
+
+A maintenance line inside the epoch. Nothing changes the wire format, and no
+client needs to move; what changes is who is allowed to configure a server and
+where the operator's own skills come from.
+
+### Breaking
+
+- `relkit-console` reads the release tree through one config entry,
+  `tree: {type, ...that type's own parameters}`, picked by `newAdapter` the same
+  way `internal/backends` does. The top-level `store` and `dir` keys and the
+  `-store` flag are gone: they put one implementation and its address into the
+  config, the command line and the deploy script. `init` now takes `-tree`.
+  Configs still carrying the old keys refuse to start and point at `upgrade`,
+  whose one-time migration is the only code that still knows them.
+- The agent signs tool download URLs with its own publicURL. Callers no longer
+  pass a base: `--public-base-url` is deleted, and publishing without a public
+  publicURL now fails with 409 instead of handing out unreachable URLs.
+  `upgrade` never rewrites a product's baseUrl. `update-internal` serves the
+  protocol tree only; the example that forwarded `/v1/tools/` and `/v1/catalog`
+  there is removed, and `verify-published-tools` targets publish.
+
+### Added
+
+- `relkit_query.py`, a read-only agent query script in the operator skill, so a
+  token never has to pass through the agent's context to answer a question.
+
+### Changed
+
+- `install agent` takes `--product-root` as a required flag and records it as
+  `productRootParent`, which is what decides where a blank-root registration
+  lands. The flag and the agent no longer disagree. `upgrade` backfills the same
+  key from the registered products, falling back to the unit's
+  WorkingDirectory when no product votes.
+- `upgrade` reads `admin.json` before backfilling `productRootParent`, so an
+  operator-set value is not overwritten by an inferred one.
+- The human-facing page has one shape on both hosts.
+- Retired fields are out of both agent config examples.
+
+### Fixed
+
+- `install agent` can choose the server root. It never wrote `rootKeyId` or
+  `custodyManifest`, so every freshly installed box came up rootless: `publish`
+  failed with `server root is required`, and `/v1/catalog` and
+  `/v1/tools/root.pub` answered 404, which reads like an empty server rather
+  than an unconfigured one. The pair could only be set by a later `upgrade`,
+  which is why a rebuilt host needed `upgrade` to finish what `install` should
+  have done. Both flags now exist on `install agent` and are validated as one
+  setting against the manifest, so a typo dies before anything is signed.
+- `upgrade` writes the root pair or neither. A box with no root keeps both keys
+  absent instead of getting a manifest path with no keyId, which previously
+  produced a config the agent refused to start on.
+- Both agent config examples leave the root pair empty rather than
+  half-filled, so the shape of a complete setting is visible in the file.
+
+### Removed
+
+- The old Dec registry publishing path and the legacy Dec files that went with
+  it. The operator skills are published from the cloud source instead: `dec`
+  writes straight to the cloud SSOT, and the `DecAssets/` copy in this repo is
+  no longer the publishing route. See ADR 0023.
+
+## 0.7.1 — console rebuild, deployment root
+
+### Breaking
+
+- The console's server-rendered pages are replaced by a React SPA over a JSON
+  API. `cmd/relkit-console` serves `/-/admin/api/*` (session, products, files,
+  users, roles, tokens) plus the SPA shell; the Go templates are gone. Writes
+  still go through `relkit-agent` with the operator's own Bearer, so the console
+  keeps owning no state.
+- The old `/-/admin/panel` and `/-/admin/panel/*` pages no longer exist; those
+  URLs and `/-/p/<id>` now 302 to the new routes. `/-/latest/*` and `/-/health`
+  are unchanged.
+- `mergeIdentity` is gone from artifact sets. It was the host-side proof that it
+  held a resolution; the epoch moved that judgement to the server, and keeping
+  the engine check made every multi-platform merge impossible. Identity
+  agreement between documents is still enforced through
+  product/version/releaseCode/channel.
+
+### Added
+
+- The built front end is committed under `internal/webui/dist` so a Go-only
+  checkout still builds. CI rebuilds it and fails when the committed bytes are
+  stale.
+
+### Fixed
+
+- The admin panel is reachable. Navigation to it used to exist only inside the
+  panel itself, so nothing linked to it from anywhere else. The SPA has a
+  persistent sidebar (and a select on narrow screens) reaching products, users,
+  roles and tokens from every page, with a skip link and a visible focus ring
+  for keyboard users, and a regression test walks the navigation.
+- The agent no longer invents a product root. An empty root resolves from
+  `productRootParent` in the agent config, else from the common parent of the
+  registered products, and is rejected with an actionable message when neither
+  exists. The old `/srv/relkit/<id>` default belongs to root on the internal
+  machines and deferred the failure to the first publish.
+- Writes are JSON mutations that return data, not pages, and the UI invalidates
+  queries afterwards. A refresh or a back-navigation can no longer replay a
+  rotate-token, which would invalidate the plaintext just shown, or mint an
+  extra token.
+- Dialogs restore focus correctly. They are controlled by an `open` prop and
+  have no trigger, so Radix had no element to hand focus back to on close and
+  the next Tab restarted at the top of the page. A document-level focusin
+  listener remembers the opener.
+- Registering a retirement names the product tree it leaves behind, and the
+  panel previews a retirement before committing to it.
+- Agent refusals are localised, and golden fixtures stay byte-stable across
+  line endings.
+
+### Removed
+
+- `relkit-cos-cert-renew` and its references in the docs.
+
 ## 0.7.0+1 — desktop updater epoch
 
 This release is a clean break, not an upgrade path. Hosts and servers on the
