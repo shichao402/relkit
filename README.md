@@ -110,10 +110,10 @@ relkit-ops rotate <credential> \
 reload/restart、健康与写权限验证、旧凭据吊销后才可激活。
 
 空机部署和服务二进制升级见
-[`scripts/deploy/README.md`](scripts/deploy/README.md) 与
-[`DecAssets/skills/relkit-deploy/SKILL.md`](DecAssets/skills/relkit-deploy/SKILL.md)；
-日常 Operator 编排见
-[`DecAssets/skills/relkit-ops/SKILL.md`](DecAssets/skills/relkit-ops/SKILL.md)。
+[`scripts/deploy/README.md`](scripts/deploy/README.md) 与运维 skill `relkit-deploy`；
+日常 Operator 编排见运维 skill `relkit-ops`。两个 skill 只存在于 Dec 云端 `relkit`
+bundle（唯一事实源），装好 Dec 后落在各宿主的用户级 skill 目录（如 `~/.claude/skills/`），
+修改走 Dec 云端，不在本仓。
 
 ## 协议与设计
 

@@ -1,10 +1,8 @@
 # 宿主接入
 
-产品仓接入合同（两轨 `--install` / `--payload`、`InstallSpec.placement`、IPC、最小步骤）的 SSOT 是运维 skill：
+产品仓接入合同（两轨 `--install` / `--payload`、`InstallSpec.placement`、IPC、最小步骤）的 SSOT 是运维 skill `relkit-ops` 里的 `host-update.md`。
 
-[`DecAssets/skills/relkit-ops/host-update.md`](../../DecAssets/skills/relkit-ops/host-update.md)
-
-产品仓经 Dec 拉取 `relkit-ops` 后，同文件在 skill 目录里。不要在本文件或产品仓 docs 再复制一份。
+该 skill 只存在于 Dec 云端 `relkit` bundle，装好 Dec 后落在各宿主的用户级 skill 目录（如 `~/.claude/skills/relkit-ops/host-update.md`）。要修改就改云端，不要在本文件、本仓或产品仓 docs 再复制一份。
 
 层对照见仓库 [`README.md`](../../README.md)：`relkit.version/1`（项目版本文件）· `rup.v2`（线格式）· `relkit.updater.v1`（本机 IPC）。
 

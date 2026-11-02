@@ -4,6 +4,14 @@ All notable changes to relkit are recorded here. The version in `VERSION.json`
 is the single source of truth; this file explains what changed and, above all,
 what will break.
 
+## Unreleased
+
+### Removed
+
+- `DecAssets/` and the `assets-version.yml` gate. The `relkit-ops` and
+  `relkit-deploy` skills now live only in the Dec cloud `relkit` bundle; edit
+  them there. See ADR 0023.
+
 ## 0.7.2+4 — console seams, deployment root, cloud skill source
 
 A maintenance line inside the epoch. Nothing changes the wire format, and no

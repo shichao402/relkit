@@ -34,7 +34,7 @@ python scripts/deploy/verify-published-tools.py \
 
 本脚本只负责 Operator 机器的装机与换二进制。产品仓不再物化任何 Python 运维脚本（ADR 0019 §1）；产品侧的声明与策略走 `relkit.project.json` 与 `relkit-ops agent policy`。
 
-唯一入口：`python scripts/deploy/relkit.py`（仓库根目录执行；Linux 上也可用 `python3 scripts/deploy/relkit.py`）。Agent 流程见 [`DecAssets/skills/relkit-deploy/SKILL.md`](../../DecAssets/skills/relkit-deploy/SKILL.md)。
+唯一入口：`python scripts/deploy/relkit.py`（仓库根目录执行；Linux 上也可用 `python3 scripts/deploy/relkit.py`）。Agent 流程见运维 skill `relkit-deploy`（Dec 云端 `relkit` bundle，本仓不存副本）。
 
 启动时会自检 Python 3.9+。`scripts/deploy/requirements.txt` 目前没有第三方包，因此不会建 venv。若以后加了 pin，脚本会创建 `scripts/deploy/.venv`、`pip install`，然后 re-exec。
 
