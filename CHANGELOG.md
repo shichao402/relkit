@@ -6,6 +6,14 @@ what will break.
 
 ## Unreleased
 
+### Fixed
+
+- The console's locked screen blamed a missing agent address in the console
+  config. Locked actually means the agent is reachable but has no operator and
+  no live bootstrap; the screen now says so and points at
+  `relkit-agent init -bootstrap`. Found on publish.firoyang.com after its
+  redeploy, where the config was correct and the agent had no admin state.
+
 ### Removed
 
 - `DecAssets/` and the `assets-version.yml` gate. The `relkit-ops` and

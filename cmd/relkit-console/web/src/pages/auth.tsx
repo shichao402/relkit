@@ -238,7 +238,7 @@ export function BlockedPage({
       title={kind === "locked" ? "面板已锁定" : "agent 不可达"}
       description={
         kind === "locked"
-          ? "控制台没有可用的 agent 配置，管理功能已停用。"
+          ? "agent 上还没有管理员，也没有可用的首次设置凭据。"
           : "控制台无法连接发布机上的 agent，管理功能暂时不可用。"
       }
     >
@@ -246,7 +246,10 @@ export function BlockedPage({
         <p>请联系维护者处理：</p>
         <ul className="list-disc space-y-1 pl-5">
           {kind === "locked" ? (
-            <li>在 relkit-console 配置中补上 agent 地址后重启服务。</li>
+            <li>
+              在发布机执行 <code>relkit-agent init -bootstrap</code>
+              ，再回到此页填入它打印的一次性凭据。
+            </li>
           ) : (
             <li>确认内网发布机上的 relkit-agent 正在运行。</li>
           )}
