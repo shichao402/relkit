@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	"github.com/shichao402/relkit/internal/vnext/extension"
 	"github.com/shichao402/relkit/internal/vnext/project"
@@ -52,8 +53,8 @@ func Run(
 	if options.Version == "" || options.Channel == "" || options.Target == "" {
 		return nil, fmt.Errorf("version, channel, and target are required")
 	}
-	if len(product.Channels) != 0 && !slices.Contains(product.Channels, options.Channel) {
-		return nil, fmt.Errorf("project does not declare channel %q", options.Channel)
+	if !model.IsStandardChannel(options.Channel) {
+		return nil, fmt.Errorf("channel %q is not a server channel (%q)", options.Channel, model.StandardChannels())
 	}
 	if len(product.SelectorDimensions) != 0 && !slices.Contains(product.SelectorDimensions, "os-arch") {
 		return nil, fmt.Errorf("project selectorDimensions must include os-arch for targeted builds")

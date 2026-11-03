@@ -11,7 +11,6 @@ import (
 	"github.com/shichao402/relkit/internal/envelope"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/vnext/canonical"
-	"github.com/shichao402/relkit/internal/vnext/project"
 )
 
 type PublishOptions struct {
@@ -33,7 +32,7 @@ type Printer func(string)
 
 func Publish(
 	cfg *config.Config,
-	product project.Document,
+	product string,
 	options PublishOptions,
 	printer Printer,
 ) (*PublishResult, error) {
@@ -52,7 +51,7 @@ func Publish(
 		return nil, err
 	}
 	rawDigest := model.Sha256Bytes(raw)
-	key := fmt.Sprintf("runtime-profile/%s/%s.json", product.Product, rawDigest)
+	key := fmt.Sprintf("runtime-profile/%s/%s.json", product, rawDigest)
 	result := &PublishResult{
 		Profile: *value,
 		Key:     key,

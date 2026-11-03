@@ -12,6 +12,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"net/url"
+	"slices"
 
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/vnext/canonical"
@@ -57,9 +58,11 @@ type Document struct {
 	// 32-byte ed25519 key. It is written verbatim from the access configuration
 	// the server handed out at product registration (requirements 10.7, 13.4).
 	RootPublicKey string `json:"rootPublicKey"`
-	// Channels lists the channels this project publishes to. It is a publish
-	// fact, not a control-plane choice: the server still decides which version
-	// is current.
+	// Channels is a legacy field. Channels are a server fact
+	// (model.StandardChannels): the server signs them into the Runtime Profile
+	// and enforces them at publish. A project may omit the field; when it is
+	// present it must equal the server set exactly, so nobody edits it in the
+	// belief that it changes anything.
 	Channels           []string `json:"channels,omitempty"`
 	SelectorDimensions []string `json:"selectorDimensions,omitempty"`
 	ArtifactProducer   *Command `json:"artifactProducer,omitempty"`
@@ -91,8 +94,11 @@ func (d Document) Validate() error {
 	if _, err := d.RootKey(); err != nil {
 		return err
 	}
+	if len(d.Channels) != 0 && !slices.Equal(d.Channels, model.StandardChannels()) {
+		return fmt.Errorf("channels is defined by the server as %q; remove the field from the project (got %q)",
+			model.StandardChannels(), d.Channels)
+	}
 	for name, values := range map[string][]string{
-		"channels":           d.Channels,
 		"selectorDimensions": d.SelectorDimensions,
 	} {
 		seen := map[string]bool{}

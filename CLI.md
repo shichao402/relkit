@@ -247,7 +247,7 @@ schema `relkit.project/1`。允许的字段只有下列这些，读到未知字�
 | `product` | 是 | 产品 id，发布与目录文档的键 |
 | `server` | 是 | 唯一写面地址（如 `http://publish.devcloud.woa.com`） |
 | `rootPublicKey` | 是 | 服务器根公钥，OpenSSH 单行格式 |
-| `channels` | 否 | 支持的渠道；声明了就只接受其中列出的 |
+| `channels` | 否 | 兼容字段，建议删除。渠道由服务器定义（`dev`、`stable`，ADR 0024）；保留时必须与之完全一致 |
 | `selectorDimensions` | 否 | 产物选择维度，断代后只有 `["os-arch"]` |
 | `artifactProducer` | 否 | 出 ArtifactSet 的命令与 env allowlist |
 | `versionProvider` | 否 | 出产品版本的命令（可空，缺省读 `VERSION.json`） |

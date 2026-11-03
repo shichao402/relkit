@@ -415,7 +415,7 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 	}
 
 	stagingRoot := stage.StagingDir(productRoot, opts.version)
-	if opts.tamperStable {
+	if opts.tamperChannel != "" {
 		stagedBytes, err := os.ReadFile(stage.StagedPath(productRoot, opts.version))
 		if err != nil {
 			t.Fatal(err)
@@ -424,7 +424,7 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tampered.Channel = "stable"
+		tampered.Channel = opts.tamperChannel
 		if stagedBytes, err = rupv2.MarshalStaged(tampered); err != nil {
 			t.Fatal(err)
 		}
@@ -485,6 +485,13 @@ func newAgentFixture(t *testing.T, opts agentFixtureOpts) *agentFixture {
 		"custodyManifest": filepath.ToSlash(filepath.Join("custody", "manifest.json")),
 		"toolsDir":        filepath.ToSlash(filepath.Join(stateDir, "tools")),
 	}
+	if opts.publishDefaults {
+		agentDoc["publish"] = map[string]any{
+			"backends":  map[string]any{"serve": ingest.backendConfig()},
+			"publishTo": []string{"serve"},
+			"directory": map[string]any{"publishTo": []string{"serve"}},
+		}
+	}
 	if opts.deployToken {
 		deployTokenPath := filepath.Join(root, "tokens", "deploy.token")
 		if err := os.MkdirAll(filepath.Dir(deployTokenPath), 0o755); err != nil {
@@ -543,10 +550,11 @@ type agentFixtureOpts struct {
 	version            string
 	channel            string
 	omitProfile        bool
+	publishDefaults    bool
 	patchProfile       func(*config.PublishProfile)
 	site               *project.Site
 	patchProject       func(*project.Document)
-	tamperStable       bool
+	tamperChannel      string
 	tamperReleaseCode  bool
 	omitProject        bool
 	selectorDimensions []string
@@ -557,7 +565,7 @@ type agentFixtureOpts struct {
 }
 
 type vNextFixtureOptions struct {
-	tamperStable       bool
+	tamperChannel      string
 	tamperReleaseCode  bool
 	selectorDimensions []string
 	artifacts          []vNextFixtureArtifact
@@ -580,7 +588,7 @@ type vNextFixtureArtifact struct {
 func makeVNextAgentFixture(t *testing.T, options vNextFixtureOptions) *agentFixture {
 	t.Helper()
 	return newAgentFixture(t, agentFixtureOpts{
-		tamperStable:       options.tamperStable,
+		tamperChannel:      options.tamperChannel,
 		tamperReleaseCode:  options.tamperReleaseCode,
 		selectorDimensions: options.selectorDimensions,
 		artifacts:          options.artifacts,

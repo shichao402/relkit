@@ -67,6 +67,10 @@ type Product struct {
 	ID      string
 	Root    string
 	Profile string
+	// Publish is the already-resolved publish profile. When set it is used
+	// instead of reading Profile, which is how server-level publish defaults
+	// reach the site rebuild.
+	Publish *config.PublishProfile
 }
 
 // productBackend pairs a resolved backend with the product whose profile
@@ -425,9 +429,13 @@ func collect(products []Product, allowEmpty bool, printer Printer) ([]browse.Pro
 	var inputs []browse.ProductData
 	backendsByName := map[string][]productBackend{}
 	for _, product := range sorted {
-		profile, err := config.LoadPublishProfile(product.Profile)
-		if err != nil {
-			return nil, nil, fmt.Errorf("%s profile: %w", product.ID, err)
+		profile := product.Publish
+		if profile == nil {
+			loaded, err := config.LoadPublishProfile(product.Profile)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s profile: %w", product.ID, err)
+			}
+			profile = loaded
 		}
 		cfg := &config.Config{
 			Root: product.Root, Product: product.ID,

@@ -30,9 +30,6 @@ type unpublishRequest struct {
 // only authority, and it is readable whether or not the staged tree survives
 // because it lives in the product repository, not in .relkit/cache.
 func loadUnpublishConfig(pc ProductConfig, product, version string, root *config.RootKey) (*config.Config, string, error) {
-	if pc.Profile == "" {
-		return nil, "", fmt.Errorf("publish profile path is empty for product %q", product)
-	}
 	productDocument, err := vnextproject.Load(filepath.Join(pc.Root, vnextrelease.ProjectFile))
 	if err != nil {
 		return nil, "", fmt.Errorf("vNext project document for %q: %w", product, err)
@@ -40,15 +37,15 @@ func loadUnpublishConfig(pc ProductConfig, product, version string, root *config
 	if productDocument.Product != product {
 		return nil, "", fmt.Errorf("project document declares product %q, not %q", productDocument.Product, product)
 	}
-	profile, err := config.LoadPublishProfile(pc.Profile)
+	profile, source, err := pc.loadPublishProfile()
 	if err != nil {
-		return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
+		return nil, "", err
 	}
 	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root, root)
 	if err != nil {
 		return nil, "", err
 	}
-	return cfg, "vNext project document + " + pc.Profile, nil
+	return cfg, "vNext project document + " + source, nil
 }
 
 func (s *Server) handleUnpublish(w http.ResponseWriter, r *http.Request) {

@@ -235,7 +235,7 @@ func TestMergeVNextPublishConfigRequiresTheServerRoot(t *testing.T) {
 func TestAgentBootstrapsRuntimeProfileWithoutExposingPrivateKey(t *testing.T) {
 	fx := makeVNextAgentFixture(t, vNextFixtureOptions{})
 	payloadBytes, err := json.Marshal(runtimeProfileRequest{
-		Product: "demo", Project: fx.vNextProject,
+		Product: "demo", Project: &fx.vNextProject,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -692,22 +692,16 @@ func TestAgentDoesNotReturnSuccessWhenReleasedVerificationFails(t *testing.T) {
 	}
 }
 
-// TestAgentRejectsChannelTheProjectDoesNotDeclare replaces the retired
-// candidate-lane test. There is one lane per project now, so the only thing
-// left to prove is that a staged release cannot claim a channel its own project
-// declaration never listed.
-func TestAgentRejectsChannelTheProjectDoesNotDeclare(t *testing.T) {
-	fx := newAgentFixture(t, agentFixtureOpts{
-		tamperStable: true,
-		patchProject: func(document *project.Document) {
-			document.Channels = []string{"dev"}
-		},
-	})
+// TestAgentRejectsChannelOutsideTheServerSet: channels are a server fact
+// (ADR 0024), so a staged release cannot claim a channel the server does not
+// define, whatever the host tree says.
+func TestAgentRejectsChannelOutsideTheServerSet(t *testing.T) {
+	fx := newAgentFixture(t, agentFixtureOpts{tamperChannel: "beta"})
 	status, body := fx.putStaged(t, "demo", "1.0.0")
 	if status != http.StatusBadRequest {
 		t.Fatalf("staged status=%d body=%s", status, body)
 	}
-	if !strings.Contains(string(body), "does not declare channel") {
+	if !strings.Contains(string(body), "is not a server channel") {
 		t.Fatalf("body=%s", body)
 	}
 }

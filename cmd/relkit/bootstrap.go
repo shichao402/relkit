@@ -198,6 +198,11 @@ func discoverProfileURL(
 	directoryURL := strings.TrimRight(server, "/") + "/" + strings.TrimLeft(model.DirectoryKey(product), "/")
 	raw, err := getBytes(ctx, client, directoryURL)
 	if err != nil {
+		if strings.HasSuffix(err.Error(), fmt.Sprintf("HTTP %d", http.StatusNotFound)) {
+			return "", fmt.Errorf("server %s has no signed directory for %s (%w); the server signs the first Runtime Profile "+
+				"when the product is registered, or on its next start if registration could not sign; check that the product "+
+				"is registered and read the agent log", server, product, err)
+		}
 		return "", fmt.Errorf("read signed directory %s: %w", directoryURL, err)
 	}
 	envelopeValue, err := rupv2.UnmarshalEnvelope(raw)
@@ -214,7 +219,8 @@ func discoverProfileURL(
 	reference := directory.GetRuntimeProfile()
 	if reference == nil || len(reference.Urls) == 0 {
 		return "", fmt.Errorf(
-			"server %s serves no Runtime Profile for %s; publish one first (POST /v1/runtime-profile)",
+			"server %s serves no Runtime Profile for %s; the server signs it when the product is registered "+
+				"(or on its next start if registration could not sign); check the agent log or re-sign with POST /v1/runtime-profile",
 			server, product,
 		)
 	}

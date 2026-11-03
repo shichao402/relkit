@@ -2,7 +2,6 @@ package runtimeprofile
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/shichao402/relkit/internal/config"
 	"github.com/shichao402/relkit/internal/envelope"
-	"github.com/shichao402/relkit/internal/vnext/project"
 )
 
 func testSigner() envelope.Signer {
@@ -23,16 +21,7 @@ func testSigner() envelope.Signer {
 	return envelope.Signer{KeyID: "server-root", Seed: seed}
 }
 
-func testProduct() project.Document {
-	signer := testSigner()
-	return project.Document{
-		Schema:        project.Schema,
-		Product:       "demo",
-		Server:        "https://updates.example",
-		RootPublicKey: base64.StdEncoding.EncodeToString(signer.PublicKey()),
-		Channels:      []string{"dev", "stable"},
-	}
-}
+func testProduct() string { return "demo" }
 
 func TestCreateSignsWithTheServerRoot(t *testing.T) {
 	signer := testSigner()

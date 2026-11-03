@@ -1072,6 +1072,67 @@ def backfill_product_root_parent(
     return updated, note
 
 
+def backfill_publish_defaults(
+    cfg: dict[str, Any], *, read_url: str, upload_url: str
+) -> tuple[dict[str, Any], str]:
+    """Register the machine's publish config in the agent config (ADR 0024).
+
+    Both addresses are stated by the operator. A read address ends up inside the
+    Runtime Profile every client trusts, so it is never inferred from a hostname.
+    An existing block is left alone: this is a first-time setting, not a sync.
+    """
+    if not read_url.strip():
+        return cfg, ""
+    if cfg.get("publish"):
+        return cfg, "publish defaults already set; --publish-read-url ignored"
+    if not upload_url.strip():
+        raise Fail("--publish-read-url needs --public-upload-url: the agent must know where to write")
+    updated = dict(cfg)
+    updated["publish"] = {
+        "publishTo": ["serve"],
+        "backends": {
+            "serve": {
+                "type": "relkit-compatible",
+                "baseUrl": read_url.strip().rstrip("/") + "/",
+                "uploadUrl": upload_url.strip().rstrip("/") + "/",
+                "tokenEnv": "RELKIT_SERVE_TOKEN",
+                "timeoutSeconds": 600,
+            }
+        },
+        "directory": {"publishTo": ["serve"]},
+    }
+    return updated, f"publish defaults written (read {read_url}, write {upload_url})"
+
+
+def ensure_agent_serve_token(env_file: Path, store_config: Path) -> str:
+    """Give the agent the store's upload token through its EnvironmentFile.
+
+    An existing value wins, so an operator's credential is never replaced. The
+    token stays on this machine and is never returned, printed, or put in a spec.
+    """
+    lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.is_file() else []
+    if any(line.strip().startswith("RELKIT_SERVE_TOKEN=") for line in lines):
+        return "RELKIT_SERVE_TOKEN already present in the agent environment"
+    if not store_config.is_file():
+        raise Fail(f"cannot find {store_config}; the agent has no store token to publish with")
+    token_file = str(load_json_object(store_config.read_text(encoding="utf-8")).get("uploadTokenFile") or "").strip()
+    if not token_file:
+        raise Fail(f"{store_config} names no uploadTokenFile; the agent has no store token to publish with")
+    token_path = Path(token_file)
+    if not token_path.is_absolute():
+        token_path = store_config.parent / token_path
+    token = token_path.read_text(encoding="utf-8").strip()
+    if not token:
+        raise Fail(f"{token_path} is empty; the agent has no store token to publish with")
+    lines.append(f"RELKIT_SERVE_TOKEN={token}")
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    os.chmod(env_file, 0o600)
+    return f"RELKIT_SERVE_TOKEN added to {env_file} from the store's token file"
+
+
 def cmd_install_agent(args: argparse.Namespace) -> None:
     must_root()
     require_cmd("systemctl")
@@ -1887,6 +1948,7 @@ def apply_agent_upgrade(
     custody_manifest: str = "",
     admin_state_file: str = "",
     enable_tool_publish: bool = False,
+    publish_read_url: str = "",
 ) -> list[str]:
     notes: list[str] = []
     show = systemd_show("relkit-agent", "ExecStart", "User", "FragmentPath")
@@ -1933,6 +1995,7 @@ def apply_agent_upgrade(
             products_dir,
             manifest_file,
             admin_file,
+            config_dir / "env",
         ],
     )
 
@@ -2026,6 +2089,13 @@ def apply_agent_upgrade(
     )
     if backfill_note:
         notes.append(backfill_note)
+    cfg, publish_note = backfill_publish_defaults(
+        cfg, read_url=publish_read_url, upload_url=public_upload_url or ""
+    )
+    if publish_note:
+        notes.append(publish_note)
+    if publish_read_url.strip():
+        notes.append(ensure_agent_serve_token(config_dir / "env", Path("/etc/relkit-store/relkit-store.json")))
     config_file.write_text(dump_json(cfg), encoding="utf-8")
 
     if manifest_file.is_file():
@@ -2381,6 +2451,7 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         custody_manifest=spec.get("custodyManifest") or "",
                         admin_state_file=spec.get("adminStateFile") or "",
                         enable_tool_publish=bool(spec.get("enableToolPublish")),
+                        publish_read_url=spec.get("publishReadUrl") or "",
                     )
                 )
             if spec.get("upgradeConsole"):
@@ -2650,6 +2721,7 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
         "keepBackups": keep_backups,
         "rootKeyId": args.root_key_id,
+        "publishReadUrl": args.publish_read_url,
         "custodyManifest": args.custody_manifest,
         "adminStateFile": args.admin_state_file,
         "enableToolPublish": want_tools,
@@ -3148,6 +3220,14 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--restart", action="store_true", help="deprecated: apply already restarts unless --stage-only")
     upgrade.add_argument("--stage-only", action="store_true", help="write files but do not restart; not a completed upgrade")
     upgrade.add_argument("--allow-dirty", action="store_true")
+    upgrade.add_argument(
+        "--publish-read-url",
+        default="",
+        help=(
+            "protocol read address for the agent's publish defaults (ADR 0024); "
+            "first-time setting, requires --public-upload-url"
+        ),
+    )
     upgrade.add_argument("--unsafe-from-dist", action="store_true", help="ship existing dist/ binaries instead of building HEAD")
     upgrade.add_argument("--serve-binary", default="dist/relkit-store-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")

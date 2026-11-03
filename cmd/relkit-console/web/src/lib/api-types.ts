@@ -122,6 +122,17 @@ export interface IssuedToken {
   ok: true;
   token: Token;
   plaintext?: string;
+  /** Present on registration: the server signs the product's first Runtime
+   *  Profile in the same request (ADR 0024). `error` explains why it did not;
+   *  the agent retries on its next start. */
+  runtimeProfile?: RegistrationRuntimeProfile;
+}
+
+export interface RegistrationRuntimeProfile {
+  signed: boolean;
+  directorySequence?: number;
+  digest?: string;
+  error?: string;
 }
 
 /** What a retirement did, or would do when `dryRun` is set. The agent answers

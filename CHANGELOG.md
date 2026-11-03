@@ -6,6 +6,18 @@ what will break.
 
 ## Unreleased
 
+### Changed
+
+- Registering a product now signs its first Runtime Profile, and the agent signs
+  any missing one on start, so `relkit bootstrap build` works right after
+  registration. Channels are a server fact (`dev`, `stable`) and publish config
+  derives from a machine-level `publish` block in `relkit-agent.json`. See ADR 0024.
+
+### Breaking
+
+- `relkit.project.json` may omit `channels`; any value other than
+  `["dev","stable"]` is now rejected, and so is a staged document on another channel.
+
 ### Fixed
 
 - The console's locked screen blamed a missing agent address in the console

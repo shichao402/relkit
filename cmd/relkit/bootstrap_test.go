@@ -80,14 +80,7 @@ func newBootstrapFixture(t *testing.T) *bootstrapFixture {
 	t.Cleanup(fixture.server.Close)
 
 	value, err := runtimeprofile.Create(
-		project.Document{
-			Schema:        project.Schema,
-			Product:       "demo",
-			Server:        fixture.server.URL,
-			RootPublicKey: base64.StdEncoding.EncodeToString(fixture.root),
-			// Channels steer allowedChannels in the generated Profile.
-			Channels: []string{"dev", "stable"},
-		},
+		"demo",
 		[]string{fixture.server.URL + "/directory/demo.pb"},
 		3,
 		envelope.Signer{KeyID: fixture.profileSignedBy, Seed: seed},
@@ -272,13 +265,7 @@ func TestBootstrapRejectsProfileSignedByAnotherKey(t *testing.T) {
 	fixture.profileSignedBy = "some-old-product-key"
 	// Re-create the Profile under the wrong key id.
 	value, err := runtimeprofile.Create(
-		project.Document{
-			Schema:        project.Schema,
-			Product:       "demo",
-			Server:        fixture.server.URL,
-			RootPublicKey: base64.StdEncoding.EncodeToString(fixture.root),
-			Channels:      []string{"dev", "stable"},
-		},
+		"demo",
 		[]string{fixture.server.URL + "/directory/demo.pb"},
 		3,
 		envelope.Signer{KeyID: fixture.profileSignedBy, Seed: fixture.seed},

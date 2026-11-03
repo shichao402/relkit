@@ -503,17 +503,40 @@ func (s *Server) adminProducts(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// The first Runtime Profile is a server action, not a host step: every
+		// input is a server fact, so sign it now and a host's first
+		// `relkit bootstrap build` finds it (ADR 0024). A failure here does not
+		// undo registration; startup reconciliation retries it, and the
+		// response says why it is still missing.
+		profileState := map[string]any{"signed": false}
+		mu := s.productLock(product.ID)
+		mu.Lock()
+		outcome, signErr := s.signRuntimeProfile(product.ID, nil, false, true)
+		mu.Unlock()
+		if signErr != nil {
+			profileState["error"] = signErr.Error()
+		} else {
+			profileState["signed"] = true
+			profileState["directorySequence"] = outcome.DirectorySequence
+			if outcome.Profile != nil {
+				profileState["digest"] = outcome.Profile.Digest
+			}
+		}
+		resolvedProfile := s.resolvedProfile(product)
 		resp := map[string]any{
 			"ok":      true,
 			"product": product,
 			"token":   token,
 			// The plaintext appears here and nowhere else, ever (requirement 11.3).
-			"plaintext":         plaintext,
-			"connectConfig":     s.connectConfig(r, product.ID),
-			"tokenShownOnce":    true,
-			"plaintextNotice":   "this value is not stored and cannot be shown again; put it in the host CI secret now",
-			"profileMissing":    !fileExists(s.resolvedProfile(product)),
-			"profileExpectedAt": s.resolvedProfile(product),
+			"plaintext":       plaintext,
+			"connectConfig":   s.connectConfig(r, product.ID),
+			"tokenShownOnce":  true,
+			"plaintextNotice": "this value is not stored and cannot be shown again; put it in the host CI secret now",
+			"runtimeProfile":  profileState,
+			// A missing per-product file only matters when the agent has no
+			// publish defaults to fall back on.
+			"profileMissing":    s.cfg.Publish == nil && !fileExists(resolvedProfile),
+			"profileExpectedAt": resolvedProfile,
 		}
 		writeJSON(w, http.StatusOK, resp)
 	default:

@@ -1735,5 +1735,66 @@ class BuildAppendTests(unittest.TestCase):
         self.assertTrue(args.cli)
 
 
+class PublishDefaultsBackfillTests(unittest.TestCase):
+    """ADR 0024: upgrade registers the machine's publish config once."""
+
+    def test_no_read_url_changes_nothing(self):
+        cfg, note = deploy_cli.backfill_publish_defaults({"addr": "x"}, read_url="", upload_url="")
+        self.assertEqual(cfg, {"addr": "x"})
+        self.assertEqual(note, "")
+
+    def test_writes_the_stated_addresses(self):
+        cfg, _ = deploy_cli.backfill_publish_defaults(
+            {"addr": "x"},
+            read_url="https://update-internal.example.com",
+            upload_url="https://publish.example.com/",
+        )
+        serve = cfg["publish"]["backends"]["serve"]
+        self.assertEqual(serve["baseUrl"], "https://update-internal.example.com/")
+        self.assertEqual(serve["uploadUrl"], "https://publish.example.com/")
+        self.assertEqual(cfg["addr"], "x")
+
+    def test_existing_block_wins(self):
+        existing = {"publish": {"publishTo": ["other"]}}
+        cfg, note = deploy_cli.backfill_publish_defaults(
+            existing, read_url="https://r.example.com", upload_url="https://w.example.com"
+        )
+        self.assertEqual(cfg, existing)
+        self.assertIn("already set", note)
+
+    def test_read_url_needs_upload_url(self):
+        with self.assertRaises(deploy_cli.Fail):
+            deploy_cli.backfill_publish_defaults({}, read_url="https://r.example.com", upload_url="")
+
+
+class AgentServeTokenTests(unittest.TestCase):
+    def _store(self, root: Path) -> Path:
+        (root / "relkit-store.token").write_text("store-secret\n", encoding="utf-8")
+        store = root / "relkit-store.json"
+        store.write_text(json.dumps({"uploadTokenFile": "relkit-store.token"}), encoding="utf-8")
+        return store
+
+    def test_copies_token_without_reporting_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = root / "env"
+            env.write_text("COS_KEY=keep\n", encoding="utf-8")
+            note = deploy_cli.ensure_agent_serve_token(env, self._store(root))
+            self.assertNotIn("store-secret", note)
+            self.assertEqual(
+                env.read_text(encoding="utf-8").splitlines(),
+                ["COS_KEY=keep", "RELKIT_SERVE_TOKEN=store-secret"],
+            )
+            self.assertEqual(env.stat().st_mode & 0o777, 0o600)
+
+    def test_existing_token_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = root / "env"
+            env.write_text("RELKIT_SERVE_TOKEN=operator\n", encoding="utf-8")
+            deploy_cli.ensure_agent_serve_token(env, self._store(root))
+            self.assertEqual(env.read_text(encoding="utf-8"), "RELKIT_SERVE_TOKEN=operator\n")
+
+
 if __name__ == "__main__":
     unittest.main()

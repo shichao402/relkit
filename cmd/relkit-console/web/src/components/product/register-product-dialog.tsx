@@ -109,6 +109,19 @@ export function RegisterProductDialog({
               value={issued.plaintext ?? ""}
               label={`${issued.token.product} / ${issued.token.id}`}
             />
+            {issued.runtimeProfile &&
+              (issued.runtimeProfile.signed ? (
+                <p className="text-muted-foreground text-xs">
+                  已签发首份 Runtime Profile（目录序号{" "}
+                  {issued.runtimeProfile.directorySequence}），宿主现在可以直接执行{" "}
+                  <span className="font-mono">relkit bootstrap build</span>。
+                </p>
+              ) : (
+                <p className="text-destructive text-xs break-words" role="alert">
+                  首份 Runtime Profile 未签发：{issued.runtimeProfile.error}
+                  。产品已注册，修好服务器发布配置后重启 agent 会自动补签。
+                </p>
+              ))}
             <DialogFooter>
               <Button
                 onClick={() => {

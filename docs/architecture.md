@@ -34,7 +34,7 @@ Go 侧 facade 在 `internal/updaterfacade`，属仓内实现，不对外发布�
 
 它签这些对象：
 
-- Runtime Profile（服务器是谁、端点在哪、允许哪些渠道）
+- Runtime Profile（服务器是谁、端点在哪、允许哪些渠道）。它的输入全部是服务器事实，产品注册时由服务器签发首份，宿主不参与（ADR 0024）
 - Catalog（服务器提供哪些 relkit 组件、各版本摘要、当前标记哪个版本）
 - 各产品的 index 与 manifest（有哪些版本、每个文件的摘要）
 - 工具清单与工具文件的 SSH 签名
@@ -93,7 +93,7 @@ token 的具体实例以管理面板数据为准；清单只登记 token 存储�
 
 服务器是唯一事实源：relkit 的版本、组件、摘要只在服务器上维护一份，内网与外网同一套流程，只有地址和根密钥实例不同。
 
-宿主项目配置（`relkit.project/1`）只有这些字段：`product`、`server`、`rootPublicKey`、`channels`、`selectorDimensions`、`artifactProducer`、`versionProvider`、`site`。读到控制面字段明确报错，不保留读取旧字段的兼容路径。
+宿主项目配置（`relkit.project/1`）只有这些字段：`product`、`server`、`rootPublicKey`、`channels`、`selectorDimensions`、`artifactProducer`、`versionProvider`、`site`。读到控制面字段明确报错，不保留读取旧字段的兼容路径。`channels` 是兼容字段：渠道已是服务器事实（`dev`、`stable`），可省略，保留时必须与服务器一致（ADR 0024）。原则是能在服务器注册保存的不放进项目。
 
 选择器维度由项目自由声明（`SelectorDimensions`），代码里没有平台白名单。只注入 `os`/`arch`（取 `runtime.GOOS`/`GOARCH`）并强制 `apply=relkit-payload`。
 

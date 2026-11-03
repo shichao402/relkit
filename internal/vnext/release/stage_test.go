@@ -114,18 +114,18 @@ func TestStageRefusesToReplaceAnExistingTree(t *testing.T) {
 	}
 }
 
-func TestStageRejectsUndeclaredChannel(t *testing.T) {
+func TestStageRejectsChannelOutsideTheServerSet(t *testing.T) {
 	root, artifactSetPath, artifacts := stageFixture(t)
 	productDocument, err := project.Load(filepath.Join(root, ProjectFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	productDocument.Channels = []string{"stable"}
+	artifacts.Channel = "beta"
 	if _, err := Stage(*productDocument, artifacts, StageOptions{
 		ProjectRoot:     root,
 		ArtifactSetPath: artifactSetPath,
 		Code:            12,
-	}); err == nil || !strings.Contains(err.Error(), "does not declare channel") {
-		t.Fatalf("expected an undeclared channel rejection, got %v", err)
+	}); err == nil || !strings.Contains(err.Error(), "is not a server channel") {
+		t.Fatalf("expected a non-server channel rejection, got %v", err)
 	}
 }

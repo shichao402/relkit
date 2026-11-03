@@ -11,5 +11,18 @@
   "stateDir": "/data/relkit-agent",
   "productRootParent": "/data/relkit",
   "rootKeyId": "",
-  "custodyManifest": ""
+  "custodyManifest": "",
+  "publish": {
+    "publishTo": ["serve"],
+    "backends": {
+      "serve": {
+        "type": "relkit-compatible",
+        "baseUrl": "https://update-internal.devcloud.woa.com/",
+        "uploadUrl": "https://publish.devcloud.woa.com/",
+        "tokenEnv": "RELKIT_SERVE_TOKEN",
+        "timeoutSeconds": 600
+      }
+    },
+    "directory": {"publishTo": ["serve"]}
+  }
 }

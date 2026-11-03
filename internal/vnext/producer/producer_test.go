@@ -100,17 +100,16 @@ func TestRunVerifiesProducerOutput(t *testing.T) {
 	}
 }
 
-func TestRunRejectsUndeclaredChannel(t *testing.T) {
+func TestRunRejectsChannelOutsideTheServerSet(t *testing.T) {
 	root := t.TempDir()
 	productDocument := producerFixture(t, root)
-	productDocument.Channels = []string{"dev"}
 	_, err := Run(context.Background(), productDocument, Options{
 		ProjectRoot: root,
 		Version:     "1.2.3",
-		Channel:     "stable",
+		Channel:     "beta",
 		Target:      "darwin-arm64",
 	})
-	if err == nil || !strings.Contains(err.Error(), "does not declare channel") {
+	if err == nil || !strings.Contains(err.Error(), "is not a server channel") {
 		t.Fatalf("unexpected result: %v", err)
 	}
 }

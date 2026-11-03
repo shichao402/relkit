@@ -131,9 +131,9 @@ func (s *Server) productIngest(product string) (backends.Backend, backends.Inges
 	if !ok {
 		return nil, nil, fmt.Errorf("product %q is not registered", product)
 	}
-	profile, err := config.LoadPublishProfile(pc.Profile)
+	profile, _, err := pc.loadPublishProfile()
 	if err != nil {
-		return nil, nil, fmt.Errorf("profile %s: %w", pc.Profile, err)
+		return nil, nil, err
 	}
 	if profile.Product != product {
 		return nil, nil, fmt.Errorf("profile product %q does not match %q", profile.Product, product)

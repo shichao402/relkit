@@ -23,11 +23,17 @@ type adminFixture struct {
 	product  string
 	plain    string // the product token issued at registration
 	ownerErr string
+	ingest   *fakeRelkitServe
 }
 
 func newAdminFixture(t *testing.T) *adminFixture {
 	t.Helper()
-	fx := newAgentFixture(t, agentFixtureOpts{})
+	return newAdminFixtureWith(t, agentFixtureOpts{})
+}
+
+func newAdminFixtureWith(t *testing.T, opts agentFixtureOpts) *adminFixture {
+	t.Helper()
+	fx := newAgentFixture(t, opts)
 	adminStore := fx.cfg.admin
 	if adminStore == nil {
 		t.Fatal("fixture has no admin store")
@@ -58,6 +64,7 @@ func newAdminFixture(t *testing.T) *adminFixture {
 		owner:   ownerSession,
 		product: "demo",
 		plain:   fx.token,
+		ingest:  fx.ingest,
 	}
 }
 

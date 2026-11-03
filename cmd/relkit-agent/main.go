@@ -76,6 +76,12 @@ func run(argv []string) int {
 		}
 	}
 	log.Printf("products: %d, live product tokens: %d", len(cfg.Products), len(cfg.credentials))
+	if cfg.Publish == nil {
+		log.Printf("WARNING: no publish defaults in config; every product needs its own profile file under products/")
+	}
+	// Heal products registered while the server could not sign. It runs in the
+	// background: a slow or unreachable backend must not hold the listener.
+	go srv.ensureRuntimeProfiles(func(line string) { log.Print(line) })
 	if len(cfg.credentials) == 0 {
 		log.Printf("WARNING: no product token has been issued; write endpoints return 405")
 	}

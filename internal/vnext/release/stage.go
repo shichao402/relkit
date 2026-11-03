@@ -57,8 +57,8 @@ func Stage(
 	if artifacts.Product != product.Product {
 		return nil, fmt.Errorf("ArtifactSet product %q does not match project product %q", artifacts.Product, product.Product)
 	}
-	if len(product.Channels) != 0 && !contains(product.Channels, artifacts.Channel) {
-		return nil, fmt.Errorf("project does not declare channel %q", artifacts.Channel)
+	if !model.IsStandardChannel(artifacts.Channel) {
+		return nil, fmt.Errorf("channel %q is not a server channel (%q)", artifacts.Channel, model.StandardChannels())
 	}
 	if options.Code != 0 && options.Code != artifacts.ReleaseCode {
 		return nil, fmt.Errorf("stage code %d does not match ArtifactSet releaseCode %d", options.Code, artifacts.ReleaseCode)
@@ -212,11 +212,3 @@ func cloneMap(source map[string]string) map[string]string {
 	return result
 }
 
-func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}

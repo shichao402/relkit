@@ -12,6 +12,19 @@
   "productRootParent": "",
   "rootKeyId": "",
   "custodyManifest": "",
+  "publish": {
+    "publishTo": ["serve"],
+    "backends": {
+      "serve": {
+        "type": "relkit-compatible",
+        "baseUrl": "https://update-internal.firoyang.com/",
+        "uploadUrl": "https://publish.firoyang.com/",
+        "tokenEnv": "RELKIT_SERVE_TOKEN",
+        "timeoutSeconds": 600
+      }
+    },
+    "directory": {"publishTo": ["serve"]}
+  },
   "site": {
     "sinks": [
       {"type": "backend", "backend": "serve"},

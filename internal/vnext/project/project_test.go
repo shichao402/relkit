@@ -18,7 +18,7 @@ func validDocument() Document {
 		Product:       "example-product",
 		Server:        "https://updates.example",
 		RootPublicKey: testRootPublicKey,
-		Channels:      []string{"stable", "beta"},
+		Channels:      []string{"dev", "stable"},
 		ArtifactProducer: &Command{
 			Command:         []string{"./scripts/build"},
 			ExtensionSchema: "relkit.extension/1",
@@ -104,12 +104,25 @@ func TestServerURLAndRootKeyAccessors(t *testing.T) {
 	}
 }
 
-func TestChannelsAndSelectorsRejectDuplicates(t *testing.T) {
+// TestChannelsAreAServerFact: the field may be omitted, and when a legacy
+// project still carries it, it must be exactly the server set (ADR 0024).
+func TestChannelsAreAServerFact(t *testing.T) {
 	value := validDocument()
-	value.Channels = []string{"stable", "stable"}
-	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("expected a duplicate channel rejection, got %v", err)
+	value.Channels = nil
+	if err := value.Validate(); err != nil {
+		t.Fatalf("omitting channels must be valid, got %v", err)
 	}
+	for _, channels := range [][]string{{"stable"}, {"stable", "dev"}, {"dev", "stable", "beta"}, {"stable", "stable"}} {
+		value = validDocument()
+		value.Channels = channels
+		if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "defined by the server") {
+			t.Fatalf("channels %q: expected a server-set rejection, got %v", channels, err)
+		}
+	}
+}
+
+func TestSelectorsRejectDuplicates(t *testing.T) {
+	value := validDocument()
 
 	value = validDocument()
 	value.SelectorDimensions = []string{"os-arch", ""}
@@ -190,7 +203,7 @@ func TestLoadRejectsRetiredControlPlaneFields(t *testing.T) {
 			"server":"https://updates.example",
 			"rootPublicKey":"` + testRootPublicKey + `",
 			` + field + `
-			"channels":["stable"]
+			"channels":["dev","stable"]
 		}`
 		var value Document
 		if err := document.Decode([]byte(data), &value); err == nil {
@@ -200,14 +213,13 @@ func TestLoadRejectsRetiredControlPlaneFields(t *testing.T) {
 }
 
 // TestSiteDecodesFromProjectDocument pins the on-disk spelling: products
-// declare site next to channels in relkit.project.json.
+// declare site in relkit.project.json, and no channels field is needed.
 func TestSiteDecodesFromProjectDocument(t *testing.T) {
 	data := `{
 		"schema":"relkit.project/1",
 		"product":"demo",
 		"server":"https://updates.example",
 		"rootPublicKey":"` + testRootPublicKey + `",
-		"channels":["stable"],
 		"site":{"title":"Demo","description":"A demo product.","homepage":"https://example.com/demo"}
 	}`
 	var value Document

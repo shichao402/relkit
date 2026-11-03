@@ -14,7 +14,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +45,38 @@ const errLegacyProductConfig = "products and upload tokens are no longer config-
 type ProductConfig struct {
 	Root    string `json:"root"`
 	Profile string `json:"profile,omitempty"`
+	// Publish is the publish profile derived from the agent's server-level
+	// publish defaults. It applies whenever no file exists at Profile, so a
+	// product registered by id alone can publish without a hand-written
+	// per-product file (see loadPublishProfile).
+	Publish *config.PublishProfile `json:"-"`
+}
+
+// loadPublishProfile returns the product's publish profile and names where it
+// came from. A per-product file at Profile still wins, so a server that has
+// one keeps behaving exactly as before; otherwise the server defaults apply.
+// The file is checked on every call rather than at registration time, because
+// an operator may add or remove it without restarting the agent.
+func (pc ProductConfig) loadPublishProfile() (*config.PublishProfile, string, error) {
+	if pc.Publish != nil && (strings.TrimSpace(pc.Profile) == "" || !fileExists(pc.Profile)) {
+		raw, err := json.Marshal(pc.Publish)
+		if err != nil {
+			return nil, "", err
+		}
+		var copied config.PublishProfile
+		if err := json.Unmarshal(raw, &copied); err != nil {
+			return nil, "", err
+		}
+		return &copied, "agent publish defaults", nil
+	}
+	if strings.TrimSpace(pc.Profile) == "" {
+		return nil, "", fmt.Errorf("no publish profile: configure publish in relkit-agent.json or provide a per-product profile file")
+	}
+	profile, err := config.LoadPublishProfile(pc.Profile)
+	if err != nil {
+		return nil, pc.Profile, fmt.Errorf("profile %s: %w", pc.Profile, err)
+	}
+	return profile, pc.Profile, nil
 }
 
 // FileConfig is the deployment-level configuration of one agent server. It
@@ -89,6 +120,10 @@ type FileConfig struct {
 	// from the products already registered; there is no hardcoded fallback,
 	// because a guessed path the service user cannot create only fails later.
 	ProductRootParent  string `json:"productRootParent,omitempty"`
+	// Publish is the publish configuration every product on this server uses:
+	// backends, publish targets, directory targets. It is a machine fact, so it
+	// lives here once instead of in one hand-written file per product.
+	Publish            *config.PublishDefaults `json:"publish,omitempty"`
 	MinPublishProtocol *int   `json:"minPublishProtocol,omitempty"`
 	MaxPublishProtocol *int   `json:"maxPublishProtocol,omitempty"`
 	Site               SiteConfig `json:"site,omitempty"`
@@ -137,6 +172,9 @@ type Config struct {
 	// ProductRootParent is the configured parent for default product roots.
 	// Empty means infer from existing registrations (see productRootParent).
 	ProductRootParent string
+	// Publish is the server-level publish configuration (FileConfig.Publish).
+	// Nil means every product needs its own profile file.
+	Publish    *config.PublishDefaults
 	Site       SiteConfig
 	Products   map[string]ProductConfig
 	ConfigPath string
@@ -198,6 +236,14 @@ func LoadConfig(path string) (*Config, error) {
 			parent = filepath.Join(filepath.Dir(path), parent)
 		}
 		cfg.ProductRootParent = filepath.Clean(parent)
+	}
+	if raw.Publish != nil {
+		// Derive once with a placeholder id so a broken default stops the
+		// process at startup instead of failing the first registration.
+		if _, err := raw.Publish.ForProduct("relkit-default-check"); err != nil {
+			return nil, fmt.Errorf("publish: %w", err)
+		}
+		cfg.Publish = raw.Publish
 	}
 	// Default to the contract this build speaks. An operator can lower Min to
 	// ride out a publisher rollout, or set 0 to disable the handshake. Max
@@ -386,6 +432,13 @@ func loadAdminProducts(cfg *Config, admin *agentadmin.Store, configPath string) 
 			product.Profile = filepath.Join(base, product.Profile)
 		}
 		product.Profile = mustAbs(product.Profile)
+		if cfg.Publish != nil {
+			derived, err := cfg.Publish.ForProduct(registered.ID)
+			if err != nil {
+				return fmt.Errorf("product %q: %w", registered.ID, err)
+			}
+			product.Publish = derived
+		}
 		products[registered.ID] = product
 	}
 	cfg.Products = products
@@ -544,9 +597,13 @@ func (s *Server) rebuildSite(printer func(string)) (bool, error) {
 	registered := s.productIDs()
 	products := make([]siterebuild.Product, 0, len(registered))
 	for id, product := range registered {
-		products = append(products, siterebuild.Product{
-			ID: id, Root: product.Root, Profile: product.Profile,
-		})
+		entry := siterebuild.Product{ID: id, Root: product.Root, Profile: product.Profile}
+		// A resolution failure is left for the site collector to report
+		// against the profile path, exactly as it did before defaults existed.
+		if profile, _, err := product.loadPublishProfile(); err == nil {
+			entry.Publish = profile
+		}
+		products = append(products, entry)
 	}
 	return siterebuild.Rebuild(siterebuild.Config{
 		Sinks: s.cfg.Site.Sinks, StateDir: s.cfg.StateDir, AllowEmpty: s.allowEmptySite,
@@ -815,8 +872,8 @@ func (s *Server) validateVNextStaged(
 	if stagedDocument.Product != product || stagedDocument.Version != version {
 		return fmt.Errorf("staged product/version does not match route")
 	}
-	if len(productDocument.Channels) != 0 && !slices.Contains(productDocument.Channels, stagedDocument.Channel) {
-		return fmt.Errorf("project does not declare channel %q", stagedDocument.Channel)
+	if !model.IsStandardChannel(stagedDocument.Channel) {
+		return fmt.Errorf("channel %q is not a server channel (%q)", stagedDocument.Channel, model.StandardChannels())
 	}
 	artifactDocument, err := artifactset.Load(filepath.Join(root, vnextrelease.ArtifactSetFile))
 	if err != nil {
@@ -949,32 +1006,36 @@ func loadProductConfig(pc ProductConfig, version string, root *config.RootKey) (
 	if err != nil {
 		return nil, "", err
 	}
-	profile, err := config.LoadPublishProfile(pc.Profile)
+	profile, source, err := pc.loadPublishProfile()
 	if err != nil {
-		return nil, "", fmt.Errorf("profile %s: %w", pc.Profile, err)
+		return nil, "", err
 	}
 	cfg, err := mergeVNextPublishConfig(productDocument, profile, pc.Root, root)
 	if err != nil {
 		return nil, "", err
 	}
-	return cfg, "vNext project bundle + " + pc.Profile, nil
+	return cfg, "vNext project bundle + " + source, nil
 }
 
+// mergeVNextPublishConfig assembles the publish config from server facts. The
+// project document is optional: it only contributes the human-facing site
+// declaration. Product identity comes from the publish profile, channels are
+// the server channel set, signing is the server root. That is what lets the
+// server sign a product's first Runtime Profile at registration, before any
+// host has ever uploaded a project document.
 func mergeVNextPublishConfig(
 	productDocument *vnextproject.Document,
 	profile *config.PublishProfile,
 	productRoot string,
 	root *config.RootKey,
 ) (*config.Config, error) {
-	if productDocument == nil || profile == nil {
-		return nil, fmt.Errorf("vNext project and publish profile are required")
+	if profile == nil {
+		return nil, fmt.Errorf("publish profile is required")
 	}
-	if productDocument.Product != profile.Product {
+	if productDocument != nil && productDocument.Product != profile.Product {
 		return nil, fmt.Errorf("publish profile product %q does not match project product %q", profile.Product, productDocument.Product)
 	}
-	if len(productDocument.Channels) == 0 {
-		return nil, fmt.Errorf("vNext publisher project must declare channels")
-	}
+	channels := model.StandardChannels()
 	// One server, one root: every product this server publishes is signed by
 	// the same identity, so signing is not part of the product declaration and
 	// there is nothing per-product to assemble (requirement 10.5).
@@ -983,9 +1044,9 @@ func mergeVNextPublishConfig(
 	}
 	cfg := &config.Config{
 		Root:           productRoot,
-		Product:        productDocument.Product,
-		DefaultChannel: productDocument.Channels[0],
-		Channels:       append([]string(nil), productDocument.Channels...),
+		Product:        profile.Product,
+		DefaultChannel: channels[0],
+		Channels:       channels,
 		CodeStrategy:   "explicit",
 		RootKeyIDValue: root.KeyID,
 		Backends:       cloneBackendConfig(profile.Backends),
@@ -997,7 +1058,7 @@ func mergeVNextPublishConfig(
 	// empty SiteConfig, hasSiteCopy is always false, and site/<product>.json
 	// silently stops being written even though the product still appears in
 	// every protocol document. That is the 2026-10 site outage.
-	if productDocument.Site != nil {
+	if productDocument != nil && productDocument.Site != nil {
 		cfg.Site = config.SiteConfig{
 			Title:       productDocument.Site.Title,
 			Description: productDocument.Site.Description,
@@ -1107,17 +1168,140 @@ func cloneBackendConfig(source map[string]map[string]any) map[string]map[string]
 }
 
 type runtimeProfileRequest struct {
-	Product string                `json:"product"`
-	Project vnextproject.Document `json:"project"`
-	To      []string              `json:"to,omitempty"`
-	DryRun  bool                  `json:"dryRun,omitempty"`
+	Product string `json:"product"`
+	// Project is accepted for compatibility with hosts that still send it and
+	// is ignored beyond an identity check: every input of a Runtime Profile is
+	// a server fact (model.StandardChannels, the publish profile, the root).
+	Project *vnextproject.Document `json:"project,omitempty"`
+	To      []string               `json:"to,omitempty"`
+	DryRun  bool                   `json:"dryRun,omitempty"`
 }
 
-// handleRuntimeProfile bootstraps a signed Runtime Profile before a
-// self-subscribing product can create its first vNext resolution. The product
-// private key remains on the agent host; the caller receives only the signed
-// public document. The product lock is shared with normal publication so the
-// directory sequence cannot race a release.
+// runtimeProfileOutcome is the result of one signing pass.
+type runtimeProfileOutcome struct {
+	// Skipped is true when onlyIfMissing found a directory already in place.
+	// A directory always carries the Profile it was published with, so an
+	// existing directory means there is nothing to bootstrap.
+	Skipped           bool
+	DryRun            bool
+	Profile           *vnextruntimeprofile.Document
+	Reference         *model.ManifestRef
+	DirectorySequence int64
+	Log               []string
+}
+
+type runtimeProfileError struct {
+	Code    string
+	Message string
+	Status  int
+	Partial *runtimeProfileOutcome
+}
+
+func (e *runtimeProfileError) Error() string { return e.Code + ": " + e.Message }
+
+// signRuntimeProfile signs and publishes a product's Runtime Profile and the
+// directory pointing at it. It is the one implementation behind registration,
+// startup reconciliation, and POST /v1/runtime-profile, so the first Profile
+// is a server action, not a step a host has to remember (ADR 0024).
+//
+// The caller must hold the product lock.
+func (s *Server) signRuntimeProfile(product string, to []string, dryRun, onlyIfMissing bool) (*runtimeProfileOutcome, error) {
+	if s.cfg.Root == nil {
+		return nil, &runtimeProfileError{Code: "runtime_profile.root_unavailable", Status: http.StatusConflict,
+			Message: "agent server root is not resolved; configure rootKeyId and custodyManifest"}
+	}
+	pc, ok := s.product(product)
+	if !ok {
+		return nil, &runtimeProfileError{Code: "runtime_profile.unknown_product", Status: http.StatusNotFound, Message: "unknown product"}
+	}
+	profile, _, err := pc.loadPublishProfile()
+	if err != nil {
+		return nil, &runtimeProfileError{Code: "runtime_profile.publish_profile_invalid", Status: http.StatusConflict, Message: err.Error()}
+	}
+	cfg, err := mergeVNextPublishConfig(nil, profile, pc.Root, s.cfg.Root)
+	if err != nil {
+		return nil, &runtimeProfileError{Code: "runtime_profile.config_invalid", Status: http.StatusConflict, Message: err.Error()}
+	}
+	outcome := &runtimeProfileOutcome{DryRun: dryRun}
+	printer := func(line string) { outcome.Log = append(outcome.Log, line) }
+	preview, err := directory.Set(cfg, directory.Options{To: to, DryRun: true}, printer)
+	if err != nil {
+		return nil, &runtimeProfileError{Code: "runtime_profile.directory_preflight_failed", Status: http.StatusConflict, Message: err.Error(), Partial: outcome}
+	}
+	if onlyIfMissing && preview.DirectorySequence > 1 {
+		outcome.Skipped = true
+		outcome.DirectorySequence = preview.DirectorySequence - 1
+		return outcome, nil
+	}
+	result, err := vnextruntimeprofile.Publish(cfg, product, vnextruntimeprofile.PublishOptions{
+		To:             to,
+		ProfileVersion: preview.DirectorySequence,
+		DryRun:         dryRun,
+		Signer:         envelope.Signer{KeyID: s.cfg.Root.KeyID, Seed: s.cfg.Root.Seed},
+	}, printer)
+	if err != nil {
+		return nil, &runtimeProfileError{Code: "runtime_profile.publish_failed", Status: http.StatusConflict, Message: err.Error(), Partial: outcome}
+	}
+	outcome.Profile = &result.Profile
+	outcome.Reference = &result.Reference
+	outcome.DirectorySequence = preview.DirectorySequence
+	if dryRun {
+		return outcome, nil
+	}
+	published, err := directory.Set(cfg, directory.Options{To: to, RuntimeProfile: &result.Reference}, printer)
+	if err != nil {
+		return nil, &runtimeProfileError{Code: "runtime_profile.directory_commit_failed", Status: http.StatusConflict, Message: err.Error(), Partial: outcome}
+	}
+	outcome.DirectorySequence = published.DirectorySequence
+	s.triggerSiteRebuild(product, "runtime-profile")
+	return outcome, nil
+}
+
+// ensureRuntimeProfiles signs the first Runtime Profile of every registered
+// product that has no directory yet. It runs at startup so a product
+// registered while the server could not sign (no publish defaults yet, a
+// backend down) heals on the next restart instead of waiting for a human.
+func (s *Server) ensureRuntimeProfiles(printer func(string)) {
+	if s.cfg.Root == nil {
+		return
+	}
+	for id := range s.productIDs() {
+		mu := s.productLock(id)
+		mu.Lock()
+		outcome, err := s.signRuntimeProfile(id, nil, false, true)
+		mu.Unlock()
+		switch {
+		case err != nil:
+			printer(fmt.Sprintf("runtime profile %s: not signed: %v", id, err))
+		case outcome.Skipped:
+		default:
+			printer(fmt.Sprintf("runtime profile %s: signed first profile, directory sequence %d", id, outcome.DirectorySequence))
+		}
+	}
+}
+
+func writeRuntimeProfileError(w http.ResponseWriter, err error) {
+	var rpErr *runtimeProfileError
+	if !errors.As(err, &rpErr) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	body := map[string]any{"ok": false, "code": rpErr.Code, "error": rpErr.Message}
+	if rpErr.Partial != nil {
+		body["log"] = rpErr.Partial.Log
+		if rpErr.Partial.Profile != nil {
+			body["profile"] = rpErr.Partial.Profile
+			body["reference"] = rpErr.Partial.Reference
+		}
+	}
+	writeJSON(w, rpErr.Status, body)
+}
+
+// handleRuntimeProfile re-signs a product's Runtime Profile on demand. The
+// first Profile no longer depends on it: registration and startup sign it
+// (ADR 0024). The product private key never leaves the agent host; the caller
+// receives only the signed public document. The product lock is shared with
+// normal publication so the directory sequence cannot race a release.
 func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1129,23 +1313,24 @@ func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if req.Product == "" || req.Project.Product == "" {
-		http.Error(w, "product and project are required", http.StatusBadRequest)
+	if req.Product == "" {
+		http.Error(w, "product is required", http.StatusBadRequest)
 		return
 	}
-	if req.Project.Product != req.Product {
-		http.Error(w, "project product does not match request product", http.StatusBadRequest)
-		return
-	}
-	if err := req.Project.Validate(); err != nil {
-		http.Error(w, "invalid project: "+err.Error(), http.StatusBadRequest)
-		return
+	if req.Project != nil {
+		if req.Project.Product != req.Product {
+			http.Error(w, "project product does not match request product", http.StatusBadRequest)
+			return
+		}
+		if err := req.Project.Validate(); err != nil {
+			http.Error(w, "invalid project: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	if !s.requireAuthFor(w, r, req.Product) {
 		return
 	}
-	pc, ok := s.product(req.Product)
-	if !ok {
+	if _, ok := s.product(req.Product); !ok {
 		http.Error(w, "unknown product", http.StatusNotFound)
 		return
 	}
@@ -1155,60 +1340,14 @@ func (s *Server) handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer mu.Unlock()
-
-	profile, err := config.LoadPublishProfile(pc.Profile)
+	outcome, err := s.signRuntimeProfile(req.Product, req.To, req.DryRun, false)
 	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"ok": false, "code": "runtime_profile.publish_profile_invalid", "error": err.Error(),
-		})
+		writeRuntimeProfileError(w, err)
 		return
-	}
-	cfg, err := mergeVNextPublishConfig(&req.Project, profile, pc.Root, s.cfg.Root)
-	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"ok": false, "code": "runtime_profile.config_invalid", "error": err.Error(),
-		})
-		return
-	}
-	var logs []string
-	printer := func(line string) { logs = append(logs, line) }
-	preview, err := directory.Set(cfg, directory.Options{To: req.To, DryRun: true}, printer)
-	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"ok": false, "code": "runtime_profile.directory_preflight_failed", "error": err.Error(), "log": logs,
-		})
-		return
-	}
-	result, err := vnextruntimeprofile.Publish(cfg, req.Project, vnextruntimeprofile.PublishOptions{
-		To:             req.To,
-		ProfileVersion: preview.DirectorySequence,
-		DryRun:         req.DryRun,
-		Signer:         envelope.Signer{KeyID: s.cfg.Root.KeyID, Seed: s.cfg.Root.Seed},
-	}, printer)
-	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"ok": false, "code": "runtime_profile.publish_failed", "error": err.Error(), "log": logs,
-		})
-		return
-	}
-	directorySequence := preview.DirectorySequence
-	if !req.DryRun {
-		publishedDirectory, directoryErr := directory.Set(cfg, directory.Options{
-			To: req.To, RuntimeProfile: &result.Reference,
-		}, printer)
-		if directoryErr != nil {
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"ok": false, "code": "runtime_profile.directory_commit_failed", "error": directoryErr.Error(),
-				"profile": result.Profile, "reference": result.Reference, "log": logs,
-			})
-			return
-		}
-		directorySequence = publishedDirectory.DirectorySequence
-		s.triggerSiteRebuild(req.Product, "runtime-profile")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "dryRun": req.DryRun, "profile": result.Profile,
-		"reference": result.Reference, "directorySequence": directorySequence, "log": logs,
+		"ok": true, "dryRun": req.DryRun, "profile": outcome.Profile,
+		"reference": outcome.Reference, "directorySequence": outcome.DirectorySequence, "log": outcome.Log,
 	})
 }
 
@@ -1326,18 +1465,14 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		// The profile is signed by the server root and points at the directory
 		// entries this release publishes to (requirements 10.4, 12.6). There is
 		// no per-product runtime profile root and no opt-in flag: every release
-		// carries one.
-		productDocument, projectErr := vnextproject.Load(filepath.Join(stage.StagingDir(cfg.Root, version), vnextrelease.ProjectFile))
-		if projectErr != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "code": "release.project_invalid", "error": projectErr.Error(), "log": logs})
-			return
-		}
+		// carries one. Its inputs are server facts only (ADR 0024); the staged
+		// project was already checked by validateVNextStaged.
 		preview, previewErr := directory.Set(cfg, directory.Options{To: req.To, DryRun: true}, printer)
 		if previewErr != nil {
 			writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "release.directory_preflight_failed", "error": previewErr.Error(), "log": logs})
 			return
 		}
-		runtimeProfileResult, err = vnextruntimeprofile.Publish(cfg, *productDocument, vnextruntimeprofile.PublishOptions{
+		runtimeProfileResult, err = vnextruntimeprofile.Publish(cfg, cfg.Product, vnextruntimeprofile.PublishOptions{
 			To:             req.To,
 			ProfileVersion: preview.DirectorySequence,
 			Signer:         envelope.Signer{KeyID: s.cfg.Root.KeyID, Seed: s.cfg.Root.Seed},

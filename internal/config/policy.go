@@ -76,6 +76,56 @@ func validatePublishProfile(profile *PublishProfile) error {
 	return nil
 }
 
+// PublishDefaults is the publish configuration one agent server applies to
+// every product it hosts. On a real server the per-product publish profiles
+// only ever differed by their product field: the backends, publish targets and
+// directory layout belong to the machine, not to the product. Holding them once
+// in the agent config is what lets a product be registered by id alone, with no
+// file to hand-write on the server first.
+type PublishDefaults struct {
+	Backends  map[string]map[string]any `json:"backends"`
+	PublishTo []string                  `json:"publishTo,omitempty"`
+	Directory *PublishDirectoryProfile  `json:"directory,omitempty"`
+}
+
+// ForProduct derives the publish profile of one product from the server
+// defaults. The result is a deep copy, so callers may not alias each other.
+func (d *PublishDefaults) ForProduct(product string) (*PublishProfile, error) {
+	if d == nil {
+		return nil, Error{Message: "agent has no default publish configuration"}
+	}
+	if d.Directory != nil && (len(d.Directory.EntryURLs) > 0 || len(d.Directory.Services) > 0) {
+		return nil, Error{Message: "publish.directory.entryUrls and publish.directory.services name one product's files and cannot be server defaults; leave them out so they are derived from the backend baseUrl"}
+	}
+	profile := &PublishProfile{
+		Product:   product,
+		Backends:  make(map[string]map[string]any, len(d.Backends)),
+		PublishTo: append([]string(nil), d.PublishTo...),
+	}
+	for name, backend := range d.Backends {
+		if backend == nil {
+			profile.Backends[name] = nil
+			continue
+		}
+		copied := make(map[string]any, len(backend))
+		for key, value := range backend {
+			copied[key] = value
+		}
+		profile.Backends[name] = copied
+	}
+	if d.Directory != nil {
+		profile.Directory = &PublishDirectoryProfile{
+			PublishTo: append([]string(nil), d.Directory.PublishTo...),
+			EntryURLs: append([]string(nil), d.Directory.EntryURLs...),
+			Services:  append([]DirectoryServiceConfig(nil), d.Directory.Services...),
+		}
+	}
+	if err := validatePublishProfile(profile); err != nil {
+		return nil, err
+	}
+	return profile, nil
+}
+
 func loadStrict(path string, dest any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

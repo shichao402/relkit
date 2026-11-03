@@ -11,7 +11,7 @@
 | `/etc/relkit-agent/relkit-agent.json` | 监听地址、`uploadTokens`、`products` map、`productRootParent` |
 | `/etc/relkit-agent/tokens/<id>.token` | 独占产品的上传 Bearer（0600）。共用家族改名为 `tokens/shared.token`（冲突则 `shared-N`）。路径以 `init -list-products` 为准，不要用 share-with 的产品 id 去猜。CI 环境变量名是 `RELKIT_UPLOAD_TOKEN` |
 | `/etc/relkit-agent/env` | `RELKIT_PRIVATE_KEY`、`COS_SECRET_ID`、`COS_SECRET_KEY` 等（systemd `EnvironmentFile`） |
-| `/etc/relkit-agent/products/<id>.json` | 本机 **publish profile**（缺省；可用 `products.<id>.profile` 覆盖） |
+| `/etc/relkit-agent/products/<id>.json` | 可选的每产品 **publish profile**（可用 `products.<id>.profile` 覆盖路径）。存在时优先；不存在时用 `relkit-agent.json` 顶层 `publish` 默认值派生（ADR 0024） |
 | `<productRootParent>/<id>/` | 产品树根：私钥文件、`.relkit/cache/staged/<version>/`。路径由 `products.<id>.root` 决定；未显式指定时用 `productRootParent`，再不行从已注册产品的共同父目录推断 |
 | `/var/lib/relkit-agent` | 幂等回放等状态 |
 
@@ -33,7 +33,9 @@
 
 ## 发布时读哪份配置
 
-vNext 断代后只剩一条路径：本机 `/etc/relkit-agent/products/<id>.json` 的 publish profile，加上 staged 树里的 vNext 控制面文档（`staged.pb` + `resolution.json` + `resolution-bundle.json` + `relkit.project.json` + `artifact-set.json`）。profile 的 `product` 必须与请求的产品一致。
+发布配置是服务器事实（ADR 0024）。产品的 publish profile 按以下顺序取：本机 `/etc/relkit-agent/products/<id>.json` 存在就用它；否则用 `relkit-agent.json` 顶层 `publish`（`backends` / `publishTo` / `directory.publishTo`）派生，只把 `product` 换成产品 id。`publish.directory` 里不能写 `entryUrls` / `services`，它们带产品路径，由 backend `baseUrl` 推出。两者都没有时 agent 启动打印 WARNING，产品能注册但不能签 Profile、不能发布。staged 树里的 vNext 控制面文档（`staged.pb` + `relkit.project.json` + `artifact-set.json`）只提供产物事实；渠道必须属于服务器渠道集 `dev`、`stable`。
+
+注册产品（`POST /v1/admin/products`，面板只需填产品名）会在同一请求里签发首份 Runtime Profile 并发布 directory，响应的 `runtimeProfile.signed` 说明结果。签发失败不回滚注册，agent 每次启动会给所有还没有 directory 的产品补签。`POST /v1/runtime-profile` 只用于按需重签，请求体只需 `product`。
 
 staged 树必须携带 `resolution.json` 的 digest；缺该字段 `PUT /v1/staged`（整包与分片 complete）在解包后立即 **400**，不再等到 `POST /v1/publish`。
 
@@ -71,7 +73,7 @@ dump 总是先落 agent state 目录 `site/dump/` 再分发，本机副本做审
 
 改完后 `systemctl restart relkit-agent`。把新 token **先**交给该产品 CI，再重启。
 
-新产品：先用 `relkit-ops agent policy` 落 policy，再在机上准备 `/etc/relkit-agent/products/<id>.json`（`product` + `signing.keyId` + backends）。不要往产品根塞发布凭据。
+新产品：机器的 `relkit-agent.json` 里有 `publish` 默认值时，在面板（或 `POST /v1/admin/products`）只填产品名注册即可，首份 Runtime Profile 随注册签发，宿主随后直接 `relkit bootstrap build`。只有发布形态与机器默认值不同的产品才需要 `/etc/relkit-agent/products/<id>.json`。不要往产品根塞发布凭据。
 
 改 `/etc/relkit-agent/env` 后必须 `systemctl restart`。COS / 产品上传 token / EdgeOne 是三套东西。root 跑 init 时 `products/` 必须 `0755`，`tokens/` 给服务用户可读（文件 0600、目录让 relkit 能读）。
 
