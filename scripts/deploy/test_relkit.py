@@ -1735,36 +1735,76 @@ class BuildAppendTests(unittest.TestCase):
         self.assertTrue(args.cli)
 
 
-class PublishDefaultsBackfillTests(unittest.TestCase):
-    """ADR 0024: upgrade registers the machine's publish config once."""
+class PublishDefaultsDeriveTests(unittest.TestCase):
+    """ADR 0024: upgrade moves the publish config already on the box; it asks for nothing."""
 
-    def test_no_read_url_changes_nothing(self):
-        cfg, note = deploy_cli.backfill_publish_defaults({"addr": "x"}, read_url="", upload_url="")
-        self.assertEqual(cfg, {"addr": "x"})
-        self.assertEqual(note, "")
+    SERVE = {
+        "type": "relkit-compatible",
+        "baseUrl": "https://update-internal.example.com/",
+        "uploadUrl": "https://publish.example.com/",
+        "tokenEnv": "RELKIT_SERVE_TOKEN",
+        "timeoutSeconds": 600,
+    }
 
-    def test_writes_the_stated_addresses(self):
-        cfg, _ = deploy_cli.backfill_publish_defaults(
+    def _profile(self, product: str, **overrides):
+        profile = {
+            "product": product,
+            "publishTo": ["serve"],
+            "backends": {"serve": dict(self.SERVE)},
+            "directory": {
+                "publishTo": ["serve"],
+                "entryUrls": [f"https://update-internal.example.com/directory/{product}.pb"],
+            },
+        }
+        profile.update(overrides)
+        return profile
+
+    def test_derives_block_from_product_profiles(self):
+        cfg, note = deploy_cli.derive_publish_defaults(
             {"addr": "x"},
-            read_url="https://update-internal.example.com",
-            upload_url="https://publish.example.com/",
+            {"a.json": self._profile("a"), "b.json": self._profile("b")},
         )
-        serve = cfg["publish"]["backends"]["serve"]
-        self.assertEqual(serve["baseUrl"], "https://update-internal.example.com/")
-        self.assertEqual(serve["uploadUrl"], "https://publish.example.com/")
         self.assertEqual(cfg["addr"], "x")
+        self.assertEqual(
+            cfg["publish"],
+            {
+                "backends": {"serve": self.SERVE},
+                "publishTo": ["serve"],
+                "directory": {"publishTo": ["serve"]},
+            },
+        )
+        self.assertIn("2 product profile", note)
+        self.assertIn("https://update-internal.example.com/", note)
+
+    def test_per_product_directory_fields_do_not_move(self):
+        cfg, _ = deploy_cli.derive_publish_defaults({}, {"a.json": self._profile("a")})
+        self.assertNotIn("entryUrls", cfg["publish"]["directory"])
+        self.assertNotIn("product", cfg["publish"])
+
+    def test_disagreeing_profiles_stop_the_upgrade(self):
+        other = dict(self.SERVE, baseUrl="https://update.example.com/")
+        with self.assertRaises(deploy_cli.Fail):
+            deploy_cli.derive_publish_defaults(
+                {},
+                {"a.json": self._profile("a"), "b.json": self._profile("b", backends={"serve": other})},
+            )
 
     def test_existing_block_wins(self):
         existing = {"publish": {"publishTo": ["other"]}}
-        cfg, note = deploy_cli.backfill_publish_defaults(
-            existing, read_url="https://r.example.com", upload_url="https://w.example.com"
-        )
+        cfg, note = deploy_cli.derive_publish_defaults(existing, {"a.json": self._profile("a")})
         self.assertEqual(cfg, existing)
-        self.assertIn("already set", note)
+        self.assertEqual(note, "")
 
-    def test_read_url_needs_upload_url(self):
-        with self.assertRaises(deploy_cli.Fail):
-            deploy_cli.backfill_publish_defaults({}, read_url="https://r.example.com", upload_url="")
+    def test_nothing_to_derive_warns_and_changes_nothing(self):
+        cfg, note = deploy_cli.derive_publish_defaults({"addr": "x"}, {})
+        self.assertEqual(cfg, {"addr": "x"})
+        self.assertIn("WARNING", note)
+
+    def test_upgrade_has_no_read_url_flag(self):
+        with self.assertRaises(SystemExit):
+            deploy_cli.build_parser().parse_args(
+                ["upgrade", "--host", "h", "--publish-read-url", "https://r.example.com"]
+            )
 
 
 class AgentServeTokenTests(unittest.TestCase):

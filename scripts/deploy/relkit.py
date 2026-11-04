@@ -23,6 +23,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional, Sequence
@@ -1072,36 +1073,61 @@ def backfill_product_root_parent(
     return updated, note
 
 
-def backfill_publish_defaults(
-    cfg: dict[str, Any], *, read_url: str, upload_url: str
+def derive_publish_defaults(
+    cfg: dict[str, Any], product_profiles: dict[str, dict[str, Any]]
 ) -> tuple[dict[str, Any], str]:
-    """Register the machine's publish config in the agent config (ADR 0024).
+    """Move the machine's publish config into the agent config (ADR 0024).
 
-    Both addresses are stated by the operator. A read address ends up inside the
-    Runtime Profile every client trusts, so it is never inferred from a hostname.
-    An existing block is left alone: this is a first-time setting, not a sync.
+    Upgrade asks the operator for nothing here. Every value the block holds is
+    already on the box: the per-product profiles under products/ name the same
+    backends, targets and directory layout, differing only by product. The block
+    is built from them; when they disagree the upgrade stops, because picking
+    one would silently change where some product's clients read from.
+
+    A box without product profiles has nothing to move. Its publish block comes
+    from the config example chosen at install time, not from upgrade.
+    An existing block is left alone: this is a one-time move, not a sync.
     """
-    if not read_url.strip():
-        return cfg, ""
     if cfg.get("publish"):
-        return cfg, "publish defaults already set; --publish-read-url ignored"
-    if not upload_url.strip():
-        raise Fail("--publish-read-url needs --public-upload-url: the agent must know where to write")
+        return cfg, ""
+    if not product_profiles:
+        return cfg, (
+            "WARNING: no publish block and no products/*.json to derive one from; "
+            "the agent registers products but signs no Runtime Profile until the "
+            "config has one (see relkit-agent.example.json)"
+        )
+    derived: dict[str, Any] = {}
+    first = ""
+    for name in sorted(product_profiles):
+        profile = product_profiles[name]
+        backends = profile.get("backends")
+        if not isinstance(backends, dict) or not backends:
+            raise Fail(f"products/{name} names no backends; cannot derive the publish block from it")
+        block: dict[str, Any] = {"backends": deepcopy(backends)}
+        if profile.get("publishTo"):
+            block["publishTo"] = list(profile["publishTo"])
+        directory = profile.get("directory")
+        if isinstance(directory, dict) and directory.get("publishTo"):
+            # entryUrls and services name one product's files; the agent derives
+            # them per product from the backend baseUrl, so they never move.
+            block["directory"] = {"publishTo": list(directory["publishTo"])}
+        if not first:
+            derived, first = block, name
+        elif block != derived:
+            raise Fail(
+                f"products/{first} and products/{name} disagree on backends, publishTo or "
+                "directory.publishTo; the publish block is shared by every product, so "
+                "reconcile those files before upgrading"
+            )
     updated = dict(cfg)
-    updated["publish"] = {
-        "publishTo": ["serve"],
-        "backends": {
-            "serve": {
-                "type": "relkit-compatible",
-                "baseUrl": read_url.strip().rstrip("/") + "/",
-                "uploadUrl": upload_url.strip().rstrip("/") + "/",
-                "tokenEnv": "RELKIT_SERVE_TOKEN",
-                "timeoutSeconds": 600,
-            }
-        },
-        "directory": {"publishTo": ["serve"]},
-    }
-    return updated, f"publish defaults written (read {read_url}, write {upload_url})"
+    updated["publish"] = derived
+    reads = sorted(
+        str(b.get("baseUrl")) for b in derived["backends"].values() if isinstance(b, dict) and b.get("baseUrl")
+    )
+    return updated, (
+        f"publish block derived from {len(product_profiles)} product profile(s)"
+        + (f" (read {', '.join(reads)})" if reads else "")
+    )
 
 
 def ensure_agent_serve_token(env_file: Path, store_config: Path) -> str:
@@ -1948,7 +1974,6 @@ def apply_agent_upgrade(
     custody_manifest: str = "",
     admin_state_file: str = "",
     enable_tool_publish: bool = False,
-    publish_read_url: str = "",
 ) -> list[str]:
     notes: list[str] = []
     show = systemd_show("relkit-agent", "ExecStart", "User", "FragmentPath")
@@ -2089,21 +2114,9 @@ def apply_agent_upgrade(
     )
     if backfill_note:
         notes.append(backfill_note)
-    cfg, publish_note = backfill_publish_defaults(
-        cfg, read_url=publish_read_url, upload_url=public_upload_url or ""
-    )
-    if publish_note:
-        notes.append(publish_note)
-    if publish_read_url.strip():
-        notes.append(ensure_agent_serve_token(config_dir / "env", Path("/etc/relkit-store/relkit-store.json")))
-    config_file.write_text(dump_json(cfg), encoding="utf-8")
-
-    if manifest_file.is_file():
-        os.chmod(manifest_file, 0o600)
-        try:
-            chown_path(manifest_file, user)
-        except LookupError:
-            pass
+    # Product profiles are migrated before the publish block is derived, so the
+    # block holds the backends exactly as the products will use them.
+    migrated_profiles: dict[str, dict[str, Any]] = {}
     if products_dir.is_dir():
         for path in sorted(products_dir.glob("*.json")):
             profile = load_json_object(path.read_text(encoding="utf-8"))
@@ -2115,6 +2128,21 @@ def apply_agent_upgrade(
             if more:
                 path.write_text(dump_json(migrated), encoding="utf-8")
                 notes.extend(f"{path.name}: {item}" for item in more)
+            migrated_profiles[path.name] = migrated
+    had_publish = bool(cfg.get("publish"))
+    cfg, publish_note = derive_publish_defaults(cfg, migrated_profiles)
+    if publish_note:
+        notes.append(publish_note)
+    if cfg.get("publish") and not had_publish:
+        notes.append(ensure_agent_serve_token(config_dir / "env", Path("/etc/relkit-store/relkit-store.json")))
+    config_file.write_text(dump_json(cfg), encoding="utf-8")
+
+    if manifest_file.is_file():
+        os.chmod(manifest_file, 0o600)
+        try:
+            chown_path(manifest_file, user)
+        except LookupError:
+            pass
     if binary:
         install_file(binary, dest_bin, 0o755)
         notes.append(f"installed {dest_bin}")
@@ -2451,7 +2479,6 @@ def cmd_remote(args: argparse.Namespace) -> None:
                         custody_manifest=spec.get("custodyManifest") or "",
                         admin_state_file=spec.get("adminStateFile") or "",
                         enable_tool_publish=bool(spec.get("enableToolPublish")),
-                        publish_read_url=spec.get("publishReadUrl") or "",
                     )
                 )
             if spec.get("upgradeConsole"):
@@ -2669,18 +2696,27 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         _, grace = ensure_cas_grace(serve_cfg)
         print("serve migrate notes:", grace or ["addr/dir preserved"])
     public_upload = args.public_upload_url
+    planned_profiles: dict[str, dict[str, Any]] = {}
     for name, profile in (probe.get("profiles") or {}).items():
         if not isinstance(profile, dict) or profile.get("error"):
             continue
         try:
-            _, notes = migrate_profile(
+            planned, notes = migrate_profile(
                 profile,
                 serve_addr=str(serve_cfg.get("addr") or ""),
                 public_upload_url=public_upload,
             )
+            planned_profiles[name] = planned
             print(f"profile {name}:", notes or ["no changes"])
         except ValueError as exc:
             die(f"profile {name}: {exc}")
+    agent_live = (probe.get("agent") or {}).get("config")
+    if want_agent and isinstance(agent_live, dict):
+        try:
+            _, publish_note = derive_publish_defaults(agent_live, planned_profiles)
+        except Fail as exc:
+            die(f"publish block: {exc}")
+        print("publish block:", publish_note or "already set; left alone")
     ident = git_identity()
     protocol_min, protocol_max = publish_protocol_window()
     print(
@@ -2721,7 +2757,6 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
         "backup": f"/var/backups/relkit/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
         "keepBackups": keep_backups,
         "rootKeyId": args.root_key_id,
-        "publishReadUrl": args.publish_read_url,
         "custodyManifest": args.custody_manifest,
         "adminStateFile": args.admin_state_file,
         "enableToolPublish": want_tools,
@@ -3220,14 +3255,6 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--restart", action="store_true", help="deprecated: apply already restarts unless --stage-only")
     upgrade.add_argument("--stage-only", action="store_true", help="write files but do not restart; not a completed upgrade")
     upgrade.add_argument("--allow-dirty", action="store_true")
-    upgrade.add_argument(
-        "--publish-read-url",
-        default="",
-        help=(
-            "protocol read address for the agent's publish defaults (ADR 0024); "
-            "first-time setting, requires --public-upload-url"
-        ),
-    )
     upgrade.add_argument("--unsafe-from-dist", action="store_true", help="ship existing dist/ binaries instead of building HEAD")
     upgrade.add_argument("--serve-binary", default="dist/relkit-store-linux-amd64")
     upgrade.add_argument("--agent-binary", default="dist/relkit-agent-linux-amd64")

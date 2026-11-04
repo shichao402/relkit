@@ -34,5 +34,6 @@ updater 把 `allowedChannels[0]` 当作默认渠道，并按位置比较新旧 P
 ## 影响
 
 - 新产品接入流程：注册产品（只填 id），然后直接 `relkit bootstrap build`。
-- 服务器部署需要 `relkit-agent.json` 的 `publish` 块和 agent 环境里的 `RELKIT_SERVE_TOKEN`。已有机器用 `upgrade --public-upload-url ... --publish-read-url ...` 写入一次；读地址由操作者明确给出，不从域名推断，因为它会进入客户端信任的 Runtime Profile。没配时 agent 启动打印 WARNING，注册仍会成功，但不会签发 Profile。
+- 服务器部署需要 `relkit-agent.json` 的 `publish` 块和 agent 环境里的 `RELKIT_SERVE_TOKEN`。已有机器由 `upgrade` 从盒上已有的 `products/*.json` 推导出这个块，不向操作者要任何参数；几份文件不一致时拒绝升级，不挑其中一份。新机器的块来自 install 选用的配置样例。没配时 agent 启动打印 WARNING，注册仍会成功，但不会签发 Profile。
+- 部署脚本的原则：upgrade 只迁移盒上已有的状态，不向操作者要新信息。新版本需要的东西盒上没有时，修迁移推导或字段设计，不加 upgrade 参数。真正的新事实走 install 或注册接口进服务器。
 - 宿主 `relkit.project.json` 里的 `channels` 可以删除。

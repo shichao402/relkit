@@ -12,6 +12,9 @@ what will break.
   any missing one on start, so `relkit bootstrap build` works right after
   registration. Channels are a server fact (`dev`, `stable`) and publish config
   derives from a machine-level `publish` block in `relkit-agent.json`. See ADR 0024.
+- `upgrade` builds that `publish` block from the box's existing
+  `products/*.json` and asks the operator for nothing; profiles that disagree
+  stop the upgrade. The short-lived `--publish-read-url` flag is removed.
 
 ### Breaking
 
