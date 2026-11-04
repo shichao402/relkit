@@ -640,11 +640,40 @@ func checkCodeMonotonic(existing *model.IndexDocument, staged *model.StagedDocum
 		return nil
 	}
 
-	message := fmt.Sprintf("new code %d is not greater than the highest existing code %d; this usually means the code source reset (see CLI.md 4.2)", staged.Code, highest)
+	message := fmt.Sprintf("new code %d is not greater than the highest existing code %d; release codes come from the server (ADR 0025: claim one with 'relkit release-code claim' before building)", staged.Code, highest)
 	if !allowBackfill {
-		return Error{Message: message + "; pass --allow-backfill only if you are deliberately backfilling a historical version"}
+		return Error{Code: "release.code_not_monotonic", Message: message + "; pass --allow-backfill only if you are deliberately backfilling a historical version"}
 	}
 	return nil
+}
+
+// HighestPublishedCode returns the largest release code already published for
+// cfg.Product on any of channels, or 0 when nothing has been published. It
+// reads the same verified indexes the publish path reads, so the server's
+// release-code floor and the publish-time monotonic check can never disagree.
+func HighestPublishedCode(cfg *config.Config, channels []string) (int64, error) {
+	targetNames := append([]string(nil), cfg.PublishTo...)
+	if len(targetNames) == 0 {
+		return 0, Error{Message: "no target backends; set publishTo"}
+	}
+	openedBackends, err := openBackends(cfg, targetNames)
+	if err != nil {
+		return 0, err
+	}
+	trusted := trustedKeys(cfg, nil)
+	var highest int64
+	for _, channel := range channels {
+		existing, _, _, err := readExistingIndexes(openedBackends, cfg, channel, trusted, func(string) {})
+		if err != nil {
+			return 0, err
+		}
+		for _, version := range existing.Versions {
+			if version.Code > highest {
+				highest = version.Code
+			}
+		}
+	}
+	return highest, nil
 }
 
 func mergeNode(existing []*model.VersionNode, node *model.VersionNode) []*model.VersionNode {

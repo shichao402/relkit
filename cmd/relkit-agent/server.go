@@ -538,6 +538,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/staged/", s.handleStaged)
 	mux.HandleFunc("/v1/runtime-profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/v1/publish", s.handlePublish)
+	mux.HandleFunc(releaseCodePath, s.handleReleaseCode)
 	mux.HandleFunc("/v1/unpublish", s.handleUnpublish)
 	// Tool distribution is the one read face a host CI reaches before it has
 	// any relkit code: the file plus its SSH signature, both rooted in the

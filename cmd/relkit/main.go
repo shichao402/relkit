@@ -71,6 +71,8 @@ func run(argv []string) (code int) {
 		err = cmdInspect(rest)
 	case "release":
 		err = cmdRelease(rest)
+	case "release-code":
+		err = cmdReleaseCode(rest)
 	case "build":
 		err = cmdBuild(rest)
 	case "custody":
@@ -268,6 +270,7 @@ Commands:
   stage                    stage an immutable ArtifactSet
   inspect                  print a protobuf or JSON document
   release                  publish a staged release to an agent
+  release-code claim|show  claim the next release code from the server (ADR 0025)
   build                    build relkit components
   custody                  read the credential manifest by keyId
 `)

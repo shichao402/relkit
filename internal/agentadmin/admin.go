@@ -64,11 +64,16 @@ type User struct {
 // Product is one host product this server publishes. Root is the product tree
 // on this host; Profile is the machine publish profile the agent reads when it
 // needs backends. Neither is a secret.
+//
+// LastReleaseCode is the last release code this server handed out for the
+// product (ADR 0025). Release codes are a server fact: the host claims one
+// before it builds, so the counter lives next to the registration it belongs to.
 type Product struct {
-	ID        string `json:"id"`
-	Root      string `json:"root"`
-	Profile   string `json:"profile,omitempty"`
-	CreatedAt string `json:"createdAt"`
+	ID              string `json:"id"`
+	Root            string `json:"root"`
+	Profile         string `json:"profile,omitempty"`
+	CreatedAt       string `json:"createdAt"`
+	LastReleaseCode int64  `json:"lastReleaseCode,omitempty"`
 }
 
 // Token is one publisher credential. Hash is the lowercase hex sha256 of the
@@ -189,6 +194,9 @@ func validateDocument(doc Document) error {
 		seenProducts[product.ID] = true
 		if strings.TrimSpace(product.Root) == "" {
 			return fmt.Errorf("products[%d]: root is required", index)
+		}
+		if product.LastReleaseCode < 0 {
+			return fmt.Errorf("products[%d]: lastReleaseCode must not be negative", index)
 		}
 	}
 	seenTokens := map[string]bool{}
@@ -680,6 +688,39 @@ func (s *Store) AddProduct(id, root, profile string) (Product, error) {
 		return Product{}, err
 	}
 	return product, nil
+}
+
+// AllocateReleaseCode hands out the next release code for a product (ADR 0025).
+//
+// The result is strictly greater than both the last code this server handed out
+// and floor, which the caller derives from the codes already published on every
+// channel. The floor lets a product that published before the server took over
+// numbering continue above its existing history without a migration step.
+//
+// The increment and the write happen under the store lock and the new value is
+// on disk before it is returned, so two concurrent claims never see the same
+// code and a restart never reissues one. An unused code is simply a gap: codes
+// only order releases, they do not have to be dense.
+func (s *Store) AllocateReleaseCode(id string, floor int64) (int64, error) {
+	if floor < 0 {
+		return 0, fmt.Errorf("release code floor must not be negative")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.doc.Products {
+		if s.doc.Products[index].ID != id {
+			continue
+		}
+		previous := s.doc.Products[index].LastReleaseCode
+		next := max(previous, floor) + 1
+		s.doc.Products[index].LastReleaseCode = next
+		if err := s.persistLocked(); err != nil {
+			s.doc.Products[index].LastReleaseCode = previous
+			return 0, err
+		}
+		return next, nil
+	}
+	return 0, fmt.Errorf("product %q is not registered", id)
 }
 
 // RemoveProduct forgets a registration and every token issued for it. The

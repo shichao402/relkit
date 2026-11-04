@@ -23,7 +23,7 @@ vNext 不读取旧 `/1`、`/2`，保留有效语义：
 
 - 文件、kind、platform、selectors
 - install / payload 关系
-- 产品生成的单调 `releaseCode`（Operator 不得从 tag 或仓库规则二次猜测）
+- 产品生成的单调 `releaseCode`（Operator 不得从 tag 或仓库规则二次猜测）。已被 [ADR 0025](0025-server-allocated-release-code.md) 取代：releaseCode 改由服务器分配
 - changelog、展示元数据
 - multi-platform drop merge identity
 

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/shichao402/relkit/internal/casput"
 	"github.com/shichao402/relkit/internal/publishproto"
+	"github.com/shichao402/relkit/internal/stage"
 )
 
 type Options struct {
@@ -71,6 +73,9 @@ func Run(ctx context.Context, options Options) (*Result, error) {
 	if logger == nil {
 		logger = func(string) {}
 	}
+	if err := preflightStagedCode(ctx, options, logger); err != nil {
+		return nil, err
+	}
 	put, err := casput.Put(ctx, casput.Options{
 		Root: options.Root, Product: options.Product, Version: options.Version,
 		URL: options.AgentURL, Token: options.Token, Log: logger,
@@ -122,6 +127,27 @@ func Run(ctx context.Context, options Options) (*Result, error) {
 	}
 	result.AgentResponse = append(json.RawMessage(nil), body...)
 	return result, nil
+}
+
+// preflightStagedCode compares the staged release code with what the server has
+// already published before any byte is uploaded. An agent that predates ADR
+// 0025 cannot answer; then the publish-time check is the only guard, as before.
+func preflightStagedCode(ctx context.Context, options Options, log func(string)) error {
+	staged, err := stage.LoadStaged(options.Root, options.Version)
+	if err != nil {
+		return err
+	}
+	state, err := ReadReleaseCode(ctx, ReleaseCodeOptions{
+		Product: options.Product, AgentURL: options.AgentURL, Token: options.Token, Client: options.Client,
+	})
+	if errors.Is(err, ErrReleaseCodeUnsupported) {
+		log("release-code preflight skipped: " + err.Error())
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("release-code preflight: %w", err)
+	}
+	return CheckStagedCode(staged.GetCode(), state, options.AllowBackfill)
 }
 
 func normalizeEndpoint(baseURL, action string) string {

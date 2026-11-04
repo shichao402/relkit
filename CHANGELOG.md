@@ -6,6 +6,18 @@ what will break.
 
 ## Unreleased
 
+### Added
+
+- Release codes are allocated by the server (ADR 0025). `POST /v1/release-code`
+  hands out the next code for a product, above both its counter and every code
+  already published on any channel, so products that published before need no
+  migration. `relkit release-code claim` prints the number for CI;
+  `relkit release-code show` reads the state. Hosts stop deriving codes from git
+  history, so the same commit can be released again.
+- `relkit release --execute` checks the staged code against the server before
+  uploading anything. A stale code now fails in seconds instead of after the
+  whole CAS upload.
+
 ### Changed
 
 - Registering a product now signs its first Runtime Profile, and the agent signs
@@ -22,6 +34,10 @@ what will break.
   `["dev","stable"]` is now rejected, and so is a staged document on another channel.
 
 ### Fixed
+
+- The publish-time "code is not greater" error pointed at `CLI.md 4.2`, which
+  is now the `doctor` section. It now carries the stable code
+  `release.code_not_monotonic` and points at `relkit release-code claim`.
 
 - The console's locked screen blamed a missing agent address in the console
   config. Locked actually means the agent is reachable but has no operator and
@@ -76,6 +92,10 @@ where the operator's own skills come from.
 
 ### Fixed
 
+- The publish-time "code is not greater" error pointed at `CLI.md 4.2`, which
+  is now the `doctor` section. It now carries the stable code
+  `release.code_not_monotonic` and points at `relkit release-code claim`.
+
 - `install agent` can choose the server root. It never wrote `rootKeyId` or
   `custodyManifest`, so every freshly installed box came up rootless: `publish`
   failed with `server root is required`, and `/v1/catalog` and
@@ -122,6 +142,10 @@ where the operator's own skills come from.
   stale.
 
 ### Fixed
+
+- The publish-time "code is not greater" error pointed at `CLI.md 4.2`, which
+  is now the `doctor` section. It now carries the stable code
+  `release.code_not_monotonic` and points at `relkit release-code claim`.
 
 - The admin panel is reachable. Navigation to it used to exist only inside the
   panel itself, so nothing linked to it from anywhere else. The SPA has a

@@ -217,9 +217,19 @@ relkit verify released --version <v> --channel <dev|stable> --resolution <path>
 - `--allow-backfill`：允许序号回退的逃生门，日常不用
 - `--json`
 
-`--execute` 前置条件：`RELKIT_RELEASE_VIA_CI=1`，且签名 Operator 的 `secretRefs` 指向的环境变量里有凭据。执行序：按摘要上传缺失 CAS blob → 上传只含 vNext 控制面文档的瘦 staged tar → `POST /v1/publish`。
+`--execute` 前置条件：`RELKIT_RELEASE_VIA_CI=1`，且签名 Operator 的 `secretRefs` 指向的环境变量里有凭据。执行序：先 `GET /v1/release-code` 比较 staged code 与服务器已发布最大 code，不大于就立刻失败（旧 agent 无此接口时跳过）→ 按摘要上传缺失 CAS blob → 上传只含 vNext 控制面文档的瘦 staged tar → `POST /v1/publish`。
 
 agent 端点取自签名 Operator 的 `endpoints.agent`。CI 网络需要走不同入口时用 `RELKIT_AGENT_TRANSPORT_URL` 显式覆盖（绝对 `http(s)` URL，无凭据、无 query、无 fragment），同样要求 `RELKIT_RELEASE_VIA_CI=1`。
+
+### 4.10a `relkit release-code`
+
+releaseCode 由服务器分配（ADR 0025）。CI 在构建前领号，一次发布只领一次，多平台矩阵共用。
+
+- `relkit release-code claim`：领取下一个号，stdout 只打印号码，可直接 `code="$(relkit release-code claim)"`
+- `relkit release-code show`：只读，打印计数器与已发布最大 code
+- `--project` / `--custody` / `--token-key` / `--json`：服务器地址与 token 的取法同 `relkit release`
+
+新号 = `max(服务器计数器, 该产品所有渠道已发布最大 code) + 1`，跨渠道共用一条号序。未使用的号只留空号。
 
 ### 4.11 `relkit build`
 
@@ -259,7 +269,7 @@ schema `relkit.project/1`。允许的字段只有下列这些，读到未知字�
 
 ### 5.2 `VERSION.json`（版本 SSOT）
 
-仓库根必须提供，与 `relkit.project.json` 同级（ADR 0004）。code 派生策略由 `versionPolicy` 决定：`explicit` / `semver` / `version-build`。宿主语言不得自备版本号来源。
+仓库根必须提供，与 `relkit.project.json` 同级（ADR 0004）。它只决定 `x.y.z`；releaseCode 由服务器分配，见 `relkit release-code`（ADR 0025）。宿主语言不得自备版本号来源。
 
 ### 5.3 operator 侧配置
 
@@ -348,6 +358,7 @@ CI 只 `stage`，发布机持钥发布。二进制：`cmd/relkit-agent`。运维
 - `PUT /v1/staged/{product}/{version}`：staged 目录的 tar.gz（Bearer；整包与瘦包两条路径都收）
 - `POST /v1/cas/credentials`：为缺失 blob 返回唯一 ingest 的 `requests[]`。协议 3 且对象大于一片时，COS/S3 改为多条带 `offset` / `length` 的分片 URL，客户端把 `ETag` 交回 `POST /v1/cas/complete`
 - `POST /v1/publish`：触发 `publish.Run`（按 product 串行 + 幂等键）
+- `POST /v1/release-code`：领取该产品下一个 releaseCode；`GET /v1/release-code?product=<id>` 只读（Bearer，ADR 0025）
 - `POST /v1/unpublish`：删节点 + 重签提交指针 + 重投影 site/latest/channel + 删 release 文档。CAS/manifest 孤儿由 store GC 回收。与 publish 共产品锁，并发 409。CLI：`relkit-agent unpublish -product <id> -version <v> [--dry-run]`
 - `GET /-/health`
 
