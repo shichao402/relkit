@@ -1,6 +1,6 @@
 # ADR 0027: 内容轴补上软链与密封包，macOS 同时支持 LIBRARY 与整包 IN_PLACE
 
-- 状态：Proposed（第四版，2026-11-05：落盘收敛为“两种写法 × 两种切换”；引擎随宿主；Loom 作为托管库特例单列；已裁决：整包交换 commit 即删旧包、`active.json` 只加 `bundle` 字段、launcher bundle id 用 `<id>.launcher`；未改代码）
+- 状态：Accepted（第五版，2026-11-05：第 0–3 步已实现于 `cb03d6d`、`2276d82`；本版按实现修正 schema 类型、`controlDir` 判定、换名恢复、脚本工作目录、`ExecutableRelpath` 基准与对账写的软链父目录。第四版裁决不变：整包交换 commit 即删旧包、`active.json` 只加 `bundle` 字段、launcher bundle id 用 `<id>.launcher`、Loom 作为托管库特例）
 - 日期：2026-11-05
 - 关联：修订 [ADR 0013](0013-internal-update-payload.md)（软链禁令）、[ADR 0014](0014-placement-and-version-library.md)（“macOS .app 选 bundle 根”一句的落地方式）；延续 [ADR 0010](0010-single-updater-engine.md) 单引擎、[ADR 0026](0026-updater-binary-only-protojson.md) 强类型契约；同步 `docs/design/install-layouts.md` §7、§8、§11
 
@@ -66,7 +66,7 @@ message FileEntry {
 
 zip 里不存软链（zip 的软链语义各实现不一致），软链只存在于 `files.pb`，解包和落盘时由引擎创建。`inspect` 的“zip 条目与表一一对应”改为“与表中 FILE 条目一一对应”。
 
-安全规则在 `Build`、`inspect`、落盘三处执行同一个纯函数 `CheckSymlink(table)`：
+安全规则在 `Build`、`inspect`、落盘三处执行同一个纯函数 `payload.CheckSymlinks(table)`：
 
 1. `link_target` 非空、是相对路径、不含反斜杠、不含 NUL。
 2. 以链接所在目录为基准做词法解析（`path.Clean(path.Join(dir(relpath), target))`），结果不得为 `..` 或以 `../` 开头，即不越出内容根。
@@ -75,7 +75,7 @@ zip 里不存软链（zip 的软链语义各实现不一致），软链只存在
 5. 链式软链允许，但解析深度上限 40，且不得成环。
 6. Windows 引擎遇到含 SYMLINK 的表一律拒绝（`LAYOUT_UNSUPPORTED`），stage 阶段对 Windows 选择器的 artifact 同样拒绝。Windows 上创建软链需要特权或开发者模式，且 Windows 产品不需要它。
 
-落盘加固（同时适用于现有 IN_PLACE，算顺手补洞）：写每个条目前，检查它在 `targetRoot` 之下的每一级父目录都不是软链（`Lstat`），防止磁盘上已有的软链把写入导出安装根。
+落盘加固（同时适用于现有 IN_PLACE，算顺手补洞）：写每个条目前，检查它在 `targetRoot` 之下的每一级父目录都是真实目录（`Lstat`，不是软链也不是文件），防止磁盘上已有的软链把写入导出安装根。对账写里，挡路的父路径若是上一版基线拥有且未被改动的条目（例如上一版把 `lib` 发成软链、这一版改成目录），先按 §4.1 挪进备份再写；不属于基线或已被改动的，报 `LAYOUT_UNSUPPORTED`，绝不穿过它写入。全新写的 `P` 是空目录，只会遇到表内条目，表规则（第 4 条）已保证不冲突。
 
 `preserve` 列表中的路径不得是 SYMLINK 条目或位于其下。
 
@@ -89,7 +89,7 @@ enum ContentUnit {
 }
 
 message FileTable {
-  int32 schema = 1;
+  string schema = 1;           // "relkit.payload/1" 或 "relkit.payload/2"
   repeated FileEntry files = 2;
   repeated ScriptEntry scripts = 3;
   repeated string preserve = 4;
@@ -108,7 +108,7 @@ message FileTable {
 
 ### 3. 格式版本与协商：payload/2 + selector 隔离
 
-- 只要表里出现 SYMLINK 条目或 `unit=BUNDLE`，`schema=2`，manifest 写 `relkit.payload/2`；否则仍出 `/1`，字节级不变（Windows 产物完全不动）。
+- 只要表里出现 SYMLINK 条目或 `unit=BUNDLE`，`schema="relkit.payload/2"`（`payload.RequiredSchema` 计算，`Build` 写入、`inspect` 校验两者一致）；否则仍为 `relkit.payload/1`，字节级不变（Windows 产物完全不动）。
 - 发布时 artifact 带 selector `apply=relkit-payload/2`。
 - 新引擎 `withEngineDefaults` 的 apply 偏好从单值改为有序列表 `[relkit-payload/2, relkit-payload]`，`selectors.prefersApply` 按序挑选。
 - 老引擎只认 `apply=relkit-payload`，匹配不到 `/2`，回落到完整安装 artifact：在 macOS 上即提示手动下载 DMG（老引擎本就拒绝 darwin FULL_INSTALL，表现为“需手动更新”，不会装坏）。
@@ -125,7 +125,7 @@ message FileTable {
 | TREE | 对账写（4.1） | 全新写（4.2）+ 指针切换（4.3） |
 | BUNDLE | 全新写（4.2）+ 换名切换（4.3） | 全新写（4.2）+ 指针切换（4.3） |
 
-写法由纯函数 `writeMode(unit, placement)` 决定：只有 TREE + IN_PLACE 是对账写，其余都是全新写。原因不在 Placement：TREE/IN_PLACE 的安装根是开放目录，里面有 launcher、`active.json`、用户文件和 preserve 条目，不归这份内容独占，只能逐文件对账；另外三格的目标（一个版本目录或一个密封包）完全由这份内容定义，可以整体新建再切过去。
+写法与切换由同一个纯函数 `layoutFor(unit, placement)` 决定（`UNSPECIFIED` 读作 TREE）：只有 TREE + IN_PLACE 是对账写，其余都是全新写；切换按上表。原因不在 Placement：TREE/IN_PLACE 的安装根是开放目录，里面有 launcher、`active.json`、用户文件和 preserve 条目，不归这份内容独占，只能逐文件对账；另外三格的目标（一个版本目录或一个密封包）完全由这份内容定义，可以整体新建再切过去。
 
 BUNDLE/IN_PLACE 可以看成“容量为 1 的版本库”：指针是 `.app` 路径本身，切换是原子换名，不保留旧版。
 
@@ -133,9 +133,10 @@ BUNDLE/IN_PLACE 可以看成“容量为 1 的版本库”：指针是 `.app` �
 
 保持现有 `applyContentTable` 语义：逐文件把旧文件挪进同卷 `.relkit-backup/<session>` 并记 journal、写新文件、基线差分删除（sha 相同才删）、preserve 跳过、post 脚本失败按 journal 回滚、commit 后存基线。新增：
 
-- SYMLINK 条目：落盘为 `os.Symlink`；备份与回滚用 rename，天然覆盖软链本身（不跟随）。
-- 基线条目增加 `kind` 与 `link_target`；删除判定对软链比较 `readlink` 结果而非 sha。
-- 父目录软链检查（§1）。
+- SYMLINK 条目：落盘为 `os.Symlink`；备份与回滚用 rename，天然覆盖软链本身（不跟随）。磁盘探测一律 `Lstat`。
+- 基线条目增加 `kind` 与 `link_target`；删除判定对软链比较 `readlink` 结果，对文件要求是普通文件且 sha 相同，形态变了（文件变软链、软链变目录）一律视为用户改动而保留。
+- 父目录检查（§1）：基线拥有且未改动的挡路条目先挪进备份；删除旧条目时若路径经过软链则跳过，不跟随。
+- 回滚时被挪开的条目可能是目录，按目录整体还原。
 
 这条路径只服务开放目录。需要整目录替换的 Windows 产品应改用 LIBRARY，而不是让对账写去换整个目录：Windows 上只要有进程打开目录里的任何文件（资源管理器、杀毒、停在该目录的终端），目录就无法改名。
 
@@ -149,19 +150,19 @@ BUNDLE/IN_PLACE 可以看成“容量为 1 的版本库”：指针是 `.app` �
 | BUNDLE/LIBRARY | `install_root/versions/<id>`（包在 `T/<bundle_name>`） |
 | BUNDLE/IN_PLACE | `install_root`（即 `.app` 本身） |
 
-步骤，三格完全相同：
+设内容根 `C`：TREE 为 `P`，BUNDLE 为 `P/<bundle_name>`（LIBRARY）或 `P` 本身（IN_PLACE，`P` 就是未来的 `.app`）。表内 relpath、脚本工作目录与 `ExecutableRelpath` 都相对于 `C`，与对账写相对于安装根同一语义。
 
 1. 暂存目录 `P = dir(T)/.<base(T)>.relkit-partial`，与 `T` 同卷、隐藏（以 `.` 开头，prune 与列表跳过）。存在残留先删。
-2. pre 脚本。
-3. 按表物化到 `P`（BUNDLE 物化到 `P/<bundle_name>`）：写文件、设 mode、建软链、父目录软链检查。不建 journal、不做备份：`P` 是全新目录，失败直接删 `P`，已安装内容一个字节都没动。
-4. post 脚本（工作目录与环境变量指向 `P`）。失败删 `P`。
-5. 校验：BUNDLE 跑 `codesign --verify --deep --strict`，失败报 `SIGNATURE` 并删 `P`。放在 post 脚本之后，脚本若篡改包内文件会被拦下。TREE 不额外校验（解包时已逐文件核 sha）。ad-hoc 签名也能通过，它验的是“包完整”，不是身份。
+2. pre 脚本（工作目录 `C`）。
+3. 按表物化到 `C`：写文件、设 mode、建软链、父目录检查。不建 journal、不做备份：`P` 是全新目录，失败直接删 `P`，已安装内容一个字节都没动。
+4. post 脚本（工作目录 `C`）。失败删 `P`。
+5. 校验：BUNDLE 对包根跑 `codesign --verify --deep --strict`，失败报 `SIGNATURE` 并删 `P`。放在 post 脚本之后，脚本若篡改包内文件会被拦下。TREE 不额外校验（解包时已逐文件核 sha）。ad-hoc 签名也能通过，它验的是“包完整”，不是身份。
 6. 写 `P/relkit-version.json`（仅 LIBRARY）作为完成标记。
 7. 交给 4.3 切换。
 
-崩溃恢复统一：下次会话发现残留 `P` 直接删除。只有换名切换中途崩溃需要 journal（见 4.3）。
+崩溃恢复统一：下次会话发现残留 `P` 直接删除。换名切换的中间态同样由兄弟路径推导，不需要 journal（见 4.3）。
 
-脚本约束：全新写下 pre/post 脚本的工作目录是 `P`，不是最终路径 `T`，引擎不向脚本暴露 `T`。脚本只能按相对路径改动内容，不得记录绝对路径或向系统注册（文件关联、服务、Shell 扩展）；这类工作属于安装器或 launcher。现有产品的 payload 都不带脚本，此约束不破坏存量。
+脚本约束：全新写下 pre/post 脚本的工作目录是内容根 `C`（在 `P` 之下），不是最终路径 `T`，引擎不向脚本暴露 `T`。脚本只能按相对路径改动内容，不得记录绝对路径或向系统注册（文件关联、服务、Shell 扩展）；这类工作属于安装器或 launcher。现有产品的 payload 都不带脚本，此约束不破坏存量。
 
 同版本重装（LIBRARY 下 `T` 已存在）：
 
@@ -182,18 +183,21 @@ BUNDLE/IN_PLACE 可以看成“容量为 1 的版本库”：指针是 `.app` �
 
 换名切换（BUNDLE/IN_PLACE）：
 
-1. 前置检查（在 4.2 之前做）：`InstallSpec.preserve` 非空 → `LAYOUT_UNSUPPORTED`；`dir(T)` 不可写 → `PERMISSION_DENIED`（不提权，提示用 DMG）。表的 `bundle_name` 与 `base(T)` 不同不算错（用户可能改过名），以 `T` 为准。
-   控制文件不得写进 `T`：现在 `.relkit-apply.lock` 与可写探针都放在 `install_root` 下，对 BUNDLE/IN_PLACE 即 `.app` 内部，会破坏封印并随交换被换走。改为由纯函数 `controlDir(spec)` 决定：换名切换为 `dir(T)`，锁名 `.<base(T)>.relkit-apply.lock`；其余写法仍为 `install_root`。
+1. 前置检查（在 4.2 之前，受理 apply 时做）：
+   - 单元按磁盘判定再与表交叉校验：`install_root` 本身是软链 → `LAYOUT_UNSUPPORTED`；`Contents/Info.plist` 是普通文件即 BUNDLE，否则 TREE。表的 `unit` 与之不符（把树装到包上，或反之）→ `LAYOUT_UNSUPPORTED`。不按扩展名推断，也不信任宿主上报：宿主只给 Placement，单元是磁盘事实。判定结果记入会话（`ApplySessionRecord.unit`），后续 worker、锁路径、拉起方式都只读会话。
+   - `InstallSpec.preserve` 非空 → `LAYOUT_UNSUPPORTED`；`dir(T)` 不可写 → `PERMISSION_DENIED`（不提权，提示用 DMG）。表的 `bundle_name` 与 `base(T)` 不同不算错（用户可能改过名），以 `T` 为准。
+   - 控制文件不得写进 `T`：`.relkit-apply.lock` 与可写探针若放在 `install_root` 下，对 BUNDLE/IN_PLACE 即 `.app` 内部，会破坏封印并随交换被换走。由纯函数 `controlDirFor(unit, placement, root)` 决定：换名切换为 `dir(T)`，锁名 `.<base(T)>.relkit-apply.lock`；其余写法仍为 `install_root`，锁名不变。
 2. 等宿主退出（`planRequiresHostExit` 对换名切换恒为 true）。
-3. journal 记 `SWAP{P, T}` 后 `renamex_np(P, T, RENAME_SWAP)`。非 APFS 或调用失败时回落两次 rename（`T → dir(T)/.<base(T)>.relkit-old`，`P → T`），journal 逐步记录，崩溃后按 journal 还原。
-4. commit：删除换下来的旧包（已裁决：不保留回滚副本，回滚只由 LIBRARY 提供）；删除该 install_root 的陈旧基线（整包即真相）。
+3. 先 `recoverSwap`，再 4.2 全新写，然后交换：`renamex_np(P, T, RENAME_SWAP)`；非 APFS 或调用失败时回落两次 rename（`T → O`，`P → T`，`O = dir(T)/.<base(T)>.relkit-old`），第二步失败立即把 `O` 改回 `T`，连还原也失败则报错并注明 INCOMPLETE，留给下次恢复。
+   恢复不靠 journal，只看三个兄弟路径：`T` 缺失而 `O` 存在 → `rename(O, T)`（崩在两次 rename 之间）；`T` 存在 → `O` 是已换下的旧包，删除；`P` 一律删除（未完成的新包，或 RENAME_SWAP 后换出来的旧包）。每种中间态都能唯一推出动作，journal 是多余的状态源。
+4. commit：删除换下来的旧包（`P` 与 `O`，已裁决：不保留回滚副本，回滚只由 LIBRARY 提供）；删除该产品的陈旧基线（整包即真相）。
 5. 不支持跨更新的多实例：这是 IN_PLACE 的固有代价，需要的产品用 LIBRARY。
 
 宿主退出规则因此收敛为：对账写沿用现状（表里含 executable 或 `sidecar_relpath` 才退出）；指针切换从不要求；换名切换总是要求。
 
 #### 4.4 LIBRARY 的其余部分
 
-- `active.json` 与 `relkit-version.json` 新增 `bundle`（如 `"SvnAutoMerge.app"`），仅 BUNDLE 有值；`executable` 仍为相对 `versions/<id>/` 的完整路径，供在用判定。已裁决：只加这一个字段，保持现有 JSON 键与数值类型不变，不改成 proto 定义（ProtoJSON 会把 int64 `code` 编码成字符串，破坏 Windows C++ launcher）。
+- `active.json` 与 `relkit-version.json` 新增 `bundle`（如 `"SvnAutoMerge.app"`），仅 BUNDLE 有值；`executable` 仍是相对安装根的完整路径（`versions/<id>/<bundle>/<ExecutableRelpath>`，TREE 省去 `<bundle>`），供在用判定与拉起；宿主传入的 `ExecutableRelpath` 始终相对内容根（§4.2）。已裁决：只加这一个字段，保持现有 JSON 键与数值类型不变，不改成 proto 定义（ProtoJSON 会把 int64 `code` 编码成字符串，破坏 Windows C++ launcher）。
 - 删掉 `applyLibraryContent` 中按 `filesRoot` 后缀判断 `.app` 的死代码，改读表的 `unit` / `bundle_name`。
 - `pruneVersions` 修两处现存缺陷，否则“多实例”是空话：
   - 现在按目录名字典序挑最新，`0.2.0+99` 排在 `0.2.0+221` 前面。改为按 `relkit-version.json` 的 code 排序。
@@ -234,7 +238,7 @@ BUNDLE/IN_PLACE 可以看成“容量为 1 的版本库”：指针是 `.app` �
 | 产品 | 形态 | 现状 |
 | --- | --- | --- |
 | SvnMergeTool Windows | TREE/LIBRARY | 错误：`0.2.0+222` payload 21 个文件，无引擎；版本目录里的宿主调用根上安装器写的那份 |
-| SvnMergeTool macOS | BUNDLE，两种 Placement | 待实现 |
+| SvnMergeTool macOS | BUNDLE，两种 Placement | 引擎侧已就绪，宿主侧待接入（实施第 6 步） |
 
 SvnMergeTool Windows 的后果：根上引擎只有安装器会写，`refreshSidecar` 两个候选源都不存在，应用内更新从不换引擎。从 `+218` 及以前在应用内升到 `+219`（protocol 5）后，新宿主对上根上旧引擎，更新检查失败，只能重跑安装器恢复。dev 渠道已受影响（推断，待 Windows 真机确认）；修复前 `+219` 及以后不得升 stable。
 
@@ -281,7 +285,7 @@ Loom 是一个安装根上的两个产品：
 - Dock 固定：用户若把运行中的内层版本固定到 Dock，旧版本被清理后图标变问号。Fusion 360 同样存在。缓解：launcher 首启提示固定 launcher；`retain` 不低于 2。不在引擎层解决。
 - TCC：ad-hoc 签名每次构建身份不同，换版本后隐私授权失效，与布局无关（IN_PLACE 整包也一样）。只有稳定签名身份能解决，独立跟进。
 - launcher 与内层 app 的 bundle id 分开（`<id>.launcher`）后，Dock/Spotlight/“打开方式”的表现待实测。
-- 非 APFS 卷（外置 HFS+）：交换退化为两次 rename，崩溃窗口靠 journal 兜底；待做 kill -9 于两次 rename 之间的测试。
+- 非 APFS 卷（外置 HFS+）：交换退化为两次 rename，崩溃窗口靠兄弟路径恢复兜底（单测已覆盖各中间态）；真机 kill -9 于两次 rename 之间待测。
 - `/Applications` 可写性：管理员用户默认可写；标准用户不可写时走 `PERMISSION_DENIED` 引导 DMG，待实测文案。
 - seed 导入后移除 quarantine 的做法待真机确认无“仍要打开”拦截；`open` 拉起应用内更新后的新包同样待确认。
 - 进程枚举判定“在用”（§4.4）依赖可执行路径；macOS 上被移动过的运行中 bundle 路径会变，需实测 `kern.procargs2` 返回值。
@@ -304,17 +308,19 @@ Loom 是一个安装根上的两个产品：
 - LIBRARY 沿用对账写（现状：先 `RemoveAll` 再逐文件写并记 journal）：版本目录是全新的，journal 与备份无事可做；先删再写会删掉正在运行的同版本，且崩溃留下残缺的 active 版本。
 - BUNDLE/IN_PLACE 先交换再跑 post 脚本、失败再换回（第二版）：交换后、校验前存在一个未经校验的包占据正式路径；全新写把脚本与签名校验都放在切换之前。
 - 新增 `ALREADY_INSTALLED` 错误码：改宿主契约；同版本重装可做成幂等切换，冲突时复用 `OCCUPIED`。
+- 换名切换记 journal 并按 journal 恢复（第四版）：`T`、`P`、`O` 三个兄弟路径的存在与否已唯一决定恢复动作，journal 只会成为第二个可能与磁盘不一致的状态源。
+- 由宿主在 `InstallSpec` 上报 IN_PLACE 的内容单元：要改宿主契约，且宿主说错时会把树当包换名或把包当树对账；单元是磁盘事实，引擎自己判定并与表交叉校验。
 
 ## 实施顺序
 
 0. 止血（与 macOS 工作解耦，先做）：
-   - relkit：删 `refreshSidecar` 及测试；引入 `writeMode`，LIBRARY 改为全新写（`.partial` 物化 → post 脚本 → `relkit-version.json` → `rename`，去掉空转的 journal 与备份，不再 `RemoveAll`）；同版本重装按 4.2 幂等或 `OCCUPIED`；`pruneVersions` 按 code 排序、跳过在用版本；Windows `rename` 退避重试；对账写的空目录清理只限本次触及条目的祖先（§6.2-1）；基线文件按产品命名（§6.2-2）。
+   - relkit（已实现，`cb03d6d`；其中 `writeMode` 后在第 3 步并入 `layoutFor`）：删 `refreshSidecar` 及测试；引入 `writeMode`，LIBRARY 改为全新写（`.partial` 物化 → post 脚本 → `relkit-version.json` → `rename`，去掉空转的 journal 与备份，不再 `RemoveAll`）；同版本重装按 4.2 幂等或 `OCCUPIED`；`pruneVersions` 按 code 排序、跳过在用版本；Windows `rename` 退避重试；对账写的空目录清理只限本次触及条目的祖先（§6.2-1）；基线文件按产品命名（§6.2-2）。
    - SvnMergeTool Windows：引擎放进 `versions/<id>/` 并改为调用自带引擎，`validate_windows_payload_package` 要求含引擎；日志移出版本目录。
    - 发 dev，在 Windows 真机验证：SvnMergeTool 从 `+222` 手动重装后能应用内升级；Loom 启动器自更新后编辑器 `versions/` 无改动，编辑器装新版、重装同版、另一实例停在旧版时更新，三项都正确。再决定 stable。
-1. relkit / Content 轴：`payload.proto` 字段、`CheckSymlink`、`Build --bundle`、`inspect`/`Extract`、payload/2 manifest；父目录软链加固。单测覆盖全部规则的正反例。
-2. relkit / 协商：apply 偏好列表、`prefersApply`、stage 闸门对 `/2`、BUNDLE 仅 darwin、SYMLINK 拒绝 Windows。
-3. relkit / 落盘：全新写支持 BUNDLE（物化到 `P/<bundle_name>`、软链、codesign 校验）；换名切换（`controlDir`、前置检查、`RENAME_SWAP` 与两次 rename 回落、journal 恢复、commit 删旧包与陈旧基线）；BUNDLE/LIBRARY 删死代码、`bundle` 字段、`install_root` 不得在 `.app` 内；宿主退出规则按 4.3；LaunchServices 拉起。端到端用一个带 framework 软链的测试 `.app` 跑两种 Placement，并在每个步骤间 kill -9。
-4. 文档：`docs/design/topology.md` 第七节（安装形态拓扑，本 ADR 起草时已写入，实现落地后去掉“待实现”标记）；`install-layouts.md` §7（引擎随宿主）、§8（与本 ADR 对齐）、§11；ADR 0013/0014 加“已被 0027 修订”指针。
+1. relkit / Content 轴（已实现，`2276d82`）：`payload.proto` 字段、`CheckSymlinks`、`payload build --bundle`、`inspect`/`Extract`、payload/2 manifest；父目录软链加固。单测覆盖全部规则的正反例。
+2. relkit / 协商（已实现，`2276d82`）：apply 偏好列表、`prefersApply`、stage 闸门对 `/2`、BUNDLE 仅 darwin、SYMLINK 拒绝 Windows。
+3. relkit / 落盘（已实现，`2276d82`）：全新写支持 BUNDLE（物化到内容根、软链、codesign 校验）；换名切换（`controlDirFor`、磁盘判定单元并交叉校验、`RENAME_SWAP` 与两次 rename 回落、兄弟路径恢复、commit 删旧包与陈旧基线）；BUNDLE/LIBRARY 删死代码、`bundle` 字段、`install_root` 不得在 `.app` 内；宿主退出规则按 4.3；LaunchServices 拉起。单测用带 framework 软链的测试 `.app` 跑两种 Placement 与各崩溃中间态，另有真实 ad-hoc 签名与篡改反例；真机 kill -9 留待第 6 步。
+4. 文档（已完成）：`docs/design/topology.md` 第七节去掉“待实现”并按实现重画写法流程；`install-layouts.md` §7（引擎随宿主）、§8（与本 ADR 对齐）、§11；ADR 0013/0014 加“已被 0027 修订”指针。
 5. 发布 relkit（`2d38946` 会被第 0 步删除的代码覆盖，不单独发），升级两台服务器（`update.devcloud.woa.com`、`publish.firoyang.com`）。
 6. SvnMergeTool macOS：日志进 dataDir、安装根推导、构建出 `/2` payload、发 dev 版，本机先验 BUNDLE/IN_PLACE（存量 `/Applications` 包），再做 launcher + seed 验 LIBRARY。
 7. SvnMergeTool `adr-009` 修订。

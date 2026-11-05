@@ -1,8 +1,8 @@
 # ADR 0013：内部更新轨与 Payload
 
-- 状态：Accepted
+- 状态：Accepted（已被 [ADR 0027](0027-bundle-content-and-symlinks.md) 修订：payload 允许受约束的软链与 `unit=BUNDLE` 整包，以 `relkit.payload/2` 与 selector `apply=relkit-payload/2` 隔离老客户端，机制同本 ADR）
 - 日期：2026-09-17
-- 关联：[0010](0010-single-updater-engine.md)、[0011](0011-immutable-release-consume.md)
+- 关联：[0010](0010-single-updater-engine.md)、[0011](0011-immutable-release-consume.md)、[0027](0027-bundle-content-and-symlinks.md)
 
 ## 背景
 

@@ -135,7 +135,7 @@ Go 引擎（`pruneVersions`）：
 
 ## 7. sidecar 刷新位置
 
-> 已被 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md) §6 废止（实现前仍是现状）：引擎随宿主落在版本内，不再刷新安装根上的共享引擎。现行形状见 [topology.md](topology.md) 第七节。
+> 已被 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md) §6 废止并已实现（`refreshSidecar` 已删除）：引擎随宿主落在自己的内容里（TREE/IN_PLACE 在安装根、LIBRARY 在 `versions/<id>/`、BUNDLE 在包内 `Contents/Resources/runtime/`），引擎不再刷新安装根上的任何共享引擎；根上旧版安装器留下的那份只服务修复前的旧版本。现行形状见 [topology.md](topology.md) 第七节。下文为历史行为。
 
 `sidecarRelpath` 非空时，每次 apply 结束都会把 payload 里的那一份更新器覆盖到
 **`installRoot/relkit-updater[.exe]`**——注意是安装根，不是版本目录。做法是先把旧的 rename
@@ -145,7 +145,7 @@ Go 引擎（`pruneVersions`）：
 
 ## 8. macOS 可以版本并存，但不能照搬当前落盘形状
 
-> macOS 的落盘设计（BUNDLE、launcher + seed、换名切换）已由 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md) 取代本节，图见 [topology.md](topology.md) 第七节。本节保留为论证过程。
+> macOS 的落盘设计已由 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md) 取代本节，引擎侧已实现，图见 [topology.md](topology.md) 第七节。与本节的对应关系：版本目录里放完整 `.app`（BUNDLE/LIBRARY，`active.json` 增 `bundle` 字段，拉起走 `open -n`）；存量 `/Applications` 裸包走 BUNDLE/IN_PLACE 整包换名；下文“`unpackFirst` 找 `.app` 当根”的推断式做法已删除，改为 payload 表显式声明 `unit=BUNDLE`；launcher + seed 属宿主侧（ADR 0027 §7）。按项目选版仍是本节所述的待设计项。本节保留为论证过程。
 
 SPEC 附录 B 原来要求引擎拒绝 `macos` + `versionedDir`，却没有论证。这条平台禁令过强。
 版本目录不只用来绕开 Windows 文件占用，也可以承担**回退、并行保留多个工具版本、按项目
@@ -214,3 +214,6 @@ installRoot/
 |---|---|---|
 | D1 | ~~SPEC 原来要求拒绝 macos + versionedDir；darwin 解包剥 .app~~ **已修**：versionedDir 拷完整 `.app`；payload 无 bundle 则失败 | 完成 |
 | D2 | Go `pruneVersions` 在 `retain >= 3` 时不清理；Dart `_pruneVersionDirectories` 按最近 N 份清理 | Go 已改为最近 N 份 + reserved_codes |
+| D3 | ~~payload 禁软链，Flutter `.app` 打不出包；`.app` 根识别已删成死代码~~ **已修**（ADR 0027）：软链是表内一等条目（payload/2），`unit=BUNDLE` 显式声明整包 | 完成 |
+| D4 | ~~LIBRARY 先 `RemoveAll` 版本目录再逐文件写；prune 按目录名字典序且不看在用~~ **已修**（ADR 0027 §4.2、§4.4）：全新写 + rename，prune 按 code 排序并跳过在用版本 | 完成 |
+| D5 | ~~控制文件（锁、可写探针）写在安装根，对 IN_PLACE 整包即写进 `.app`~~ **已修**（ADR 0027 §4.3）：换名切换时放在包旁边 | 完成 |

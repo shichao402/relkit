@@ -6,7 +6,7 @@ category: design
 created: 2026-10-26
 updated: 2026-11-05
 status: approved
-依据: ADR 0023；第七节依据 ADR 0027（Proposed）
+依据: ADR 0023；第七节依据 ADR 0027（Accepted）
 ---
 
 本文是 relkit 拓扑图的唯一来源。其它文档需要画拓扑时引用本文的对应小节，不再各画一份。图分散在多处必然漂移，而漂移过的图比没有图更误导。
@@ -352,7 +352,7 @@ IA <|.. s3r
 
 ## 七、安装形态（客户端落盘）
 
-前六节画的是服务器和链路，本节画引擎把字节落到用户机器上之后的形状。依据 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md)（Proposed）。图中标「待实现」的部分还没有代码，落地后去掉标记；没标的都能在 `internal/updater/` 里找到。
+前六节画的是服务器和链路，本节画引擎把字节落到用户机器上之后的形状。依据 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md)（Accepted）。引擎侧四格均已实现，都能在 `internal/updater/` 里找到；标「宿主侧」的是产品仓的工作，不在本仓。
 
 ### 7.1 两条正交轴与标准形态
 
@@ -372,10 +372,10 @@ package "TREE / IN_PLACE（现有）\n例：Windows 单目录产品、Loom 启�
   }
 }
 
-package "TREE|BUNDLE / LIBRARY\n例：SvnMergeTool（Windows 现有，macOS 待实现）" as B {
+package "TREE|BUNDLE / LIBRARY\n例：SvnMergeTool（Windows 已接入，macOS 宿主侧接入中）" as B {
   folder "install_root/" as b_root {
     file "入口：launcher\n只读 active.json，不调用引擎\n由安装器写入，引擎从不更新它" as b_launch
-    file "active.json\n{current, previous, executable, bundle（待实现）}" as b_active
+    file "active.json\n{current, previous, executable, bundle}" as b_active
     folder "versions/<id>/" as b_ver {
       file "relkit-version.json" as b_vj
       file "内容；BUNDLE 时为 <bundle_name>.app" as b_c
@@ -384,9 +384,12 @@ package "TREE|BUNDLE / LIBRARY\n例：SvnMergeTool（Windows 现有，macOS 待�
   }
 }
 
-package "BUNDLE / IN_PLACE（待实现）\n例：/Applications 下的存量裸包" as C {
-  folder "install_root = /Applications/X.app" as c_root {
-    file "Contents/...\n引擎在 Contents/Resources/runtime/" as c_c
+package "BUNDLE / IN_PLACE\n例：/Applications 下的存量裸包" as C {
+  folder "dir(install_root) = /Applications/" as c_dir {
+    folder "install_root = X.app（封印，引擎不往里放任何控制文件）" as c_root {
+      file "Contents/...\n引擎在 Contents/Resources/runtime/" as c_c
+    }
+    file ".X.app.relkit-apply.lock\n锁与可写探针在包旁边" as c_lock
   }
 }
 @enduml
@@ -396,8 +399,10 @@ package "BUNDLE / IN_PLACE（待实现）\n例：/Applications 下的存量裸�
 | --- | --- | --- | --- | --- | --- | --- |
 | TREE/IN_PLACE | 开放目录 | 根内，随内容 | 对账写 | 无（逐文件） | 仅当 `sidecar_relpath` 被改时需要 | 无 |
 | TREE/LIBRARY | `versions/<id>` | 版本内 | 全新写 | 指针切换 | 不需要 | `active.json.previous` |
-| BUNDLE/LIBRARY（待实现） | `versions/<id>/<bundle>` | 包内 | 全新写 | 指针切换 | 不需要 | `active.json.previous` |
-| BUNDLE/IN_PLACE（待实现） | 包本身 | 包内 | 全新写 | 换名切换 | 需要 | 无，commit 即删旧包 |
+| BUNDLE/LIBRARY | `versions/<id>/<bundle>` | 包内 | 全新写 | 指针切换 | 不需要 | `active.json.previous` |
+| BUNDLE/IN_PLACE | 包本身 | 包内 | 全新写 | 换名切换 | 需要 | 无，commit 即删旧包 |
+
+IN_PLACE 的单元不由宿主上报，受理 apply 时按磁盘判定（`Contents/Info.plist` 是普通文件即 BUNDLE），再与 payload 表声明的单元交叉校验，不符报 `LAYOUT_UNSUPPORTED`。BUNDLE 只在 darwin 受理；含软链的表在 Windows 上拒绝。
 
 规则只有一条：引擎属于调用它的宿主，随宿主的内容一起落盘、一起更新。没有放在共享位置、由别人刷新的引擎（原 `refreshSidecar` 已删除）。
 
@@ -458,19 +463,27 @@ start
 :下载并校验 artifact（size → sha256）;
 if (形态?) then (TREE / IN_PLACE)
   :对账写
-  逐条比对基线，备份后覆盖
+  逐条比对基线（文件比 sha，软链比 readlink），备份后覆盖
+  父路径须为真实目录：基线拥有且未改动的挡路条目先挪开，否则拒绝
   清理空目录（只限触及条目的祖先）;
   :写基线;
   stop
 else (其余三格)
-  :全新写（LIBRARY 现有，BUNDLE 待实现）
-  P = dir(T)/.<base(T)>.relkit-partial;
-  :pre 脚本;
-  :物化条目（FILE / SYMLINK，CheckSymlink）;
-  :post 脚本（cwd = P）;
-  :codesign --verify（darwin）;
-  :写 relkit-version.json;
+  if (换名切换?) then (是)
+    :recoverSwap：只看兄弟路径
+    T 缺且 O 在 → O 改回 T
+    T 在 → 删 O；P 一律删;
+  endif
+  :全新写
+  P = dir(T)/.<base(T)>.relkit-partial
+  内容根 C = P 或 P/<bundle>;
+  :pre 脚本（cwd = C）;
+  :物化条目（FILE / SYMLINK，CheckSymlinks）;
+  :post 脚本（cwd = C）;
+  :BUNDLE：codesign --verify --deep --strict
+  失败报 SIGNATURE，删 P;
   if (Placement?) then (LIBRARY)
+    :写 relkit-version.json（含 bundle）;
     :指针切换
     rename P → versions/<id>
     （Windows 退避重试约 5 秒）;
@@ -478,14 +491,17 @@ else (其余三格)
     :prune：按 code 排序，跳过在用版本;
     note right: 不要求宿主退出
   else (IN_PLACE)
-    :换名切换（待实现）
-    controlDir → 等宿主退出;
-    :journal 记 SWAP;
-    :renamex_np RENAME_SWAP
-    （非 APFS 回落为两次 rename）;
-    :commit 即删旧包;
+    :换名切换（宿主已退出）
+    renamex_np(P, T, RENAME_SWAP);
+    note right
+      非 APFS 回落两次 rename：
+      T → O = .<base>.relkit-old，P → T
+      第二步失败把 O 改回 T，
+      改不回报 INCOMPLETE，留给 recoverSwap
+    end note
+    :commit：删 P 与 O，删该产品基线;
   endif
-  :拉起宿主（darwin 用 open -n）;
+  :拉起宿主（darwin BUNDLE 用 open -n <bundle>）;
   stop
 endif
 @enduml
@@ -495,7 +511,7 @@ endif
 
 ### 7.4 payload 格式协商
 
-软链只在新格式里出现，旧引擎看不懂就不该拿到。格式由 manifest 里的 selector 区分，引擎按自己的偏好顺序挑第一个认识的（待实现）。
+软链只在新格式里出现，旧引擎看不懂就不该拿到。格式由 manifest 里的 selector 区分，引擎按自己的偏好顺序挑第一个认识的。
 
 ```plantuml
 @startuml
@@ -518,7 +534,7 @@ note over m : BUNDLE 只发 /2：旧引擎找不到可用格式，\n报错而不
 要点：
 
 - 协议版本严格相等，不提供兼容窗口（[ADR 0026](../adr/0026-updater-binary-only-protojson.md) §4）。引擎随宿主更新，所以宿主拿到的永远是自己 payload 里那个引擎；引擎不在 payload 里的产品（SvnMergeTool Windows `+219..+222`）会协议失配，只能手动跑一次安装器。
-- macOS 上安装根不得位于任何 `.app` 内，也不得等于 dataDir；宿主处于 App Translocation 或只读卷时不发起更新（待实现）。
+- macOS 上 LIBRARY 安装根不得位于任何 `.app` 内，也不得等于 dataDir（引擎检查）；宿主处于 App Translocation 或只读卷时不发起更新（宿主侧）。
 
 ## 相关
 

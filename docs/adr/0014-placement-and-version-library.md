@@ -1,8 +1,8 @@
 # ADR 0014：内容、落点与版本库
 
-- 状态：Accepted
+- 状态：Accepted（已被 [ADR 0027](0027-bundle-content-and-symlinks.md) 修订：Content 轴增加 BUNDLE，“macOS `.app` 选 bundle 根”改为表内显式 `unit=BUNDLE`；落盘收敛为对账写/全新写 × 指针/换名切换；LIBRARY 改为全新写）
 - 日期：2026-09-17
-- 关联：[0010](0010-single-updater-engine.md)、[0013](0013-internal-update-payload.md)
+- 关联：[0010](0010-single-updater-engine.md)、[0013](0013-internal-update-payload.md)、[0027](0027-bundle-content-and-symlinks.md)
 - 取代：ADR 0010 中 Layout 分类、SPEC 附录 B 的 Layout API
 
 ## 背景
