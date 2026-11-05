@@ -77,7 +77,7 @@ payload 是 artifact zip 解包后的**整棵树**，不做「单顶层目录剥
 ## 4. 入口由产品提供，引擎不生成 launcher
 
 这是最容易误判的一条。引擎在 `installRoot` 下只碰三样东西：`versions/`、`active.json`、
-`relkit-updater[.exe]`。会话记录与暂存都在 `dataDir`（`sessions/`、`staging/`）。**它不会创建、不会更新任何 launcher，也不会动快捷方式。**
+`relkit-updater[.exe]`。会话记录与暂存都在 `dataDir`（`plans/`、`sessions/`、`staging/`），由引擎自己回收：同一目标的重复 check 复用同一份 plan，过期 plan 的暂存立即删除、记录再留一个 `PlanTTL`，进行中会话用到的永不触碰（`internal/updater/plans.go`）。**它不会创建、不会更新任何 launcher，也不会动快捷方式。**
 
 所以 `versionedDir` 要成立，产品必须自己在 `installRoot` 放一个稳定入口：读 `active.json`，
 按 `executable` 起真正的程序。安装器（NSIS / MSI / pkg）的快捷方式、开始菜单项、卸载项

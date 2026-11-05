@@ -51,7 +51,7 @@ func (e *Engine) handleDownload(ctx context.Context, req *updaterv2.UpdaterReque
 			}},
 		})
 	}
-	destDir := filepath.Join(req.GetRuntime().GetDataDir(), "staging", plan.PlanId)
+	destDir := st.planStagingDir(plan.PlanId)
 	total, derr := e.downloadPlanFiles(ctx, st, plan, destDir, func(_ int, p sdk.Progress) {
 		_ = e.emit(&updaterv2.UpdaterEvent{
 			Kind: &updaterv2.UpdaterEvent_Progress{Progress: &updaterv2.Progress{

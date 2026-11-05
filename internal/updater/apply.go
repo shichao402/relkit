@@ -124,7 +124,7 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 		StartedAt:         now,
 		HeartbeatAt:       now,
 		InstallRoot:       inst.InstallRoot,
-		StagedRoot:        filepath.Join(req.GetRuntime().GetDataDir(), "staging", plan.PlanId),
+		StagedRoot:        st.planStagingDir(plan.PlanId),
 		TargetCode:        plan.Code,
 		TargetVersion:     plan.Version,
 		Pid:               int32(os.Getppid()),

@@ -71,6 +71,18 @@ what will break.
 
 ### Fixed
 
+- `dataDir/plans` and `dataDir/staging` grew without bound. Every `check`
+  minted a new plan, and a host polling every minute (Loom launcher) left one
+  plan record and, once downloaded, one staging directory per poll, never
+  removed. A check that resolves to the same bytes for the same product,
+  channel and code now returns the live plan it issued before, with fresh
+  index facts, URLs and expiry; its planId and downloaded files stay valid,
+  so polling no longer re-downloads either. `check` and `cleanup` also sweep:
+  staged files of an expired plan go at once, the plan record one `PlanTTL`
+  later (late requests still see `PLAN_EXPIRED`), orphan staging directories
+  and finished session records older than `PlanTTL` go too (the newest
+  session is always kept for `status`). Nothing a live apply session uses is
+  touched.
 - LIBRARY installs could delete or corrupt a running version. The engine
   wiped `versions/<id>` before reinstalling it, pruned by directory name (so
   `0.2.0+99` outranked `0.2.0+221`) and never checked what was running. A

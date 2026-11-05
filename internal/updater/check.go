@@ -99,6 +99,7 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv2.UpdaterRequest,
 		return e.emitCheckFailed(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil, profile)
 	}
 	now := time.Now().UTC()
+	st.sweep(now)
 	if op == nil {
 		op = &updaterv2.CheckOp{}
 	}
@@ -320,7 +321,6 @@ func (e *Engine) emitCheckFailed(code updaterv2.ErrorCode, retryable bool, messa
 
 func (e *Engine) buildPlan(st store, profile *openedProfile, runtime *updaterv2.Runtime, result inprocess.CheckResult) (*enginestate.UpdatePlan, error) {
 	av := result.Available
-	id := newID("plan")
 	now := time.Now().UTC()
 	files := []*enginestate.PlannedFile{}
 	if av.Artifact != nil {
@@ -336,7 +336,7 @@ func (e *Engine) buildPlan(st store, profile *openedProfile, runtime *updaterv2.
 		})
 	}
 	plan := &enginestate.UpdatePlan{
-		PlanId:               id,
+		PlanId:               newID("plan"),
 		Product:              profile.Product,
 		Channel:              runtime.Channel,
 		Version:              av.Target.Version,
@@ -353,6 +353,10 @@ func (e *Engine) buildPlan(st store, profile *openedProfile, runtime *updaterv2.
 	key, err := st.planKey()
 	if err != nil {
 		return nil, err
+	}
+	if prior := st.reusablePlan(key, plan, now); prior != nil {
+		refreshPlan(prior, plan)
+		plan = prior
 	}
 	plan.PlanHmac = hmacPlan(key, plan)
 	if err := st.savePlan(plan); err != nil {

@@ -400,6 +400,7 @@ func (e *Engine) handleCleanup(req *updaterv2.UpdaterRequest, st store) error {
 			}
 		}
 	}
+	st.sweep(time.Now())
 	_ = req
 	return e.emit(&updaterv2.UpdaterEvent{
 		Kind: &updaterv2.UpdaterEvent_Result{Result: &updaterv2.Result{Kind: &updaterv2.Result_Ok{Ok: &updaterv2.Ok{}}}},
