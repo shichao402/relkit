@@ -2,9 +2,12 @@ package updater
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
+	"time"
 
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/sdk"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -345,9 +348,43 @@ func (e *Engine) handleStatus(req *updaterv2.UpdaterRequest, st store) error {
 			StartedAt: sess.StartedAt,
 			Error:     sess.Error,
 		}
+		snap.HostMustExit = hostMustExit(sess, time.Now())
 	}
 	_ = req
 	return e.emit(&updaterv2.UpdaterEvent{Kind: &updaterv2.UpdaterEvent_Status{Status: snap}})
+}
+
+// workerGrace covers the gap between handleApply returning and the worker
+// taking over the apply lock, and any heartbeat the worker just wrote.
+const workerGrace = 15 * time.Second
+
+// hostMustExit is the startup handoff rule (StatusSnapshot.host_must_exit).
+// The engine owns it so hosts never encode phase semantics, and it fails open:
+// a worker that is gone never keeps a host from starting.
+func hostMustExit(sess *enginestate.ApplySessionRecord, now time.Time) bool {
+	if sess == nil || !sess.GetRequiresHostExit() {
+		return false
+	}
+	switch sess.GetPhase() {
+	case updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT,
+		updaterv2.SessionPhase_SESSION_PHASE_DOWNLOADING,
+		updaterv2.SessionPhase_SESSION_PHASE_COPYING,
+		updaterv2.SessionPhase_SESSION_PHASE_COMMITTING:
+	default:
+		return false
+	}
+	if hb := sess.GetHeartbeatAt(); hb != nil && now.Sub(hb.AsTime()) < workerGrace {
+		return true
+	}
+	raw, err := os.ReadFile(applyLockPath(sess.GetInstallRoot()))
+	if err != nil {
+		return false
+	}
+	var lock applyLockFile
+	if json.Unmarshal(raw, &lock) != nil {
+		return false
+	}
+	return lock.SessionID == sess.GetSessionId() && lock.Pid > 0 && processAlive(lock.Pid)
 }
 
 func (e *Engine) handleCleanup(req *updaterv2.UpdaterRequest, st store) error {

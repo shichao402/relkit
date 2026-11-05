@@ -19,6 +19,10 @@ what will break.
 - `apply` accepts a plan that was not downloaded yet; the worker downloads it
   after the host exits (new `SESSION_PHASE_DOWNLOADING`). Such a session always
   reports `requiresHostExit: true`.
+- `StatusSnapshot.hostMustExit` is the single startup handoff rule: a host that
+  sees it true exits at once. The engine computes it (live worker, install root
+  still needed), so a relaunched host is never told to quit and a crashed
+  worker never locks the host out (ADR 0026 §6).
 - Release codes are allocated by the server (ADR 0025). `POST /v1/release-code`
   hands out the next code for a product, above both its counter and every code
   already published on any channel, so products that published before need no

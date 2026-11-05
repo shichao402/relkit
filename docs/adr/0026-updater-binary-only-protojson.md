@@ -90,7 +90,7 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 - 窗口只显示、不提供“取消”以外的操作（失败时另有关闭按钮，以及有 `RecoveryHelp` 链接时的帮助按钮），与 SvnMergeTool 让路界面“不给留下来的机会”的原则一致。只有等待退出与下载两段可取消，安装开始拷贝后不可取消，标题栏关闭按钮与取消按钮同义。
 - 会话以“安装目录未被改动”结束时（用户取消、下载失败、拷贝失败已回滚），worker 按 `relaunch` 重新拉起旧版本宿主，用户不会落到什么都没在运行的状态。等待宿主退出超时则不拉起，因为宿主仍在运行。取消记为 `NEEDS_ATTENTION` + `ERROR_CODE_CANCELED`（可重试），与安装程序被取消一致。
 - worker 写进会话的错误带上宿主 `ClientProfile.recovery`，窗口与后续 `status` 都能看到。
-- 窗口期间仍有宿主实例被手动打开：宿主启动时发 `status`，看到 `active_session` 处于非终态就自行退出。这是宿主唯一必须实现的交接行为，契约里写死。
+- 窗口期间仍有宿主实例被手动打开：宿主启动时发 `status`，`StatusSnapshot.host_must_exit` 为真就自行退出。这是宿主唯一必须实现的交接行为，契约里写死。判定归引擎，宿主不解读阶段：只在会话要求宿主退出、处于 `WAITING_FOR_EXIT` / `DOWNLOADING` / `COPYING` / `COMMITTING`、且 worker 仍活着（15 秒内有心跳，或持有本会话的 apply 锁且进程存活）时为真。从 `RELAUNCHING` 起文件已就位，被拉起的新宿主必须能起来；worker 崩溃后同样放行，坏掉的更新不能把宿主永久挡在门外。（2026-11-05 补：最初写成“`active_session` 非终态就退出”，会让 `RELAUNCHING` 时被拉起的新宿主自杀，也会被死掉的 worker 永久卡住。）
 - full-install（安装包交接）：窗口只覆盖等待宿主退出这一段，之后交给安装程序自身的界面。
 - 产品显示名取自新增的 `InstallSpec.display_name = 8`，为空时退回 `ClientProfile.expected_product`。原设想“取自 bootstrap”不成立：bootstrap 只有 product id，没有显示名。界面文案随系统 UI 语言（Windows `GetUserDefaultUILanguage`，其他平台 `LC_ALL`/`LC_MESSAGES`/`LANG`）在 zh/en 之间选择。
 - `hide_progress`、显示名与 recovery 随会话落盘（enginestate `ApplySessionRecord` 25–27），worker 从会话读取。
@@ -119,6 +119,8 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 4. Loom-Launcher（Rust）：删 `relkit-updater` crate 路径依赖与 `.relkit/components/sdk/rust`；`build.rs` 用导出的 proto 跑 `prost-build` + `pbjson-build`；`updater.rs` 改调用方式。
 5. Loom：无变化（不持有 updater 客户端）。
 6. relkit-ops skill 中的宿主接入合同（`host-update.md`）按本 ADR 重写。
+
+宿主侧生成方式的细化（2026-11-05）：宿主仓提交一份 `relkit-updater proto` 的输出副本，本地构建直接从副本生成类型，不依赖网络和 `buf`；CI 在取到并验签引擎之后，把 `relkit-updater proto` 的输出与副本逐字节比对，不一致即失败。这样契约仍只有引擎一个来源，副本只是它的缓存，漂移在 CI 暴露；升级引擎时同一个提交里刷新副本并重新生成。
 
 步骤 3、4 必须在新引擎发布后同批完成：新旧两侧会以 `UPDATER_TOO_OLD/NEW` 互相拒绝，不会半工作。
 

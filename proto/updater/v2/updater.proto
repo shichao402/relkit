@@ -394,11 +394,15 @@ message StatusSnapshot {
   google.protobuf.Timestamp next_allowed_at = 3;
   int64 last_seen_sequence = 4;
   repeated int64 skipped_codes = 5;
-  // A host that starts while this session is not in a terminal phase
-  // (COMPLETED, ROLLED_BACK, NEEDS_ATTENTION) must exit at once: an install is
-  // waiting for the install root.
   SessionView active_session = 6;
   SidecarInfo sidecar = 7;
+  // The one handoff rule a host follows (ADR 0026): send status at startup
+  // and exit at once when this is true. The engine sets it while a live apply
+  // worker still needs the install root (waiting for exit, downloading,
+  // copying, committing). It stays false once the files are in place
+  // (RELAUNCHING onward), for sessions that never asked the host to exit, and
+  // for a worker that died, so a crashed update can never lock a host out.
+  bool host_must_exit = 8;
 }
 
 message Progress {

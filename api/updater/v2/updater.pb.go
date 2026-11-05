@@ -3139,11 +3139,15 @@ type StatusSnapshot struct {
 	NextAllowedAt    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=next_allowed_at,json=nextAllowedAt,proto3" json:"next_allowed_at,omitempty"`
 	LastSeenSequence int64                  `protobuf:"varint,4,opt,name=last_seen_sequence,json=lastSeenSequence,proto3" json:"last_seen_sequence,omitempty"`
 	SkippedCodes     []int64                `protobuf:"varint,5,rep,packed,name=skipped_codes,json=skippedCodes,proto3" json:"skipped_codes,omitempty"`
-	// A host that starts while this session is not in a terminal phase
-	// (COMPLETED, ROLLED_BACK, NEEDS_ATTENTION) must exit at once: an install is
-	// waiting for the install root.
-	ActiveSession *SessionView `protobuf:"bytes,6,opt,name=active_session,json=activeSession,proto3" json:"active_session,omitempty"`
-	Sidecar       *SidecarInfo `protobuf:"bytes,7,opt,name=sidecar,proto3" json:"sidecar,omitempty"`
+	ActiveSession    *SessionView           `protobuf:"bytes,6,opt,name=active_session,json=activeSession,proto3" json:"active_session,omitempty"`
+	Sidecar          *SidecarInfo           `protobuf:"bytes,7,opt,name=sidecar,proto3" json:"sidecar,omitempty"`
+	// The one handoff rule a host follows (ADR 0026): send status at startup
+	// and exit at once when this is true. The engine sets it while a live apply
+	// worker still needs the install root (waiting for exit, downloading,
+	// copying, committing). It stays false once the files are in place
+	// (RELAUNCHING onward), for sessions that never asked the host to exit, and
+	// for a worker that died, so a crashed update can never lock a host out.
+	HostMustExit  bool `protobuf:"varint,8,opt,name=host_must_exit,json=hostMustExit,proto3" json:"host_must_exit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3225,6 +3229,13 @@ func (x *StatusSnapshot) GetSidecar() *SidecarInfo {
 		return x.Sidecar
 	}
 	return nil
+}
+
+func (x *StatusSnapshot) GetHostMustExit() bool {
+	if x != nil {
+		return x.HostMustExit
+	}
+	return false
 }
 
 type Progress struct {
@@ -3810,7 +3821,7 @@ const file_updater_v2_updater_proto_rawDesc = "" +
 	"\x05phase\x18\x03 \x01(\x0e2\x1f.relkit.updater.v2.SessionPhaseR\x05phase\x129\n" +
 	"\n" +
 	"started_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12.\n" +
-	"\x05error\x18\x05 \x01(\v2\x18.relkit.updater.v2.ErrorR\x05error\"\xa8\x03\n" +
+	"\x05error\x18\x05 \x01(\v2\x18.relkit.updater.v2.ErrorR\x05error\"\xce\x03\n" +
 	"\x0eStatusSnapshot\x12>\n" +
 	"\rlast_check_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\vlastCheckAt\x12>\n" +
 	"\vlast_result\x18\x02 \x01(\x0e2\x1d.relkit.updater.v2.LastResultR\n" +
@@ -3819,7 +3830,8 @@ const file_updater_v2_updater_proto_rawDesc = "" +
 	"\x12last_seen_sequence\x18\x04 \x01(\x03R\x10lastSeenSequence\x12#\n" +
 	"\rskipped_codes\x18\x05 \x03(\x03R\fskippedCodes\x12E\n" +
 	"\x0eactive_session\x18\x06 \x01(\v2\x1e.relkit.updater.v2.SessionViewR\ractiveSession\x128\n" +
-	"\asidecar\x18\a \x01(\v2\x1e.relkit.updater.v2.SidecarInfoR\asidecar\"|\n" +
+	"\asidecar\x18\a \x01(\v2\x1e.relkit.updater.v2.SidecarInfoR\asidecar\x12$\n" +
+	"\x0ehost_must_exit\x18\b \x01(\bR\fhostMustExit\"|\n" +
 	"\bProgress\x12%\n" +
 	"\x0ebytes_received\x18\x01 \x01(\x03R\rbytesReceived\x12\x1f\n" +
 	"\vbytes_total\x18\x02 \x01(\x03R\n" +

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
@@ -516,6 +517,76 @@ func TestStatusReportsFullInstallFailure(t *testing.T) {
 	}
 	if active.GetError().GetCode() != updaterv2.ErrorCode_ERROR_CODE_INSTALLER_FAILED {
 		t.Fatalf("error code = %v", active.GetError().GetCode())
+	}
+	if events[0].GetStatus().GetHostMustExit() {
+		t.Fatal("a terminal session must not keep the host out")
+	}
+}
+
+func TestHostMustExitOnlyWhileALiveWorkerHoldsTheRoot(t *testing.T) {
+	now := time.Now()
+	root := t.TempDir()
+	stale := timestamppb.New(now.Add(-time.Hour))
+	base := func(phase updaterv2.SessionPhase) *enginestate.ApplySessionRecord {
+		return &enginestate.ApplySessionRecord{
+			SessionId:        "sess-1",
+			Phase:            phase,
+			InstallRoot:      root,
+			RequiresHostExit: true,
+			HeartbeatAt:      stale,
+		}
+	}
+	writeLock := func(sessionID string, pid int) {
+		raw, _ := json.Marshal(applyLockFile{SessionID: sessionID, Pid: pid})
+		if err := os.WriteFile(applyLockPath(root), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// No lock and a stale heartbeat: the worker is gone, the host may start.
+	if hostMustExit(base(updaterv2.SessionPhase_SESSION_PHASE_COPYING), now) {
+		t.Fatal("dead worker must not lock the host out")
+	}
+	// A fresh heartbeat covers the spawn window before the worker owns the lock.
+	fresh := base(updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT)
+	fresh.HeartbeatAt = timestamppb.New(now)
+	if !hostMustExit(fresh, now) {
+		t.Fatal("fresh heartbeat means a live worker")
+	}
+	// A live worker holding the lock for this session.
+	writeLock("sess-1", os.Getpid())
+	for _, phase := range []updaterv2.SessionPhase{
+		updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT,
+		updaterv2.SessionPhase_SESSION_PHASE_DOWNLOADING,
+		updaterv2.SessionPhase_SESSION_PHASE_COPYING,
+		updaterv2.SessionPhase_SESSION_PHASE_COMMITTING,
+	} {
+		if !hostMustExit(base(phase), now) {
+			t.Fatalf("%v with a live worker must keep the host out", phase)
+		}
+	}
+	// Files are in place from RELAUNCHING on: the relaunched host must start.
+	for _, phase := range []updaterv2.SessionPhase{
+		updaterv2.SessionPhase_SESSION_PHASE_RELAUNCHING,
+		updaterv2.SessionPhase_SESSION_PHASE_COMPLETED,
+		updaterv2.SessionPhase_SESSION_PHASE_ROLLED_BACK,
+		updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
+	} {
+		if hostMustExit(base(phase), now) {
+			t.Fatalf("%v must let the host start", phase)
+		}
+	}
+	// A lock owned by another session does not count.
+	writeLock("sess-other", os.Getpid())
+	if hostMustExit(base(updaterv2.SessionPhase_SESSION_PHASE_COPYING), now) {
+		t.Fatal("foreign lock must not count")
+	}
+	// Sessions that never asked the host to exit (LIBRARY editor installs).
+	writeLock("sess-1", os.Getpid())
+	lib := base(updaterv2.SessionPhase_SESSION_PHASE_COPYING)
+	lib.RequiresHostExit = false
+	if hostMustExit(lib, now) {
+		t.Fatal("a session that keeps the host up must not ask it to exit")
 	}
 }
 
