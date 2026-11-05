@@ -113,12 +113,12 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 
 断代一次，不留兼容分支（ADR 0023 原则 2）：
 
-1. relkit：proto v2 与 enginestate 拆分、引擎改 ProtoJSON 传输与 `protocol` 校验、`relkit-updater proto` 子命令、conformance 改写、删除第 1 节所列目录。（2026-11-05 已在仓内完成；新引擎暂不发布到服务器，因为它会拒绝现役宿主，须与步骤 3、4 同批上线。）
-2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。（2026-11-05 Windows 已在仓内完成，随步骤 1 同批发布。）
-3. SvnMergeTool（Dart）：删 `rup_client` 依赖与 `.relkit/components/sdk/dart` 物化；CI 加“导出 proto → buf generate”；`update_service.dart` 改成启动进程 + 按行解码；启动时 `status` 检查替代现有让路逻辑的判定来源（界面可保留）。
-4. Loom-Launcher（Rust）：删 `relkit-updater` crate 路径依赖与 `.relkit/components/sdk/rust`；`build.rs` 用导出的 proto 跑 `prost-build` + `pbjson-build`；`updater.rs` 改调用方式。
+1. relkit：proto v2 与 enginestate 拆分、引擎改 ProtoJSON 传输与 `protocol` 校验、`relkit-updater proto` 子命令、conformance 改写、删除第 1 节所列目录。（2026-11-05 完成，与步骤 3、4 同批发布到内外网服务器。）
+2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。（2026-11-05 Windows 已随步骤 1 发布，待 Windows 真机验证；macOS 未做。）
+3. SvnMergeTool（Dart）：删 `rup_client` 依赖与 `.relkit/components/sdk/dart` 物化；CI 加“导出 proto → buf generate”；`update_service.dart` 改成启动进程 + 按行解码；启动时 `status` 检查替代现有让路逻辑的判定来源（界面可保留）。（2026-11-05 完成，SvnMergeTool #108 发布 0.2.0+219。）
+4. Loom-Launcher（Rust）：删 `relkit-updater` crate 路径依赖与 `.relkit/components/sdk/rust`；`build.rs` 用导出的 proto 跑 `prost-build` + `pbjson-build`；`updater.rs` 改调用方式。（2026-11-05 完成，Loom-Launcher #59 发布 0.1.0+58。）
 5. Loom：无变化（不持有 updater 客户端）。
-6. relkit-ops skill 中的宿主接入合同（`host-update.md`）按本 ADR 重写。
+6. relkit-ops skill 中的宿主接入合同（`host-update.md`）按本 ADR 重写。（2026-11-05 完成。）
 
 宿主侧生成方式的细化（2026-11-05）：宿主仓提交一份 `relkit-updater proto` 的输出副本，本地构建直接从副本生成类型，不依赖网络和 `buf`；CI 在取到并验签引擎之后，把 `relkit-updater proto` 的输出与副本逐字节比对，不一致即失败。这样契约仍只有引擎一个来源，副本只是它的缓存，漂移在 CI 暴露；升级引擎时同一个提交里刷新副本并重新生成。
 
