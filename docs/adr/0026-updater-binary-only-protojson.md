@@ -98,7 +98,12 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 平台实现：
 
 - Windows：`golang.org/x/sys/windows` 直接调 Win32（user32 窗口、comctl32 进度条、shell32 打开帮助链接），无 cgo，交叉编译不变。窗口跑在独立锁定的 OS 线程上，worker 只改状态并投递消息。第一版没有嵌 comctl32 v6 manifest，也未声明 DPI 感知，控件是经典样式、高 DPI 下由系统缩放。
-- macOS：AppKit 需要 cgo，`relkit-updater` 的 darwin 产物改由 GitHub Actions macOS runner 编译（2026-11-05 用户裁决），产物仍走现有工具发布与验签流程上传服务器。macOS 是整个 `.app` 当 payload 替换，耗时短，第一版只做等待与安装两个阶段的面板。
+- macOS：AppKit 需要 cgo，`relkit-updater` 的 darwin 产物改由 GitHub Actions macOS runner 编译（2026-11-05 用户裁决），产物仍走现有工具发布与验签流程上传服务器。落地形态（2026-11-05）：
+  - 窗口代码在 `internal/updater/progress_darwin.go`（`darwin && cgo`），Objective-C 写在 cgo preamble 里，不放 `.m` 文件，否则 darwin 下 `CGO_ENABLED=0` 的构建会直接失败。行为与 Windows 版一致，各阶段与失败页都覆盖，文案随 `NSLocale preferredLanguages`。
+  - AppKit 只认进程主线程。`internal/mainthread` 在 darwin 的 init 里锁住主 goroutine，`relkit-updater --worker` 用 `mainthread.Run` 跑会话，窗口通过 `mainthread.Post` 上主线程跑 run loop。
+  - 构建：`.github/workflows/darwin-updater.yml` 每次 push master 在 macOS runner 上用 `scripts/deploy/relkit.py build --updater --os darwin --darwin-cgo` 出 amd64、arm64 两个产物和 manifest。部署脚本构建 darwin updater 时不再本地交叉编译，而是按 HEAD 提交下载该 run 的产物，核对 manifest 版本与 sha256 后并入本次发布；工作区不干净或该提交没有成功的 run 时直接报错。`relkit build`（Go）在 Mac 上构建 darwin updater 时自动开 cgo，`release.yml` 的 GitHub Release 用 macOS job 的 cgo 产物替换 ubuntu 交叉编译的那份。
+  - 最低系统版本 macOS 13，与 go.mod 所用 Go 工具链对自身目标文件的要求一致。
+  - 没有 cgo 的 darwin 构建仍能工作，只是没有窗口（`progress_other.go`）。
 
 ### 7. conformance
 
@@ -114,7 +119,7 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 断代一次，不留兼容分支（ADR 0023 原则 2）：
 
 1. relkit：proto v2 与 enginestate 拆分、引擎改 ProtoJSON 传输与 `protocol` 校验、`relkit-updater proto` 子命令、conformance 改写、删除第 1 节所列目录。（2026-11-05 完成，与步骤 3、4 同批发布到内外网服务器。）
-2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。（2026-11-05 Windows 已随步骤 1 发布，待 Windows 真机验证；macOS 未做。）
+2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。（2026-11-05 Windows 已随步骤 1 发布，待 Windows 真机验证；macOS 已实现，随下次服务器升级发布。）
 3. SvnMergeTool（Dart）：删 `rup_client` 依赖与 `.relkit/components/sdk/dart` 物化；CI 加“导出 proto → buf generate”；`update_service.dart` 改成启动进程 + 按行解码；启动时 `status` 检查替代现有让路逻辑的判定来源（界面可保留）。（2026-11-05 完成，SvnMergeTool #108 发布 0.2.0+219。）
 4. Loom-Launcher（Rust）：删 `relkit-updater` crate 路径依赖与 `.relkit/components/sdk/rust`；`build.rs` 用导出的 proto 跑 `prost-build` + `pbjson-build`；`updater.rs` 改调用方式。（2026-11-05 完成，Loom-Launcher #59 发布 0.1.0+58。）
 5. Loom：无变化（不持有 updater 客户端）。
@@ -128,7 +133,7 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 
 - 宿主每种语言要自己写几十行“启动进程 + 读行”的代码。这部分不涉及契约，生成类型覆盖了所有会出错的字段层面。
 - ProtoJSON 比二进制帧大，`Progress` 事件频繁时略多 CPU。事件量很小（每次运行几十到几百行），可忽略。
-- macOS 产物需要 macOS 构建机。
+- macOS 产物需要 macOS 构建机：发布前提交必须先推到 GitHub 并等 `darwin-updater.yml` 跑完。
 - 再断代一次，两个现役宿主各改一次。
 
 ## 已裁决（2026-11-05）

@@ -1660,6 +1660,93 @@ class BuildAppendTests(unittest.TestCase):
         self.assertTrue(args.cli)
 
 
+class DarwinUpdaterTests(unittest.TestCase):
+    """ADR 0026 §6: the darwin updater is the CI runner's cgo build."""
+
+    STAMP = "1.2.3+abcdefabcdef"
+    COMMIT = "abcdefabcdef0123456789"
+
+    def _fake_gh(self, runs, files=None, version=None):
+        calls = []
+
+        def runner(argv, cwd=None, capture=False, **_):
+            calls.append(list(argv))
+            if argv[1:3] == ["run", "list"]:
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(runs), stderr="")
+            if argv[1:3] == ["run", "download"]:
+                dest = Path(argv[argv.index("-D") + 1])
+                artifacts = []
+                for arch, data in (files or {}).items():
+                    name = f"relkit-updater-darwin-{arch}"
+                    (dest / name).write_bytes(data)
+                    artifacts.append({
+                        "component": "updater", "os": "darwin", "arch": arch, "path": name,
+                        "sha256": deploy_cli.file_sha256(dest / name),
+                    })
+                (dest / "manifest.json").write_text(json.dumps({
+                    "version": version or self.STAMP, "artifacts": artifacts,
+                }), encoding="utf-8")
+                return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected command {argv}")
+
+        return runner, calls
+
+    def test_build_accepts_darwin_cgo(self):
+        args = deploy_cli.build_parser().parse_args(["build", "--updater", "--os", "darwin", "--darwin-cgo"])
+        self.assertTrue(args.darwin_cgo)
+
+    def test_cgo_env_refuses_off_macos(self):
+        with self.assertRaises(deploy_cli.Fail):
+            deploy_cli.darwin_cgo_env("arm64", platform="linux")
+        env = deploy_cli.darwin_cgo_env("amd64", platform="darwin")
+        self.assertEqual(env["CGO_ENABLED"], "1")
+        self.assertEqual(env["CC"], "clang -arch x86_64")
+
+    def test_min_version_matches_go_build(self):
+        source = (deploy_cli.REPO_ROOT / "cmd" / "relkit" / "build.go").read_text(encoding="utf-8")
+        self.assertIn(f'const darwinMinVersion = "{deploy_cli.DARWIN_MIN_VERSION}"', source)
+
+    def test_dirty_tree_is_refused(self):
+        runner, calls = self._fake_gh([])
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(deploy_cli.Fail) as caught:
+            deploy_cli.fetch_darwin_updater(Path(tmp), self.STAMP + "-dirty", self.COMMIT, ["arm64"], runner=runner)
+        self.assertIn("--darwin-cgo", str(caught.exception))
+        self.assertEqual(calls, [])
+
+    def test_missing_run_names_the_way_out(self):
+        runner, _ = self._fake_gh([])
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(deploy_cli.Fail) as caught:
+            deploy_cli.fetch_darwin_updater(Path(tmp), self.STAMP, self.COMMIT, ["arm64"], runner=runner)
+        self.assertIn(deploy_cli.DARWIN_UPDATER_WORKFLOW, str(caught.exception))
+        self.assertIn(self.COMMIT[:12], str(caught.exception))
+
+    def test_version_mismatch_is_refused(self):
+        runner, _ = self._fake_gh([{"databaseId": 7}], files={"arm64": b"x"}, version="1.2.3+other")
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(deploy_cli.Fail):
+            deploy_cli.fetch_darwin_updater(Path(tmp), self.STAMP, self.COMMIT, ["arm64"], runner=runner)
+
+    def test_missing_arch_is_refused(self):
+        runner, _ = self._fake_gh([{"databaseId": 7}], files={"arm64": b"x"})
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(deploy_cli.Fail):
+            deploy_cli.fetch_darwin_updater(Path(tmp), self.STAMP, self.COMMIT, ["amd64", "arm64"], runner=runner)
+
+    def test_fetch_copies_verified_bytes(self):
+        runner, calls = self._fake_gh([{"databaseId": 7}], files={"amd64": b"intel", "arm64": b"apple"})
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = deploy_cli.fetch_darwin_updater(Path(tmp), self.STAMP, self.COMMIT, ["amd64", "arm64"], runner=runner)
+            self.assertEqual((Path(tmp) / "relkit-updater-darwin-arm64").read_bytes(), b"apple")
+        self.assertEqual([r["arch"] for r in rows], ["amd64", "arm64"])
+        self.assertIn("--commit", calls[0])
+        self.assertIn(self.COMMIT, calls[0])
+
+    def test_workflow_builds_with_cgo_and_uploads_the_artifact(self):
+        workflow = deploy_cli.REPO_ROOT / ".github" / "workflows" / deploy_cli.DARWIN_UPDATER_WORKFLOW
+        text = workflow.read_text(encoding="utf-8")
+        self.assertIn("--darwin-cgo", text)
+        self.assertIn(f"name: {deploy_cli.DARWIN_UPDATER_ARTIFACT}", text)
+        self.assertIn("macos-", text)
+
+
 class PublishDefaultsDeriveTests(unittest.TestCase):
     """ADR 0024: upgrade moves the publish config already on the box; it asks for nothing."""
 

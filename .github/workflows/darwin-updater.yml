@@ -1,0 +1,47 @@
+name: Darwin updater
+
+# ADR 0026 §6: the darwin relkit-updater carries an AppKit progress window,
+# which needs cgo and a Mac. Every master commit gets a build here; the deploy
+# CLI (scripts/deploy/relkit.py build) downloads this run's artifact for the
+# exact commit it releases, checks its manifest, and publishes it through the
+# usual tools path.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test
+        run: go test ./internal/mainthread ./internal/updater ./cmd/relkit-updater
+      - name: Build
+        run: python3 scripts/deploy/relkit.py build --updater --os darwin --darwin-cgo --out dist-darwin
+      - name: Check
+        run: |
+          for binary in dist-darwin/relkit-updater-darwin-*; do
+            lipo -archs "$binary"
+            otool -L "$binary" | grep -q Cocoa.framework
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relkit-updater-darwin
+          path: |
+            dist-darwin/relkit-updater-darwin-*
+            dist-darwin/manifest.json
+          if-no-files-found: error
+          retention-days: 90

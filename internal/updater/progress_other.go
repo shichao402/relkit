@@ -1,9 +1,9 @@
-//go:build !windows
+//go:build !windows && !(darwin && cgo)
 
 package updater
 
-// The macOS AppKit window lands with the macOS build runner (ADR 0026 §6);
-// until then hide_progress is a no-op off Windows.
+// Linux has no window, and a darwin build without cgo cannot reach AppKit;
+// both run the session without one (ADR 0026 §6).
 func platformProgressUI(progressSpec) (progressUI, error) { return noopProgress{}, nil }
 
 func uiLanguage() string { return langFromLocale(envLocale()) }

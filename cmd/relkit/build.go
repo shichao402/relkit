@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -268,14 +269,43 @@ func mustAtoi(value string) int {
 	return n
 }
 
-// goBuildCross runs go build with GOOS/GOARCH pinned and CGO off.
+// goBuildCross runs go build with GOOS/GOARCH pinned. CGO stays off except for
+// the darwin updater on a darwin host: its progress window is AppKit, which
+// only cgo reaches (ADR 0026 §6). Built anywhere else it still works, just
+// without the window.
 func goBuildCross(root, pkg, dest, ldflags, osName, arch string) error {
 	command := exec.Command("go", "build", "-trimpath", "-ldflags", ldflags, "-o", dest, pkg)
 	command.Dir = root
-	command.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+osName, "GOARCH="+arch)
+	command.Env = append(os.Environ(), "GOOS="+osName, "GOARCH="+arch)
+	command.Env = append(command.Env, darwinCgoEnv(pkg, osName, arch)...)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	return command.Run()
+}
+
+// darwinUpdaterPackage is the one package built with cgo.
+const darwinUpdaterPackage = "./cmd/relkit-updater"
+
+// darwinMinVersion is the oldest macOS the cgo updater runs on. It matches
+// what the Go toolchain in go.mod already requires of its own object files;
+// left unset, clang would stamp the build host's SDK version instead.
+const darwinMinVersion = "13.0"
+
+func darwinCgoEnv(pkg, osName, arch string) []string {
+	if pkg != darwinUpdaterPackage || osName != "darwin" || runtime.GOOS != "darwin" {
+		return []string{"CGO_ENABLED=0"}
+	}
+	clangArch := map[string]string{"amd64": "x86_64", "arm64": "arm64"}[arch]
+	if clangArch == "" {
+		return []string{"CGO_ENABLED=0"}
+	}
+	return []string{
+		"CGO_ENABLED=1",
+		"CC=clang -arch " + clangArch,
+		"CGO_CFLAGS=-mmacosx-version-min=" + darwinMinVersion,
+		"CGO_LDFLAGS=-mmacosx-version-min=" + darwinMinVersion,
+		"MACOSX_DEPLOYMENT_TARGET=" + darwinMinVersion,
+	}
 }
 
 func intOf(v any) int {

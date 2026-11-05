@@ -78,6 +78,14 @@ jobs:
           path: dist-universal/*
           if-no-files-found: error
           retention-days: 1
+      # The thin darwin updaters built here carry the AppKit progress window
+      # (cgo, ADR 0026 §6); the ubuntu release job cannot build those.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relkit-updater-darwin-thin
+          path: dist-thin/relkit-updater-darwin-*
+          if-no-files-found: error
+          retention-days: 1
   release:
     if: github.event_name == 'push'
     needs: [test, universal]
@@ -114,6 +122,25 @@ jobs:
         with:
           name: relkit-darwin-universal
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: relkit-updater-darwin-thin
+          path: dist-cgo
+      - name: Swap in the cgo darwin updaters
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, shutil
+          dist, cgo = pathlib.Path("dist"), pathlib.Path("dist-cgo")
+          manifest = json.loads((dist / "manifest.json").read_text())
+          rows = {row["path"]: row for row in manifest["artifacts"]}
+          for src in sorted(cgo.iterdir()):
+              if src.name not in rows:
+                  raise SystemExit(f"{src.name} is not in dist/manifest.json")
+              shutil.copyfile(src, dist / src.name)
+              rows[src.name]["sha256"] = hashlib.sha256(src.read_bytes()).hexdigest()
+              print("cgo", src.name)
+          (dist / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
       - name: Write checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS

@@ -71,6 +71,8 @@ upgrade **保留** 现网 `dir`；仅在显式传入 `--serve-listen-addr` 时�
 
 `upgrade` 默认从当前 HEAD 构建；改完代码直接 `--apply` 即可。只有 `--unsafe-from-dist` 才会把盘上已有的 `dist/` 送上去。
 
+darwin 版 `relkit-updater` 带 AppKit 进度窗口，需要 cgo 和 Mac（ADR 0026 §6）。`build` 遇到它不在本机交叉编译，而是用 `gh` 下载 `.github/workflows/darwin-updater.yml` 针对 HEAD 提交的成功 run 产物，核对 manifest 版本与 sha256 后并入 `dist/manifest.json`。所以发布工具前先把提交推到 GitHub，等该 workflow 跑完（`gh run list --workflow darwin-updater.yml`）；工作区不干净或没有对应 run 会直接报错。在 Mac 上可以加 `--darwin-cgo` 本机构建，CI 用的就是这条。
+
 工具下载 URL 由 agent 自己的 `publicURL`（`/etc/relkit-agent/relkit-agent.json`）决定，调用方不再传。宿主 `relkit.project.json` 的 `server` 指向 publish 域，CI 从 `{server}/v1/tools/current/...` 取工具，所以 `publicURL` 必须就是 publish 域（内网 `http://publish.devcloud.woa.com`，外网 `https://publish.firoyang.com`）。没配或配成 loopback 时，工具发布返回 409 并触发整体回滚。update-internal 只给 updater 提供协议树，不转发 `/v1/tools/` 与 `/v1/catalog`。
 
 **agent 与 serve 固定配套。** 外网 `cvm-gz` 与内网 `update.devcloud.woa.com` 都必须跑两个进程（外网 serve 是操作面，数据面仍可在 COS；内网 serve 是 `relkit-compatible` 数据面，见 [publish-topology](../../docs/design/publish-topology.md) §5）。缺哪个先 `install` 哪个，不要用 `--agent-only` / `--serve-only` 当现网默认。要升的组件目标机没跑，upgrade 会在探测后报错并指出该跑哪条 `install`，不会抛栈。

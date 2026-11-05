@@ -16,6 +16,11 @@ what will break.
   version is relaunched when the install was left untouched. Hosts that draw
   their own handoff UI set `ApplyOp.hideProgress`; `InstallSpec.displayName`
   names the product (ADR 0026 §6).
+- On macOS the apply worker shows the same progress window, drawn with
+  AppKit. The darwin `relkit-updater` is now a cgo build from the
+  `darwin-updater` GitHub Actions workflow and needs macOS 13 or later; the
+  deploy CLI downloads that build for the commit being released
+  (`relkit.py build --darwin-cgo` builds it locally on a Mac instead).
 - `apply` accepts a plan that was not downloaded yet; the worker downloads it
   after the host exits (new `SESSION_PHASE_DOWNLOADING`). Such a session always
   reports `requiresHostExit: true`.

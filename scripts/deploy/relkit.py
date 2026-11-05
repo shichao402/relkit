@@ -271,15 +271,24 @@ def cmd_build(args: argparse.Namespace) -> None:
                 )
             component_platforms = narrowed
         ldflags = f"-s -w -X main.version={stamp}"
+        darwin_from_ci: list[str] = []
         for os_name, arch in component_platforms:
             name = f"{prefix}-{os_name}-{arch}"
             if os_name == "windows":
                 name += ".exe"
             dest = out_dir / name
             env = os.environ.copy()
-            env["CGO_ENABLED"] = "0"
             env["GOOS"] = os_name
             env["GOARCH"] = arch
+            if kind == DARWIN_UPDATER_COMPONENT and os_name == "darwin":
+                if not getattr(args, "darwin_cgo", False):
+                    # ADR 0026 §6: the AppKit window needs cgo on a Mac, so the
+                    # published bytes come from the macOS runner, not here.
+                    darwin_from_ci.append(arch)
+                    continue
+                env.update(darwin_cgo_env(arch))
+            else:
+                env["CGO_ENABLED"] = "0"
             # Never assign os.environ["GOOS"]: it would break later `go test` on Windows.
             print(f"  {name}")
             run(
@@ -292,6 +301,11 @@ def cmd_build(args: argparse.Namespace) -> None:
                 if (row["component"], row["os"], row["arch"]) != (kind, os_name, arch)
             ]
             built.append({"component": kind, "os": os_name, "arch": arch, "path": dest.name, "sha256": file_sha256(dest)})
+        if darwin_from_ci:
+            fetched = fetch_darwin_updater(out_dir, stamp, git_identity()["commit"], darwin_from_ci)
+            keys = {(row["component"], row["os"], row["arch"]) for row in fetched}
+            built = [row for row in built if (row["component"], row["os"], row["arch"]) not in keys]
+            built.extend(fetched)
     ident = git_identity()
     manifest = {
         "schema": "relkit.release/1",
@@ -306,6 +320,114 @@ def cmd_build(args: argparse.Namespace) -> None:
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"output in {out_dir}")
+
+
+# ADR 0026 §6: the darwin updater carries an AppKit progress window, which
+# needs cgo and a Mac. .github/workflows/darwin-updater.yml builds it on every
+# master push; a deploy from any host downloads that run's artifact for the
+# exact commit being released instead of cross-compiling a windowless copy.
+DARWIN_UPDATER_COMPONENT = "updater"
+DARWIN_UPDATER_WORKFLOW = "darwin-updater.yml"
+DARWIN_UPDATER_ARTIFACT = "relkit-updater-darwin"
+# Mirrors darwinMinVersion in cmd/relkit/build.go.
+DARWIN_MIN_VERSION = "13.0"
+_CLANG_ARCH = {"amd64": "x86_64", "arm64": "arm64"}
+
+
+def darwin_cgo_env(arch: str, platform: str = sys.platform) -> dict[str, str]:
+    """Environment for a cgo build of the darwin updater on a Mac."""
+    if platform != "darwin":
+        raise Fail("--darwin-cgo builds the AppKit updater and only runs on macOS")
+    clang_arch = _CLANG_ARCH.get(arch)
+    if clang_arch is None:
+        raise Fail(f"--darwin-cgo has no clang arch for {arch!r}")
+    return {
+        "CGO_ENABLED": "1",
+        "CC": f"clang -arch {clang_arch}",
+        "CGO_CFLAGS": f"-mmacosx-version-min={DARWIN_MIN_VERSION}",
+        "CGO_LDFLAGS": f"-mmacosx-version-min={DARWIN_MIN_VERSION}",
+        "MACOSX_DEPLOYMENT_TARGET": DARWIN_MIN_VERSION,
+    }
+
+
+def fetch_darwin_updater(
+    out_dir: Path,
+    stamp: str,
+    commit: str,
+    arches: Sequence[str],
+    runner=None,
+) -> list[dict[str, Any]]:
+    """Copy the CI-built darwin updater for `commit` into out_dir.
+
+    The artifact's own manifest must carry the same version stamp, and every
+    file must match the sha256 that manifest declares, so the bytes published
+    are exactly what the runner built from this commit.
+    """
+    runner = runner or run
+    hint = (
+        f"push the commit and wait for {DARWIN_UPDATER_WORKFLOW} "
+        f"(gh run list --workflow {DARWIN_UPDATER_WORKFLOW}), "
+        "or build on a Mac with --darwin-cgo"
+    )
+    if stamp.endswith("-dirty"):
+        raise Fail(f"the darwin updater comes from CI and a dirty tree has no CI build; commit first, then {hint}")
+    gh = shutil.which("gh") if runner is run else "gh"
+    if not gh:
+        raise Fail(f"the darwin updater is downloaded from GitHub Actions with gh; install gh, or {hint}")
+    listed = runner(
+        [gh, "run", "list", "--workflow", DARWIN_UPDATER_WORKFLOW, "--commit", commit,
+         "--status", "success", "--json", "databaseId", "--limit", "1"],
+        cwd=REPO_ROOT,
+        capture=True,
+    )
+    try:
+        runs = json.loads(listed.stdout or "[]")
+    except json.JSONDecodeError:
+        raise Fail(f"gh run list returned non-JSON output: {listed.stdout[:200]!r}")
+    if not runs:
+        raise Fail(f"no successful {DARWIN_UPDATER_WORKFLOW} run for commit {commit[:12]}; {hint}")
+    run_id = str(runs[0]["databaseId"])
+    print(f"  darwin updater from GitHub Actions run {run_id}")
+    with tempfile.TemporaryDirectory() as tmp:
+        runner(
+            [gh, "run", "download", run_id, "-n", DARWIN_UPDATER_ARTIFACT, "-D", tmp],
+            cwd=REPO_ROOT,
+        )
+        manifest_path = Path(tmp) / "manifest.json"
+        if not manifest_path.is_file():
+            raise Fail(f"artifact {DARWIN_UPDATER_ARTIFACT} of run {run_id} has no manifest.json")
+        manifest = load_json_object(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("version") != stamp:
+            raise Fail(
+                f"run {run_id} built version {manifest.get('version')!r}, this release is {stamp!r}"
+            )
+        rows: list[dict[str, Any]] = []
+        for arch in arches:
+            row = next(
+                (
+                    r for r in manifest.get("artifacts") or []
+                    if isinstance(r, dict)
+                    and (r.get("component"), r.get("os"), r.get("arch")) == (DARWIN_UPDATER_COMPONENT, "darwin", arch)
+                ),
+                None,
+            )
+            if row is None:
+                raise Fail(f"run {run_id} did not build {DARWIN_UPDATER_COMPONENT} darwin-{arch}")
+            source = Path(tmp) / str(row.get("path", ""))
+            if not source.is_file() or file_sha256(source) != row.get("sha256"):
+                raise Fail(f"run {run_id}: {row.get('path')} does not match the sha256 its manifest declares")
+            dest = out_dir / source.name
+            shutil.copyfile(source, dest)
+            dest.chmod(0o755)
+            print(f"  {dest.name} (CI)")
+            rows.append({
+                "component": DARWIN_UPDATER_COMPONENT,
+                "os": "darwin",
+                "arch": arch,
+                "path": dest.name,
+                "sha256": row["sha256"],
+            })
+    return rows
 
 
 def updater_protocol() -> int:
@@ -3006,6 +3128,15 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--out", default="dist")
     build.add_argument("--os")
     build.add_argument("--arch")
+    build.add_argument(
+        "--darwin-cgo",
+        action="store_true",
+        help=(
+            "build the darwin updater here with cgo (macOS only; what the "
+            "darwin-updater workflow runs). Without it the darwin updater is "
+            "downloaded from that workflow's run for HEAD"
+        ),
+    )
 
     install = sub.add_parser("install", help="first-time systemd install")
     install_sub = install.add_subparsers(dest="component", required=True)

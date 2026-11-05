@@ -9,6 +9,7 @@ import (
 
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/buildver"
+	"github.com/shichao402/relkit/internal/mainthread"
 	"github.com/shichao402/relkit/internal/updater"
 	relkitproto "github.com/shichao402/relkit/proto"
 )
@@ -69,7 +70,10 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, "--data-dir is required with --worker")
 			return 2
 		}
-		if err := eng.RunWorker(*dataDir, *worker); err != nil {
+		// The apply worker may open the progress window, and AppKit only
+		// draws from the process main thread; mainthread.Run keeps this
+		// goroutine serving it while the session runs elsewhere.
+		if err := mainthread.Run(func() error { return eng.RunWorker(*dataDir, *worker) }); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
