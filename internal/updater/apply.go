@@ -16,6 +16,7 @@ import (
 
 	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
+	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -635,26 +636,70 @@ func copyFile(src, dst string) error {
 	return cerr
 }
 
+// refreshSidecar puts the new relkit-updater where the host said its sidecar
+// lives (InstallRoot/SidecarRelpath). The relpath is the whole answer: on
+// macOS it is Contents/Resources/runtime/relkit-updater inside the .app, and a
+// copy dropped at the bundle root would sit outside Contents and break the
+// bundle's code signature. When the payload already carried the sidecar the
+// destination is byte-identical to the source and there is nothing to do.
 func refreshSidecar(sess *enginestate.ApplySessionRecord, payload string) {
-	if sess.SidecarRelpath == "" {
+	rel, ok := sidecarRelpath(sess.SidecarRelpath)
+	if !ok {
 		return
 	}
-	src := filepath.Join(payload, filepath.FromSlash(sess.SidecarRelpath))
+	src := filepath.Join(payload, rel)
 	if _, err := os.Stat(src); err != nil {
-		src = filepath.Join(sess.StagedRoot, filepath.FromSlash(sess.SidecarRelpath))
+		src = filepath.Join(sess.StagedRoot, rel)
 	}
 	if _, err := os.Stat(src); err != nil {
 		return
 	}
-	dest := filepath.Join(sess.InstallRoot, "relkit-updater")
-	if runtime.GOOS == "windows" {
-		dest += ".exe"
+	dest := filepath.Join(sess.InstallRoot, rel)
+	if sameFileContent(src, dest) {
+		return
 	}
 	aside := dest + ".old"
 	_ = os.Rename(dest, aside)
 	_ = copyFile(src, dest)
 	_ = os.Chmod(dest, 0o755)
 	_ = os.Remove(aside)
+}
+
+// sidecarRelpath turns the host's slash-separated relpath into a native one
+// and refuses anything that would land outside InstallRoot.
+func sidecarRelpath(raw string) (string, bool) {
+	if raw == "" {
+		return "", false
+	}
+	rel := filepath.Clean(filepath.FromSlash(raw))
+	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" || rel == "." ||
+		rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+func sameFileContent(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	if os.SameFile(ai, bi) {
+		return true
+	}
+	if ai.Size() != bi.Size() {
+		return false
+	}
+	ad, _, err := model.Sha256File(a)
+	if err != nil {
+		return false
+	}
+	bd, _, err := model.Sha256File(b)
+	return err == nil && ad == bd
 }
 
 func writeJournal(path string, j *enginestate.ApplyJournal) error {

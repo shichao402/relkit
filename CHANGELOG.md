@@ -71,6 +71,15 @@ what will break.
 
 ### Fixed
 
+- After an apply the engine refreshed its sidecar at
+  `<installRoot>/relkit-updater[.exe]` regardless of `sidecarRelpath`. On macOS
+  that left a stray binary at the `.app` root, outside `Contents`, which breaks
+  the bundle's code signature, while the real sidecar under
+  `Contents/Resources/runtime/` was never refreshed by this step. The refresh
+  now writes `<installRoot>/<sidecarRelpath>`, skips the copy when the payload
+  already put identical bytes there, and ignores relpaths that leave the
+  install root.
+
 - The publish-time "code is not greater" error pointed at `CLI.md 4.2`, which
   is now the `doctor` section. It now carries the stable code
   `release.code_not_monotonic` and points at `relkit release-code claim`.
@@ -136,6 +145,15 @@ where the operator's own skills come from.
 
 ### Fixed
 
+- After an apply the engine refreshed its sidecar at
+  `<installRoot>/relkit-updater[.exe]` regardless of `sidecarRelpath`. On macOS
+  that left a stray binary at the `.app` root, outside `Contents`, which breaks
+  the bundle's code signature, while the real sidecar under
+  `Contents/Resources/runtime/` was never refreshed by this step. The refresh
+  now writes `<installRoot>/<sidecarRelpath>`, skips the copy when the payload
+  already put identical bytes there, and ignores relpaths that leave the
+  install root.
+
 - The publish-time "code is not greater" error pointed at `CLI.md 4.2`, which
   is now the `doctor` section. It now carries the stable code
   `release.code_not_monotonic` and points at `relkit release-code claim`.
@@ -186,6 +204,15 @@ where the operator's own skills come from.
   stale.
 
 ### Fixed
+
+- After an apply the engine refreshed its sidecar at
+  `<installRoot>/relkit-updater[.exe]` regardless of `sidecarRelpath`. On macOS
+  that left a stray binary at the `.app` root, outside `Contents`, which breaks
+  the bundle's code signature, while the real sidecar under
+  `Contents/Resources/runtime/` was never refreshed by this step. The refresh
+  now writes `<installRoot>/<sidecarRelpath>`, skips the copy when the payload
+  already put identical bytes there, and ignores relpaths that leave the
+  install root.
 
 - The publish-time "code is not greater" error pointed at `CLI.md 4.2`, which
   is now the `doctor` section. It now carries the stable code
