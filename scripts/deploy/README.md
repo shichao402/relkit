@@ -40,7 +40,7 @@ python scripts/deploy/verify-published-tools.py \
 
 | 子命令 | 用途 |
 |---|---|
-| `build` | 交叉编译二进制并可生成 immutable Dart/Rust SDK ZIP（`--dart-sdk` / `--rust-sdk`）。stamp 读根目录 `VERSION.json` |
+| `build` | 交叉编译注册表里的二进制并写 `dist/manifest.json`（含 `updaterProtocol`）。stamp 读根目录 `VERSION.json` |
 | `version` | 打印 SSOT（`--field number\|version\|build\|tag`）；发版 CI 用 `--check-tag` |
 | `install serve` | 空机首装 systemd `relkit-store` |
 | `install agent` | 空机首装 systemd `relkit-agent`。`--product-root` 必填：它同时是服务账号家目录、unit 的 `WorkingDirectory`、以及写进 agent 配置的 `productRootParent`（没默认值，空机无从推断，猜错要等发布时才爆） |
@@ -119,7 +119,3 @@ sudo python3 scripts/deploy/relkit.py install agent \
 ```bash
 python -m unittest scripts/deploy/test_relkit.py
 ```
-
-Release 构建使用 `--rust-sdk` 生成 `relkit-sdk-rust.zip`。ZIP 的时间戳、权限和
-路径排序固定，并携带 canonical `proto/updater/v1/updater.proto`，因此消费仓在
-`third_party/relkit/sdk/rust` 可直接用 vendored protoc 重建 DTO。

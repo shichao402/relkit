@@ -43,8 +43,7 @@ const (
 
 // Tool is one downloadable component of one relkit version.
 type Tool struct {
-	// Component names the relkit component this file is (cli, updater, ops,
-	// sdk-dart, ...). The Catalog is aggregated from these names, so a host
+	// Component names the relkit component this file is (cli, updater, ops). The Catalog is aggregated from these names, so a host
 	// never has to parse a file name to learn what it downloaded.
 	Component string `json:"component"`
 	Name     string `json:"name"`

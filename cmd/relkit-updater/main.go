@@ -4,14 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/buildver"
-	"github.com/shichao402/relkit/internal/ipc"
 	"github.com/shichao402/relkit/internal/updater"
+	relkitproto "github.com/shichao402/relkit/proto"
 )
 
 // Overridden at release via -ldflags "-X main.version=...".
@@ -25,13 +24,27 @@ func main() {
 }
 
 func run(args []string) int {
+	// `relkit-updater proto` prints the relkit.updater.v2 schema this engine
+	// speaks. Hosts feed it to buf generate; there is no other contract file.
+	if len(args) == 1 && args[0] == "proto" {
+		if _, err := os.Stdout.WriteString(relkitproto.UpdaterV2); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+
 	fs := flag.NewFlagSet("relkit-updater", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	caps := fs.Bool("capabilities", false, "print Capabilities event and exit")
+	caps := fs.Bool("capabilities", false, "print the Capabilities event as one ProtoJSON line and exit")
 	worker := fs.String("worker", "", "apply session id")
 	dataDir := fs.String("data-dir", "", "engine data directory (required with --worker)")
 	showVersion := fs.Bool("version", false, "print engine version")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "unknown argument %q (subcommands: proto)\n", fs.Arg(0))
 		return 2
 	}
 	eng := &updater.Engine{Version: version, Stdout: os.Stdout}
@@ -40,10 +53,10 @@ func run(args []string) int {
 		return 0
 	}
 	if *caps {
-		// capabilities-only: emit caps without requiring a profile or a Hello.
-		// The handshake field stays empty on purpose — nothing was validated.
-		if err := ipc.WriteFrame(os.Stdout, &updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Capabilities{Capabilities: eng.PublicCapabilities()},
+		// capabilities-only: no profile was opened, so the handshake field
+		// stays empty on purpose.
+		if err := updater.WriteEvent(os.Stdout, &updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Capabilities{Capabilities: eng.PublicCapabilities()},
 		}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -65,13 +78,15 @@ func run(args []string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	req := &updaterv1.UpdaterRequest{}
-	if err := ipc.ReadFrame(os.Stdin, req); err != nil {
-		if err == io.EOF {
-			fmt.Fprintln(os.Stderr, "empty stdin")
-			return 2
-		}
+	req, err := updater.ReadRequest(os.Stdin)
+	if err != nil {
+		// A request that does not decode still gets a structured answer on
+		// stdout; stderr keeps the diagnostic.
 		fmt.Fprintln(os.Stderr, err)
+		if werr := eng.RejectRequest(err); werr != nil {
+			fmt.Fprintln(os.Stderr, werr)
+			return 1
+		}
 		return 2
 	}
 	if err := eng.HandleRequest(ctx, req); err != nil {
@@ -80,4 +95,3 @@ func run(args []string) int {
 	}
 	return 0
 }
-

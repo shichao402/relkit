@@ -6,9 +6,9 @@ table that owns both distribution identity and release asset naming. This
 module is the only bridge the deploy CLI needs: it reads that same JSON file so
 there is one registry, not two.
 
-The source-grep facade gate (`packed_host_surface_errors`) is deliberately not
-ported. ADR 0019 §1 deletes "grep the sources to prove a facade exists" gates;
-the packaging paths below are checked structurally instead.
+Every registered component is a Go binary: ADR 0026 retired the facade and
+projection product trees (sdk-dart, sdk-rust, bindings-ts) together with their
+zip packing.
 """
 
 from __future__ import annotations
@@ -53,12 +53,10 @@ REGISTRY_PATH = _registry_path()
 SCHEMA = "relkit.component-registry/1"
 
 # Role names the deploy CLI has always used, mapped onto the vNext registry's
-# roles. `product-tree` covers facades and projections because both are zipped.
+# roles.
 ROLE_ALIASES = {
     "infrastructure-binary": "host-binary",
     "product-binary": "product-binary",
-    "facade": "product-tree",
-    "projection": "product-tree",
 }
 
 
@@ -67,30 +65,15 @@ class Component:
     name: str
     role: str
     build_flag: str
-    archive: str = ""
-    source: str = ""
     destination: str = ""
     binary_prefix: str = ""
     go_package: str = ""
-    pack: str = ""
-    pack_files: tuple[str, ...] = ()
-    pack_extras: tuple[tuple[str, str], ...] = ()
-    pack_exclude_parts: tuple[str, ...] = ()
-    pack_exclude_suffixes: tuple[str, ...] = ()
-    pack_exclude_paths: tuple[str, ...] = ()
-    updater_process: Optional[str] = None
-    facade_paths: tuple[str, ...] = ()
     install_names: tuple[tuple[str, str], ...] = ()
     default: bool = False
     transport: str = "release-asset"
     targets: tuple[str, ...] = ()
     requires: tuple[dict[str, Any], ...] = ()
     provides: tuple[dict[str, Any], ...] = ()
-
-    def pack_kind(self) -> str:
-        if self.role != "product-tree":
-            return ""
-        return self.pack or "tracked-tree"
 
     def install_name(self, target: str) -> str:
         overrides = dict(self.install_names)
@@ -113,27 +96,16 @@ def _strings(value: Any) -> tuple[str, ...]:
 
 def _component(raw: dict[str, Any]) -> Component:
     build = raw.get("build") or {}
-    pack = build.get("pack") or {}
     role = str(raw.get("role") or "")
+    if role not in ROLE_ALIASES:
+        raise SystemExit(f"{REGISTRY_PATH}: component {raw.get('name')!r} has unknown role {role!r}")
     return Component(
         name=str(raw.get("name") or ""),
         role=ROLE_ALIASES.get(role, role),
         build_flag=str(build.get("flag") or ""),
-        archive=str(build.get("archive") or ""),
-        source=str(build.get("source") or ""),
         destination=str(raw.get("destination") or ""),
         binary_prefix=str(build.get("binaryPrefix") or ""),
         go_package=str(build.get("goPackage") or ""),
-        pack=str(pack.get("kind") or ""),
-        pack_files=_strings(pack.get("files")),
-        pack_extras=tuple(
-            (str(pair[0]), str(pair[1])) for pair in (pack.get("extras") or [])
-        ),
-        pack_exclude_parts=_strings(pack.get("excludeParts")),
-        pack_exclude_suffixes=_strings(pack.get("excludeSuffixes")),
-        pack_exclude_paths=_strings(pack.get("excludePaths")),
-        updater_process=build.get("updaterProcess") or None,
-        facade_paths=_strings(build.get("facadePaths")),
         install_names=tuple(
             (str(pair[0]), str(pair[1])) for pair in (build.get("installNames") or [])
         ),
@@ -174,4 +146,4 @@ def components(role: Optional[str] = None) -> tuple[Component, ...]:
 
 
 def product_components() -> tuple[Component, ...]:
-    return components("product-binary") + components("product-tree")
+    return components("product-binary")

@@ -8,6 +8,8 @@ what will break.
 
 ### Added
 
+- `relkit-updater proto` prints the embedded `relkit.updater.v2` contract, so a
+  host generates its types from the very binary it runs (ADR 0026).
 - Release codes are allocated by the server (ADR 0025). `POST /v1/release-code`
   hands out the next code for a product, above both its counter and every code
   already published on any channel, so products that published before need no
@@ -30,6 +32,22 @@ what will break.
 
 ### Breaking
 
+- `relkit-updater` speaks updater protocol 5 (ADR 0026). The request is one
+  ProtoJSON `relkit.updater.v2.UpdaterRequest` on stdin; events are ProtoJSON
+  `UpdaterEvent` lines on stdout, the first always `Capabilities`. Unknown
+  fields are rejected, `ClientProfile.bootstrap` and `expectedProduct` are
+  required, and a host on any other protocol gets `UPDATER_TOO_OLD` /
+  `UPDATER_TOO_NEW`. The length-prefixed binary frames, `ClientHello`, `CancelOp`
+  and the profile fields duplicated by the bootstrap are gone. Hosts on the
+  protocol 4 facades must migrate together with the engine; it is not published
+  until they do.
+- relkit no longer ships `sdk/dart`, `sdk/rust` or `bindings/ts`, and the
+  `sdk-dart` / `sdk-rust` / `bindings-ts` components, the facade generator and
+  product-tree zip packing are removed. Hosts generate their own types from
+  `relkit-updater proto`. `relkit build` loses `--dart-sdk`, `--rust-sdk` and
+  `--bindings-ts`.
+- The release manifest's `minUpdaterIpc` / `maxUpdaterIpc` become one
+  `updaterProtocol`.
 - `relkit.project.json` may omit `channels`; any value other than
   `["dev","stable"]` is now rejected, and so is a staged document on another channel.
 

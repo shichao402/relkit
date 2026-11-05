@@ -28,7 +28,7 @@ SPEC 附录 B 用一张三行表列出了 `wholeRoot` / `versionedDir` / `fileSe
 这篇把三种布局的落盘行为写全，作为 SPEC 附录 B 的展开。
 
 权威实现是 Go 引擎 `internal/updater/pipeline.go`（`relkit-updater` 二进制，ADR 0010 / 0014）。
-Dart 第二实现已删除；宿主只通过 facade 调 sidecar。
+Dart 第二实现已删除；宿主直接以 ProtoJSON 调 `relkit-updater` 进程（ADR 0026）。
 
 ## 2. 三种布局对照
 

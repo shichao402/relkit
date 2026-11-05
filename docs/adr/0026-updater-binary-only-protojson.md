@@ -1,6 +1,6 @@
 # ADR 0026: 只交付 relkit-updater 二进制，契约用 ProtoJSON 收敛
 
-- 状态：Proposed（草案，待用户裁决）
+- 状态：Accepted（2026-11-05 用户裁决；relkit 侧第 1 步已落地，进度窗口与宿主迁移按“迁移”一节推进）
 - 日期：2026-11-04
 - 关联：修订 [ADR 0023](0023-desktop-updater-epoch.md) 决策 2（各语言薄 IPC 客户端）；延续 [ADR 0010](0010-single-updater-engine.md) 单引擎原则与 [ADR 0003](0003-protobuf-v2-wire-format.md) 的 protobuf 契约
 
@@ -30,6 +30,8 @@ relkit 对宿主只交付 `relkit-updater`（随工具分发，验签规则不�
 
 `internal/sdk/doc.go`、`internal/inprocess/updater.go` 中指向 `sdk/updaterfacade` 的注释一并改正。
 
+随之失去用途、一并删除的还有：组件注册表的 `facade` / `projection` 角色及 `archive`、`source`、`pack`、`updaterProcess`、`facadePaths` 字段，`relkit build` 与 `scripts/deploy` 两侧的 product-tree zip 打包，`conformance/build/pack-shape.json`，工具发布中的 `sdk-dart` / `sdk-rust`，以及 CI 的 Rust 与 `bindings/ts` 步骤。注册表里只剩 Go 二进制。release manifest 的 `minUpdaterIpc` / `maxUpdaterIpc` 合并为单值 `updaterProtocol`。
+
 ### 2. 契约唯一来源：proto，引擎自带
 
 `proto/updater/v1` 升为 `proto/updater/v2`（package `relkit.updater.v2`）。宿主可见的 proto 编译进引擎，`relkit-updater proto` 原样打印。宿主 CI 用当次下载并验签过的二进制导出 proto，再 `buf generate` 生成本语言类型。
@@ -52,13 +54,14 @@ exit  : 0 = 已输出终态事件；非 0 = 引擎自身故障，终态事件可
 ### 4. 严格性：宁可拒绝，不可宽容
 
 - 两侧反序列化一律拒绝未知字段（各运行时默认行为；宿主不得开 ignore unknown）。字段对不上是断代信号，必须当场失败，不能“多出来的忽略”。
-- `UpdaterRequest.protocol` 必填，取值 5。引擎不等于 5 时只输出一行 `Failed{UPDATER_TOO_OLD | UPDATER_TOO_NEW}` 后退出。无协商、无兼容窗口，延续 ADR 0023。
-- 每次运行的第一行事件固定是 `Capabilities`，带 `protocol` 与 `engine_version`，宿主先校验再读后续事件。
+- `UpdaterRequest.protocol` 必填，取值 5。宿主协议高于引擎回 `UPDATER_TOO_OLD`，低于引擎回 `UPDATER_TOO_NEW`，缺省（0）回 `PROTOCOL_MISMATCH`。无协商、无兼容窗口，延续 ADR 0023。
+- 每次运行的第一行事件固定是 `Capabilities`，带 `protocol` 与 `engine_version`，宿主先校验再读后续事件。协议不匹配时也是如此：先一行不带 handshake 报告的 `Capabilities`，再一行 `Failed`，宿主不必为拒绝路径写特例。
+- stdin 不是合法的 v2 `UpdaterRequest`（未知字段、旧版二进制帧、空输入、超过 32 MiB）时，同样输出 `Capabilities` + `Failed{PROTOCOL_MISMATCH}`，进程以 2 退出。
 - 枚举以名字编码（ProtoJSON 默认），日志与 conformance 样例人可读，不会出现魔法数字。
 
 ### 5. 收窄宿主可见面
 
-v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/updater/internal/v1`（package `relkit.updater.internal.v1`），不随 `relkit-updater proto` 导出：`UpdatePlan`、`PlannedFile`、`ArtifactTarget`、`PersistedState`、`ApplySessionRecord`、`JournalEntry`、`ApplyJournal`，以及整个 `payload.proto`。
+v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/updater/enginestate/v1`（package `relkit.updater.enginestate.v1`，Go 包 `api/updater/enginestate/v1`），不随 `relkit-updater proto` 导出：`UpdatePlan`、`PlannedFile`、`PersistedState`、`ApplySessionRecord`、`JournalEntry`、`ApplyJournal`，以及整个 `payload.proto`。目录不叫 `internal`，是因为 Go 的 internal 导入规则不允许 `internal/updater` 引用 `api/updater/internal`。`ArtifactTarget` 无人使用，直接删除。
 
 宿主可见面同时删掉：
 
@@ -70,7 +73,7 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 
 ### 6. 交接阶段的进度窗口归引擎
 
-`ApplyOp` 新增 `show_progress`（默认 true）。worker 进程在宿主退出后自己显示一个小窗口，覆盖宿主看不到的全部阶段：
+`ApplyOp` 新增进度窗口开关，默认显示。proto3 的 bool 默认值是 false，所以落地时字段以 `hide_progress` 或 `optional bool show_progress` 的形式加入（随窗口实现一并定，不提前占号）。worker 进程在宿主退出后自己显示一个小窗口，覆盖宿主看不到的全部阶段：
 
 | 阶段 | 窗口内容 |
 | --- | --- |
@@ -98,8 +101,8 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 
 `conformance/updater/*.json` 已是 ProtoJSON 样例，改为两条门禁：
 
-1. 引擎对每个样例场景的实际 stdout 逐行与样例一致（逐字节比较规范化后的 JSON）。
-2. 每个样例都能用 v2 生成类型在严格模式下反序列化，再序列化回来不变。
+1. 引擎对样例场景的实际输出与样例一致：`protocol-request-check.json` 是一个完整请求，`protocol-events.jsonl` 是一组覆盖各事件类型的输出行。比较按 `proto.Equal` 做语义比较，因为 Go `protojson` 会故意插入随机空白，逐字节比较不稳定。
+2. 每个样例（含 `check-result-*.json`）都能用 v2 生成类型在严格模式下反序列化，再序列化回来语义不变。另有一条门禁锁住 `relkit-updater proto` 打印的就是 `proto/updater/v2/updater.proto`。
 
 宿主仓库可以直接复用这批样例测试自己的解析，不再有 facade 签名门禁。
 
@@ -107,8 +110,8 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 
 断代一次，不留兼容分支（ADR 0023 原则 2）：
 
-1. relkit：proto v2 与 internal 拆分、引擎改 ProtoJSON 传输与 `protocol` 校验、`relkit-updater proto` 子命令、conformance 改写、删除第 1 节所列目录。发布新引擎。
-2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前 `show_progress` 在 macOS 上是无操作。
+1. relkit：proto v2 与 enginestate 拆分、引擎改 ProtoJSON 传输与 `protocol` 校验、`relkit-updater proto` 子命令、conformance 改写、删除第 1 节所列目录。（2026-11-05 已在仓内完成；新引擎暂不发布到服务器，因为它会拒绝现役宿主，须与步骤 3、4 同批上线。）
+2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。
 3. SvnMergeTool（Dart）：删 `rup_client` 依赖与 `.relkit/components/sdk/dart` 物化；CI 加“导出 proto → buf generate”；`update_service.dart` 改成启动进程 + 按行解码；启动时 `status` 检查替代现有让路逻辑的判定来源（界面可保留）。
 4. Loom-Launcher（Rust）：删 `relkit-updater` crate 路径依赖与 `.relkit/components/sdk/rust`；`build.rs` 用导出的 proto 跑 `prost-build` + `pbjson-build`；`updater.rs` 改调用方式。
 5. Loom：无变化（不持有 updater 客户端）。

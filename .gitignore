@@ -47,5 +47,4 @@ internal/browse/preview/out/
 .dec/.version
 /.secrets/
 
-bindings/ts/node_modules/
 .with/

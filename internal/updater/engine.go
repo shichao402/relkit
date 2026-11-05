@@ -1,15 +1,13 @@
-﻿package updater
+package updater
 
 import (
 	"context"
-	"crypto/ed25519"
 	"io"
 	"os"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
-	"github.com/shichao402/relkit/internal/ipc"
-	"github.com/shichao402/relkit/internal/vnext/runtimebootstrap"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/sdk"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -31,39 +29,91 @@ func (e *Engine) writer() io.Writer {
 	return os.Stdout
 }
 
-func (e *Engine) emit(ev *updaterv1.UpdaterEvent) error {
-	return ipc.WriteFrame(e.writer(), ev)
+func (e *Engine) emit(ev *updaterv2.UpdaterEvent) error {
+	return WriteEvent(e.writer(), ev)
+}
+
+// WriteEvent writes one UpdaterEvent as a single ProtoJSON line (ADR 0026).
+// protojson never emits raw newlines in single-line mode, so "\n" is a safe
+// record separator.
+func WriteEvent(w io.Writer, ev *updaterv2.UpdaterEvent) error {
+	raw, err := protojson.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	_, err = w.Write(raw)
+	return err
+}
+
+// MaxRequestBytes bounds the stdin request. A bootstrap is a few KiB; anything
+// near this limit is a host bug, not a real request.
+const MaxRequestBytes = 32 << 20
+
+// ReadRequest reads stdin to EOF and decodes it strictly: unknown fields are
+// rejected so a host built against a different schema fails loudly instead of
+// silently dropping data (ADR 0026, decision 4).
+func ReadRequest(r io.Reader) (*updaterv2.UpdaterRequest, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, MaxRequestBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > MaxRequestBytes {
+		return nil, errRequestTooLarge
+	}
+	req := &updaterv2.UpdaterRequest{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(raw, req); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+type requestError string
+
+func (e requestError) Error() string { return string(e) }
+
+const errRequestTooLarge = requestError("request exceeds 32 MiB")
+
+// RejectRequest is what the engine says when stdin did not decode: the public
+// capabilities line followed by PROTOCOL_MISMATCH.
+func (e *Engine) RejectRequest(cause error) error {
+	if err := e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Capabilities{Capabilities: e.capabilities(nil)},
+	}); err != nil {
+		return err
+	}
+	return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROTOCOL_MISMATCH, false,
+		"request is not a valid relkit.updater.v2.UpdaterRequest: "+cause.Error(), nil))
 }
 
 // PublicCapabilities is the handshake payload for a host that has not opened a
 // profile yet (the --capabilities probe).
-func (e *Engine) PublicCapabilities() *updaterv1.Capabilities {
+func (e *Engine) PublicCapabilities() *updaterv2.Capabilities {
 	return e.capabilities(nil)
 }
 
-func (e *Engine) capabilities(report *updaterv1.HandshakeReport) *updaterv1.Capabilities {
+func (e *Engine) capabilities(report *updaterv2.HandshakeReport) *updaterv2.Capabilities {
 	ver := e.Version
 	if ver == "" {
 		ver = "dev"
 	}
-	return &updaterv1.Capabilities{
-		Ipc: IPCCurrent,
-		Operations: []updaterv1.Operation{
-			updaterv1.Operation_OPERATION_CHECK,
-			updaterv1.Operation_OPERATION_SKIP,
-			updaterv1.Operation_OPERATION_DOWNLOAD,
-			updaterv1.Operation_OPERATION_APPLY,
-			updaterv1.Operation_OPERATION_STATUS,
-			updaterv1.Operation_OPERATION_CLEANUP,
-			updaterv1.Operation_OPERATION_CANCEL,
-			updaterv1.Operation_OPERATION_LIST_INSTALLED,
-			updaterv1.Operation_OPERATION_SWITCH_ACTIVE,
-			updaterv1.Operation_OPERATION_ROLLBACK,
-			updaterv1.Operation_OPERATION_DELETE_INSTALLED,
+	return &updaterv2.Capabilities{
+		Protocol: Protocol,
+		Operations: []updaterv2.Operation{
+			updaterv2.Operation_OPERATION_CHECK,
+			updaterv2.Operation_OPERATION_SKIP,
+			updaterv2.Operation_OPERATION_DOWNLOAD,
+			updaterv2.Operation_OPERATION_APPLY,
+			updaterv2.Operation_OPERATION_STATUS,
+			updaterv2.Operation_OPERATION_CLEANUP,
+			updaterv2.Operation_OPERATION_LIST_INSTALLED,
+			updaterv2.Operation_OPERATION_SWITCH_ACTIVE,
+			updaterv2.Operation_OPERATION_ROLLBACK,
+			updaterv2.Operation_OPERATION_DELETE_INSTALLED,
 		},
-		Placements: []updaterv1.Placement{
-			updaterv1.Placement_PLACEMENT_IN_PLACE,
-			updaterv1.Placement_PLACEMENT_LIBRARY,
+		Placements: []updaterv2.Placement{
+			updaterv2.Placement_PLACEMENT_IN_PLACE,
+			updaterv2.Placement_PLACEMENT_LIBRARY,
 		},
 		MinCheckInterval: minCheckDurationPB(),
 		PlanTtl:          planTTLDurationPB(),
@@ -72,109 +122,86 @@ func (e *Engine) capabilities(report *updaterv1.HandshakeReport) *updaterv1.Capa
 	}
 }
 
-func negotiate(hello *updaterv1.ClientHello) *updaterv1.Error {
-	if hello == nil || hello.IpcMin == 0 && hello.IpcMax == 0 {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROTOCOL_MISMATCH, false, "missing ClientHello", nil)
-	}
-	if hello.IpcMax < IPCMin {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW, false,
-			"host IPC window is older than the engine baseline (window 4); this epoch does not migrate hosts", nil)
-	}
-	if hello.IpcMin > IPCMax {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_OLD, false,
-			"host IPC window is newer than this engine; update the updater sidecar", nil)
+// checkProtocol compares the host's declared protocol with the engine's.
+// There is exactly one protocol per engine build; there is no window.
+func checkProtocol(host uint32) *updaterv2.Error {
+	switch {
+	case host == 0:
+		return newError(updaterv2.ErrorCode_ERROR_CODE_PROTOCOL_MISMATCH, false, "request.protocol required", nil)
+	case host > Protocol:
+		return newError(updaterv2.ErrorCode_ERROR_CODE_UPDATER_TOO_OLD, false,
+			"host speaks a newer updater protocol than this engine; update the relkit-updater sidecar", nil)
+	case host < Protocol:
+		return newError(updaterv2.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW, false,
+			"host speaks an older updater protocol than this engine; regenerate host types from `relkit-updater proto`", nil)
 	}
 	return nil
 }
 
-// resolveBootstrap validates the Runtime Bootstrap a host forwarded verbatim
-// and returns the profile the engine will actually use plus the handshake
-// report the host reads product/channels from (requirement 3.8).
+// openedProfile is what the engine actually works with once the Runtime
+// Bootstrap has been verified. It never travels on the wire: hosts only send
+// the bootstrap verbatim and read the HandshakeReport back.
+type openedProfile struct {
+	Product         string
+	AllowedChannels []string
+	EntryURLs       []string
+	TrustedKeys     sdk.TrustedKeys
+	Recovery        *updaterv2.RecoveryHelp
+}
+
+// openProfile validates the Runtime Bootstrap the host forwarded verbatim and
+// returns the opened profile plus the handshake report (requirement 3.8).
 //
 // The engine is the single parser: schema, key encoding, fingerprint, product
-// consistency, channel membership and the profile signature all get checked
-// here. Hosts that still build a ClientProfile without a bootstrap keep
-// working, but then nothing is reported back.
-func resolveBootstrap(profile *updaterv1.ClientProfile, channel string) (*updaterv1.ClientProfile, *updaterv1.HandshakeReport, *updaterv1.Error) {
+// consistency, channel membership and the profile signature are all checked
+// here. bootstrap and expected_product are both required.
+func openProfile(profile *updaterv2.ClientProfile, channel string) (*openedProfile, *updaterv2.HandshakeReport, *updaterv2.Error) {
 	raw := profile.GetBootstrap()
 	if raw == "" {
-		if profile.GetExpectedProduct() != "" && profile.GetExpectedProduct() != profile.GetProduct() {
-			return nil, nil, newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false,
-				"expectedProduct does not match profile.product", nil)
-		}
-		if profile.GetProduct() == "" {
-			return nil, nil, newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "product required", nil)
-		}
-		if err := channelAllowed(profile.GetAllowedChannels(), channel); err != nil {
-			return nil, nil, err
-		}
-		return profile, nil, nil
-	}
-
-	var doc runtimebootstrap.Document
-	parsed, perr := decodeBootstrap([]byte(raw))
-	if perr != nil {
-		return nil, nil, newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, perr.Error(), nil)
-	}
-	doc = *parsed
-	if err := doc.Validate(); err != nil {
-		return nil, nil, newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false,
-			"runtime bootstrap: "+err.Error(), nil)
+		return nil, nil, newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "profile.bootstrap required", nil)
 	}
 	expected := profile.GetExpectedProduct()
 	if expected == "" {
-		expected = profile.GetProduct()
+		return nil, nil, newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "profile.expectedProduct required", nil)
 	}
-	if expected != "" && expected != doc.Product {
-		return nil, nil, newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false,
+	parsed, perr := decodeBootstrap([]byte(raw))
+	if perr != nil {
+		return nil, nil, newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, perr.Error(), nil)
+	}
+	doc := *parsed
+	if err := doc.Validate(); err != nil {
+		return nil, nil, newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false,
+			"runtime bootstrap: "+err.Error(), nil)
+	}
+	if expected != doc.Product {
+		return nil, nil, newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false,
 			"bootstrap belongs to product "+doc.Product+", host expected "+expected, nil)
 	}
 	if err := channelAllowed(doc.Profile.AllowedChannels, channel); err != nil {
 		return nil, nil, err
 	}
-	disagreement := func(field, fromHost, fromBootstrap string) *updaterv1.Error {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false,
-			field+" disagrees with the runtime bootstrap ("+fromHost+" vs "+fromBootstrap+")", nil)
-	}
-	if p := profile.GetProduct(); p != "" && p != doc.Product {
-		return nil, nil, disagreement("profile.product", p, doc.Product)
-	}
-	if hosts := profile.GetAllowedChannels(); len(hosts) > 0 && !sameStrings(hosts, doc.Profile.AllowedChannels) {
-		return nil, nil, disagreement("profile.allowedChannels", join(hosts), join(doc.Profile.AllowedChannels))
-	}
-	if hosts := profile.GetEntryUrls(); len(hosts) > 0 && !sameStrings(hosts, doc.Profile.DirectoryBootstrap.EntryURLs) {
-		return nil, nil, disagreement("profile.entryUrls", join(hosts), join(doc.Profile.DirectoryBootstrap.EntryURLs))
-	}
-
 	pub, err := doc.PublicKey()
 	if err != nil {
-		return nil, nil, newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, err.Error(), nil)
+		return nil, nil, newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, err.Error(), nil)
 	}
-	keys := append([]*updaterv1.TrustedKey(nil), profile.GetTrustedKeys()...)
-	if !hasKey(keys, doc.RootKeyID, pub) {
-		keys = append(keys, &updaterv1.TrustedKey{KeyId: doc.RootKeyID, PublicKey: pub})
-	}
-
-	resolved := &updaterv1.ClientProfile{
+	opened := &openedProfile{
 		Product:         doc.Product,
 		AllowedChannels: append([]string(nil), doc.Profile.AllowedChannels...),
-		EntryUrls:       append([]string(nil), doc.Profile.DirectoryBootstrap.EntryURLs...),
-		IndexUrls:       append([]string(nil), profile.GetIndexUrls()...),
-		FallbackUrls:    append([]string(nil), profile.GetFallbackUrls()...),
-		TrustedKeys:     keys,
+		EntryURLs:       append([]string(nil), doc.Profile.DirectoryBootstrap.EntryURLs...),
+		TrustedKeys:     sdk.TrustedKeys{doc.RootKeyID: pub},
 		Recovery:        profile.GetRecovery(),
 	}
-	report := &updaterv1.HandshakeReport{
+	report := &updaterv2.HandshakeReport{
 		Product:         doc.Product,
 		AllowedChannels: append([]string(nil), doc.Profile.AllowedChannels...),
 		DefaultChannel:  doc.Profile.AllowedChannels[0],
 		RootKeyId:       doc.RootKeyID,
 		RootFingerprint: doc.RootFingerprint,
 	}
-	return resolved, report, nil
+	return opened, report, nil
 }
 
-func channelAllowed(allowed []string, channel string) *updaterv1.Error {
+func channelAllowed(allowed []string, channel string) *updaterv2.Error {
 	if len(allowed) == 0 || channel == "" {
 		return nil
 	}
@@ -183,186 +210,124 @@ func channelAllowed(allowed []string, channel string) *updaterv1.Error {
 			return nil
 		}
 	}
-	return newError(updaterv1.ErrorCode_ERROR_CODE_CHANNEL_NOT_ALLOWED, false,
+	return newError(updaterv2.ErrorCode_ERROR_CODE_CHANNEL_NOT_ALLOWED, false,
 		"channel "+channel+" is not in allowedChannels", nil)
 }
 
-func hasKey(keys []*updaterv1.TrustedKey, keyID string, pub ed25519.PublicKey) bool {
-	for _, k := range keys {
-		if k != nil && k.GetKeyId() == keyID && ed25519.PublicKey(k.GetPublicKey()).Equal(pub) {
-			return true
-		}
+func validateRuntime(profile *openedProfile, runtime *updaterv2.Runtime) *updaterv2.Error {
+	if runtime == nil {
+		return newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "runtime required", nil)
 	}
-	return false
-}
-
-func sameStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func join(values []string) string {
-	out := ""
-	for i, v := range values {
-		if i > 0 {
-			out += ","
-		}
-		out += v
-	}
-	return out
-}
-
-func validateOpen(profile *updaterv1.ClientProfile, runtime *updaterv1.Runtime) *updaterv1.Error {
-	if profile == nil || runtime == nil {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "profile and runtime required", nil)
-	}
-	if profile.Product == "" {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "product required", nil)
-	}
-	if len(profile.TrustedKeys) == 0 {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "trustedKeys required", nil)
-	}
-	if len(profile.EntryUrls) == 0 && len(profile.IndexUrls) == 0 {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "entryUrls or indexUrls required", nil)
+	if len(profile.EntryURLs) == 0 {
+		return newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "bootstrap carries no entryUrls", nil)
 	}
 	if runtime.CurrentCode < 0 {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "currentCode must not be negative", nil)
+		return newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "currentCode must not be negative", nil)
 	}
 	if runtime.Channel == "" {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "channel required", nil)
-	}
-	if err := channelAllowed(profile.AllowedChannels, runtime.Channel); err != nil {
-		return err
+		return newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "channel required", nil)
 	}
 	if runtime.DataDir == "" {
-		return newError(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "dataDir required", nil)
+		return newError(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "dataDir required", nil)
 	}
 	if inst := runtime.Install; inst != nil {
-		if inst.Placement == updaterv1.Placement_PLACEMENT_UNSPECIFIED {
-			return newError(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, false, "placement required", nil)
+		if inst.Placement == updaterv2.Placement_PLACEMENT_UNSPECIFIED {
+			return newError(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, false, "placement required", nil)
 		}
 	}
 	return nil
 }
 
-func trustedKeys(profile *updaterv1.ClientProfile) sdk.TrustedKeys {
-	out := sdk.TrustedKeys{}
-	for _, k := range profile.TrustedKeys {
-		if k == nil || len(k.PublicKey) != ed25519.PublicKeySize {
-			continue
-		}
-		out[k.KeyId] = ed25519.PublicKey(k.PublicKey)
-	}
-	return out
-}
-
 // HandleRequest processes one UpdaterRequest and writes events to stdout.
-func (e *Engine) HandleRequest(ctx context.Context, req *updaterv1.UpdaterRequest) error {
-	// Negotiation happens before anything else so an incompatible host gets one
-	// clear error instead of a partially useful capabilities frame.
-	if nego := negotiate(req.GetHello()); nego != nil {
-		if err := e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Capabilities{Capabilities: e.capabilities(nil)},
+func (e *Engine) HandleRequest(ctx context.Context, req *updaterv2.UpdaterRequest) error {
+	// The protocol check comes first so an incompatible host gets one clear
+	// error instead of a partially useful capabilities line.
+	if perr := checkProtocol(req.GetProtocol()); perr != nil {
+		if err := e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Capabilities{Capabilities: e.capabilities(nil)},
 		}); err != nil {
 			return err
 		}
-		return e.emit(failedEvent(nego.Code, nego.Retryable, nego.Message, nil))
+		return e.emit(failedEvent(perr.Code, perr.Retryable, perr.Message, nil))
 	}
 
-	profile, report, berr := resolveBootstrap(req.GetProfile(), req.GetRuntime().GetChannel())
+	profile, report, berr := openProfile(req.GetProfile(), req.GetRuntime().GetChannel())
 	if berr != nil {
-		if err := e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Capabilities{Capabilities: e.capabilities(nil)},
+		if err := e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Capabilities{Capabilities: e.capabilities(nil)},
 		}); err != nil {
 			return err
 		}
 		return e.emit(failedEvent(berr.Code, berr.Retryable, berr.Message, nil))
 	}
-	if err := e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Capabilities{Capabilities: e.capabilities(report)},
+	if err := e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Capabilities{Capabilities: e.capabilities(report)},
 	}); err != nil {
 		return err
 	}
-	if verr := validateOpen(profile, req.GetRuntime()); verr != nil {
-		if !opToleratesIncompleteProfile(req) {
-			return e.emit(failedEvent(verr.Code, verr.Retryable, verr.Message, nil))
-		}
-		if req.GetRuntime() == nil || req.GetRuntime().DataDir == "" {
+	if verr := validateRuntime(profile, req.GetRuntime()); verr != nil {
+		if !opToleratesIncompleteRuntime(req) || req.GetRuntime().GetDataDir() == "" {
 			return e.emit(failedEvent(verr.Code, verr.Retryable, verr.Message, nil))
 		}
 	}
 
 	st := store{
 		dataDir: req.GetRuntime().GetDataDir(),
-		product: profile.GetProduct(),
+		product: profile.Product,
 		channel: req.GetRuntime().GetChannel(),
 	}
-	// Downstream handlers read the profile straight off the request, so the
-	// resolved one (bootstrap-derived) replaces whatever the host sent.
-	req.Profile = profile
 	switch op := req.GetOp().(type) {
-	case *updaterv1.UpdaterRequest_Check:
-		return e.handleCheck(ctx, req, op.Check, st)
-	case *updaterv1.UpdaterRequest_Skip:
+	case *updaterv2.UpdaterRequest_Check:
+		return e.handleCheck(ctx, req, profile, op.Check, st)
+	case *updaterv2.UpdaterRequest_Skip:
 		return e.handleSkip(ctx, req, op.Skip, st)
-	case *updaterv1.UpdaterRequest_Download:
+	case *updaterv2.UpdaterRequest_Download:
 		return e.handleDownload(ctx, req, op.Download, st)
-	case *updaterv1.UpdaterRequest_Apply:
+	case *updaterv2.UpdaterRequest_Apply:
 		return e.handleApply(ctx, req, op.Apply, st)
-	case *updaterv1.UpdaterRequest_Status:
+	case *updaterv2.UpdaterRequest_Status:
 		return e.handleStatus(req, st)
-	case *updaterv1.UpdaterRequest_Cleanup:
+	case *updaterv2.UpdaterRequest_Cleanup:
 		return e.handleCleanup(req, st)
-	case *updaterv1.UpdaterRequest_Cancel:
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}},
-		})
-	case *updaterv1.UpdaterRequest_ListInstalled:
+	case *updaterv2.UpdaterRequest_ListInstalled:
 		return e.handleListInstalled(req)
-	case *updaterv1.UpdaterRequest_SwitchActive:
+	case *updaterv2.UpdaterRequest_SwitchActive:
 		return e.handleSwitchActive(req, op.SwitchActive)
-	case *updaterv1.UpdaterRequest_Rollback:
+	case *updaterv2.UpdaterRequest_Rollback:
 		return e.handleRollback(req)
-	case *updaterv1.UpdaterRequest_DeleteInstalled:
+	case *updaterv2.UpdaterRequest_DeleteInstalled:
 		return e.handleDeleteInstalled(req, op.DeleteInstalled)
 	default:
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "missing operation", nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "missing operation", nil))
 	}
 }
 
-// opToleratesIncompleteProfile reports whether an op can run with only a
+// opToleratesIncompleteRuntime reports whether an op can run with only a
 // dataDir, which is what a host needs after a crash or when it just wants the
 // installed inventory.
-func opToleratesIncompleteProfile(req *updaterv1.UpdaterRequest) bool {
+func opToleratesIncompleteRuntime(req *updaterv2.UpdaterRequest) bool {
 	switch req.GetOp().(type) {
-	case *updaterv1.UpdaterRequest_Status,
-		*updaterv1.UpdaterRequest_Cleanup,
-		*updaterv1.UpdaterRequest_ListInstalled:
+	case *updaterv2.UpdaterRequest_Status,
+		*updaterv2.UpdaterRequest_Cleanup,
+		*updaterv2.UpdaterRequest_ListInstalled:
 		return true
 	}
 	return false
 }
 
-func (e *Engine) handleStatus(req *updaterv1.UpdaterRequest, st store) error {
+func (e *Engine) handleStatus(req *updaterv2.UpdaterRequest, st store) error {
 	state, err := st.loadState()
 	if err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
 	}
-	snap := &updaterv1.StatusSnapshot{
+	snap := &updaterv2.StatusSnapshot{
 		LastResult:       state.LastResult,
 		LastSeenSequence: state.LastSeenSequence,
 		SkippedCodes:     state.SkippedCodes,
 		LastCheckAt:      state.LastCheckAt,
-		Sidecar: &updaterv1.SidecarInfo{
-			Ipc:     IPCCurrent,
-			Version: e.Version,
+		Sidecar: &updaterv2.SidecarInfo{
+			Protocol: Protocol,
+			Version:  e.Version,
 		},
 	}
 	ok, next := shouldCheck(lastCheckTime(state), state.LastResult, nil, false, timestamppb.Now().AsTime())
@@ -370,7 +335,7 @@ func (e *Engine) handleStatus(req *updaterv1.UpdaterRequest, st store) error {
 		snap.NextAllowedAt = timestamppb.New(next)
 	}
 	if sess, _ := st.latestSession(); sess != nil {
-		snap.ActiveSession = &updaterv1.SessionView{
+		snap.ActiveSession = &updaterv2.SessionView{
 			SessionId: sess.SessionId,
 			PlanId:    sess.PlanId,
 			Phase:     sess.Phase,
@@ -379,29 +344,29 @@ func (e *Engine) handleStatus(req *updaterv1.UpdaterRequest, st store) error {
 		}
 	}
 	_ = req
-	return e.emit(&updaterv1.UpdaterEvent{Kind: &updaterv1.UpdaterEvent_Status{Status: snap}})
+	return e.emit(&updaterv2.UpdaterEvent{Kind: &updaterv2.UpdaterEvent_Status{Status: snap}})
 }
 
-func (e *Engine) handleCleanup(req *updaterv1.UpdaterRequest, st store) error {
+func (e *Engine) handleCleanup(req *updaterv2.UpdaterRequest, st store) error {
 	sess, err := st.latestSession()
 	if err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
 	}
 	if sess != nil {
 		switch sess.Phase {
-		case updaterv1.SessionPhase_SESSION_PHASE_COMPLETED, updaterv1.SessionPhase_SESSION_PHASE_ROLLED_BACK:
+		case updaterv2.SessionPhase_SESSION_PHASE_COMPLETED, updaterv2.SessionPhase_SESSION_PHASE_ROLLED_BACK:
 			if sess.StagedRoot != "" {
 				_ = os.RemoveAll(sess.StagedRoot)
 			}
 		}
 	}
 	_ = req
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}},
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Result{Result: &updaterv2.Result{Kind: &updaterv2.Result_Ok{Ok: &updaterv2.Ok{}}}},
 	})
 }
 
-func recoveryFrom(profile *updaterv1.ClientProfile) *updaterv1.RecoveryHelp {
+func recoveryFrom(profile *openedProfile) *updaterv2.RecoveryHelp {
 	if profile == nil {
 		return nil
 	}

@@ -3,11 +3,11 @@ package updater
 import (
 	"time"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-func clampPolicy(p *updaterv1.CheckPolicy) (afterSuccess, afterFailure time.Duration) {
+func clampPolicy(p *updaterv2.CheckPolicy) (afterSuccess, afterFailure time.Duration) {
 	afterSuccess, afterFailure = DefaultSuccess, DefaultFailure
 	if p != nil {
 		if p.AfterSuccess != nil {
@@ -26,7 +26,7 @@ func clampPolicy(p *updaterv1.CheckPolicy) (afterSuccess, afterFailure time.Dura
 	return afterSuccess, afterFailure
 }
 
-func shouldCheck(lastCheck *time.Time, last updaterv1.LastResult, policy *updaterv1.CheckPolicy, force bool, now time.Time) (ok bool, next time.Time) {
+func shouldCheck(lastCheck *time.Time, last updaterv2.LastResult, policy *updaterv2.CheckPolicy, force bool, now time.Time) (ok bool, next time.Time) {
 	afterSuccess, afterFailure := clampPolicy(policy)
 	wait := afterSuccess
 	if isFailureResult(last) {
@@ -52,6 +52,6 @@ func planTTLDurationPB() *durationpb.Duration {
 
 // isFailureResult lives here (it used to sit next to the legacy state reader)
 // because the throttle policy is its only consumer.
-func isFailureResult(r updaterv1.LastResult) bool {
-	return r == updaterv1.LastResult_LAST_RESULT_FAILED
+func isFailureResult(r updaterv2.LastResult) bool {
+	return r == updaterv2.LastResult_LAST_RESULT_FAILED
 }

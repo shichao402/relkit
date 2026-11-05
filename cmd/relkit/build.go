@@ -17,7 +17,7 @@ import (
 )
 
 // cmdBuild implements `relkit build`: cross-compile host/product binaries and
-// pack product-tree zips, writing the relkit.release/1 manifest. The component
+// write the relkit.release/1 manifest. The component
 // table and asset naming rules come from the single vNext registry; the
 // retired internal/registry table and scripts/host/release-contract.json are
 // gone (ADR 0019 §1).
@@ -82,25 +82,17 @@ func cmdBuild(args []string) error {
 
 	binaryRows := registryDocument.InRoles(registry.RoleInfrastructureBinary, registry.RoleProductBinary)
 	var targets []string
-	var treeRows []registry.Component
-	treeCandidates := registryDocument.InRoles(registry.RoleFacade, registry.RoleProjection)
 	if all {
 		for _, row := range binaryRows {
 			targets = append(targets, row.Name)
 		}
-		treeRows = treeCandidates
 	} else {
 		for _, row := range binaryRows {
 			if selected[row.Build.Flag] {
 				targets = append(targets, row.Name)
 			}
 		}
-		for _, row := range treeCandidates {
-			if selected[row.Build.Flag] {
-				treeRows = append(treeRows, row)
-			}
-		}
-		if len(targets) == 0 && len(treeRows) == 0 {
+		if len(targets) == 0 {
 			targets = []string{"store", "agent"}
 		}
 	}
@@ -151,17 +143,14 @@ func cmdBuild(args []string) error {
 	fmt.Printf("build %s\n", stamp)
 
 	// The retired scripts/host/release-contract.json is gone (ADR 0019 §1).
-	// The protocol and updater IPC windows now come from their Go sources of
-	// truth, which is where the contract file used to be pinned from anyway.
-	ipcMin, ipcMax, err := build.UpdateIPCWindow(root)
+	// The publish protocol window and the updater protocol come from their Go
+	// sources of truth, which is where the contract file used to be pinned from.
+	updaterProtocol, err := build.UpdaterProtocol(root)
 	if err != nil {
 		return err
 	}
 	if publishproto.Min <= 0 || publishproto.Max < publishproto.Min {
 		return fmt.Errorf("internal/publishproto declares an invalid protocol window [%d,%d]", publishproto.Min, publishproto.Max)
-	}
-	if ipcMin <= 0 || ipcMax < ipcMin {
-		return fmt.Errorf("internal/updater declares an invalid IPC window [%d,%d]", ipcMin, ipcMax)
 	}
 
 	type builtArtifact struct {
@@ -198,37 +187,20 @@ func cmdBuild(args []string) error {
 		}
 	}
 
-	for _, row := range treeRows {
-		entries, err := ctx.ComponentEntries(registryDocument, row.Name)
-		if err != nil {
-			return err
-		}
-		archive := filepath.Join(outPath, row.Build.Archive)
-		if err := build.WriteDeterministicZip(archive, entries); err != nil {
-			return err
-		}
-		digest, err := build.FileSHA256(archive)
-		if err != nil {
-			return err
-		}
-		built = append(built, builtArtifact{Component: row.Name, OS: "any", Arch: "any", Path: row.Build.Archive, SHA256: digest})
-	}
-
 	ident, err := ctx.Identity()
 	if err != nil {
 		return err
 	}
 	manifest := map[string]any{
-		"schema":        "relkit.release/1",
-		"version":       stamp,
-		"commit":        ident.Commit,
-		"dirty":         ident.Dirty,
-		"minProtocol":   publishproto.Min,
-		"maxProtocol":   publishproto.Max,
-		"minUpdaterIpc": ipcMin,
-		"maxUpdaterIpc": ipcMax,
-		"builtAt":       time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		"artifacts":     built,
+		"schema":          "relkit.release/1",
+		"version":         stamp,
+		"commit":          ident.Commit,
+		"dirty":           ident.Dirty,
+		"minProtocol":     publishproto.Min,
+		"maxProtocol":     publishproto.Max,
+		"updaterProtocol": updaterProtocol,
+		"builtAt":         time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		"artifacts":       built,
 	}
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

@@ -26,22 +26,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: |
-            bindings/ts/package-lock.json
-            cmd/relkit-console/web/package-lock.json
+          cache-dependency-path: cmd/relkit-console/web/package-lock.json
       - name: Test
         shell: bash
         run: |
           go test ./...
-          cargo test --manifest-path sdk/rust/Cargo.toml
           python -m unittest scripts/deploy/test_relkit.py
-          npm --prefix bindings/ts ci
-          npm --prefix bindings/ts test
           npm --prefix cmd/relkit-console/web ci
           npm --prefix cmd/relkit-console/web test
   universal:

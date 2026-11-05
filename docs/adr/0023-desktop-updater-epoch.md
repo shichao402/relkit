@@ -1,6 +1,7 @@
 # ADR 0023: 桌面更新断代——单引擎、单根信任、服务器单一事实源
 
 - 状态：Accepted（2026-10-22 用户裁决；代码与宿主迁移按任务清单推进）
+- 修订：决策 2（各语言薄 IPC 客户端）与 IPC 帧传输被 [ADR 0026](0026-updater-binary-only-protojson.md) 取代：只交付 `relkit-updater` 二进制，契约为 ProtoJSON lines，protocol 5
 - 日期：2026-10-22
 - 取代：[ADR 0019](0019-vnext-breaking-and-protocol-contracts.md)、[ADR 0020](0020-vnext-catalog-operator-resolution.md)、[ADR 0021](0021-vnext-artifact-runtime-registry.md)、[ADR 0022](0022-vnext-certification-ops-skill.md) 与本次决策冲突的部分（逐条驳斥见 [驳斥文档](0019-0022-refutation.md)）
 - 关联：[ADR 0010](0010-single-updater-engine.md)（单引擎决策的前身，本 ADR 将其推到底）、[ADR 0013](0013-internal-update-payload.md)（payload 形态继续有效）、[ADR 0016](0016-serve-split-store-console.md)（console 只读定位由本 ADR 更新）、[`docs/architecture.md`](../architecture.md)（现行架构，与本 ADR 一致）

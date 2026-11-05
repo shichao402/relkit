@@ -4,9 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/relkit/internal/vnext/document"
 )
 
 func TestEmbeddedRegistryIsValidAndHostless(t *testing.T) {
@@ -17,27 +18,25 @@ func TestEmbeddedRegistryIsValidAndHostless(t *testing.T) {
 	if _, ok := value.ByName("host-scripts"); ok {
 		t.Fatal("retired host-scripts is present")
 	}
-	if component, ok := value.ByName("bindings-ts"); !ok || component.Role != RoleProjection {
-		t.Fatalf("bindings-ts must be a projection, got %+v", component)
+	for _, component := range value.Components {
+		if component.Role != RoleInfrastructureBinary && component.Role != RoleProductBinary {
+			t.Fatalf("%s has non-binary role %q; product trees were retired by ADR 0026", component.Name, component.Role)
+		}
+	}
+	for _, retired := range []string{"sdk-dart", "sdk-rust", "bindings-ts"} {
+		if _, ok := value.ByName(retired); ok {
+			t.Fatalf("retired component %s is present", retired)
+		}
 	}
 }
 
-func TestRequiredSeparatesFacadeAndProjection(t *testing.T) {
-	value, err := Default()
-	if err != nil {
-		t.Fatal(err)
-	}
-	required, err := value.Required("windows-amd64", []string{"rust"}, []string{"ts"}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"cli", "updater", "sdk-rust", "bindings-ts"} {
-		if !slices.Contains(required, name) {
-			t.Fatalf("required components %v do not contain %s", required, name)
+func TestRegistryRejectsRetiredProductTreeFields(t *testing.T) {
+	raw := []byte(`{"schema":"relkit.component-registry/1","buildTargets":["linux-amd64"],"components":[{"name":"x","role":"facade","transport":"release-asset","targets":["all"],"destination":"d","build":{"flag":"x","archive":"x.zip"}}]}`)
+	var value Document
+	if err := document.Decode(raw, &value); err == nil {
+		if err := value.Validate(); err == nil {
+			t.Fatal("registry accepted a retired facade component")
 		}
-	}
-	if slices.Contains(required, "sdk-node") {
-		t.Fatal("TypeScript projection was misclassified as a Node facade")
 	}
 }
 

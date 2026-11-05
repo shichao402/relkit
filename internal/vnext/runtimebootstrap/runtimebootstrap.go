@@ -18,7 +18,8 @@ import (
 
 const Schema = "relkit.runtime-bootstrap/2"
 
-// Document is the build input consumed by updater facades.
+// Document is the bootstrap a host embeds at build time and hands to
+// relkit-updater as ClientProfile.bootstrap (ADR 0026).
 //
 // RootKeyID and RootPublicKey name the single server root. There is no key set
 // and no product root: one application talks to one server (requirement 10.7).

@@ -4,7 +4,7 @@
 
 改动本文任何一条规矩，先写一份 ADR 说明为什么破，再改本文。两者不得矛盾。
 
-依据：[ADR 0023](adr/0023-desktop-updater-epoch.md)（桌面更新断代）。
+依据：[ADR 0023](adr/0023-desktop-updater-epoch.md)（桌面更新断代）、[ADR 0026](adr/0026-updater-binary-only-protojson.md)（只交付引擎二进制，ProtoJSON 契约）。
 
 ## 一、定位
 
@@ -12,19 +12,20 @@ relkit 只做 Windows 与 macOS 桌面应用的更新。
 
 范围内的平台：`windows`、`macos`。范围外且明确不支持的：Linux、Android、iOS、移动端沙箱环境、浏览器内自更新。selector 与 target 维度里不得为范围外平台保留取值。
 
-`relkit-updater` 是唯一引擎：`cmd/relkit-updater` + `internal/updater`。更新状态机只实现一次，宿主与 relkit 之间唯一的客户端契约是 `api/updater/v1` protobuf 帧 IPC（4 字节大端长度前缀 + protobuf 载荷）。当前 IPC 基线是 4。
+`relkit-updater` 是唯一引擎：`cmd/relkit-updater` + `internal/updater`。更新状态机只实现一次。relkit 对宿主只交付这一个二进制，不交付任何语言的 SDK、facade 或绑定。
 
-各语言只有薄 IPC 客户端，职责限于：找到引擎可执行文件、启动子进程、编解码帧、把事件交给 UI。
+宿主与引擎之间唯一的契约是 `proto/updater/v2/updater.proto`（package `relkit.updater.v2`），协议号 5：
 
-| 宿主 | 语言 | 薄客户端 |
-| --- | --- | --- |
-| SvnMergeTool | Dart | `sdk/dart/lib/src/updater_facade.dart` |
-| Loom-Launcher | Rust | `sdk/rust/src/lib.rs` |
-| Loom | TypeScript | `bindings/ts`（仅生成类型） |
+- stdin：一个 ProtoJSON 编码的 `UpdaterRequest`，读到 EOF。
+- stdout：每行一个 ProtoJSON 编码的 `UpdaterEvent`，首行固定是 `Capabilities`。
+- stderr：只放人读诊断，不属于契约。
+- 两侧都拒绝未知字段；协议号不等即报 `UPDATER_TOO_OLD` / `UPDATER_TOO_NEW`，无兼容窗口。
 
-薄客户端不做这些事：解析 bootstrap、解析 index/manifest、验签、算摘要、决定版本、管理安装目录。这些全部在引擎里。发现任何一处客户端开始解析协议文档，就是架构被破坏，应删除而不是补齐。
+proto 编译进引擎，`relkit-updater proto` 原样打印。宿主 CI 用当次下载并验签的二进制导出 proto，再用本语言的标准 protobuf 工具生成类型。宿主自己写的只有“启动进程、写一个 JSON、按行读”。
 
-Go 侧 facade 在 `internal/updaterfacade`，属仓内实现，不对外发布。
+宿主不做这些事：解析 bootstrap、解析 index/manifest、验签、算摘要、决定版本、管理安装目录。这些全部在引擎里。发现任何一处宿主开始解析协议文档，就是架构被破坏，应删除而不是补齐。
+
+引擎落盘结构在 `proto/updater/enginestate/v1`，不属于宿主契约，不随 `relkit-updater proto` 导出。
 
 ## 二、信任
 

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
-	"github.com/shichao402/relkit/internal/ipc"
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/payload"
 	"google.golang.org/protobuf/proto"
@@ -25,13 +25,13 @@ func TestStateIsIsolatedByProductAndChannel(t *testing.T) {
 	stable := store{dataDir: dir, product: "svn-auto-merge", channel: "stable"}
 	other := store{dataDir: dir, product: "other/product", channel: "dev"}
 
-	if err := dev.saveState(&updaterv1.PersistedState{LastSeenSequence: 93}); err != nil {
+	if err := dev.saveState(&enginestate.PersistedState{LastSeenSequence: 93}); err != nil {
 		t.Fatal(err)
 	}
-	if err := stable.saveState(&updaterv1.PersistedState{LastSeenSequence: 21}); err != nil {
+	if err := stable.saveState(&enginestate.PersistedState{LastSeenSequence: 21}); err != nil {
 		t.Fatal(err)
 	}
-	if err := other.saveState(&updaterv1.PersistedState{LastSeenSequence: 7}); err != nil {
+	if err := other.saveState(&enginestate.PersistedState{LastSeenSequence: 7}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -63,7 +63,7 @@ func TestStateIsIsolatedByProductAndChannel(t *testing.T) {
 // state.pb written by an old client must never leak into a scoped store.
 func TestScopedStateIgnoresUnattributedStateFile(t *testing.T) {
 	dir := t.TempDir()
-	legacy := &updaterv1.PersistedState{
+	legacy := &enginestate.PersistedState{
 		LastSeenSequence:          93,
 		LastSeenDirectorySequence: 12,
 		SkippedCodes:              []int64{150},
@@ -91,7 +91,7 @@ func TestScopedStateIgnoresUnattributedStateFile(t *testing.T) {
 }
 
 func TestClampHalfHourDoesNotBecomeZero(t *testing.T) {
-	p := &updaterv1.CheckPolicy{AfterSuccess: durationpb.New(30 * time.Minute)}
+	p := &updaterv2.CheckPolicy{AfterSuccess: durationpb.New(30 * time.Minute)}
 	success, failure := clampPolicy(p)
 	if success != 30*time.Minute {
 		t.Fatalf("success=%v", success)
@@ -99,7 +99,7 @@ func TestClampHalfHourDoesNotBecomeZero(t *testing.T) {
 	if failure < MinCheckInterval {
 		t.Fatalf("failure clamped below min: %v", failure)
 	}
-	zero := &updaterv1.CheckPolicy{AfterSuccess: durationpb.New(0)}
+	zero := &updaterv2.CheckPolicy{AfterSuccess: durationpb.New(0)}
 	s, _ := clampPolicy(zero)
 	if s != MinCheckInterval {
 		t.Fatalf("zero must clamp to min, got %v", s)
@@ -118,58 +118,78 @@ func TestValidateArtifactFilename(t *testing.T) {
 	}
 }
 
-func TestFrameRoundTrip(t *testing.T) {
+func TestEventLineRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	ev := &updaterv1.UpdaterEvent{Kind: &updaterv1.UpdaterEvent_Log{Log: &updaterv1.Log{Message: "hi"}}}
-	if err := ipc.WriteFrame(&buf, ev); err != nil {
+	ev := &updaterv2.UpdaterEvent{Kind: &updaterv2.UpdaterEvent_Log{Log: &updaterv2.Log{Message: "hi\nthere"}}}
+	if err := WriteEvent(&buf, ev); err != nil {
 		t.Fatal(err)
 	}
-	got := &updaterv1.UpdaterEvent{}
-	if err := ipc.ReadFrame(&buf, got); err != nil {
-		t.Fatal(err)
+	line := buf.String()
+	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
+		t.Fatalf("event must be exactly one line, got %q", line)
 	}
-	if got.GetLog().GetMessage() != "hi" {
-		t.Fatalf("%v", got)
+	events := decodeEvents(t, &buf)
+	if len(events) != 1 || !proto.Equal(events[0], ev) {
+		t.Fatalf("round trip = %v", events)
 	}
 }
 
-func TestNegotiateWindow(t *testing.T) {
-	for _, window := range []uint32{1, 2, 3} {
-		if got := negotiate(&updaterv1.ClientHello{IpcMin: window, IpcMax: window}); got == nil ||
-			got.Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_NEW {
-			t.Fatalf("window %d host must be rejected with UPDATER_TOO_NEW, got %v", window, got)
+func TestReadRequestIsStrict(t *testing.T) {
+	good := `{"protocol":5,"profile":{"bootstrap":"{}","expectedProduct":"p"},"runtime":{"channel":"dev","dataDir":"x"},"status":{}}`
+	req, err := ReadRequest(strings.NewReader(good))
+	if err != nil {
+		t.Fatalf("valid request rejected: %v", err)
+	}
+	if req.GetProtocol() != 5 || req.GetStatus() == nil || req.GetProfile().GetExpectedProduct() != "p" {
+		t.Fatalf("decoded = %v", req)
+	}
+	// proto field names are accepted too; that is standard ProtoJSON.
+	if _, err := ReadRequest(strings.NewReader(`{"protocol":5,"profile":{"expected_product":"p"}}`)); err != nil {
+		t.Fatalf("proto names must decode: %v", err)
+	}
+	for name, raw := range map[string]string{
+		"unknown top-level":  `{"protocol":5,"hello":{"ipcMin":4}}`,
+		"removed field":      `{"protocol":5,"profile":{"product":"p"}}`,
+		"removed op":         `{"protocol":5,"cancel":{}}`,
+		"wrong type":         `{"protocol":"five"}`,
+		"length-prefixed v1": "\x00\x00\x00\x02{}",
+		"empty":              ``,
+	} {
+		if _, err := ReadRequest(strings.NewReader(raw)); err == nil {
+			t.Fatalf("%s: must be rejected", name)
 		}
 	}
-	if negotiate(&updaterv1.ClientHello{IpcMin: 4, IpcMax: 4}) != nil {
-		t.Fatal("window 4 host must be accepted")
+}
+
+func TestRejectRequestAnswersOnStdout(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &Engine{Version: "test", Stdout: &buf}
+	_, cause := ReadRequest(strings.NewReader(`{"hello":{}}`))
+	if err := eng.RejectRequest(cause); err != nil {
+		t.Fatal(err)
 	}
-	if got := negotiate(&updaterv1.ClientHello{IpcMin: 5, IpcMax: 5}); got == nil ||
-		got.Code != updaterv1.ErrorCode_ERROR_CODE_UPDATER_TOO_OLD {
-		t.Fatalf("window 5 host must be rejected with UPDATER_TOO_OLD, got %v", got)
+	events := decodeEvents(t, &buf)
+	if len(events) != 2 || events[0].GetCapabilities() == nil {
+		t.Fatalf("want capabilities + failure, got %v", events)
 	}
-	if got := negotiate(&updaterv1.ClientHello{IpcMin: 1, IpcMax: 0}); got == nil {
-		t.Fatal("expected error")
+	if got := events[1].GetFailed().GetError().GetCode(); got != updaterv2.ErrorCode_ERROR_CODE_PROTOCOL_MISMATCH {
+		t.Fatalf("code = %v", got)
 	}
 }
 
-func TestProfileValidation(t *testing.T) {
-	err := validateOpen(&updaterv1.ClientProfile{Product: "p"}, &updaterv1.Runtime{Channel: "stable", CurrentCode: 1, DataDir: "x"})
-	if err == nil || err.Code != updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID {
-		t.Fatalf("keys+urls required: %v", err)
+func TestRuntimeValidation(t *testing.T) {
+	opened := &openedProfile{Product: "p", EntryURLs: []string{"https://e.invalid/"}}
+	if err := validateRuntime(&openedProfile{Product: "p"}, &updaterv2.Runtime{Channel: "dev", CurrentCode: 1, DataDir: "x"}); err == nil ||
+		err.Code != updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID {
+		t.Fatalf("entry urls required: %v", err)
 	}
-	err = validateOpen(&updaterv1.ClientProfile{
-		Product: "p", IndexUrls: []string{"https://e.invalid/i"},
-		TrustedKeys:     []*updaterv1.TrustedKey{{KeyId: "k", PublicKey: bytes.Repeat([]byte{1}, 32)}},
-		AllowedChannels: []string{"stable"},
-	}, &updaterv1.Runtime{Channel: "dev", CurrentCode: 1, DataDir: "x"})
-	if err == nil || err.Code != updaterv1.ErrorCode_ERROR_CODE_CHANNEL_NOT_ALLOWED {
-		t.Fatalf("got %v", err)
+	if err := validateRuntime(opened, &updaterv2.Runtime{CurrentCode: 1, DataDir: "x"}); err == nil {
+		t.Fatal("channel required")
 	}
-	err = validateOpen(&updaterv1.ClientProfile{
-		Product: "p", IndexUrls: []string{"https://e.invalid/i"},
-		TrustedKeys: []*updaterv1.TrustedKey{{KeyId: "k", PublicKey: bytes.Repeat([]byte{1}, 32)}},
-	}, &updaterv1.Runtime{Channel: "dev", CurrentCode: 0, DataDir: "x"})
-	if err != nil {
+	if err := validateRuntime(opened, &updaterv2.Runtime{Channel: "dev", CurrentCode: 1}); err == nil {
+		t.Fatal("dataDir required")
+	}
+	if err := validateRuntime(opened, &updaterv2.Runtime{Channel: "dev", CurrentCode: 0, DataDir: "x"}); err != nil {
 		t.Fatalf("code 0 is a valid pre-release baseline: %v", err)
 	}
 }
@@ -201,12 +221,12 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := &updaterv1.UpdatePlan{
+	plan := &enginestate.UpdatePlan{
 		PlanId:    "plan-test",
 		Version:   "1.0.0",
 		Code:      1,
 		ExpiresAt: timestamppb.New(time.Now().Add(time.Hour)),
-		Files: []*updaterv1.PlannedFile{{
+		Files: []*enginestate.PlannedFile{{
 			Name:       "app-payload.zip",
 			Kind:       "payload",
 			Size:       info.Size(),
@@ -232,11 +252,11 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 			return nil
 		},
 	}
-	req := &updaterv1.UpdaterRequest{
-		Runtime: &updaterv1.Runtime{
+	req := &updaterv2.UpdaterRequest{
+		Runtime: &updaterv2.Runtime{
 			DataDir: dataDir,
-			Install: &updaterv1.InstallSpec{
-				Placement:   updaterv1.Placement_PLACEMENT_LIBRARY,
+			Install: &updaterv2.InstallSpec{
+				Placement:   updaterv2.Placement_PLACEMENT_LIBRARY,
 				InstallRoot: installRoot,
 			},
 		},
@@ -244,7 +264,7 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 	if err := eng.handleApply(
 		context.Background(),
 		req,
-		&updaterv1.ApplyOp{PlanId: plan.PlanId},
+		&updaterv2.ApplyOp{PlanId: plan.PlanId},
 		st,
 	); err != nil {
 		t.Fatal(err)
@@ -252,16 +272,17 @@ func TestHandleApplyStartsWorkerBeforeAccepting(t *testing.T) {
 	if !launched {
 		t.Fatal("apply accepted without starting worker")
 	}
-	ev := &updaterv1.UpdaterEvent{}
-	if err := ipc.ReadFrame(&stdout, ev); err != nil {
-		t.Fatal(err)
+	events := decodeEvents(t, &stdout)
+	if len(events) != 1 {
+		t.Fatalf("want one event, got %v", events)
 	}
+	ev := events[0]
 	if ev.GetApply().GetAccepted() == nil {
 		t.Fatalf("expected accepted result, got %v", ev)
 	}
 }
 
-func mustPayloadPlan(t *testing.T, stage, version string, code int64, files map[string][]byte) *updaterv1.UpdatePlan {
+func mustPayloadPlan(t *testing.T, stage, version string, code int64, files map[string][]byte) *enginestate.UpdatePlan {
 	t.Helper()
 	tree := filepath.Join(stage, "tree-"+version)
 	for rel, body := range files {
@@ -285,10 +306,10 @@ func mustPayloadPlan(t *testing.T, stage, version string, code int64, files map[
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &updaterv1.UpdatePlan{
+	return &enginestate.UpdatePlan{
 		Version: version,
 		Code:    code,
-		Files: []*updaterv1.PlannedFile{{
+		Files: []*enginestate.PlannedFile{{
 			Name:      filepath.Base(zipPath),
 			Kind:      "payload",
 			Size:      info.Size(),
@@ -306,24 +327,24 @@ func TestBaselineDeletionProtectsModifiedFiles(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "stale.txt"), []byte("user-edited"), 0o644)
 	_ = os.WriteFile(filepath.Join(root, "remove.txt"), []byte("old"), 0o644)
 	oldDigest := model.Sha256Bytes([]byte("old"))
-	if err := saveBaseline(filepath.Join(dataDir, baselineFileName), &updaterv1.Baseline{
+	if err := saveBaseline(filepath.Join(dataDir, baselineFileName), &enginestate.Baseline{
 		Schema: baselineSchema,
-		Files: []*updaterv1.BaselineEntry{
+		Files: []*enginestate.BaselineEntry{
 			{Relpath: "stale.txt", Sha256: oldDigest},
 			{Relpath: "remove.txt", Sha256: oldDigest},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sess := &updaterv1.ApplySessionRecord{
+	sess := &enginestate.ApplySessionRecord{
 		InstallRoot: root,
 		StagedRoot:  stage,
 	}
 	content := &applyContent{
-		table:     &updaterv1.FileTable{Schema: payload.Schema},
+		table:     &enginestate.FileTable{Schema: payload.Schema},
 		filesRoot: filesRoot,
 	}
-	if err := applyContentTable(dataDir, sess, &updaterv1.UpdatePlan{Code: 2}, content, root, true); err != nil {
+	if err := applyContentTable(dataDir, sess, &enginestate.UpdatePlan{Code: 2}, content, root, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "remove.txt")); !os.IsNotExist(err) {
@@ -340,12 +361,12 @@ func TestVersionedDirAtomicActive(t *testing.T) {
 	plan := mustPayloadPlan(t, stage, "1.0.0", 2, map[string][]byte{
 		"bin/app.exe": []byte("n"),
 	})
-	sess := &updaterv1.ApplySessionRecord{
+	sess := &enginestate.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
-		Placement:         updaterv1.Placement_PLACEMENT_LIBRARY,
+		Placement:         updaterv2.Placement_PLACEMENT_LIBRARY,
 		ExecutableRelpath: "bin/app.exe",
-		Library:           &updaterv1.LibraryPolicy{Retain: 2},
+		Library:           &updaterv2.LibraryPolicy{Retain: 2},
 	}
 	if err := applyPlan(t.TempDir(), sess, plan); err != nil {
 		t.Fatal(err)
@@ -359,34 +380,24 @@ func TestVersionedDirAtomicActive(t *testing.T) {
 	}
 }
 
-func TestHandleRequestMissingHello(t *testing.T) {
+func TestHandleRequestRequiresBootstrap(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &Engine{Version: "test", Stdout: &buf}
-	req := &updaterv1.UpdaterRequest{
-		Profile: &updaterv1.ClientProfile{
-			Product:     "p",
-			IndexUrls:   []string{"https://e.invalid/i"},
-			TrustedKeys: []*updaterv1.TrustedKey{{KeyId: "k", PublicKey: bytes.Repeat([]byte{1}, 32)}},
-		},
-		Runtime: &updaterv1.Runtime{Channel: "stable", CurrentCode: 1, DataDir: t.TempDir()},
-		Op:      &updaterv1.UpdaterRequest_Status{Status: &updaterv1.StatusOp{}},
+	req := &updaterv2.UpdaterRequest{
+		Protocol: Protocol,
+		Profile:  &updaterv2.ClientProfile{ExpectedProduct: "p"},
+		Runtime:  &updaterv2.Runtime{Channel: "stable", CurrentCode: 1, DataDir: t.TempDir()},
+		Op:       &updaterv2.UpdaterRequest_Status{Status: &updaterv2.StatusOp{}},
 	}
 	if err := eng.HandleRequest(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	ev := &updaterv1.UpdaterEvent{}
-	if err := ipc.ReadFrame(&buf, ev); err != nil {
-		t.Fatal(err)
+	events := decodeEvents(t, &buf)
+	if len(events) != 2 || events[0].GetCapabilities() == nil {
+		t.Fatalf("want capabilities + failure, got %v", events)
 	}
-	if ev.GetCapabilities() == nil {
-		t.Fatal("first event must be capabilities")
-	}
-	ev2 := &updaterv1.UpdaterEvent{}
-	if err := ipc.ReadFrame(&buf, ev2); err != nil {
-		t.Fatal(err)
-	}
-	if ev2.GetFailed() == nil {
-		t.Fatalf("expected hello failure, got %v", ev2)
+	if got := events[1].GetFailed().GetError().GetCode(); got != updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID {
+		t.Fatalf("code = %v", got)
 	}
 }
 
@@ -396,12 +407,12 @@ func TestInstallOnlyLeavesActive(t *testing.T) {
 	first := mustPayloadPlan(t, stage, "1.0.0+1", 1, map[string][]byte{
 		"bin/app.exe": []byte("a"),
 	})
-	sess := &updaterv1.ApplySessionRecord{
+	sess := &enginestate.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
-		Placement:         updaterv1.Placement_PLACEMENT_LIBRARY,
+		Placement:         updaterv2.Placement_PLACEMENT_LIBRARY,
 		ExecutableRelpath: "bin/app.exe",
-		Library:           &updaterv1.LibraryPolicy{Retain: 2},
+		Library:           &updaterv2.LibraryPolicy{Retain: 2},
 	}
 	if err := applyPlan(t.TempDir(), sess, first); err != nil {
 		t.Fatal(err)
@@ -460,12 +471,12 @@ func TestVersionedDirKeepsAppBundle(t *testing.T) {
 	plan := mustPayloadPlan(t, stage, "0.2.2+21", 21, map[string][]byte{
 		"Loom Editor.app/Contents/MacOS/loom": []byte("bin"),
 	})
-	sess := &updaterv1.ApplySessionRecord{
+	sess := &enginestate.ApplySessionRecord{
 		InstallRoot:       root,
 		StagedRoot:        stage,
-		Placement:         updaterv1.Placement_PLACEMENT_LIBRARY,
+		Placement:         updaterv2.Placement_PLACEMENT_LIBRARY,
 		ExecutableRelpath: "Loom Editor.app/Contents/MacOS/loom",
-		Library:           &updaterv1.LibraryPolicy{Retain: 2},
+		Library:           &updaterv2.LibraryPolicy{Retain: 2},
 	}
 	if err := applyPlan(t.TempDir(), sess, plan); err != nil {
 		t.Fatal(err)

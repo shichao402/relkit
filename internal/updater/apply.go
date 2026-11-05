@@ -14,76 +14,77 @@ import (
 	"strings"
 	"time"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, op *updaterv1.ApplyOp, st store) error {
+func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, op *updaterv2.ApplyOp, st store) error {
 	if op == nil || op.PlanId == "" {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, "planId required")
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, "planId required")
 	}
 	plan, err := st.loadPlan(op.PlanId)
 	if err != nil {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, "unknown planId")
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, "unknown planId")
 	}
 	key, err := st.planKey()
 	if err != nil || !verifyPlan(key, plan) {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "plan hmac mismatch")
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "plan hmac mismatch")
 	}
 	if plan.ExpiresAt != nil && time.Now().After(plan.ExpiresAt.AsTime()) {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_EXPIRED, "plan expired")
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_EXPIRED, "plan expired")
 	}
 	for _, f := range plan.Files {
 		if !f.Downloaded || f.LocalPath == "" {
-			return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_NOT_DOWNLOADED, "download the plan before apply")
+			return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_NOT_DOWNLOADED, "download the plan before apply")
 		}
 		if fi, err := os.Stat(f.LocalPath); err != nil || fi.Size() != f.Size {
-			return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "downloaded file size mismatch")
+			return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "downloaded file size mismatch")
 		}
 	}
 	if len(plan.Files) == 0 {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "plan has no files")
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "plan has no files")
 	}
 	inst := req.GetRuntime().GetInstall()
 	if inst == nil {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "install spec required")
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "install spec required")
 	}
 	disposition, installerRel, derr := classifyApply(plan)
 	if derr != nil {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, derr.Error())
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, derr.Error())
 	}
-	if disposition == updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL && fullInstallRefused(runtime.GOOS) {
+	if disposition == updaterv2.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL && fullInstallRefused(runtime.GOOS) {
 		// macOS products ship the whole .app as a payload; there is no
 		// installer handoff (requirement 3.11).
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED,
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED,
 			"full-install disposition is not supported on macOS; ship the .app as a payload")
 	}
 	if inst.InstallRoot == "" {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, "installRoot required")
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, "installRoot required")
 	}
 	if err := assertWritable(inst.InstallRoot); err != nil {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, err.Error())
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, err.Error())
 	}
 
 	sessionID := newID("sess")
 	now := timestamppb.Now()
 	if err := acquireApplyLock(inst.InstallRoot, sessionID); err != nil {
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, err.Error())
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, err.Error())
 	}
 	requiresHostExit := true
-	if disposition == updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL {
+	if disposition == updaterv2.ApplyDisposition_APPLY_DISPOSITION_INTERNAL {
 		ok, perr := planRequiresHostExit(inst, plan)
 		if perr != nil {
 			releaseApplyLock(inst.InstallRoot)
-			return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, perr.Error())
+			return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_TAMPERED, perr.Error())
 		}
 		requiresHostExit = ok
 	}
-	sess := &updaterv1.ApplySessionRecord{
+	sess := &enginestate.ApplySessionRecord{
 		SessionId:         sessionID,
 		PlanId:            plan.PlanId,
-		Phase:             updaterv1.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT,
+		Phase:             updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT,
 		StartedAt:         now,
 		HeartbeatAt:       now,
 		InstallRoot:       inst.InstallRoot,
@@ -104,23 +105,23 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv1.UpdaterRequest, o
 	}
 	if err := st.saveSession(sess); err != nil {
 		releaseApplyLock(inst.InstallRoot)
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, err.Error())
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_DISK, err.Error())
 	}
 	launch := e.LaunchWorker
 	if launch == nil {
 		launch = launchApplyWorker
 	}
 	if err := launch(req.GetRuntime().GetDataDir(), sessionID, sess.StagedRoot); err != nil {
-		sess.Phase = updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
-		sess.Error = newError(updaterv1.ErrorCode_ERROR_CODE_DISK, true, err.Error(), nil)
+		sess.Phase = updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
+		sess.Error = newError(updaterv2.ErrorCode_ERROR_CODE_DISK, true, err.Error(), nil)
 		sess.HeartbeatAt = timestamppb.Now()
 		_ = st.saveSession(sess)
 		releaseApplyLock(inst.InstallRoot)
-		return e.emitApplyFail(updaterv1.ErrorCode_ERROR_CODE_DISK, "failed to start apply worker: "+err.Error())
+		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_DISK, "failed to start apply worker: "+err.Error())
 	}
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Apply{Apply: &updaterv1.ApplyResult{
-			Kind: &updaterv1.ApplyResult_Accepted{Accepted: &updaterv1.ApplyAccepted{
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Apply{Apply: &updaterv2.ApplyResult{
+			Kind: &updaterv2.ApplyResult_Accepted{Accepted: &updaterv2.ApplyAccepted{
 				SessionId:        sessionID,
 				PlanId:           plan.PlanId,
 				RequiresHostExit: requiresHostExit,
@@ -154,10 +155,10 @@ func launchApplyWorker(dataDir, sessionID, stagedRoot string) error {
 	return cmd.Process.Release()
 }
 
-func (e *Engine) emitApplyFail(code updaterv1.ErrorCode, message string) error {
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Apply{Apply: &updaterv1.ApplyResult{
-			Kind: &updaterv1.ApplyResult_Failed{Failed: &updaterv1.Failed{
+func (e *Engine) emitApplyFail(code updaterv2.ErrorCode, message string) error {
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Apply{Apply: &updaterv2.ApplyResult{
+			Kind: &updaterv2.ApplyResult_Failed{Failed: &updaterv2.Failed{
 				Error: newError(code, false, message, nil),
 			}},
 		}},
@@ -181,16 +182,16 @@ func fullInstallRefused(goos string) bool {
 //
 // The engine never guesses: a plan whose single artifact is neither a payload
 // nor a runnable installer is rejected by the caller.
-func classifyApply(plan *updaterv1.UpdatePlan) (upderv1Disposition updaterv1.ApplyDisposition, installerRel string, err error) {
+func classifyApply(plan *enginestate.UpdatePlan) (upderv1Disposition updaterv2.ApplyDisposition, installerRel string, err error) {
 	if plan == nil || len(plan.Files) == 0 {
-		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "", fmt.Errorf("plan has no files")
+		return updaterv2.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "", fmt.Errorf("plan has no files")
 	}
 	first := plan.Files[0]
 	if first.Kind == "payload" {
-		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL, "", nil
+		return updaterv2.ApplyDisposition_APPLY_DISPOSITION_INTERNAL, "", nil
 	}
 	if first.Kind != "installer" {
-		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "",
+		return updaterv2.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "",
 			fmt.Errorf("artifact kind %q is neither a payload nor an installer", first.Kind)
 	}
 	rel := first.DestRelpath
@@ -198,9 +199,9 @@ func classifyApply(plan *updaterv1.UpdatePlan) (upderv1Disposition updaterv1.App
 		rel = first.Name
 	}
 	if err := ValidateArtifactFilename(rel); err != nil {
-		return updaterv1.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "", err
+		return updaterv2.ApplyDisposition_APPLY_DISPOSITION_UNSPECIFIED, "", err
 	}
-	return updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL, rel, nil
+	return updaterv2.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL, rel, nil
 }
 
 // installerCommand builds the process that runs the verified installer.
@@ -222,7 +223,7 @@ var installerCommand = func(installer string) *exec.Cmd {
 // (requirement 3.10): wait for the host to exit, run the verified installer
 // interactively (no silent flags, no elevation — the OS raises UAC if the
 // installer needs it), then judge the result by exit code and relaunch.
-func runFullInstall(sess *updaterv1.ApplySessionRecord, installer string) error {
+func runFullInstall(sess *enginestate.ApplySessionRecord, installer string) error {
 	if _, err := os.Stat(installer); err != nil {
 		return fmt.Errorf("installer missing from staging: %w", err)
 	}
@@ -277,7 +278,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		return err
 	}
 	refreshApplyLock(sess.InstallRoot, sess.SessionId, os.Getpid())
-	setPhase := func(p updaterv1.SessionPhase, errp *updaterv1.Error) {
+	setPhase := func(p updaterv2.SessionPhase, errp *updaterv2.Error) {
 		sess.Phase = p
 		sess.HeartbeatAt = timestamppb.Now()
 		sess.Error = errp
@@ -285,36 +286,36 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	}
 	if sess.RequiresHostExit {
 		if err := waitForHostExit(int(sess.Pid), 5*time.Minute, func() {
-			setPhase(updaterv1.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, nil)
+			setPhase(updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, nil)
 		}); err != nil {
 			setPhase(
-				updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
-				newError(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil),
+				updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
+				newError(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil),
 			)
 			releaseApplyLock(sess.InstallRoot)
 			return err
 		}
 	}
-	if sess.Disposition == updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL {
+	if sess.Disposition == updaterv2.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL {
 		return runFullInstallPhase(sess, st, setPhase)
 	}
-	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COPYING, nil)
+	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COPYING, nil)
 
 	err = applyPlan(dataDir, sess, plan)
 	if err != nil {
 		attn := strings.Contains(err.Error(), "INCOMPLETE")
-		phase := updaterv1.SessionPhase_SESSION_PHASE_ROLLED_BACK
+		phase := updaterv2.SessionPhase_SESSION_PHASE_ROLLED_BACK
 		if attn {
-			phase = updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
+			phase = updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
 		}
-		setPhase(phase, newError(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
+		setPhase(phase, newError(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
 		releaseApplyLock(sess.InstallRoot)
 		return err
 	}
 	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
-		setPhase(updaterv1.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
+		setPhase(updaterv2.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
 		exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
-		if sess.Placement == updaterv1.Placement_PLACEMENT_LIBRARY {
+		if sess.Placement == updaterv2.Placement_PLACEMENT_LIBRARY {
 			if ptr := readActive(sess.InstallRoot); ptr != nil && ptr.Executable != "" {
 				exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Executable))
 			} else if ptr != nil {
@@ -325,7 +326,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		cmd.Dir = sess.InstallRoot
 		_ = cmd.Start()
 	}
-	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMPLETED, nil)
+	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COMPLETED, nil)
 	releaseApplyLock(sess.InstallRoot)
 	return nil
 }
@@ -333,31 +334,31 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 // runFullInstallPhase runs the verified installer and reports the outcome in
 // the session, which is what the next status call reads (requirement 3.10).
 func runFullInstallPhase(
-	sess *updaterv1.ApplySessionRecord,
+	sess *enginestate.ApplySessionRecord,
 	st store,
-	setPhase func(updaterv1.SessionPhase, *updaterv1.Error),
+	setPhase func(updaterv2.SessionPhase, *updaterv2.Error),
 ) error {
 	defer releaseApplyLock(sess.InstallRoot)
 	installer := filepath.Join(sess.StagedRoot, filepath.FromSlash(sess.InstallerRelpath))
-	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMMITTING, nil)
+	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COMMITTING, nil)
 	if err := runFullInstall(sess, installer); err != nil {
-		code := updaterv1.ErrorCode_ERROR_CODE_INSTALLER_FAILED
+		code := updaterv2.ErrorCode_ERROR_CODE_INSTALLER_FAILED
 		retry := false
 		if errors.Is(err, errInstallerCancelled) {
-			code = updaterv1.ErrorCode_ERROR_CODE_CANCELED
+			code = updaterv2.ErrorCode_ERROR_CODE_CANCELED
 			retry = true
 		}
-		setPhase(updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION, newError(code, retry, err.Error(), nil))
+		setPhase(updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION, newError(code, retry, err.Error(), nil))
 		return err
 	}
 	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
-		setPhase(updaterv1.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
+		setPhase(updaterv2.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
 		exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
 		cmd := exec.Command(exe)
 		cmd.Dir = sess.InstallRoot
 		_ = cmd.Start()
 	}
-	setPhase(updaterv1.SessionPhase_SESSION_PHASE_COMPLETED, nil)
+	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COMPLETED, nil)
 	return nil
 }
 
@@ -493,7 +494,7 @@ func pruneVersions(root string, current activePointer, retain int, reserved []in
 	}
 }
 
-func rollbackJournal(j *updaterv1.ApplyJournal) {
+func rollbackJournal(j *enginestate.ApplyJournal) {
 	for i := len(j.Entries) - 1; i >= 0; i-- {
 		ent := j.Entries[i]
 		_ = os.Remove(ent.DestPath)
@@ -529,7 +530,7 @@ func copyFile(src, dst string) error {
 	return cerr
 }
 
-func refreshSidecar(sess *updaterv1.ApplySessionRecord, payload string) {
+func refreshSidecar(sess *enginestate.ApplySessionRecord, payload string) {
 	if sess.SidecarRelpath == "" {
 		return
 	}
@@ -551,7 +552,7 @@ func refreshSidecar(sess *updaterv1.ApplySessionRecord, payload string) {
 	_ = os.Remove(aside)
 }
 
-func writeJournal(path string, j *updaterv1.ApplyJournal) error {
+func writeJournal(path string, j *enginestate.ApplyJournal) error {
 	raw, err := proto.Marshal(j)
 	if err != nil {
 		return err

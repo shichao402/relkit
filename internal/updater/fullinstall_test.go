@@ -7,7 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -31,7 +32,7 @@ func stubInstaller(t *testing.T, cmd *exec.Cmd) {
 
 // fullInstallFixture stages a fake installer and returns the session plus a
 // store that persists phase changes, mirroring what the worker does.
-func fullInstallFixture(t *testing.T, installerName string) (*updaterv1.ApplySessionRecord, store) {
+func fullInstallFixture(t *testing.T, installerName string) (*enginestate.ApplySessionRecord, store) {
 	t.Helper()
 	dataDir := t.TempDir()
 	root := t.TempDir()
@@ -46,14 +47,14 @@ func fullInstallFixture(t *testing.T, installerName string) (*updaterv1.ApplySes
 	if err := acquireApplyLock(root, "sess-full"); err != nil {
 		t.Fatal(err)
 	}
-	sess := &updaterv1.ApplySessionRecord{
+	sess := &enginestate.ApplySessionRecord{
 		SessionId:        "sess-full",
 		PlanId:           "plan-full",
-		Phase:            updaterv1.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT,
+		Phase:            updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT,
 		StartedAt:        timestamppb.Now(),
 		InstallRoot:      root,
 		StagedRoot:       stagedRoot,
-		Disposition:      updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL,
+		Disposition:      updaterv2.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL,
 		InstallerRelpath: installerName,
 	}
 	return sess, store{dataDir: dataDir}
@@ -61,9 +62,9 @@ func fullInstallFixture(t *testing.T, installerName string) (*updaterv1.ApplySes
 
 // phaseRecorder returns the setPhase callback the worker uses, plus a pointer to
 // the persisted session so the assertion reads what the next status call reads.
-func phaseRecorder(t *testing.T, sess *updaterv1.ApplySessionRecord, st store) func(updaterv1.SessionPhase, *updaterv1.Error) {
+func phaseRecorder(t *testing.T, sess *enginestate.ApplySessionRecord, st store) func(updaterv2.SessionPhase, *updaterv2.Error) {
 	t.Helper()
-	return func(p updaterv1.SessionPhase, errp *updaterv1.Error) {
+	return func(p updaterv2.SessionPhase, errp *updaterv2.Error) {
 		sess.Phase = p
 		sess.HeartbeatAt = timestamppb.Now()
 		sess.Error = errp
@@ -89,7 +90,7 @@ func TestRunFullInstallPhaseCompletesOnZeroExit(t *testing.T) {
 	if err := runFullInstallPhase(sess, st, phaseRecorder(t, sess, st)); err != nil {
 		t.Fatalf("runFullInstallPhase: %v", err)
 	}
-	if sess.Phase != updaterv1.SessionPhase_SESSION_PHASE_COMPLETED {
+	if sess.Phase != updaterv2.SessionPhase_SESSION_PHASE_COMPLETED {
 		t.Fatalf("phase = %v, want COMPLETED", sess.Phase)
 	}
 	if sess.Error != nil {
@@ -99,7 +100,7 @@ func TestRunFullInstallPhaseCompletesOnZeroExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Phase != updaterv1.SessionPhase_SESSION_PHASE_COMPLETED {
+	if persisted.Phase != updaterv2.SessionPhase_SESSION_PHASE_COMPLETED {
 		t.Fatalf("persisted phase = %v", persisted.Phase)
 	}
 	assertLockReleased(t, sess.InstallRoot)
@@ -115,10 +116,10 @@ func TestRunFullInstallPhaseReportsFailureExit(t *testing.T) {
 	if err == nil {
 		t.Fatal("non-zero installer exit must surface as an error")
 	}
-	if sess.Phase != updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION {
+	if sess.Phase != updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION {
 		t.Fatalf("phase = %v, want NEEDS_ATTENTION", sess.Phase)
 	}
-	if sess.Error.GetCode() != updaterv1.ErrorCode_ERROR_CODE_INSTALLER_FAILED {
+	if sess.Error.GetCode() != updaterv2.ErrorCode_ERROR_CODE_INSTALLER_FAILED {
 		t.Fatalf("error code = %v, want INSTALLER_FAILED", sess.Error.GetCode())
 	}
 	if sess.Error.GetRetryable() {
@@ -128,7 +129,7 @@ func TestRunFullInstallPhaseReportsFailureExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Error.GetCode() != updaterv1.ErrorCode_ERROR_CODE_INSTALLER_FAILED {
+	if persisted.Error.GetCode() != updaterv2.ErrorCode_ERROR_CODE_INSTALLER_FAILED {
 		t.Fatalf("persisted error code = %v", persisted.Error.GetCode())
 	}
 	assertLockReleased(t, sess.InstallRoot)
@@ -145,10 +146,10 @@ func TestRunFullInstallPhaseTreatsWizardCancelAsCanceled(t *testing.T) {
 		if err == nil {
 			t.Fatalf("exit %d must surface as an error", code)
 		}
-		if sess.Phase != updaterv1.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION {
+		if sess.Phase != updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION {
 			t.Fatalf("exit %d phase = %v", code, sess.Phase)
 		}
-		if sess.Error.GetCode() != updaterv1.ErrorCode_ERROR_CODE_CANCELED {
+		if sess.Error.GetCode() != updaterv2.ErrorCode_ERROR_CODE_CANCELED {
 			t.Fatalf("exit %d error code = %v, want CANCELED", code, sess.Error.GetCode())
 		}
 		if !sess.Error.GetRetryable() {

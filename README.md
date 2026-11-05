@@ -77,12 +77,12 @@ stage → release plan → release execute
 `relkit release --execute` 只允许 CI 调用（要求 `RELKIT_RELEASE_VIA_CI=1`），token
 按 keyId 从宿主的 `relkit.custody.json` 里取（需求 15），编排本身不出现 token 值。
 
-## SDK 与组件
+## 引擎与组件
 
-引擎唯一：`relkit-updater` 承担全部更新逻辑，各语言只保留现役宿主的薄 IPC 客户端
-（`sdk/dart` 是 facade + frame，Rust 是薄壳），Dart/Node 的厚实现已删除。SDK 从
-服务器的 `/v1/tools/current/sdk-dart/<platform>` 等端点按需取回并验签，宿主仓库里
-没有一个 relkit 二进制或版本号。
+引擎唯一：`relkit-updater` 承担全部更新逻辑，relkit 不再交付任何语言的 SDK
+（ADR 0026）。宿主从服务器 `/v1/tools/current/updater/<platform>` 取回引擎并验签，
+用 `relkit-updater proto` 导出契约、自行生成类型，通过 stdin 一个 ProtoJSON 请求、
+stdout 逐行 ProtoJSON 事件与引擎交互。宿主仓库里没有一个 relkit 二进制或版本号。
 
 ## Operator 运维
 
@@ -102,7 +102,7 @@ relkit-ops rotate <credential> \
   --inventory <inventory> --execute --json
 ```
 
-工具与 SDK 资产由服务器 `/v1/tools/` 面统一分发：每个组件按 `<component>/<platform>`
+工具资产由服务器 `/v1/tools/` 面统一分发：每个组件按 `<component>/<platform>`
 发出，随附 `.signature`，都受同一把根公钥背书。宿主与 CI 只认 `current` 别名，
 不钉版本号或摘要，所以换代不需要改任何宿主仓库。
 
@@ -125,7 +125,8 @@ bundle（唯一事实源），装好 Dec 后落在各宿主的用户级 skill �
   0019~0022 的驳斥与退出说明。
 - [`docs/architecture.md`](docs/architecture.md)：现行架构定档。
 
-RUP Schema Set、Publish Protocol、Updater IPC 和 ArtifactSet 各自按合同窗口兼容；
+RUP Schema Set、Publish Protocol 和 ArtifactSet 各自按合同窗口兼容，Updater 协议
+是单一协议号（当前 5），不兼容即拒绝；
 不承诺任意 Relkit release 组件混搭。v0.5 及更早控制面已冻结，只接受安全与正确性
 最小修复。
 
@@ -134,17 +135,14 @@ RUP Schema Set、Publish Protocol、Updater IPC 和 ArtifactSet 各自按合同�
 版本 SSOT 是 [`VERSION.json`](VERSION.json)。生成正式资产：
 
 ```bash
-python3 scripts/deploy/relkit.py build \
-  --cli --updater --dart-sdk --go-sdk --rust-sdk --bindings-ts
+python3 scripts/deploy/relkit.py build --cli --updater --ops
 ```
 
 主要验证：
 
 ```bash
 go test ./...
-cargo test --manifest-path sdk/rust/Cargo.toml
-cd sdk/dart && dart test
-cd bindings/ts && npm test
+python -m unittest scripts/deploy/test_relkit.py
 ```
 
 `internal/vnext` 覆盖项目声明、ArtifactSet 生产与合并、staged 发布事务、工具分发与

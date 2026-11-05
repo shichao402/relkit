@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 
 DEPLOY = Path(__file__).resolve().parent
@@ -747,51 +746,33 @@ class BackupRollbackTests(unittest.TestCase):
 
 
 class CliParseTests(unittest.TestCase):
-    def test_bindings_archive_uses_precompiled_entrypoints(self):
-        names = {name for _, name in deploy_cli.component_entries("bindings-ts")}
-        self.assertEqual(names, set(BY_NAME["bindings-ts"].pack_files))
-        self.assertNotIn("updater/v1/updater_pb.ts", names)
+    def test_registry_is_binaries_only(self):
+        # ADR 0026: relkit ships the updater binary plus its proto, no
+        # facade/projection trees and therefore no zip packing.
+        self.assertEqual(deploy_cli.registry_components("product-tree"), ())
+        for retired in ("sdk-dart", "sdk-rust", "bindings-ts", "sdk-go", "host-scripts"):
+            self.assertNotIn(retired, BY_NAME)
+        for row in deploy_cli.registry_components():
+            self.assertIn(row.role, ("host-binary", "product-binary"))
+            self.assertTrue(row.go_package)
+            self.assertTrue(row.binary_prefix)
+        self.assertFalse(hasattr(deploy_cli, "component_entries"))
+        self.assertFalse(hasattr(deploy_cli, "write_deterministic_zip"))
 
-    def test_component_entries_does_not_branch_on_component_names(self):
-        source = inspect.getsource(deploy_cli.component_entries)
-        self.assertNotIn("if name ==", source)
-        self.assertNotIn("if row.name ==", source)
-        self.assertIn("pack_kind()", source)
+    def test_tools_are_the_three_binaries(self):
+        self.assertEqual(deploy_cli.TOOL_COMPONENT_NAMES, ("cli", "updater", "ops"))
+        self.assertFalse(hasattr(deploy_cli, "TOOL_TREE_NAMES"))
 
-    def test_registry_pack_covers_required_archive_paths(self):
-        # The epoch upgrade ships no Go SDK: the Go packages move into
-        # internal/ and host Go code stops being a relkit artifact, so the
-        # go-deps pack kind went with it (requirement 135 keeps pack-shape and
-        # the component table in step).
-        self.assertEqual(BY_NAME["sdk-rust"].pack_kind(), "tracked-tree")
-        self.assertEqual(BY_NAME["bindings-ts"].pack_kind(), "listed-files")
-        self.assertEqual(BY_NAME["sdk-dart"].pack_kind(), "tracked-tree")
-        self.assertNotIn("host-scripts", BY_NAME)
-        self.assertNotIn("sdk-go", BY_NAME)
-        for row in deploy_cli.registry_components("product-tree"):
-            names = {name for _, name in deploy_cli.component_entries(row.name)}
-            self.assertTrue(names, f"{row.name} packed no files")
-
-    def test_host_zips_omit_in_process_updater(self):
-        dart = {name for _, name in deploy_cli.component_entries("sdk-dart")}
-        self.assertNotIn("lib/src/updater.dart", dart)
-        self.assertNotIn("lib/src/scheduler.dart", dart)
-        self.assertFalse(any(name.startswith("test/") for name in dart))
-        # The retired source-grep gate is gone; what remains enforceable is that
-        # every declared facade path really is inside its archive.
-        for row in deploy_cli.registry_components("product-tree"):
-            if not row.updater_process:
-                continue
-            names = {name for _, name in deploy_cli.component_entries(row.name)}
-            self.assertTrue(row.facade_paths)
-            for facade in row.facade_paths:
-                self.assertIn(facade, names)
+    def test_updater_protocol_reads_engine_constant(self):
+        text = (deploy_cli.REPO_ROOT / "internal" / "updater" / "const.go").read_text(encoding="utf-8")
+        self.assertIn(f"Protocol uint32 = {deploy_cli.updater_protocol()}", text)
 
     def test_tag_ci_builds_every_registry_component(self):
         workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
         text = workflow.read_text(encoding="utf-8")
         self.assertIn("build --all", text)
-        self.assertIn("npm --prefix bindings/ts test", text)
+        self.assertNotIn("bindings/ts", text)
+        self.assertNotIn("cargo", text)
         parser = deploy_cli.build_parser()
         args = parser.parse_args(["build", "--all"])
         self.assertTrue(args.all)
@@ -799,8 +780,6 @@ class CliParseTests(unittest.TestCase):
             self.assertTrue(hasattr(args, row.build_flag.replace("-", "_")))
 
     def test_registry_preserves_artifact_and_install_name_goldens(self):
-        self.assertEqual(BY_NAME["sdk-rust"].archive, "relkit-sdk-rust.zip")
-        self.assertEqual(BY_NAME["bindings-ts"].archive, "relkit-bindings-ts.zip")
         # The vNext registry derives shell names from binaryPrefix alone: one
         # rule for every product binary instead of a per-target override table.
         self.assertEqual(BY_NAME["cli"].install_name("windows-amd64"), "relkit.exe")
@@ -817,28 +796,6 @@ class CliParseTests(unittest.TestCase):
                 "relkit-updater-darwin-arm64",
             ],
         )
-
-    def test_registry_declares_each_facade_once(self):
-        """ADR 0021: one row per facade, and a facade row is one validated unit.
-
-        The retired facets.py validator is gone with the Python registry, so the
-        invariants it used to assert are now asserted against the single vNext
-        registry that replaced it.
-        """
-        trees = deploy_cli.registry_components("product-tree")
-        self.assertEqual(
-            [row.name for row in trees],
-            ["sdk-dart", "sdk-rust", "bindings-ts"],
-        )
-        for row in trees:
-            self.assertTrue(row.build_flag)
-            self.assertTrue(row.archive)
-            self.assertTrue(row.source)
-            self.assertEqual(
-                bool(row.updater_process), bool(row.facade_paths),
-                f"{row.name} must declare updaterProcess and facadePaths together",
-            )
-        self.assertNotIn("host-scripts", BY_NAME)
 
     def test_help_and_subcommands(self):
         env = os.environ.copy()
@@ -899,44 +856,12 @@ class CliParseTests(unittest.TestCase):
         text = (DEPLOY / "requirements.txt").read_text(encoding="utf-8")
         self.assertEqual(ops.parse_requirements(text), [])
 
-    def test_rust_sdk_flag_and_deterministic_zip(self):
-        args = deploy_cli.build_parser().parse_args(["build", "--rust-sdk"])
-        self.assertTrue(args.rust_sdk)
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "Cargo.toml"
-            source.write_text("[package]\nname='x'\n", encoding="utf-8")
-            first = root / "first.zip"
-            second = root / "second.zip"
-            entries = [(source, "Cargo.toml")]
-            deploy_cli.write_deterministic_zip(first, entries)
-            deploy_cli.write_deterministic_zip(second, entries)
-            self.assertEqual(first.read_bytes(), second.read_bytes())
-
     def test_retired_host_scripts_component_is_not_packable(self):
         # ADR 0019 §1 deleted scripts/host; the registry must reject the name
         # rather than quietly pack an empty tree.
         self.assertNotIn("host-scripts", BY_NAME)
-        with self.assertRaises(KeyError):
-            deploy_cli.component_entries("host-scripts")
         args = deploy_cli.build_parser().parse_args(["build", "--all"])
         self.assertFalse(hasattr(args, "host_scripts"))
-
-    def test_rust_sdk_archive_excludes_ignored_target(self):
-        ignore = (deploy_cli.REPO_ROOT / "sdk" / "rust" / ".gitignore").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("/target/", ignore.splitlines())
-        with tempfile.TemporaryDirectory() as tmp:
-            archive_path = Path(tmp) / "relkit-sdk-rust.zip"
-            deploy_cli.write_deterministic_zip(
-                archive_path, deploy_cli.rust_sdk_entries()
-            )
-            with zipfile.ZipFile(archive_path) as archive:
-                names = archive.namelist()
-        self.assertIn("Cargo.toml", names)
-        self.assertIn("proto/updater/v1/updater.proto", names)
-        self.assertFalse(any(name == "target" or name.startswith("target/") for name in names))
 
 
 class ExtractExportTests(unittest.TestCase):

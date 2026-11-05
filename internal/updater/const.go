@@ -2,13 +2,11 @@ package updater
 
 import "time"
 
-// Window 4 is the desktop-epoch baseline: OPERATION_SCHEDULER is gone,
-// DeleteInstalled exists, and the engine owns Runtime Bootstrap parsing.
-// Older windows are rejected outright — this epoch does not migrate hosts.
+// Protocol 5 (ADR 0026): relkit.updater.v2 over ProtoJSON lines. The engine
+// speaks exactly one protocol; hosts on any other value are rejected with
+// UPDATER_TOO_OLD / UPDATER_TOO_NEW. This epoch does not migrate hosts.
 const (
-	IPCMin     uint32 = 4
-	IPCMax     uint32 = 4
-	IPCCurrent uint32 = 4
+	Protocol uint32 = 5
 
 	MinCheckInterval = 5 * time.Minute
 	DefaultSuccess   = 24 * time.Hour
@@ -27,4 +25,4 @@ const (
 	TrashDirName     = ".trash"
 )
 
-var DefaultOperations = []int32{1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12} // Operation enum values
+var DefaultOperations = []int32{1, 2, 3, 4, 5, 6, 9, 10, 11, 12} // Operation enum values

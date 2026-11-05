@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 	"github.com/shichao402/relkit/internal/model"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -30,9 +30,9 @@ const (
 )
 
 type Script struct {
-	Phase       updaterv1.ScriptPhase
+	Phase       enginestate.ScriptPhase
 	Path        string
-	Interpreter updaterv1.ScriptInterpreter
+	Interpreter enginestate.ScriptInterpreter
 	Timeout     time.Duration
 	Args        []string
 }
@@ -45,12 +45,12 @@ type BuildOptions struct {
 }
 
 type Package struct {
-	Table       *updaterv1.FileTable
+	Table       *enginestate.FileTable
 	FilesRoot   string
 	ScriptsRoot string
 }
 
-func Build(outPath string, options BuildOptions) (*updaterv1.FileTable, error) {
+func Build(outPath string, options BuildOptions) (*enginestate.FileTable, error) {
 	info, err := os.Stat(options.Tree)
 	if err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("payload tree must be a directory: %s", options.Tree)
@@ -58,7 +58,7 @@ func Build(outPath string, options BuildOptions) (*updaterv1.FileTable, error) {
 	if err := applyDescriptor(&options); err != nil {
 		return nil, err
 	}
-	table := &updaterv1.FileTable{Schema: Schema}
+	table := &enginestate.FileTable{Schema: Schema}
 	type source struct {
 		name string
 		path string
@@ -97,7 +97,7 @@ func Build(outPath string, options BuildOptions) (*updaterv1.FileTable, error) {
 		if err != nil {
 			return err
 		}
-		table.Files = append(table.Files, &updaterv1.FileEntry{
+		table.Files = append(table.Files, &enginestate.FileEntry{
 			Relpath: rel,
 			Size:    size,
 			Sha256:  digest,
@@ -127,10 +127,10 @@ func Build(outPath string, options BuildOptions) (*updaterv1.FileTable, error) {
 	sort.Strings(table.Preserve)
 
 	for _, script := range options.Scripts {
-		if script.Phase == updaterv1.ScriptPhase_SCRIPT_PHASE_UNSPECIFIED {
+		if script.Phase == enginestate.ScriptPhase_SCRIPT_PHASE_UNSPECIFIED {
 			return nil, fmt.Errorf("script %q has no phase", script.Path)
 		}
-		if script.Interpreter == updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_UNSPECIFIED {
+		if script.Interpreter == enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_UNSPECIFIED {
 			return nil, fmt.Errorf("script %q has no interpreter", script.Path)
 		}
 		rel := filepath.ToSlash(script.Path)
@@ -150,7 +150,7 @@ func Build(outPath string, options BuildOptions) (*updaterv1.FileTable, error) {
 		if timeout <= 0 {
 			timeout = 30 * time.Second
 		}
-		table.Scripts = append(table.Scripts, &updaterv1.ScriptEntry{
+		table.Scripts = append(table.Scripts, &enginestate.ScriptEntry{
 			Phase:       script.Phase,
 			Relpath:     rel,
 			Size:        size,
@@ -240,19 +240,19 @@ func applyDescriptor(options *BuildOptions) error {
 		script := Script{Path: item.Path, Args: item.Args}
 		switch item.Phase {
 		case "pre":
-			script.Phase = updaterv1.ScriptPhase_SCRIPT_PHASE_PRE_APPLY
+			script.Phase = enginestate.ScriptPhase_SCRIPT_PHASE_PRE_APPLY
 		case "post":
-			script.Phase = updaterv1.ScriptPhase_SCRIPT_PHASE_POST_APPLY
+			script.Phase = enginestate.ScriptPhase_SCRIPT_PHASE_POST_APPLY
 		default:
 			return fmt.Errorf("%s: script %q has invalid phase %q", configPath, item.Path, item.Phase)
 		}
 		switch item.Interpreter {
 		case "direct":
-			script.Interpreter = updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_DIRECT
+			script.Interpreter = enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_DIRECT
 		case "sh":
-			script.Interpreter = updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_SH
+			script.Interpreter = enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_SH
 		case "powershell":
-			script.Interpreter = updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_POWERSHELL
+			script.Interpreter = enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_POWERSHELL
 		default:
 			return fmt.Errorf("%s: script %q has invalid interpreter %q", configPath, item.Path, item.Interpreter)
 		}
@@ -268,7 +268,7 @@ func applyDescriptor(options *BuildOptions) error {
 	return nil
 }
 
-func Validate(path string) (*updaterv1.FileTable, error) {
+func Validate(path string) (*enginestate.FileTable, error) {
 	return inspect(path, "")
 }
 
@@ -284,7 +284,7 @@ func Extract(path, dest string) (*Package, error) {
 	}, nil
 }
 
-func inspect(path, dest string) (*updaterv1.FileTable, error) {
+func inspect(path, dest string) (*enginestate.FileTable, error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open payload: %w", err)
@@ -320,7 +320,7 @@ func inspect(path, dest string) (*updaterv1.FileTable, error) {
 	if err != nil {
 		return nil, err
 	}
-	table := &updaterv1.FileTable{}
+	table := &enginestate.FileTable{}
 	if err := proto.Unmarshal(raw, table); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", TableName, err)
 	}
@@ -348,8 +348,8 @@ func inspect(path, dest string) (*updaterv1.FileTable, error) {
 		}
 	}
 	for _, script := range table.Scripts {
-		if script == nil || script.Phase == updaterv1.ScriptPhase_SCRIPT_PHASE_UNSPECIFIED ||
-			script.Interpreter == updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_UNSPECIFIED {
+		if script == nil || script.Phase == enginestate.ScriptPhase_SCRIPT_PHASE_UNSPECIFIED ||
+			script.Interpreter == enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_UNSPECIFIED {
 			return nil, fmt.Errorf("invalid script entry")
 		}
 		if script.Timeout == nil || script.Timeout.AsDuration() <= 0 {
@@ -389,7 +389,7 @@ func inspect(path, dest string) (*updaterv1.FileTable, error) {
 	return table, nil
 }
 
-func ensurePortableDistinct(table *updaterv1.FileTable) error {
+func ensurePortableDistinct(table *enginestate.FileTable) error {
 	seen := map[string]string{}
 	check := func(kind, rel string) error {
 		key := kind + ":" + strings.ToLower(rel)

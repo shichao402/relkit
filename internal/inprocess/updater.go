@@ -18,7 +18,7 @@ import (
 
 // Updater checks for and downloads RUP v2 updates.
 //
-// Frozen: engine-internal. Hosts must use sdk/updaterfacade + relkit-updater (ADR 0010).
+// Frozen: engine-internal. Hosts drive the relkit-updater binary (ADR 0026).
 type Updater struct {
 	Product         string
 	Channel         string

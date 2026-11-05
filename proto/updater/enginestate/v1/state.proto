@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+// Engine-private persisted state (ADR 0026 §5). Never exported to hosts and
+// never printed by `relkit-updater proto`. These messages are written to the
+// engine data directory in protobuf binary, so field numbers are frozen: they
+// match the retired relkit.updater.v1 layout byte for byte.
+package relkit.updater.enginestate.v1;
+
+option go_package = "github.com/shichao402/relkit/api/updater/enginestate/v1;enginestatev1";
+
+import "google/protobuf/timestamp.proto";
+import "updater/v2/updater.proto";
+
+message PlannedFile {
+  string name = 1;
+  int64 size = 2;
+  string sha256_hex = 3;
+  repeated string urls = 4;
+  string dest_relpath = 5;
+  string local_path = 6;
+  bool downloaded = 7;
+  string kind = 8;
+}
+
+message UpdatePlan {
+  string plan_id = 1;
+  string product = 2;
+  string channel = 3;
+  string version = 4;
+  int64 code = 5;
+  int64 sequence = 6;
+  bool mandatory = 7;
+  int32 remaining_hops = 8;
+  string release_notes_markdown = 9;
+  string release_notes_url = 10;
+  repeated relkit.updater.v2.PriorReleaseNotes prior_release_notes = 11;
+  repeated PlannedFile files = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp expires_at = 14;
+  bytes plan_hmac = 15;
+}
+
+message PersistedState {
+  google.protobuf.Timestamp last_check_at = 1;
+  relkit.updater.v2.LastResult last_result = 2;
+  int64 last_seen_sequence = 3;
+  int64 last_seen_directory_sequence = 4;
+  int64 last_seen_fallback_sequence = 5;
+  repeated int64 skipped_codes = 6;
+}
+
+message ApplySessionRecord {
+  string session_id = 1;
+  string plan_id = 2;
+  relkit.updater.v2.SessionPhase phase = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp heartbeat_at = 5;
+  string install_root = 6;
+  string staged_root = 7;
+  int64 target_code = 8;
+  string target_version = 9;
+  relkit.updater.v2.Error error = 10;
+  int32 pid = 11;
+  relkit.updater.v2.Placement placement = 12;
+  bool relaunch = 13;
+  string executable_relpath = 14;
+  repeated string preserve = 15;
+  reserved 16, 17, 20; // retired retain, file_set, reserved_codes
+  string sidecar_relpath = 18;
+  bool install_only = 19;
+  bool requires_host_exit = 21;
+  relkit.updater.v2.LibraryPolicy library = 22;
+  // Carried into the worker so a FULL_INSTALL session runs the installer
+  // instead of unpacking a payload.
+  relkit.updater.v2.ApplyDisposition disposition = 23;
+  // Relpath of the verified installer inside the staged root.
+  string installer_relpath = 24;
+}
+
+message JournalEntry {
+  string dest_path = 1;
+  string backup_path = 2;
+  string source_path = 3;
+}
+
+message ApplyJournal {
+  string session_id = 1;
+  repeated JournalEntry entries = 2;
+  bool committed = 3;
+}

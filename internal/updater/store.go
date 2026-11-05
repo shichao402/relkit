@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -56,12 +56,12 @@ func atomicWrite(path string, data []byte) error {
 	return os.Rename(tmp, path)
 }
 
-func (s store) loadState() (*updaterv1.PersistedState, error) {
+func (s store) loadState() (*enginestate.PersistedState, error) {
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
 	if raw, err := os.ReadFile(s.statePath()); err == nil {
-		st := &updaterv1.PersistedState{}
+		st := &enginestate.PersistedState{}
 		if err := proto.Unmarshal(raw, st); err != nil {
 			return nil, err
 		}
@@ -69,14 +69,14 @@ func (s store) loadState() (*updaterv1.PersistedState, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	st := &updaterv1.PersistedState{}
+	st := &enginestate.PersistedState{}
 	if err := s.saveState(st); err != nil {
 		return nil, err
 	}
 	return st, nil
 }
 
-func (s store) saveState(st *updaterv1.PersistedState) error {
+func (s store) saveState(st *enginestate.PersistedState) error {
 	raw, err := proto.Marshal(st)
 	if err != nil {
 		return err
@@ -88,7 +88,7 @@ func (s store) planPath(id string) string {
 	return filepath.Join(s.plansDir(), id+".pb")
 }
 
-func (s store) savePlan(p *updaterv1.UpdatePlan) error {
+func (s store) savePlan(p *enginestate.UpdatePlan) error {
 	raw, err := proto.Marshal(p)
 	if err != nil {
 		return err
@@ -96,12 +96,12 @@ func (s store) savePlan(p *updaterv1.UpdatePlan) error {
 	return atomicWrite(s.planPath(p.PlanId), raw)
 }
 
-func (s store) loadPlan(id string) (*updaterv1.UpdatePlan, error) {
+func (s store) loadPlan(id string) (*enginestate.UpdatePlan, error) {
 	raw, err := os.ReadFile(s.planPath(id))
 	if err != nil {
 		return nil, err
 	}
-	p := &updaterv1.UpdatePlan{}
+	p := &enginestate.UpdatePlan{}
 	if err := proto.Unmarshal(raw, p); err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (s store) sessionPath(id string) string {
 	return filepath.Join(s.sessionsDir(), id+".pb")
 }
 
-func (s store) saveSession(sess *updaterv1.ApplySessionRecord) error {
+func (s store) saveSession(sess *enginestate.ApplySessionRecord) error {
 	raw, err := proto.Marshal(sess)
 	if err != nil {
 		return err
@@ -120,19 +120,19 @@ func (s store) saveSession(sess *updaterv1.ApplySessionRecord) error {
 	return atomicWrite(s.sessionPath(sess.SessionId), raw)
 }
 
-func (s store) loadSession(id string) (*updaterv1.ApplySessionRecord, error) {
+func (s store) loadSession(id string) (*enginestate.ApplySessionRecord, error) {
 	raw, err := os.ReadFile(s.sessionPath(id))
 	if err != nil {
 		return nil, err
 	}
-	sess := &updaterv1.ApplySessionRecord{}
+	sess := &enginestate.ApplySessionRecord{}
 	if err := proto.Unmarshal(raw, sess); err != nil {
 		return nil, err
 	}
 	return sess, nil
 }
 
-func (s store) latestSession() (*updaterv1.ApplySessionRecord, error) {
+func (s store) latestSession() (*enginestate.ApplySessionRecord, error) {
 	ents, err := os.ReadDir(s.sessionsDir())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -140,7 +140,7 @@ func (s store) latestSession() (*updaterv1.ApplySessionRecord, error) {
 		}
 		return nil, err
 	}
-	var best *updaterv1.ApplySessionRecord
+	var best *enginestate.ApplySessionRecord
 	for _, e := range ents {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".pb" {
 			continue
@@ -171,7 +171,7 @@ func (s store) planKey() ([]byte, error) {
 	return key, nil
 }
 
-func skippedSet(st *updaterv1.PersistedState) map[int64]struct{} {
+func skippedSet(st *enginestate.PersistedState) map[int64]struct{} {
 	out := map[int64]struct{}{}
 	if st == nil {
 		return out
@@ -182,7 +182,7 @@ func skippedSet(st *updaterv1.PersistedState) map[int64]struct{} {
 	return out
 }
 
-func lastCheckTime(st *updaterv1.PersistedState) *time.Time {
+func lastCheckTime(st *enginestate.PersistedState) *time.Time {
 	if st == nil || st.LastCheckAt == nil {
 		return nil
 	}

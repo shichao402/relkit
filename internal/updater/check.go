@@ -1,4 +1,4 @@
-﻿package updater
+package updater
 
 import (
 	"context"
@@ -10,7 +10,8 @@ import (
 	"sort"
 	"time"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/inprocess"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/sdk"
@@ -18,10 +19,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func (e *Engine) handleSkip(_ context.Context, req *updaterv1.UpdaterRequest, op *updaterv1.SkipOp, st store) error {
+func (e *Engine) handleSkip(_ context.Context, req *updaterv2.UpdaterRequest, op *updaterv2.SkipOp, st store) error {
 	state, err := st.loadState()
 	if err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
 	}
 	// Mandatory skip is denied when the latest plan for this code is mandatory.
 	if plans, _ := osReadPlanIDs(st); true {
@@ -31,10 +32,10 @@ func (e *Engine) handleSkip(_ context.Context, req *updaterv1.UpdaterRequest, op
 				continue
 			}
 			if p.Code == op.GetCode() && p.Mandatory {
-				return e.emit(&updaterv1.UpdaterEvent{
-					Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{
-						Kind: &updaterv1.Result_Failed{Failed: &updaterv1.Failed{
-							Error: newError(updaterv1.ErrorCode_ERROR_CODE_SKIP_DENIED, false, "mandatory updates cannot be skipped", nil),
+				return e.emit(&updaterv2.UpdaterEvent{
+					Kind: &updaterv2.UpdaterEvent_Result{Result: &updaterv2.Result{
+						Kind: &updaterv2.Result_Failed{Failed: &updaterv2.Failed{
+							Error: newError(updaterv2.ErrorCode_ERROR_CODE_SKIP_DENIED, false, "mandatory updates cannot be skipped", nil),
 						}},
 					}},
 				})
@@ -46,11 +47,11 @@ func (e *Engine) handleSkip(_ context.Context, req *updaterv1.UpdaterRequest, op
 		state.SkippedCodes = append(state.SkippedCodes, op.GetCode())
 	}
 	if err := st.saveState(state); err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
 	}
 	_ = req
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}},
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Result{Result: &updaterv2.Result{Kind: &updaterv2.Result_Ok{Ok: &updaterv2.Ok{}}}},
 	})
 }
 
@@ -88,33 +89,30 @@ func withEngineDefaults(host map[string]string) map[string]string {
 	return out
 }
 
-func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest, op *updaterv1.CheckOp, st store) error {
-	profile, runtime := req.GetProfile(), req.GetRuntime()
+func (e *Engine) handleCheck(ctx context.Context, req *updaterv2.UpdaterRequest, profile *openedProfile, op *updaterv2.CheckOp, st store) error {
+	runtime := req.GetRuntime()
 	state, err := st.loadState()
 	if err != nil {
-		return e.emitCheckFailed(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil, profile)
+		return e.emitCheckFailed(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil, profile)
 	}
 	now := time.Now().UTC()
 	if op == nil {
-		op = &updaterv1.CheckOp{}
+		op = &updaterv2.CheckOp{}
 	}
 	ok, next := shouldCheck(lastCheckTime(state), state.LastResult, op.Policy, op.Force, now)
 	if !ok {
-		state.LastResult = updaterv1.LastResult_LAST_RESULT_THROTTLED
+		state.LastResult = updaterv2.LastResult_LAST_RESULT_THROTTLED
 		_ = st.saveState(state)
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
-				Kind: &updaterv1.CheckResult_Throttled{Throttled: &updaterv1.Throttled{
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Check{Check: &updaterv2.CheckResult{
+				Kind: &updaterv2.CheckResult_Throttled{Throttled: &updaterv2.Throttled{
 					NextAllowedAt: timestamppb.New(next),
 				}},
 			}},
 		})
 	}
 
-	keys := trustedKeys(profile)
-	if len(keys) == 0 {
-		return e.emitCheckFailed(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "trustedKeys required", nil, profile)
-	}
+	keys := profile.TrustedKeys
 
 	sdkState := engineStateToSDK(state)
 	clientSelectors := withEngineDefaults(runtime.ClientSelectors)
@@ -122,9 +120,7 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 		Product:         profile.Product,
 		Channel:         runtime.Channel,
 		CurrentCode:     int(runtime.CurrentCode),
-		IndexURLs:       profile.IndexUrls,
-		EntryURLs:       profile.EntryUrls,
-		FallbackURLs:    profile.FallbackUrls,
+		EntryURLs:       profile.EntryURLs,
 		TrustedKeys:     keys,
 		ClientSelectors: clientSelectors,
 		Fetcher:         e.fetcher(),
@@ -145,11 +141,11 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 
 	if op.ExactCode != 0 {
 		if op.ExactCode == runtime.CurrentCode {
-			state.LastResult = updaterv1.LastResult_LAST_RESULT_UP_TO_DATE
+			state.LastResult = updaterv2.LastResult_LAST_RESULT_UP_TO_DATE
 			_ = st.saveState(state)
-			return e.emit(&updaterv1.UpdaterEvent{
-				Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
-					Kind: &updaterv1.CheckResult_UpToDate{UpToDate: &updaterv1.UpToDate{
+			return e.emit(&updaterv2.UpdaterEvent{
+				Kind: &updaterv2.UpdaterEvent_Check{Check: &updaterv2.CheckResult{
+					Kind: &updaterv2.CheckResult_UpToDate{UpToDate: &updaterv2.UpToDate{
 						Sequence:        result.Sequence,
 						CurrentIsYanked: result.CurrentIsYanked,
 					}},
@@ -159,18 +155,18 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 		exact := u.FetchExact(ctx, op.ExactCode)
 		result.Attempts = append(result.Attempts, exact.Attempts...)
 		if exact.Err != nil {
-			state.LastResult = updaterv1.LastResult_LAST_RESULT_FAILED
+			state.LastResult = updaterv2.LastResult_LAST_RESULT_FAILED
 			_ = st.saveState(state)
 			code, retry := classifyFetch(exact.Err)
 			if containsAny(exact.Err.Error(), "not reachable", "yanked") {
-				code, retry = updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false
+				code, retry = updaterv2.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false
 			}
 			return e.emitCheckFailed(code, retry, exact.Err.Error(), result.Attempts, profile)
 		}
 		if exact.Available == nil {
-			state.LastResult = updaterv1.LastResult_LAST_RESULT_FAILED
+			state.LastResult = updaterv2.LastResult_LAST_RESULT_FAILED
 			_ = st.saveState(state)
-			return e.emitCheckFailed(updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, fmt.Sprintf("exact code %d not reachable", op.ExactCode), result.Attempts, profile)
+			return e.emitCheckFailed(updaterv2.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, fmt.Sprintf("exact code %d not reachable", op.ExactCode), result.Attempts, profile)
 		}
 		result.Available = exact.Available
 		result.Sequence = exact.Sequence
@@ -184,11 +180,11 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 		code := result.Available.Target.Code
 		if !result.Available.Mandatory {
 			if _, skipped := skippedSet(state)[code]; skipped {
-				state.LastResult = updaterv1.LastResult_LAST_RESULT_UP_TO_DATE
+				state.LastResult = updaterv2.LastResult_LAST_RESULT_UP_TO_DATE
 				_ = st.saveState(state)
-				return e.emit(&updaterv1.UpdaterEvent{
-					Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
-						Kind: &updaterv1.CheckResult_UpToDate{UpToDate: &updaterv1.UpToDate{
+				return e.emit(&updaterv2.UpdaterEvent{
+					Kind: &updaterv2.UpdaterEvent_Check{Check: &updaterv2.CheckResult{
+						Kind: &updaterv2.CheckResult_UpToDate{UpToDate: &updaterv2.UpToDate{
 							Sequence:        result.Sequence,
 							CurrentIsYanked: result.CurrentIsYanked,
 						}},
@@ -198,50 +194,50 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 		}
 		plan, err := e.buildPlan(st, profile, runtime, result)
 		if err != nil {
-			state.LastResult = updaterv1.LastResult_LAST_RESULT_FAILED
+			state.LastResult = updaterv2.LastResult_LAST_RESULT_FAILED
 			_ = st.saveState(state)
-			return e.emitCheckFailed(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), result.Attempts, profile)
+			return e.emitCheckFailed(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), result.Attempts, profile)
 		}
-		state.LastResult = updaterv1.LastResult_LAST_RESULT_UPDATE_AVAILABLE
+		state.LastResult = updaterv2.LastResult_LAST_RESULT_UPDATE_AVAILABLE
 		_ = st.saveState(state)
 		av := result.Available
 		notes := av.Target.Notes
 		if notes == "" && av.Manifest != nil {
 			notes = av.Manifest.Notes
 		}
-		view := []*updaterv1.ArtifactView{}
+		view := []*updaterv2.ArtifactView{}
 		if av.Artifact != nil {
 			if err := ValidateArtifactFilename(av.Artifact.Filename); err != nil {
-				state.LastResult = updaterv1.LastResult_LAST_RESULT_FAILED
+				state.LastResult = updaterv2.LastResult_LAST_RESULT_FAILED
 				_ = st.saveState(state)
-				return e.emitCheckFailed(updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, err.Error(), result.Attempts, profile)
+				return e.emitCheckFailed(updaterv2.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, err.Error(), result.Attempts, profile)
 			}
 			sum, _ := hex.DecodeString(av.Artifact.Sha256)
-			view = append(view, &updaterv1.ArtifactView{
+			view = append(view, &updaterv2.ArtifactView{
 				Name:   av.Artifact.Filename,
 				Size:   av.Artifact.Size,
 				Sha256: sum,
 			})
 		}
-		priors := make([]*updaterv1.PriorReleaseNotes, 0, len(av.PriorReleaseNotes))
+		priors := make([]*updaterv2.PriorReleaseNotes, 0, len(av.PriorReleaseNotes))
 		for _, p := range av.PriorReleaseNotes {
 			if p.Code <= runtime.CurrentCode || (av.Target != nil && p.Code > av.Target.Code) {
 				continue
 			}
-			priors = append(priors, &updaterv1.PriorReleaseNotes{
+			priors = append(priors, &updaterv2.PriorReleaseNotes{
 				Version:  p.Version,
 				Code:     p.Code,
 				Notes:    p.Notes,
 				NotesUrl: p.NotesURL,
 			})
 		}
-		disposition := updaterv1.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL
+		disposition := updaterv2.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL
 		if av.Artifact != nil && model.ArtifactKindString(av.Artifact.Kind) == "payload" {
-			disposition = updaterv1.ApplyDisposition_APPLY_DISPOSITION_INTERNAL
+			disposition = updaterv2.ApplyDisposition_APPLY_DISPOSITION_INTERNAL
 		}
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
-				Kind: &updaterv1.CheckResult_UpdateAvailable{UpdateAvailable: &updaterv1.UpdateAvailable{
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Check{Check: &updaterv2.CheckResult{
+				Kind: &updaterv2.CheckResult_UpdateAvailable{UpdateAvailable: &updaterv2.UpdateAvailable{
 					PlanId:               plan.PlanId,
 					PromptKey:            fmt.Sprintf("code:%d", av.Target.Code),
 					Version:              av.Target.Version,
@@ -260,12 +256,12 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 	}
 
 	if result.Fallback != nil {
-		state.LastResult = updaterv1.LastResult_LAST_RESULT_FALLBACK_REQUIRED
+		state.LastResult = updaterv2.LastResult_LAST_RESULT_FALLBACK_REQUIRED
 		_ = st.saveState(state)
 		fb := result.Fallback
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
-				Kind: &updaterv1.CheckResult_FallbackRequired{FallbackRequired: &updaterv1.FallbackRequired{
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Check{Check: &updaterv2.CheckResult{
+				Kind: &updaterv2.CheckResult_FallbackRequired{FallbackRequired: &updaterv2.FallbackRequired{
 					PromptKey: fmt.Sprintf("fallback:%d", fb.Sequence),
 					ManualUrl: fb.ManualURL,
 					Message:   fb.Message,
@@ -279,28 +275,28 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 	}
 
 	if result.Err != nil {
-		state.LastResult = updaterv1.LastResult_LAST_RESULT_FAILED
+		state.LastResult = updaterv2.LastResult_LAST_RESULT_FAILED
 		_ = st.saveState(state)
 		msg := result.Err.Error()
-		code := updaterv1.ErrorCode_ERROR_CODE_NETWORK
+		code := updaterv2.ErrorCode_ERROR_CODE_NETWORK
 		retry := true
 		if containsAny(msg, "signature", "verify") {
-			code, retry = updaterv1.ErrorCode_ERROR_CODE_SIGNATURE, false
+			code, retry = updaterv2.ErrorCode_ERROR_CODE_SIGNATURE, false
 		}
 		if containsAny(msg, "older than last seen") {
-			code, retry = updaterv1.ErrorCode_ERROR_CODE_ROLLBACK_REJECTED, false
+			code, retry = updaterv2.ErrorCode_ERROR_CODE_ROLLBACK_REJECTED, false
 		}
 		if containsAny(msg, "no artifact") {
-			code, retry = updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false
+			code, retry = updaterv2.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false
 		}
 		return e.emitCheckFailed(code, retry, msg, result.Attempts, profile)
 	}
 
-	state.LastResult = updaterv1.LastResult_LAST_RESULT_UP_TO_DATE
+	state.LastResult = updaterv2.LastResult_LAST_RESULT_UP_TO_DATE
 	_ = st.saveState(state)
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
-			Kind: &updaterv1.CheckResult_UpToDate{UpToDate: &updaterv1.UpToDate{
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Check{Check: &updaterv2.CheckResult{
+			Kind: &updaterv2.CheckResult_UpToDate{UpToDate: &updaterv2.UpToDate{
 				Sequence:        result.Sequence,
 				CurrentIsYanked: result.CurrentIsYanked,
 			}},
@@ -308,26 +304,26 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv1.UpdaterRequest,
 	})
 }
 
-func (e *Engine) emitCheckFailed(code updaterv1.ErrorCode, retryable bool, message string, attempts []string, profile *updaterv1.ClientProfile) error {
+func (e *Engine) emitCheckFailed(code updaterv2.ErrorCode, retryable bool, message string, attempts []string, profile *openedProfile) error {
 	err := newError(code, retryable, message, attempts)
 	err.Recovery = recoveryFrom(profile)
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Check{Check: &updaterv1.CheckResult{
-			Kind: &updaterv1.CheckResult_Failed{Failed: &updaterv1.Failed{Error: err}},
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Check{Check: &updaterv2.CheckResult{
+			Kind: &updaterv2.CheckResult_Failed{Failed: &updaterv2.Failed{Error: err}},
 		}},
 	})
 }
 
-func (e *Engine) buildPlan(st store, profile *updaterv1.ClientProfile, runtime *updaterv1.Runtime, result inprocess.CheckResult) (*updaterv1.UpdatePlan, error) {
+func (e *Engine) buildPlan(st store, profile *openedProfile, runtime *updaterv2.Runtime, result inprocess.CheckResult) (*enginestate.UpdatePlan, error) {
 	av := result.Available
 	id := newID("plan")
 	now := time.Now().UTC()
-	files := []*updaterv1.PlannedFile{}
+	files := []*enginestate.PlannedFile{}
 	if av.Artifact != nil {
 		if err := ValidateArtifactFilename(av.Artifact.Filename); err != nil {
 			return nil, err
 		}
-		files = append(files, &updaterv1.PlannedFile{
+		files = append(files, &enginestate.PlannedFile{
 			Name:      av.Artifact.Filename,
 			Size:      av.Artifact.Size,
 			Sha256Hex: av.Artifact.Sha256,
@@ -335,7 +331,7 @@ func (e *Engine) buildPlan(st store, profile *updaterv1.ClientProfile, runtime *
 			Kind:      model.ArtifactKindString(av.Artifact.Kind),
 		})
 	}
-	plan := &updaterv1.UpdatePlan{
+	plan := &enginestate.UpdatePlan{
 		PlanId:               id,
 		Product:              profile.Product,
 		Channel:              runtime.Channel,
@@ -361,8 +357,8 @@ func (e *Engine) buildPlan(st store, profile *updaterv1.ClientProfile, runtime *
 	return plan, nil
 }
 
-func hmacPlan(key []byte, plan *updaterv1.UpdatePlan) []byte {
-	clone := proto.Clone(plan).(*updaterv1.UpdatePlan)
+func hmacPlan(key []byte, plan *enginestate.UpdatePlan) []byte {
+	clone := proto.Clone(plan).(*enginestate.UpdatePlan)
 	clone.PlanHmac = nil
 	raw, _ := proto.Marshal(clone)
 	mac := hmac.New(sha256.New, key)
@@ -370,11 +366,11 @@ func hmacPlan(key []byte, plan *updaterv1.UpdatePlan) []byte {
 	return mac.Sum(nil)
 }
 
-func verifyPlan(key []byte, plan *updaterv1.UpdatePlan) bool {
+func verifyPlan(key []byte, plan *enginestate.UpdatePlan) bool {
 	return hmac.Equal(plan.PlanHmac, hmacPlan(key, plan))
 }
 
-func engineStateToSDK(st *updaterv1.PersistedState) *sdk.UpdateState {
+func engineStateToSDK(st *enginestate.PersistedState) *sdk.UpdateState {
 	out := &sdk.UpdateState{}
 	if st.LastCheckAt != nil {
 		t := st.LastCheckAt.AsTime()

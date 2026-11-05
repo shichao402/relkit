@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/testutil"
 	"github.com/shichao402/relkit/internal/vnext/runtimebootstrap"
 	"github.com/shichao402/relkit/internal/vnext/runtimeprofile"
@@ -17,7 +17,7 @@ import (
 
 // updateFixtures rewrites the conformance fixtures instead of asserting them.
 //
-//	 go test ./internal/updater/ -run RuntimeBootstrapConformance -args -update
+//	go test ./internal/updater/ -run RuntimeBootstrapConformance -args -update
 //
 // The fixtures are golden files: they are produced by the real generator
 // (runtimebootstrap.New over a signed runtime profile), never typed by hand, so
@@ -116,8 +116,8 @@ func TestRuntimeBootstrapConformanceFixture(t *testing.T) {
 			"regenerate with -run RuntimeBootstrapConformance -args -update")
 	}
 	// The fixture must be accepted by the engine exactly as a host would send it.
-	resolved, report, rerr := resolveBootstrap(
-		&updaterv1.ClientProfile{Bootstrap: string(got), ExpectedProduct: "loom"}, "dev")
+	resolved, report, rerr := openProfile(
+		&updaterv2.ClientProfile{Bootstrap: string(got), ExpectedProduct: "loom"}, "dev")
 	if rerr != nil {
 		t.Fatalf("fixture must resolve: %v", rerr)
 	}
@@ -142,11 +142,11 @@ func TestRuntimeBootstrapNumericKeyConformanceFixture(t *testing.T) {
 		return
 	}
 	raw := fixtureBytes(t, path)
-	_, _, rerr := resolveBootstrap(&updaterv1.ClientProfile{Bootstrap: string(raw)}, "dev")
+	_, _, rerr := openProfile(&updaterv2.ClientProfile{Bootstrap: string(raw), ExpectedProduct: "loom"}, "dev")
 	if rerr == nil {
 		t.Fatal("a numeric rootPublicKey must be rejected, not hashed")
 	}
-	if rerr.Code != updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID {
+	if rerr.Code != updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID {
 		t.Fatalf("code = %v, want PROFILE_INVALID", rerr.Code)
 	}
 }

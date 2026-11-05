@@ -4,7 +4,6 @@ package registry
 import (
 	_ "embed"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/shichao402/relkit/internal/vnext/document"
@@ -20,8 +19,6 @@ type Role string
 const (
 	RoleInfrastructureBinary Role = "infrastructure-binary"
 	RoleProductBinary        Role = "product-binary"
-	RoleFacade               Role = "facade"
-	RoleProjection           Role = "projection"
 )
 
 type Transport string
@@ -31,38 +28,17 @@ const (
 	TransportReleaseAsset Transport = "release-asset"
 )
 
-// PackKind identifies how a product-tree component is zipped.
-type PackKind string
-
-const (
-	PackTrackedTree PackKind = "tracked-tree"
-	PackWorkingTree PackKind = "working-tree"
-	PackListedFiles PackKind = "listed-files"
-)
-
-// Pack declares the zip shape of one product-tree component.
-type Pack struct {
-	Kind            PackKind    `json:"kind"`
-	Files           []string    `json:"files,omitempty"`
-	ExcludeParts    []string    `json:"excludeParts,omitempty"`
-	ExcludeSuffixes []string    `json:"excludeSuffixes,omitempty"`
-	ExcludePaths    []string    `json:"excludePaths,omitempty"`
-	Extras          [][2]string `json:"extras,omitempty"`
-}
-
 // Build declares how a component is produced and named in a relkit release.
 // It replaces the retired internal/registry table: one declarative registry
 // now owns both the distribution identity (name/role/targets/transport) and
-// the release asset naming rule (binary prefix or archive name).
+// the release asset naming rule (binary prefix). Every component is a Go
+// binary: the product-tree roles (facade/projection) went with the SDKs and
+// bindings (ADR 0026), leaving relkit-updater plus its proto as the only host
+// surface.
 type Build struct {
-	Flag           string   `json:"flag"`
-	GoPackage      string   `json:"goPackage,omitempty"`
-	BinaryPrefix   string   `json:"binaryPrefix,omitempty"`
-	Archive        string   `json:"archive,omitempty"`
-	Source         string   `json:"source,omitempty"`
-	Pack           *Pack    `json:"pack,omitempty"`
-	UpdaterProcess string   `json:"updaterProcess,omitempty"`
-	FacadePaths    []string `json:"facadePaths,omitempty"`
+	Flag         string `json:"flag"`
+	GoPackage    string `json:"goPackage"`
+	BinaryPrefix string `json:"binaryPrefix"`
 }
 
 type Component struct {
@@ -76,7 +52,7 @@ type Component struct {
 }
 
 type Document struct {
-	Schema     string      `json:"schema"`
+	Schema string `json:"schema"`
 	// BuildTargets lists every platform `relkit build` cross-compiles for.
 	// darwin-universal is absent on purpose: it is lipo-composed from the
 	// thin darwin binaries, never compiled.
@@ -122,7 +98,7 @@ func (d Document) Validate() error {
 		}
 		seen[component.Name] = true
 		switch component.Role {
-		case RoleInfrastructureBinary, RoleProductBinary, RoleFacade, RoleProjection:
+		case RoleInfrastructureBinary, RoleProductBinary:
 		default:
 			return fmt.Errorf("component %q has unknown role %q", component.Name, component.Role)
 		}
@@ -151,70 +127,16 @@ func (d Document) Validate() error {
 	return nil
 }
 
-// validateBuild enforces the release asset naming rule each component needs.
-// Role decides the shape: binaries carry a goPackage plus a binaryPrefix (or
-// an archive for portable trees); every component carries a build flag so
-// `relkit build --<flag>` stays derivable from this file alone.
+// validateBuild enforces the release asset naming rule: every component
+// carries a build flag (so `relkit build --<flag>` stays derivable from this
+// file alone), a goPackage, and a binaryPrefix.
 func validateBuild(component Component) error {
 	build := component.Build
 	if build.Flag == "" {
 		return fmt.Errorf("component %q has no build flag", component.Name)
 	}
-	switch component.Role {
-	case RoleInfrastructureBinary, RoleProductBinary:
-		if build.GoPackage == "" || build.BinaryPrefix == "" {
-			return fmt.Errorf("component %q must declare goPackage and binaryPrefix", component.Name)
-		}
-		if build.Archive != "" || build.Source != "" || build.Pack != nil {
-			return fmt.Errorf("component %q is a binary and must not declare archive/source/pack", component.Name)
-		}
-		if build.UpdaterProcess != "" || len(build.FacadePaths) > 0 {
-			return fmt.Errorf("component %q is a binary and must not declare host surface fields", component.Name)
-		}
-	case RoleFacade, RoleProjection:
-		if build.Archive == "" || build.Source == "" || build.Pack == nil {
-			return fmt.Errorf("component %q must declare archive, source, and pack", component.Name)
-		}
-		if build.GoPackage != "" || build.BinaryPrefix != "" {
-			return fmt.Errorf("component %q is a product tree and must not declare goPackage/binaryPrefix", component.Name)
-		}
-		if err := validatePack(component.Name, build); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validatePack(name string, build Build) error {
-	pack := build.Pack
-	kind := pack.Kind
-	if kind == "" {
-		return fmt.Errorf("component %q pack has no kind", name)
-	}
-	switch kind {
-	case PackTrackedTree:
-		if len(pack.Files) > 0 || len(pack.ExcludeParts) > 0 || len(pack.ExcludeSuffixes) > 0 {
-			return fmt.Errorf("component %q tracked-tree pack carries fields of another kind", name)
-		}
-	case PackWorkingTree:
-		if len(pack.Files) > 0 || len(pack.ExcludeSuffixes) > 0 {
-			return fmt.Errorf("component %q working-tree pack carries fields of another kind", name)
-		}
-	case PackListedFiles:
-		if len(pack.Files) == 0 {
-			return fmt.Errorf("component %q listed-files pack requires files", name)
-		}
-		if len(pack.ExcludeParts) > 0 || len(pack.ExcludeSuffixes) > 0 {
-			return fmt.Errorf("component %q listed-files pack carries fields of another kind", name)
-		}
-	default:
-		return fmt.Errorf("component %q has unknown pack kind %q", name, kind)
-	}
-	if build.UpdaterProcess != "" && len(build.FacadePaths) == 0 {
-		return fmt.Errorf("component %q updaterProcess requires facadePaths", name)
-	}
-	if build.UpdaterProcess == "" && len(build.FacadePaths) > 0 {
-		return fmt.Errorf("component %q facadePaths require updaterProcess", name)
+	if build.GoPackage == "" || build.BinaryPrefix == "" {
+		return fmt.Errorf("component %q must declare goPackage and binaryPrefix", component.Name)
 	}
 	return nil
 }
@@ -256,15 +178,9 @@ func (d Document) InRoles(roles ...Role) []Component {
 }
 
 // ReleaseAssetName returns the release attachment name for the component at
-// target, plus the manifest os-arch label that names it. Product trees use
-// "all" and report any-any; binaries append .exe on Windows.
+// target, plus the manifest os-arch label that names it. Windows binaries
+// append .exe.
 func (c Component) ReleaseAssetName(target string) (string, string, error) {
-	if c.Role == RoleFacade || c.Role == RoleProjection {
-		if c.Build.Archive == "" {
-			return "", "", fmt.Errorf("portable component has no archive")
-		}
-		return c.Build.Archive, "any-any", nil
-	}
 	if c.Build.BinaryPrefix == "" {
 		return "", "", fmt.Errorf("targeted component has no binary prefix")
 	}
@@ -285,45 +201,4 @@ func (c Component) ShellName(target string) (string, error) {
 		name += ".exe"
 	}
 	return name, nil
-}
-
-// Required returns component names for the declared platform/language surface.
-func (d Document) Required(platform string, facades, projections []string, updaterHost bool) ([]string, error) {
-	required := []string{"cli"}
-	if updaterHost {
-		required = append(required, "updater")
-	}
-	for _, facade := range facades {
-		required = append(required, "sdk-"+facade)
-	}
-	for _, projection := range projections {
-		if projection == "ts" || projection == "typescript" {
-			required = append(required, "bindings-ts")
-		} else {
-			required = append(required, "bindings-"+projection)
-		}
-	}
-	required = unique(required)
-	for _, name := range required {
-		component, ok := d.ByName(name)
-		if !ok {
-			return nil, fmt.Errorf("required component %q is not registered", name)
-		}
-		if !slices.Contains(component.Targets, "all") && !slices.Contains(component.Targets, platform) {
-			return nil, fmt.Errorf("component %q does not support platform %q", name, platform)
-		}
-	}
-	return required, nil
-}
-
-func unique(values []string) []string {
-	seen := map[string]bool{}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if !seen[value] {
-			seen[value] = true
-			result = append(result, value)
-		}
-	}
-	return result
 }

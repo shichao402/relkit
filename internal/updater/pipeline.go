@@ -10,7 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/payload"
 	"google.golang.org/protobuf/proto"
@@ -22,12 +23,12 @@ const (
 )
 
 type applyContent struct {
-	table       *updaterv1.FileTable
+	table       *enginestate.FileTable
 	filesRoot   string
 	scriptsRoot string
 }
 
-func planRequiresHostExit(inst *updaterv1.InstallSpec, plan *updaterv1.UpdatePlan) (bool, error) {
+func planRequiresHostExit(inst *updaterv2.InstallSpec, plan *enginestate.UpdatePlan) (bool, error) {
 	if inst == nil || plan == nil || len(plan.Files) == 0 {
 		return false, fmt.Errorf("plan has no files")
 	}
@@ -43,7 +44,7 @@ func planRequiresHostExit(inst *updaterv1.InstallSpec, plan *updaterv1.UpdatePla
 		if file == nil {
 			continue
 		}
-		if inst.Placement == updaterv1.Placement_PLACEMENT_IN_PLACE &&
+		if inst.Placement == updaterv2.Placement_PLACEMENT_IN_PLACE &&
 			sameRelpath(file.Relpath, inst.ExecutableRelpath) {
 			return true, nil
 		}
@@ -54,22 +55,22 @@ func planRequiresHostExit(inst *updaterv1.InstallSpec, plan *updaterv1.UpdatePla
 	return false, nil
 }
 
-func applyPlan(dataDir string, sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) error {
+func applyPlan(dataDir string, sess *enginestate.ApplySessionRecord, plan *enginestate.UpdatePlan) error {
 	content, err := prepareContent(sess, plan)
 	if err != nil {
 		return err
 	}
 	switch sess.Placement {
-	case updaterv1.Placement_PLACEMENT_IN_PLACE:
+	case updaterv2.Placement_PLACEMENT_IN_PLACE:
 		return applyContentTable(dataDir, sess, plan, content, sess.InstallRoot, true)
-	case updaterv1.Placement_PLACEMENT_LIBRARY:
+	case updaterv2.Placement_PLACEMENT_LIBRARY:
 		return applyLibraryContent(dataDir, sess, plan, content)
 	default:
 		return fmt.Errorf("unsupported placement")
 	}
 }
 
-func prepareContent(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan) (*applyContent, error) {
+func prepareContent(sess *enginestate.ApplySessionRecord, plan *enginestate.UpdatePlan) (*applyContent, error) {
 	if len(plan.Files) == 0 {
 		return nil, fmt.Errorf("plan has no files")
 	}
@@ -84,7 +85,7 @@ func prepareContent(sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePl
 	return &applyContent{table: pkg.Table, filesRoot: pkg.FilesRoot, scriptsRoot: pkg.ScriptsRoot}, nil
 }
 
-func applyLibraryContent(dataDir string, sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan, content *applyContent) error {
+func applyLibraryContent(dataDir string, sess *enginestate.ApplySessionRecord, plan *enginestate.UpdatePlan, content *applyContent) error {
 	id := strings.ReplaceAll(plan.Version, "/", "_")
 	if id == "" {
 		id = fmt.Sprintf("code-%d", plan.Code)
@@ -128,8 +129,8 @@ func applyLibraryContent(dataDir string, sess *updaterv1.ApplySessionRecord, pla
 	return nil
 }
 
-func applyContentTable(dataDir string, sess *updaterv1.ApplySessionRecord, plan *updaterv1.UpdatePlan, content *applyContent, targetRoot string, useBaseline bool) error {
-	if err := runScripts(content, updaterv1.ScriptPhase_SCRIPT_PHASE_PRE_APPLY, sess.InstallRoot); err != nil {
+func applyContentTable(dataDir string, sess *enginestate.ApplySessionRecord, plan *enginestate.UpdatePlan, content *applyContent, targetRoot string, useBaseline bool) error {
+	if err := runScripts(content, enginestate.ScriptPhase_SCRIPT_PHASE_PRE_APPLY, sess.InstallRoot); err != nil {
 		return fmt.Errorf("pre-apply script: %w", err)
 	}
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
@@ -142,14 +143,14 @@ func applyContentTable(dataDir string, sess *updaterv1.ApplySessionRecord, plan 
 	// 与 StagedRoot 跨卷同样不安全，统一用 targetRoot 同卷位置。
 	backupRoot := filepath.Join(targetRoot, ".relkit-backup", sess.SessionId)
 	_ = os.RemoveAll(backupRoot)
-	journal := &updaterv1.ApplyJournal{SessionId: sess.SessionId}
+	journal := &enginestate.ApplyJournal{SessionId: sess.SessionId}
 	rollback := func(cause error) error {
 		rollbackJournal(journal)
 		return cause
 	}
 	preserved := append([]string(nil), sess.Preserve...)
 	preserved = append(preserved, content.table.Preserve...)
-	current := make(map[string]*updaterv1.FileEntry, len(content.table.Files))
+	current := make(map[string]*enginestate.FileEntry, len(content.table.Files))
 	for _, file := range content.table.Files {
 		if file == nil {
 			continue
@@ -172,7 +173,7 @@ func applyContentTable(dataDir string, sess *updaterv1.ApplySessionRecord, plan 
 				return rollback(err)
 			}
 		}
-		entry := &updaterv1.JournalEntry{DestPath: dest, BackupPath: backup, SourcePath: src}
+		entry := &enginestate.JournalEntry{DestPath: dest, BackupPath: backup, SourcePath: src}
 		journal.Entries = append(journal.Entries, entry)
 		if err := writeJournal(journalPath, journal); err != nil {
 			return rollback(err)
@@ -209,20 +210,20 @@ func applyContentTable(dataDir string, sess *updaterv1.ApplySessionRecord, plan 
 			if err := os.Rename(dest, backup); err != nil {
 				return rollback(err)
 			}
-			journal.Entries = append(journal.Entries, &updaterv1.JournalEntry{DestPath: dest, BackupPath: backup})
+			journal.Entries = append(journal.Entries, &enginestate.JournalEntry{DestPath: dest, BackupPath: backup})
 			if err := writeJournal(journalPath, journal); err != nil {
 				return rollback(err)
 			}
 		}
 	}
-	if err := runScripts(content, updaterv1.ScriptPhase_SCRIPT_PHASE_POST_APPLY, sess.InstallRoot); err != nil {
+	if err := runScripts(content, enginestate.ScriptPhase_SCRIPT_PHASE_POST_APPLY, sess.InstallRoot); err != nil {
 		return rollback(fmt.Errorf("post-apply script: %w", err))
 	}
 	if useBaseline {
-		next := &updaterv1.Baseline{Schema: baselineSchema, Code: plan.Code, Version: plan.Version}
+		next := &enginestate.Baseline{Schema: baselineSchema, Code: plan.Code, Version: plan.Version}
 		for _, file := range content.table.Files {
 			if file != nil {
-				next.Files = append(next.Files, &updaterv1.BaselineEntry{Relpath: file.Relpath, Sha256: file.Sha256})
+				next.Files = append(next.Files, &enginestate.BaselineEntry{Relpath: file.Relpath, Sha256: file.Sha256})
 			}
 		}
 		if err := saveBaseline(filepath.Join(dataDir, baselineFileName), next); err != nil {
@@ -239,7 +240,7 @@ func applyContentTable(dataDir string, sess *updaterv1.ApplySessionRecord, plan 
 	return nil
 }
 
-func runScripts(content *applyContent, phase updaterv1.ScriptPhase, workDir string) error {
+func runScripts(content *applyContent, phase enginestate.ScriptPhase, workDir string) error {
 	for _, script := range content.table.Scripts {
 		if script == nil || script.Phase != phase {
 			continue
@@ -249,11 +250,11 @@ func runScripts(content *applyContent, phase updaterv1.ScriptPhase, workDir stri
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		var command *exec.Cmd
 		switch script.Interpreter {
-		case updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_DIRECT:
+		case enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_DIRECT:
 			command = exec.CommandContext(ctx, path, script.Args...)
-		case updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_SH:
+		case enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_SH:
 			command = exec.CommandContext(ctx, "sh", append([]string{path}, script.Args...)...)
-		case updaterv1.ScriptInterpreter_SCRIPT_INTERPRETER_POWERSHELL:
+		case enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_POWERSHELL:
 			args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path}
 			command = exec.CommandContext(ctx, "powershell", append(args, script.Args...)...)
 		default:
@@ -270,19 +271,19 @@ func runScripts(content *applyContent, phase updaterv1.ScriptPhase, workDir stri
 	return nil
 }
 
-func loadBaseline(path string) *updaterv1.Baseline {
+func loadBaseline(path string) *enginestate.Baseline {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	baseline := &updaterv1.Baseline{}
+	baseline := &enginestate.Baseline{}
 	if proto.Unmarshal(raw, baseline) != nil || baseline.Schema != baselineSchema {
 		return nil
 	}
 	return baseline
 }
 
-func saveBaseline(path string, baseline *updaterv1.Baseline) error {
+func saveBaseline(path string, baseline *enginestate.Baseline) error {
 	raw, err := proto.Marshal(baseline)
 	if err != nil {
 		return err

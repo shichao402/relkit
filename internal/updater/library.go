@@ -9,54 +9,54 @@ import (
 	"strings"
 	"time"
 
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 )
 
-func (e *Engine) handleListInstalled(req *updaterv1.UpdaterRequest) error {
+func (e *Engine) handleListInstalled(req *updaterv2.UpdaterRequest) error {
 	root := req.GetRuntime().GetInstall().GetInstallRoot()
 	if root == "" {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
 	}
 	list := listInstalled(root)
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Installed{Installed: list},
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Installed{Installed: list},
 	})
 }
 
-func (e *Engine) handleSwitchActive(req *updaterv1.UpdaterRequest, op *updaterv1.SwitchActiveOp) error {
+func (e *Engine) handleSwitchActive(req *updaterv2.UpdaterRequest, op *updaterv2.SwitchActiveOp) error {
 	root := req.GetRuntime().GetInstall().GetInstallRoot()
 	if root == "" {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
 	}
 	if op == nil || op.Code == 0 {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "code required", nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "code required", nil))
 	}
 	if err := acquireApplyLock(root, "switch"); err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil))
 	}
 	defer releaseApplyLock(root)
 	if err := switchActive(root, op.Code); err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, err.Error(), nil))
 	}
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}},
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Result{Result: &updaterv2.Result{Kind: &updaterv2.Result_Ok{Ok: &updaterv2.Ok{}}}},
 	})
 }
 
-func (e *Engine) handleRollback(req *updaterv1.UpdaterRequest) error {
+func (e *Engine) handleRollback(req *updaterv2.UpdaterRequest) error {
 	root := req.GetRuntime().GetInstall().GetInstallRoot()
 	if root == "" {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
 	}
 	if err := acquireApplyLock(root, "rollback"); err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil))
 	}
 	defer releaseApplyLock(root)
 	if err := rollbackActive(root); err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_ROLLBACK_REJECTED, false, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_ROLLBACK_REJECTED, false, err.Error(), nil))
 	}
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}},
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Result{Result: &updaterv2.Result{Kind: &updaterv2.Result_Ok{Ok: &updaterv2.Ok{}}}},
 	})
 }
 
@@ -68,27 +68,27 @@ func (e *Engine) handleRollback(req *updaterv1.UpdaterRequest) error {
 //   - versions the host declares in use (open windows) are never deletable;
 //   - the delete holds .relkit-apply.lock, so it can never interleave with an
 //     apply that is writing versions/.
-func (e *Engine) handleDeleteInstalled(req *updaterv1.UpdaterRequest, op *updaterv1.DeleteInstalledOp) error {
+func (e *Engine) handleDeleteInstalled(req *updaterv2.UpdaterRequest, op *updaterv2.DeleteInstalledOp) error {
 	root := req.GetRuntime().GetInstall().GetInstallRoot()
 	if root == "" {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "installRoot required", nil))
 	}
-	if req.GetRuntime().GetInstall().GetPlacement() != updaterv1.Placement_PLACEMENT_LIBRARY {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, false,
+	if req.GetRuntime().GetInstall().GetPlacement() != updaterv2.Placement_PLACEMENT_LIBRARY {
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, false,
 			"deleteInstalled only applies to LIBRARY installs", nil))
 	}
 	if op == nil || op.Code <= 0 {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "code required", nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, false, "code required", nil))
 	}
 	if err := acquireApplyLock(root, "delete"); err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil))
 	}
 	defer releaseApplyLock(root)
 	if err := deleteInstalled(root, op.Code, op.InUseCodes); err != nil {
-		return e.emit(failedEvent(updaterv1.ErrorCode_ERROR_CODE_OCCUPIED, false, err.Error(), nil))
+		return e.emit(failedEvent(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, false, err.Error(), nil))
 	}
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Result{Result: &updaterv1.Result{Kind: &updaterv1.Result_Ok{Ok: &updaterv1.Ok{}}}},
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Result{Result: &updaterv2.Result{Kind: &updaterv2.Result_Ok{Ok: &updaterv2.Ok{}}}},
 	})
 }
 
@@ -129,8 +129,8 @@ func deleteInstalled(root string, code int64, inUse []int64) error {
 	return nil
 }
 
-func listInstalled(root string) *updaterv1.InstalledList {
-	out := &updaterv1.InstalledList{}
+func listInstalled(root string) *updaterv2.InstalledList {
+	out := &updaterv2.InstalledList{}
 	active := readActive(root)
 	if active != nil {
 		out.ActiveCode = active.Code
@@ -147,7 +147,7 @@ func listInstalled(root string) *updaterv1.InstalledList {
 		rel := filepath.ToSlash(filepath.Join("versions", e.Name()))
 		abs := filepath.Join(root, filepath.FromSlash(rel))
 		meta := readVersionMeta(abs)
-		item := &updaterv1.InstalledVersion{Path: rel}
+		item := &updaterv2.InstalledVersion{Path: rel}
 		if meta != nil {
 			item.Code = meta.Code
 			item.Version = meta.Version
@@ -172,7 +172,7 @@ func listInstalled(root string) *updaterv1.InstalledList {
 
 func switchActive(root string, code int64) error {
 	list := listInstalled(root)
-	var found *updaterv1.InstalledVersion
+	var found *updaterv2.InstalledVersion
 	for _, v := range list.Versions {
 		if v.Code == code {
 			found = v

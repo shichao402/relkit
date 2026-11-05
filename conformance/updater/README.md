@@ -6,7 +6,8 @@ Black-box fixtures for `relkit-updater`. Root `conformance/` RUP fixtures remain
 
 | Fixture | Asserts |
 |---------|---------|
-| `facade-signatures.txt` | generated facades contain the locked method set |
+| `protocol-request-check.json` | a full v2 `UpdaterRequest` (ProtoJSON) decodes strictly and round-trips |
+| `protocol-events.jsonl` | one ProtoJSON `UpdaterEvent` per line covering every event kind; strict decode + semantic round-trip |
 | `runtime-bootstrap.json` | the generator's real bootstrap is accepted and reported back in the handshake |
 | `runtime-bootstrap-numeric-key.json` | `rootPublicKey` written as a number array is rejected (2026-10-17 accident) |
 | `policy-clamp.json` | 0.5h / 0 duration clamp to minCheckInterval |
@@ -21,7 +22,15 @@ documents:
 go test ./internal/updater/ -run RuntimeBootstrap -args -update
 ```
 
-Run: `go test ./internal/updater ./cmd/relkit-facade-gen`；Rust 投影：`cargo test --manifest-path sdk/rust/Cargo.toml`
+The protocol samples are compared with `proto.Equal`, not byte-for-byte: Go
+`protojson` deliberately randomizes whitespace. Hosts can reuse them to test
+their own strict decoding. Regenerate after a contract change:
+
+```
+go test ./internal/updater/ -run 'Protocol(Request|Events)Conformance' -args -update
+```
+
+Run: `go test ./internal/updater`
 
 ## apply/
 

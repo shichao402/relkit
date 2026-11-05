@@ -121,11 +121,9 @@ artifacts produce → artifact-set.json
 ```text
 .relkit/components/bin/relkit[.exe]
 .relkit/components/bin/relkit-updater[.exe]
-.relkit/components/sdk/go
-.relkit/components/sdk/dart
-.relkit/components/sdk/rust
-.relkit/components/bindings/ts
 ```
+
+没有 SDK 落点：宿主用 `relkit-updater proto` 导出契约自行生成类型（ADR 0026）。
 
 宿主不 clone Relkit，不从 PATH 猜 CLI，也不读任何 consume lock。
 
@@ -240,7 +238,7 @@ releaseCode 由服务器分配（ADR 0025）。CI 在构建前领号，一次发
 - `--os` / `--arch`：单目标
 - `--all`：全部目标
 - `--check-tag <tag>`：校验 tag 与 `VERSION.json` 一致
-- 组件开关来自注册表的 `build.flag`：`--store` `--console` `--agent` `--ops` `--cli` `--updater` `--dart-sdk` `--go-sdk` `--rust-sdk` `--bindings-ts`
+- 组件开关来自注册表的 `build.flag`：`--store` `--console` `--agent` `--ops` `--cli` `--updater`
 
 未在注册表登记的 flag 直接报错。
 

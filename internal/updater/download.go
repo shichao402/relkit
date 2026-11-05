@@ -1,4 +1,4 @@
-﻿package updater
+package updater
 
 import (
 	"context"
@@ -8,55 +8,55 @@ import (
 	"time"
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
-	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/sdk"
 )
 
-func (e *Engine) handleDownload(ctx context.Context, req *updaterv1.UpdaterRequest, op *updaterv1.DownloadOp, st store) error {
+func (e *Engine) handleDownload(ctx context.Context, req *updaterv2.UpdaterRequest, op *updaterv2.DownloadOp, st store) error {
 	if op == nil || op.PlanId == "" {
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-				Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-					Error: newError(updaterv1.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, false, "planId required", nil),
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+				Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+					Error: newError(updaterv2.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, false, "planId required", nil),
 				}},
 			}},
 		})
 	}
 	plan, err := st.loadPlan(op.PlanId)
 	if err != nil {
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-				Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-					Error: newError(updaterv1.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, false, "unknown planId", nil),
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+				Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+					Error: newError(updaterv2.ErrorCode_ERROR_CODE_PLAN_UNKNOWN, false, "unknown planId", nil),
 				}},
 			}},
 		})
 	}
 	key, err := st.planKey()
 	if err != nil || !verifyPlan(key, plan) {
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-				Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-					Error: newError(updaterv1.ErrorCode_ERROR_CODE_PLAN_TAMPERED, false, "plan hmac mismatch", nil),
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+				Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+					Error: newError(updaterv2.ErrorCode_ERROR_CODE_PLAN_TAMPERED, false, "plan hmac mismatch", nil),
 				}},
 			}},
 		})
 	}
 	if plan.ExpiresAt != nil && time.Now().After(plan.ExpiresAt.AsTime()) {
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-				Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-					Error: newError(updaterv1.ErrorCode_ERROR_CODE_PLAN_EXPIRED, false, "plan expired", nil),
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+				Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+					Error: newError(updaterv2.ErrorCode_ERROR_CODE_PLAN_EXPIRED, false, "plan expired", nil),
 				}},
 			}},
 		})
 	}
 	destDir := filepath.Join(req.GetRuntime().GetDataDir(), "staging", plan.PlanId)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-				Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-					Error: newError(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil),
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+				Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+					Error: newError(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil),
 				}},
 			}},
 		})
@@ -64,10 +64,10 @@ func (e *Engine) handleDownload(ctx context.Context, req *updaterv1.UpdaterReque
 	var total int64
 	for _, f := range plan.Files {
 		if err := ValidateArtifactFilename(f.Name); err != nil {
-			return e.emit(&updaterv1.UpdaterEvent{
-				Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-					Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-						Error: newError(updaterv1.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, err.Error(), nil),
+			return e.emit(&updaterv2.UpdaterEvent{
+				Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+					Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+						Error: newError(updaterv2.ErrorCode_ERROR_CODE_SELECTOR_NO_MATCH, false, err.Error(), nil),
 					}},
 				}},
 			})
@@ -80,8 +80,8 @@ func (e *Engine) handleDownload(ctx context.Context, req *updaterv1.UpdaterReque
 			Urls:     f.Urls,
 		}
 		verified, err := sdk.DownloadArtifact(ctx, e.fetcher(), art, dest, sdk.DefaultPolicy(), func(p sdk.Progress) {
-			_ = e.emit(&updaterv1.UpdaterEvent{
-				Kind: &updaterv1.UpdaterEvent_Progress{Progress: &updaterv1.Progress{
+			_ = e.emit(&updaterv2.UpdaterEvent{
+				Kind: &updaterv2.UpdaterEvent_Progress{Progress: &updaterv2.Progress{
 					BytesReceived:  p.Received,
 					BytesTotal:     p.Total,
 					BytesPerSecond: p.BytesPerSecond,
@@ -89,10 +89,10 @@ func (e *Engine) handleDownload(ctx context.Context, req *updaterv1.UpdaterReque
 			})
 		})
 		if err != nil {
-			return e.emit(&updaterv1.UpdaterEvent{
-				Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-					Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-						Error: newError(updaterv1.ErrorCode_ERROR_CODE_NETWORK, true, err.Error(), nil),
+			return e.emit(&updaterv2.UpdaterEvent{
+				Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+					Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+						Error: newError(updaterv2.ErrorCode_ERROR_CODE_NETWORK, true, err.Error(), nil),
 					}},
 				}},
 			})
@@ -103,10 +103,10 @@ func (e *Engine) handleDownload(ctx context.Context, req *updaterv1.UpdaterReque
 		_ = hex.EncodeToString
 	}
 	if err := st.savePlan(plan); err != nil {
-		return e.emit(&updaterv1.UpdaterEvent{
-			Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-				Kind: &updaterv1.DownloadResult_Failed{Failed: &updaterv1.Failed{
-					Error: newError(updaterv1.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil),
+		return e.emit(&updaterv2.UpdaterEvent{
+			Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+				Kind: &updaterv2.DownloadResult_Failed{Failed: &updaterv2.Failed{
+					Error: newError(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil),
 				}},
 			}},
 		})
@@ -115,9 +115,9 @@ func (e *Engine) handleDownload(ctx context.Context, req *updaterv1.UpdaterReque
 	key, _ = st.planKey()
 	plan.PlanHmac = hmacPlan(key, plan)
 	_ = st.savePlan(plan)
-	return e.emit(&updaterv1.UpdaterEvent{
-		Kind: &updaterv1.UpdaterEvent_Download{Download: &updaterv1.DownloadResult{
-			Kind: &updaterv1.DownloadResult_Downloaded{Downloaded: &updaterv1.Downloaded{
+	return e.emit(&updaterv2.UpdaterEvent{
+		Kind: &updaterv2.UpdaterEvent_Download{Download: &updaterv2.DownloadResult{
+			Kind: &updaterv2.DownloadResult_Downloaded{Downloaded: &updaterv2.Downloaded{
 				PlanId: plan.PlanId,
 				Bytes:  total,
 			}},

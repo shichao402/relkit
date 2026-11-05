@@ -22,7 +22,6 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-import zipfile
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -205,115 +204,6 @@ def git_stamp(number: str) -> str:
     return stamp
 
 
-def release_source_paths(*prefixes: str) -> list[str]:
-    tracked = run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *prefixes],
-        cwd=REPO_ROOT,
-        capture=True,
-    ).stdout
-    return sorted(item for item in tracked.split("\0") if item)
-
-
-def write_deterministic_zip(
-    destination: Path, entries: Sequence[tuple[Path, str]]
-) -> None:
-    with zipfile.ZipFile(
-        destination,
-        "w",
-        compression=zipfile.ZIP_DEFLATED,
-        compresslevel=9,
-    ) as archive:
-        for source, archive_name in sorted(entries, key=lambda item: item[1]):
-            info = zipfile.ZipInfo(
-                archive_name,
-                date_time=(1980, 1, 1, 0, 0, 0),
-            )
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o100644 << 16
-            archive.writestr(info, source.read_bytes(), compresslevel=9)
-
-
-def tree_entries(source: str) -> list[tuple[Path, str]]:
-    source_root = REPO_ROOT / source
-    paths = release_source_paths(source)
-    if not paths:
-        raise Fail(f"{source} has no tracked files")
-    return [
-        (REPO_ROOT / relative, (REPO_ROOT / relative).relative_to(source_root).as_posix())
-        for relative in paths
-        if (REPO_ROOT / relative).is_file()
-    ]
-
-
-def working_tree_entries(source: str, exclude_parts: Sequence[str]) -> list[tuple[Path, str]]:
-    source_root = REPO_ROOT / source
-    if not source_root.is_dir():
-        raise Fail(f"{source} is missing")
-    excluded = set(exclude_parts)
-    return [
-        (path, path.relative_to(source_root).as_posix())
-        for path in sorted(source_root.rglob("*"))
-        if path.is_file() and not excluded.intersection(path.parts)
-    ]
-
-
-def listed_file_entries(source: str, names: Sequence[str], component: str) -> list[tuple[Path, str]]:
-    source_root = REPO_ROOT / source
-    entries = [(source_root / relative, relative) for relative in names]
-    missing = [relative for path, relative in entries if not path.is_file()]
-    if missing:
-        raise Fail(f"{component} is incomplete: " + ", ".join(missing))
-    return entries
-
-
-def component_entries(name: str) -> list[tuple[Path, str]]:
-    row = BY_NAME[name]
-    if row.role != "product-tree":
-        raise Fail(f"{name} is not a packed product-tree")
-    kind = row.pack_kind()
-    if kind == "listed-files":
-        entries = listed_file_entries(row.source, row.pack_files, row.name)
-    elif kind == "working-tree":
-        entries = working_tree_entries(row.source, row.pack_exclude_parts)
-    elif kind == "tracked-tree":
-        entries = tree_entries(row.source)
-    else:
-        # go-deps existed only for the retired sdk-go component; the epoch
-        # upgrade moves the Go packages into internal/ and ships no Go SDK
-        # (requirement 135 keeps pack-shape and this table in sync).
-        raise Fail(f"{row.name} has unknown pack {row.pack}")
-    for extra_src, extra_dest in row.pack_extras:
-        path = REPO_ROOT / extra_src
-        if not path.is_file():
-            raise Fail(f"{row.name} extra {extra_src} is missing")
-        entries.append((path, extra_dest))
-    if row.pack_exclude_paths:
-        entries = [
-            item for item in entries
-            if not pack_path_excluded(item[1], row.pack_exclude_paths)
-        ]
-    if not entries:
-        raise Fail(f"{row.name} packed no files")
-    # The retired source-grep facade gate (ADR 0019 §1) used to scan these
-    # entries for an in-process updater. Structure alone decides what is packed
-    # now: a facade's own conformance suite proves it, not a text match here.
-    return entries
-
-
-def pack_path_excluded(archive_name: str, prefixes: Sequence[str]) -> bool:
-    for prefix in prefixes:
-        if prefix.endswith("/"):
-            if archive_name == prefix[:-1] or archive_name.startswith(prefix):
-                return True
-        elif archive_name == prefix or archive_name.startswith(prefix + "/"):
-            return True
-    return False
-
-
-def rust_sdk_entries() -> list[tuple[Path, str]]:
-    return component_entries("sdk-rust")
-
-
 def cmd_build(args: argparse.Namespace) -> None:
     require_cmd("go")
     out_dir = Path(args.out)
@@ -321,20 +211,14 @@ def cmd_build(args: argparse.Namespace) -> None:
         out_dir = REPO_ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     binary_rows = registry_components("host-binary") + registry_components("product-binary")
-    tree_rows = registry_components("product-tree")
     if getattr(args, "all", False):
         targets = [row.name for row in binary_rows]
-        selected_trees = list(tree_rows)
     else:
         targets = [
             row.name for row in binary_rows
             if getattr(args, row.build_flag.replace("-", "_"), False)
         ]
-        selected_trees = [
-            row for row in tree_rows
-            if getattr(args, row.build_flag.replace("-", "_"), False)
-        ]
-        if not targets and not selected_trees:
+        if not targets:
             targets = ["store", "agent"]
     stamp = git_stamp(load_ssot()["number"])
     platforms = [tuple(target.split("-", 1)) for target in TARGETS]
@@ -346,15 +230,13 @@ def cmd_build(args: argparse.Namespace) -> None:
         die("no build platforms left after --os/--arch filters")
     pkgs = {row.name: (row.go_package, row.binary_prefix) for row in binary_rows}
     step(f"build {stamp}")
-    # The retired scripts/host/release-contract.json used to pin these windows
-    # (ADR 0019 §1). Their Go sources are the SSOT now; validating the window
-    # itself is `relkit build`'s job, and this deploy path keeps the same rule.
-    ipc_min, ipc_max = updater_ipc_window()
+    # The retired scripts/host/release-contract.json used to pin these numbers
+    # (ADR 0019 §1). Their Go sources are the SSOT now; validating them is
+    # `relkit build`'s job, and this deploy path keeps the same rule.
+    updater_proto = updater_protocol()
     protocol_min, protocol_max = publish_protocol_window()
     if protocol_min <= 0 or protocol_max < protocol_min:
         die("internal/publishproto declares an invalid protocol window")
-    if ipc_min <= 0 or ipc_max < ipc_min:
-        die("internal/updater declares an invalid IPC window")
     protocol = {"min": protocol_min, "max": protocol_max}
     built: list[dict[str, Any]] = []
     manifest_file = out_dir / "manifest.json"
@@ -410,19 +292,6 @@ def cmd_build(args: argparse.Namespace) -> None:
                 if (row["component"], row["os"], row["arch"]) != (kind, os_name, arch)
             ]
             built.append({"component": kind, "os": os_name, "arch": arch, "path": dest.name, "sha256": file_sha256(dest)})
-    for row in selected_trees:
-        entries = component_entries(row.name)
-        archive = out_dir / row.archive
-        write_deterministic_zip(archive, entries)
-        built.append(
-            {
-                "component": row.name,
-                "os": "any",
-                "arch": "any",
-                "path": archive.name,
-                "sha256": file_sha256(archive),
-            }
-        )
     ident = git_identity()
     manifest = {
         "schema": "relkit.release/1",
@@ -431,8 +300,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         "dirty": ident["dirty"] == "true",
         "minProtocol": protocol.get("min"),
         "maxProtocol": protocol.get("max"),
-        "minUpdaterIpc": ipc_min,
-        "maxUpdaterIpc": ipc_max,
+        "updaterProtocol": updater_proto,
         "builtAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "artifacts": built,
     }
@@ -440,14 +308,13 @@ def cmd_build(args: argparse.Namespace) -> None:
     print(f"output in {out_dir}")
 
 
-def updater_ipc_window() -> tuple[int, int]:
-    """Sidecar IPC window from internal/updater/const.go (same numbers as the facades)."""
+def updater_protocol() -> int:
+    """The single updater protocol number from internal/updater/const.go (ADR 0026)."""
     text = (REPO_ROOT / "internal" / "updater" / "const.go").read_text(encoding="utf-8")
-    found_min = re.search(r"IPCMin\s+uint32\s*=\s*(\d+)", text)
-    found_max = re.search(r"IPCMax\s+uint32\s*=\s*(\d+)", text)
-    if found_min is None or found_max is None:
-        die("cannot read IPCMin/IPCMax from internal/updater/const.go")
-    return int(found_min.group(1)), int(found_max.group(1))
+    found = re.search(r"^\s*Protocol\s+uint32\s*=\s*(\d+)", text, re.MULTILINE)
+    if found is None or int(found.group(1)) <= 0:
+        die("cannot read a positive Protocol from internal/updater/const.go")
+    return int(found.group(1))
 
 
 def publish_protocol_window() -> tuple[int, int]:
@@ -2934,23 +2801,12 @@ def cmd_version(args: argparse.Namespace) -> None:
 
 # The relkit components a host CI downloads and runs. Only the ones a host
 # actually fetches are published as tools: the server programs are installed by
-# the deploy pipeline itself, never fetched by a host.
-#
-# sdk-dart is included because requirement 12 makes the server the only place a
-# host materialises its thin client from: SvnMergeTool resolves its `rup_client`
-# dependency out of the served tool surface at build time, so a tool surface
-# without sdk-dart leaves that host unable to build at all.
-#
-# sdk-rust is included for the same reason: Loom-Launcher's Rust shell links the
-# facade crate (`relkit-updater = { path = ".relkit/components/sdk/rust" }`), so
-# a server that serves no sdk-rust leaves that host unable to build at all. It is
-# a thin IPC client (it spawns the updater sidecar), which is exactly the shape
-# requirement 12 keeps on the server.
-TOOL_COMPONENT_NAMES = ("cli", "updater", "ops", "sdk-dart", "sdk-rust")
-# Binaries are cross-compiled per platform; trees are platform-independent and
-# are published once under the "all" platform a host asks for by name.
-TOOL_BINARY_NAMES = ("cli", "updater", "ops")
-TOOL_TREE_NAMES = ("sdk-dart", "sdk-rust")
+# the deploy pipeline itself, never fetched by a host. ADR 0026 retired the
+# sdk-dart / sdk-rust / bindings-ts trees: a host integrates relkit-updater over
+# its ProtoJSON contract and generates its own types from `relkit-updater proto`,
+# so every tool is a per-platform binary.
+TOOL_COMPONENT_NAMES = ("cli", "updater", "ops")
+TOOL_BINARY_NAMES = TOOL_COMPONENT_NAMES
 TOOL_COMPONENT_FLAGS = TOOL_BINARY_NAMES
 
 
@@ -2968,9 +2824,9 @@ TOOL_COMPONENTS = tool_components()
 
 
 def tool_platform(os_name: str, arch: str) -> str:
-    # A tree component (sdk-dart) ships one artifact for every platform;
-    # `relkit build` records it as os/arch = any, while hosts ask for it by the
-    # "all" platform name. Anything else is the plain os-arch selector.
+    # Releases from before ADR 0026 recorded the retired product trees as
+    # os/arch = any, which hosts selected by the "all" platform name. Keep
+    # reading that shape for old listings; new releases only carry os-arch.
     if os_name == "any" and arch == "any":
         return "all"
     return f"{os_name}-{arch}"
@@ -3083,31 +2939,6 @@ def cmd_tools(args: argparse.Namespace) -> None:
                 "os": os_name, "arch": arch, "size": path.stat().st_size,
                 "sha256": actual, "path": path,
             })
-    for name in TOOL_TREE_NAMES:
-        row = BY_NAME.get(name)
-        if row is None or not row.archive:
-            continue
-        # A tree ships one artifact for every platform, and `relkit build`
-        # records it that way (os/arch = any). Hosts still select by platform,
-        # so it is published under the "all" platform they ask for by name.
-        declared = index.get((name, "any", "any"))
-        if declared is None:
-            continue
-        path = dist / row.archive
-        if not path.is_file():
-            die(f"{path} is missing; the release manifest declares {name}")
-        actual = file_digest(path)
-        if strip_digest_prefix(actual) != strip_digest_prefix(declared):
-            die(
-                f"{path} digest {actual} does not match the official release "
-                f"{declared} for {name}; refusing to publish a tool the "
-                "release did not build"
-            )
-        plan.append({
-            "component": name, "name": row.archive, "platform": "all",
-            "os": "any", "arch": "any", "size": path.stat().st_size,
-            "sha256": actual, "path": path,
-        })
     if not plan:
         die(f"the release manifest declares no {', '.join(TOOL_COMPONENT_NAMES)} artifact")
     if args.dry_run:
