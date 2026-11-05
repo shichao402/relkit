@@ -128,8 +128,11 @@ func verifyStagedHashes(cfg *config.Config, staged *model.StagedDocument, allowM
 			continue
 		}
 		if artifact.Kind == rupv2.ArtifactKind_ARTIFACT_KIND_PAYLOAD {
-			if _, err := payload.Validate(path); err != nil {
+			table, err := payload.Validate(path)
+			if err != nil {
 				mismatches = append(mismatches, fmt.Sprintf("%s: invalid payload: %v", artifact.Filename, err))
+			} else if err := payload.CheckPublishSelectors(table, model.SelectorsToMap(artifact.Selectors)); err != nil {
+				mismatches = append(mismatches, fmt.Sprintf("%s: %v", artifact.Filename, err))
 			}
 		}
 	}
@@ -154,7 +157,7 @@ func requireInstallCounterparts(artifacts []*model.StagedArtifact) error {
 			}
 		}
 		if !found {
-			return Error{Message: fmt.Sprintf("payload %q requires a full-install artifact with the same selectors (excluding apply=relkit-payload)", artifact.Id)}
+			return Error{Message: fmt.Sprintf("payload %q requires a full-install artifact with the same selectors (excluding apply)", artifact.Id)}
 		}
 	}
 	return nil

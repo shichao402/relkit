@@ -9,6 +9,7 @@ package relkit.updater.enginestate.v1;
 option go_package = "github.com/shichao402/relkit/api/updater/enginestate/v1;enginestatev1";
 
 import "google/protobuf/timestamp.proto";
+import "updater/enginestate/v1/payload.proto";
 import "updater/v2/updater.proto";
 
 message PlannedFile {
@@ -84,6 +85,13 @@ message ApplySessionRecord {
   // beside other products under one install root, such as the IN_PLACE
   // baseline (ADR 0027 §6.2).
   string product = 28;
+  // Content unit of the install. For IN_PLACE it is read from the disk when
+  // apply is accepted (a bundle root has Contents/Info.plist) because the
+  // payload may not be downloaded yet; it decides where control files live
+  // and is cross-checked against the table (ADR 0027 §4.3). For LIBRARY it
+  // is filled from the table once the payload is on disk.
+  ContentUnit unit = 29;
+  string bundle_name = 30;
 }
 
 message JournalEntry {

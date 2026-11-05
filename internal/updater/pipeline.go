@@ -55,7 +55,7 @@ func applyErrorCode(err error) updaterv2.ErrorCode {
 	return updaterv2.ErrorCode_ERROR_CODE_DISK
 }
 
-// writeMode is how content reaches disk (ADR 0027 §4).
+// writeMode is how content reaches disk (ADR 0027 §4). layoutFor picks it.
 type writeMode int
 
 const (
@@ -66,24 +66,12 @@ const (
 	writeFresh
 )
 
-// writeModeFor is the single rule that picks the write path. The target is
-// owned by the content everywhere except IN_PLACE, whose install root also
-// holds launchers, pointers, user files and preserved entries.
-func writeModeFor(placement updaterv2.Placement) (writeMode, error) {
-	switch placement {
-	case updaterv2.Placement_PLACEMENT_IN_PLACE:
-		return writeReconcile, nil
-	case updaterv2.Placement_PLACEMENT_LIBRARY:
-		return writeFresh, nil
-	default:
-		return 0, fmt.Errorf("unsupported placement")
-	}
-}
-
 // planRequiresHostExit answers whether the worker must wait for the host.
-// A pointer switch never touches running files; a reconcile write does when
-// the table replaces the host executable or the engine beside it.
-func planRequiresHostExit(inst *updaterv2.InstallSpec, plan *enginestate.UpdatePlan) (bool, error) {
+// A pointer switch never touches running files; a rename switch replaces the
+// whole bundle the host runs from; a reconcile write does when the table
+// replaces the host executable or the engine beside it. onDisk is the unit
+// detected at install_root (IN_PLACE only).
+func planRequiresHostExit(inst *updaterv2.InstallSpec, plan *enginestate.UpdatePlan, onDisk enginestate.ContentUnit) (bool, error) {
 	if inst == nil || plan == nil || len(plan.Files) == 0 {
 		return false, fmt.Errorf("plan has no files")
 	}
@@ -95,11 +83,22 @@ func planRequiresHostExit(inst *updaterv2.InstallSpec, plan *enginestate.UpdateP
 	if err != nil {
 		return false, err
 	}
-	mode, err := writeModeFor(inst.Placement)
+	if err := checkTableSupported(table, hostGOOS); err != nil {
+		return false, err
+	}
+	if inst.Placement == updaterv2.Placement_PLACEMENT_IN_PLACE {
+		if err := checkInPlaceUnit(table, onDisk); err != nil {
+			return false, err
+		}
+	}
+	mode, sw, err := layoutFor(payload.UnitOf(table), inst.Placement)
 	if err != nil {
 		return false, err
 	}
-	if mode != writeReconcile {
+	switch {
+	case sw == switchRename:
+		return true, nil
+	case mode != writeReconcile:
 		return false, nil
 	}
 	for _, file := range table.Files {
@@ -114,17 +113,33 @@ func planRequiresHostExit(inst *updaterv2.InstallSpec, plan *enginestate.UpdateP
 }
 
 func applyPlan(dataDir string, sess *enginestate.ApplySessionRecord, plan *enginestate.UpdatePlan) error {
-	mode, err := writeModeFor(sess.Placement)
-	if err != nil {
+	if _, _, err := layoutFor(sess.Unit, sess.Placement); err != nil {
 		return err
 	}
 	content, err := prepareContent(sess, plan)
 	if err != nil {
 		return err
 	}
-	switch mode {
-	case writeReconcile:
+	table := content.table
+	if err := checkTableSupported(table, hostGOOS); err != nil {
+		return err
+	}
+	if sess.Placement == updaterv2.Placement_PLACEMENT_IN_PLACE {
+		if err := checkInPlaceUnit(table, sess.Unit); err != nil {
+			return err
+		}
+	}
+	sess.Unit = payload.UnitOf(table)
+	sess.BundleName = table.BundleName
+	mode, sw, err := layoutFor(sess.Unit, sess.Placement)
+	if err != nil {
+		return err
+	}
+	switch {
+	case mode == writeReconcile:
 		return applyReconcile(dataDir, sess, plan, content, sess.InstallRoot)
+	case sw == switchRename:
+		return applySwap(dataDir, sess, content)
 	default:
 		return applyLibrary(sess, plan, content)
 	}
@@ -166,9 +181,20 @@ func applyLibrary(sess *enginestate.ApplySessionRecord, plan *enginestate.Update
 	}
 	target := filepath.Join(versionsDir, id)
 	versionRel := path.Join(VersionsDirName, id)
-	executableRel := versionRel
+	// The content root is the version directory for TREE and the bundle
+	// inside it for BUNDLE; the executable relpath is relative to it in both
+	// placements, so one InstallSpec serves IN_PLACE and LIBRARY.
+	bundle := ""
+	if payload.UnitOf(content.table) == enginestate.ContentUnit_CONTENT_UNIT_BUNDLE {
+		bundle = content.table.BundleName
+	}
+	contentRel := versionRel
+	if bundle != "" {
+		contentRel = path.Join(versionRel, bundle)
+	}
+	executableRel := contentRel
 	if sess.ExecutableRelpath != "" {
-		executableRel = path.Join(versionRel, filepath.ToSlash(sess.ExecutableRelpath))
+		executableRel = path.Join(contentRel, filepath.ToSlash(sess.ExecutableRelpath))
 	}
 
 	reuse, err := prepareLibraryTarget(root, target, plan.Code)
@@ -176,11 +202,11 @@ func applyLibrary(sess *enginestate.ApplySessionRecord, plan *enginestate.Update
 		return err
 	}
 	if !reuse {
-		partial, err := materializeFresh(content, target)
+		partial, err := materializeFresh(content, target, bundle)
 		if err != nil {
 			return err
 		}
-		meta := versionMeta{Code: plan.Code, Version: plan.Version, Path: versionRel, Executable: executableRel}
+		meta := versionMeta{Code: plan.Code, Version: plan.Version, Path: versionRel, Executable: executableRel, Bundle: bundle}
 		if err := writeVersionMeta(partial, meta); err != nil {
 			_ = os.RemoveAll(partial)
 			return err
@@ -192,7 +218,7 @@ func applyLibrary(sess *enginestate.ApplySessionRecord, plan *enginestate.Update
 	}
 
 	previous := readActive(root)
-	pointer := activePointer{Code: plan.Code, Version: plan.Version, Path: versionRel, Executable: executableRel}
+	pointer := activePointer{Code: plan.Code, Version: plan.Version, Path: versionRel, Executable: executableRel, Bundle: bundle}
 	if previous != nil {
 		if filepath.ToSlash(previous.Path) == versionRel {
 			pointer.Previous = previous.Previous
@@ -259,37 +285,50 @@ func partialPathFor(target string) string {
 
 // materializeFresh builds the content in the partial directory and runs the
 // scripts there. No journal and no backup: the partial is new, so failing
-// means deleting it. The caller renames the returned path into place.
-func materializeFresh(content *applyContent, target string) (string, error) {
+// means deleting it. The caller switches the returned path into place.
+//
+// sub is where the content root sits inside the partial: the bundle name for
+// BUNDLE/LIBRARY, "" when the partial is the content root. Scripts run in the
+// content root, as they do for a reconcile write. A bundle is verified after
+// the post script, so a script that breaks the seal is caught before switching.
+func materializeFresh(content *applyContent, target, sub string) (string, error) {
 	partial := partialPathFor(target)
 	if err := os.RemoveAll(partial); err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(partial, 0o755); err != nil {
+	contentRoot := partial
+	if sub != "" {
+		contentRoot = filepath.Join(partial, sub)
+	}
+	if err := os.MkdirAll(contentRoot, 0o755); err != nil {
 		return "", err
 	}
 	fail := func(cause error) (string, error) {
 		_ = os.RemoveAll(partial)
 		return "", cause
 	}
-	if err := runScripts(content, enginestate.ScriptPhase_SCRIPT_PHASE_PRE_APPLY, partial); err != nil {
+	if err := runScripts(content, enginestate.ScriptPhase_SCRIPT_PHASE_PRE_APPLY, contentRoot); err != nil {
 		return fail(fmt.Errorf("pre-apply script: %w", err))
 	}
+	verified := map[string]struct{}{}
 	for _, file := range content.table.Files {
 		if file == nil {
 			continue
 		}
-		src := filepath.Join(content.filesRoot, filepath.FromSlash(file.Relpath))
-		dest := filepath.Join(partial, filepath.FromSlash(file.Relpath))
-		if err := copyFile(src, dest); err != nil {
+		if _, err := checkNoSymlinkParents(contentRoot, file.Relpath, verified); err != nil {
 			return fail(err)
 		}
-		if err := os.Chmod(dest, fileMode(file)); err != nil {
+		if err := writeEntry(content, file, filepath.Join(contentRoot, filepath.FromSlash(file.Relpath))); err != nil {
 			return fail(err)
 		}
 	}
-	if err := runScripts(content, enginestate.ScriptPhase_SCRIPT_PHASE_POST_APPLY, partial); err != nil {
+	if err := runScripts(content, enginestate.ScriptPhase_SCRIPT_PHASE_POST_APPLY, contentRoot); err != nil {
 		return fail(fmt.Errorf("post-apply script: %w", err))
+	}
+	if payload.UnitOf(content.table) == enginestate.ContentUnit_CONTENT_UNIT_BUNDLE {
+		if err := verifyBundleSignature(contentRoot); err != nil {
+			return fail(err)
+		}
 	}
 	return partial, nil
 }
@@ -325,9 +364,13 @@ func renameWithRetry(from, to string) error {
 }
 
 // applyReconcile updates an open install root in place (ADR 0027 §4.1): the
-// old file goes to a same-volume backup under a journal, the new file is
-// written, files the baseline owned and the table dropped are removed, and
+// old entry goes to a same-volume backup under a journal, the new entry is
+// written, entries the baseline owned and the table dropped are removed, and
 // any failure rolls the journal back.
+//
+// Entries may be symlinks (payload/2). Nothing is ever written or removed
+// through a symlinked directory: such a parent is displaced first when the
+// baseline owns it unchanged, and refused otherwise.
 func applyReconcile(dataDir string, sess *enginestate.ApplySessionRecord, plan *enginestate.UpdatePlan, content *applyContent, targetRoot string) error {
 	if err := runScripts(content, enginestate.ScriptPhase_SCRIPT_PHASE_PRE_APPLY, sess.InstallRoot); err != nil {
 		return fmt.Errorf("pre-apply script: %w", err)
@@ -344,45 +387,80 @@ func applyReconcile(dataDir string, sess *enginestate.ApplySessionRecord, plan *
 		rollbackJournal(journal)
 		return cause
 	}
+	// moveAside backs up the entry at rel and journals it.
+	moveAside := func(rel, src string) error {
+		dest := filepath.Join(targetRoot, filepath.FromSlash(rel))
+		backup := filepath.Join(backupRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(dest, backup); err != nil {
+			return err
+		}
+		journal.Entries = append(journal.Entries, &enginestate.JournalEntry{DestPath: dest, BackupPath: backup, SourcePath: src})
+		return writeJournal(journalPath, journal)
+	}
 	preserved := append([]string(nil), sess.Preserve...)
 	preserved = append(preserved, content.table.Preserve...)
+	baselinePath := baselinePathFor(dataDir, sess.Product)
+	baseline, legacy := loadProductBaseline(dataDir, sess.Product)
+	owned := make(map[string]*enginestate.BaselineEntry, len(baseline.GetFiles()))
+	for _, old := range baseline.GetFiles() {
+		if old != nil {
+			owned[old.Relpath] = old
+		}
+	}
+	verified := map[string]struct{}{}
+	// clearParents makes every directory above rel real, displacing a
+	// baseline-owned symlink or file in the way.
+	clearParents := func(rel string) error {
+		for {
+			blocker, err := checkNoSymlinkParents(targetRoot, rel, verified)
+			if err == nil {
+				return nil
+			}
+			old := owned[blocker]
+			if blocker == "" || old == nil || matchesPreserve(blocker, preserved) ||
+				!baselineOwns(filepath.Join(targetRoot, filepath.FromSlash(blocker)), old) {
+				return err
+			}
+			if err := moveAside(blocker, ""); err != nil {
+				return err
+			}
+		}
+	}
 	current := make(map[string]*enginestate.FileEntry, len(content.table.Files))
 	for _, file := range content.table.Files {
 		if file == nil {
 			continue
 		}
 		current[file.Relpath] = file
+		if err := clearParents(file.Relpath); err != nil {
+			return rollback(err)
+		}
 		dest := filepath.Join(targetRoot, filepath.FromSlash(file.Relpath))
-		if matchesPreserve(file.Relpath, preserved) {
-			if _, err := os.Stat(dest); err == nil {
-				continue
-			}
+		_, statErr := os.Lstat(dest)
+		if matchesPreserve(file.Relpath, preserved) && statErr == nil {
+			continue
 		}
-		src := filepath.Join(content.filesRoot, filepath.FromSlash(file.Relpath))
-		backup := ""
-		if _, err := os.Stat(dest); err == nil {
-			backup = filepath.Join(backupRoot, filepath.FromSlash(file.Relpath))
-			if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+		src := ""
+		if !payload.IsSymlink(file) {
+			src = filepath.Join(content.filesRoot, filepath.FromSlash(file.Relpath))
+		}
+		if statErr == nil {
+			if err := moveAside(file.Relpath, src); err != nil {
 				return rollback(err)
 			}
-			if err := os.Rename(dest, backup); err != nil {
+		} else {
+			journal.Entries = append(journal.Entries, &enginestate.JournalEntry{DestPath: dest, SourcePath: src})
+			if err := writeJournal(journalPath, journal); err != nil {
 				return rollback(err)
 			}
 		}
-		entry := &enginestate.JournalEntry{DestPath: dest, BackupPath: backup, SourcePath: src}
-		journal.Entries = append(journal.Entries, entry)
-		if err := writeJournal(journalPath, journal); err != nil {
-			return rollback(err)
-		}
-		if err := copyFile(src, dest); err != nil {
-			return rollback(err)
-		}
-		if err := os.Chmod(dest, fileMode(file)); err != nil {
+		if err := writeEntry(content, file, dest); err != nil {
 			return rollback(err)
 		}
 	}
-	baselinePath := baselinePathFor(dataDir, sess.Product)
-	baseline, legacy := loadProductBaseline(dataDir, sess.Product)
 	var removedDirs []string
 	for _, old := range baseline.GetFiles() {
 		if old == nil {
@@ -391,20 +469,14 @@ func applyReconcile(dataDir string, sess *enginestate.ApplySessionRecord, plan *
 		if _, exists := current[old.Relpath]; exists || matchesPreserve(old.Relpath, preserved) {
 			continue
 		}
-		dest := filepath.Join(targetRoot, filepath.FromSlash(old.Relpath))
-		digest, _, err := model.Sha256File(dest)
-		if err != nil || digest != old.Sha256 {
+		if blocker, err := checkNoSymlinkParents(targetRoot, old.Relpath, verified); err != nil || blocker != "" {
 			continue
 		}
-		backup := filepath.Join(backupRoot, filepath.FromSlash(old.Relpath))
-		if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
-			return rollback(err)
+		dest := filepath.Join(targetRoot, filepath.FromSlash(old.Relpath))
+		if !baselineOwns(dest, old) {
+			continue
 		}
-		if err := os.Rename(dest, backup); err != nil {
-			return rollback(err)
-		}
-		journal.Entries = append(journal.Entries, &enginestate.JournalEntry{DestPath: dest, BackupPath: backup})
-		if err := writeJournal(journalPath, journal); err != nil {
+		if err := moveAside(old.Relpath, ""); err != nil {
 			return rollback(err)
 		}
 		removedDirs = append(removedDirs, filepath.Dir(dest))
@@ -414,9 +486,15 @@ func applyReconcile(dataDir string, sess *enginestate.ApplySessionRecord, plan *
 	}
 	next := &enginestate.Baseline{Schema: baselineSchema, Code: plan.Code, Version: plan.Version}
 	for _, file := range content.table.Files {
-		if file != nil {
-			next.Files = append(next.Files, &enginestate.BaselineEntry{Relpath: file.Relpath, Sha256: file.Sha256})
+		if file == nil {
+			continue
 		}
+		entry := &enginestate.BaselineEntry{Relpath: file.Relpath, Sha256: file.Sha256}
+		if payload.IsSymlink(file) {
+			entry.Kind = enginestate.EntryKind_ENTRY_KIND_SYMLINK
+			entry.LinkTarget = file.LinkTarget
+		}
+		next.Files = append(next.Files, entry)
 	}
 	if err := saveBaseline(baselinePath, next); err != nil {
 		return rollback(err)
@@ -432,6 +510,28 @@ func applyReconcile(dataDir string, sess *enginestate.ApplySessionRecord, plan *
 	_ = os.Remove(filepath.Dir(backupRoot))
 	removeEmptyAncestors(targetRoot, removedDirs)
 	return nil
+}
+
+// baselineOwns reports whether dest is still exactly what the baseline
+// recorded: the same symlink, or a regular file with the same digest. Anything
+// else was changed by someone else and is left alone.
+func baselineOwns(dest string, old *enginestate.BaselineEntry) bool {
+	info, err := os.Lstat(dest)
+	if err != nil {
+		return false
+	}
+	if old.Kind == enginestate.EntryKind_ENTRY_KIND_SYMLINK {
+		if info.Mode()&os.ModeSymlink == 0 {
+			return false
+		}
+		target, err := os.Readlink(dest)
+		return err == nil && target == old.LinkTarget
+	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
+	digest, _, err := model.Sha256File(dest)
+	return err == nil && digest == old.Sha256
 }
 
 func runScripts(content *applyContent, phase enginestate.ScriptPhase, workDir string) error {

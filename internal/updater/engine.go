@@ -376,7 +376,7 @@ func hostMustExit(sess *enginestate.ApplySessionRecord, now time.Time) bool {
 	if hb := sess.GetHeartbeatAt(); hb != nil && now.Sub(hb.AsTime()) < workerGrace {
 		return true
 	}
-	raw, err := os.ReadFile(applyLockPath(sess.GetInstallRoot()))
+	raw, err := os.ReadFile(sessionLockPath(sess))
 	if err != nil {
 		return false
 	}

@@ -180,6 +180,9 @@ func switchActive(root string, code int64) error {
 	if prev != nil {
 		ptr.Previous = prev.Path
 	}
+	if meta := readVersionMeta(filepath.Join(root, filepath.FromSlash(found.Path))); meta != nil {
+		ptr.Bundle = meta.Bundle
+	}
 	return writeActive(root, ptr)
 }
 
@@ -199,6 +202,7 @@ func rollbackActive(root string) error {
 		ptr.Code = meta.Code
 		ptr.Version = meta.Version
 		ptr.Executable = meta.Executable
+		ptr.Bundle = meta.Bundle
 	} else {
 		ptr.Executable = filepath.ToSlash(filepath.Join(cur.Previous, filepath.Base(cur.Executable)))
 	}

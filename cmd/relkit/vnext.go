@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,16 +28,21 @@ import (
 const defaultProjectPath = "relkit.project.json"
 
 func cmdPayload(args []string) error {
+	const usage = "usage: relkit payload build (--tree <directory> | --bundle <X.app>) --out <payload.zip>"
 	if len(args) == 0 || args[0] != "build" {
-		return fmt.Errorf("usage: relkit payload build --tree <directory> --out <payload.zip>")
+		return errors.New(usage)
 	}
 	tree := ""
+	bundle := ""
 	output := ""
 	for i := 1; i < len(args); i++ {
 		switch arg := args[i]; arg {
 		case "--tree":
 			i++
 			tree = mustValue(args, i, "--tree")
+		case "--bundle":
+			i++
+			bundle = mustValue(args, i, "--bundle")
 		case "--out":
 			i++
 			output = mustValue(args, i, "--out")
@@ -44,14 +50,18 @@ func cmdPayload(args []string) error {
 			return fmt.Errorf("unexpected argument %q", arg)
 		}
 	}
-	if tree == "" || output == "" {
-		return fmt.Errorf("payload build requires --tree and --out")
+	if (tree == "") == (bundle == "") || output == "" {
+		return fmt.Errorf("payload build requires exactly one of --tree or --bundle, and --out")
 	}
-	table, err := payload.Build(output, payload.BuildOptions{Tree: tree})
+	options := payload.BuildOptions{Tree: tree}
+	if bundle != "" {
+		options = payload.BuildOptions{Tree: bundle, Bundle: true}
+	}
+	table, err := payload.Build(output, options)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("built payload %s (%d files, %d scripts)\n", output, len(table.Files), len(table.Scripts))
+	fmt.Printf("built payload %s (%s, %d entries, %d scripts)\n", output, table.Schema, len(table.Files), len(table.Scripts))
 	return nil
 }
 

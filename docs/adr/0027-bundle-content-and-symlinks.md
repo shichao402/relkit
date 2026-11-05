@@ -267,7 +267,7 @@ Loom 是一个安装根上的两个产品：
 
 ### 7. 宿主侧契约（以 SvnMergeTool 为第一个落地者）
 
-1. bundle 与版本目录只读。任何运行期写入（日志、缓存、状态）进 dataDir。SvnMergeTool 现在把日志写进 `.app/Contents/Resources/runtime/logs`（`resolvePortableLogsDir`），既破坏签名封印，也是 `kMacosPreservedEntries` 存在的唯一原因；改为 dataDir 后删除该 preserve。Windows 日志写在 `versions/<id>/logs` 同理，一并改掉（否则 prune 会连日志一起删）。
+1. bundle 与版本目录只读。任何运行期写入（日志、缓存、状态）进 dataDir。SvnMergeTool 现在把日志写进 `.app/Contents/Resources/runtime/logs`（`resolvePortableLogsDir`），既破坏签名封印，也是 `kMacosPreservedEntries` 存在的唯一原因；改为 dataDir 后删除该 preserve。Windows 日志写在 `versions/<id>/logs` 同理，一并改掉（否则 prune 会连日志一起删）：改到安装根 `logs/`。它由安装器预建、不属于任何版本，引擎在 LIBRARY 下只动 `versions/` 和 `active.json`，不会碰它；放在安装根是为了让用户在安装目录里直接找到日志。macOS 的安装根是 `.app` 本身，没有这样的位置，所以进 dataDir。（SvnMergeTool Windows 已于 `9714526` 落地，含引擎随版本树与 §7.2。）
 2. 引擎路径：宿主按“自己可执行文件所在的内容根”解析引擎，不再按安装根解析（§6）。
 3. 安装根由自身路径推导，不靠 launcher 传参：可执行文件位于 `<root>/versions/<id>/...` 时 `install_root=<root>`、Placement=LIBRARY；否则 macOS 为 BUNDLE/IN_PLACE（`install_root` = 当前 `.app`），Windows 为 TREE/IN_PLACE。与现有 Windows `currentPortableAppRoot` 同一思路。存量 macOS 裸包因此能直接应用内升级；用户下次手动装 DMG 时迁到 launcher + library。
    例外：包被 Gatekeeper 随机化转移（App Translocation，直接运行“下载”里带 quarantine 的包）或位于只读卷（挂载中的 DMG）时，推导出的路径不是用户的安装位置。宿主用 `SecTranslocateIsTranslocatedURL` 与卷只读属性识别，不发起应用内更新，提示把应用拖进“应用程序”。

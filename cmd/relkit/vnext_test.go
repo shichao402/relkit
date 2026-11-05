@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/shichao402/relkit/internal/custody"
+	payloadpkg "github.com/shichao402/relkit/internal/payload"
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	"github.com/shichao402/relkit/internal/vnext/document"
 	"github.com/shichao402/relkit/internal/vnext/project"
@@ -50,8 +51,17 @@ func stageFixture(t *testing.T, root, version string) {
 	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	payload := []byte("payload-bytes")
-	if err := os.WriteFile(filepath.Join(artifactRoot, "payload.zip"), payload, 0o644); err != nil {
+	// Staging derives the apply selector from the table, so the fixture must
+	// be a real payload.
+	tree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tree, "app.exe"), []byte("app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := payloadpkg.Build(filepath.Join(artifactRoot, "payload.zip"), payloadpkg.BuildOptions{Tree: tree}); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(filepath.Join(artifactRoot, "payload.zip"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(payload)

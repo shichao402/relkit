@@ -66,13 +66,38 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 	if inst.InstallRoot == "" {
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PROFILE_INVALID, "installRoot required")
 	}
-	if err := assertWritable(inst.InstallRoot); err != nil {
+	// The unit at install_root decides where control files go before the
+	// payload is known (ADR 0027 §4.3); the table is cross-checked against it.
+	onDisk := enginestate.ContentUnit_CONTENT_UNIT_TREE
+	switch inst.Placement {
+	case updaterv2.Placement_PLACEMENT_IN_PLACE:
+		unit, uerr := detectInPlaceUnit(inst.InstallRoot)
+		if uerr != nil {
+			return e.emitApplyFail(applyErrorCode(uerr), uerr.Error())
+		}
+		onDisk = unit
+		if onDisk == enginestate.ContentUnit_CONTENT_UNIT_BUNDLE {
+			if err := checkUnitSupported(onDisk, false, hostGOOS); err != nil {
+				return e.emitApplyFail(applyErrorCode(err), err.Error())
+			}
+			if len(inst.Preserve) > 0 {
+				return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED,
+					"a bundle replaced in place cannot preserve entries")
+			}
+		}
+	case updaterv2.Placement_PLACEMENT_LIBRARY:
+		if err := checkLibraryRoot(inst.InstallRoot, req.GetRuntime().GetDataDir(), hostGOOS); err != nil {
+			return e.emitApplyFail(applyErrorCode(err), err.Error())
+		}
+	}
+	if err := assertWritable(controlDirFor(inst.InstallRoot, inst.Placement, onDisk)); err != nil {
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, err.Error())
 	}
 
 	sessionID := newID("sess")
 	now := timestamppb.Now()
-	if err := acquireApplyLock(inst.InstallRoot, sessionID); err != nil {
+	lockPath := applyLockPathFor(inst.InstallRoot, inst.Placement, onDisk)
+	if err := acquireApplyLockAt(lockPath, sessionID); err != nil {
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, err.Error())
 	}
 	requiresHostExit := true
@@ -80,10 +105,15 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 	// the running executable, so an undownloaded plan always asks the host
 	// to exit.
 	if disposition == updaterv2.ApplyDisposition_APPLY_DISPOSITION_INTERNAL && downloaded {
-		ok, perr := planRequiresHostExit(inst, plan)
+		ok, perr := planRequiresHostExit(inst, plan, onDisk)
 		if perr != nil {
-			releaseApplyLock(inst.InstallRoot)
-			return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_TAMPERED, perr.Error())
+			releaseApplyLockAt(lockPath)
+			code := updaterv2.ErrorCode_ERROR_CODE_PLAN_TAMPERED
+			var f *applyFailure
+			if errors.As(perr, &f) {
+				code = f.code
+			}
+			return e.emitApplyFail(code, perr.Error())
 		}
 		requiresHostExit = ok
 	}
@@ -112,9 +142,10 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 		DisplayName:       displayNameFor(req),
 		Recovery:          req.GetProfile().GetRecovery(),
 		Product:           req.GetProfile().GetExpectedProduct(),
+		Unit:              onDisk,
 	}
 	if err := st.saveSession(sess); err != nil {
-		releaseApplyLock(inst.InstallRoot)
+		releaseApplyLockAt(lockPath)
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_DISK, err.Error())
 	}
 	launch := e.LaunchWorker
@@ -126,7 +157,7 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 		sess.Error = newError(updaterv2.ErrorCode_ERROR_CODE_DISK, true, err.Error(), nil)
 		sess.HeartbeatAt = timestamppb.Now()
 		_ = st.saveSession(sess)
-		releaseApplyLock(inst.InstallRoot)
+		releaseApplyLockAt(lockPath)
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_DISK, "failed to start apply worker: "+err.Error())
 	}
 	return e.emit(&updaterv2.UpdaterEvent{
@@ -303,7 +334,8 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	refreshApplyLock(sess.InstallRoot, sess.SessionId, os.Getpid())
+	lockPath := sessionLockPath(sess)
+	refreshApplyLockAt(lockPath, sess.SessionId, os.Getpid())
 
 	ui := e.openProgressUI(sess)
 	defer ui.Close()
@@ -334,7 +366,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	// host when the install is untouched and the host is gone.
 	finish := func(p updaterv2.SessionPhase, errp *updaterv2.Error, cause error, relaunchOld bool) error {
 		setPhase(p, errp)
-		releaseApplyLock(sess.InstallRoot)
+		releaseApplyLockAt(lockPath)
 		if errp.GetCode() == updaterv2.ErrorCode_ERROR_CODE_CANCELED {
 			ui.Close()
 		} else {
@@ -407,7 +439,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		relaunchHost(sess)
 	}
 	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COMPLETED, nil)
-	releaseApplyLock(sess.InstallRoot)
+	releaseApplyLockAt(lockPath)
 	return nil
 }
 
@@ -418,24 +450,51 @@ func phaseCancelable(p updaterv2.SessionPhase) bool {
 		p == updaterv2.SessionPhase_SESSION_PHASE_DOWNLOADING
 }
 
-// relaunchHost starts the host executable the session names, resolving the
-// active version for LIBRARY installs. It is a no-op unless the session asked
-// for relaunch.
+// relaunchHost starts the host the session names, resolving the active
+// version for LIBRARY installs. On macOS a bundle is opened through
+// LaunchServices (`open -n`), so the updater does not become the responsible
+// process of the new host (ADR 0027 §5). It is a no-op unless the session
+// asked for relaunch.
 var relaunchHost = func(sess *enginestate.ApplySessionRecord) {
 	if !sess.Relaunch || sess.ExecutableRelpath == "" || sess.InstallOnly {
 		return
 	}
-	exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
-	if sess.Placement == updaterv2.Placement_PLACEMENT_LIBRARY {
-		if ptr := readActive(sess.InstallRoot); ptr != nil && ptr.Executable != "" {
-			exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Executable))
-		} else if ptr != nil {
-			exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Path), filepath.Base(sess.ExecutableRelpath))
-		}
+	exe, bundle := relaunchTarget(sess)
+	var cmd *exec.Cmd
+	if bundle != "" && runtime.GOOS == "darwin" {
+		cmd = exec.Command("open", "-n", bundle)
+	} else {
+		cmd = exec.Command(exe)
 	}
-	cmd := exec.Command(exe)
 	cmd.Dir = sess.InstallRoot
 	_ = cmd.Start()
+}
+
+// relaunchTarget is the executable to start and, when the content is a
+// bundle, the bundle that holds it: install_root for IN_PLACE, the active
+// version's bundle for LIBRARY.
+func relaunchTarget(sess *enginestate.ApplySessionRecord) (exe, bundle string) {
+	root := sess.InstallRoot
+	exe = filepath.Join(root, filepath.FromSlash(sess.ExecutableRelpath))
+	if sess.Placement == updaterv2.Placement_PLACEMENT_LIBRARY {
+		ptr := readActive(root)
+		if ptr == nil {
+			return exe, ""
+		}
+		if ptr.Executable != "" {
+			exe = filepath.Join(root, filepath.FromSlash(ptr.Executable))
+		} else {
+			exe = filepath.Join(root, filepath.FromSlash(ptr.Path), filepath.Base(sess.ExecutableRelpath))
+		}
+		if ptr.Bundle != "" {
+			bundle = filepath.Join(root, filepath.FromSlash(ptr.Path), ptr.Bundle)
+		}
+		return exe, bundle
+	}
+	if sess.Unit == enginestate.ContentUnit_CONTENT_UNIT_BUNDLE {
+		bundle = filepath.Clean(root)
+	}
+	return exe, bundle
 }
 
 // runFullInstallPhase runs the verified installer and reports the outcome in
@@ -445,7 +504,7 @@ func runFullInstallPhase(
 	st store,
 	setPhase func(updaterv2.SessionPhase, *updaterv2.Error),
 ) error {
-	defer releaseApplyLock(sess.InstallRoot)
+	defer releaseApplyLockAt(sessionLockPath(sess))
 	installer := filepath.Join(sess.StagedRoot, filepath.FromSlash(sess.InstallerRelpath))
 	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COMMITTING, nil)
 	if err := runFullInstall(sess, installer); err != nil {
@@ -492,7 +551,9 @@ type activePointer struct {
 	Version    string `json:"version"`
 	Path       string `json:"path"`
 	Executable string `json:"executable,omitempty"`
-	Previous   string `json:"previous,omitempty"`
+	// Bundle names the .app inside Path when the content is a bundle.
+	Bundle   string `json:"bundle,omitempty"`
+	Previous string `json:"previous,omitempty"`
 }
 
 func readActive(root string) *activePointer {
@@ -540,6 +601,7 @@ type versionMeta struct {
 	Version    string `json:"version"`
 	Path       string `json:"path"`
 	Executable string `json:"executable,omitempty"`
+	Bundle     string `json:"bundle,omitempty"`
 }
 
 // pruneVersions trims versions/ after an install (ADR 0027 §4.4). It keeps
@@ -638,7 +700,13 @@ func installedCode(root, name string) int64 {
 func rollbackJournal(j *enginestate.ApplyJournal) {
 	for i := len(j.Entries) - 1; i >= 0; i-- {
 		ent := j.Entries[i]
-		_ = os.Remove(ent.DestPath)
+		// A real directory at dest was created by this apply where a
+		// displaced symlink or file stood; everything in it is new.
+		if info, err := os.Lstat(ent.DestPath); err == nil && info.IsDir() && ent.BackupPath != "" {
+			_ = os.RemoveAll(ent.DestPath)
+		} else {
+			_ = os.Remove(ent.DestPath)
+		}
 		if ent.BackupPath != "" {
 			_ = os.Rename(ent.BackupPath, ent.DestPath)
 		}

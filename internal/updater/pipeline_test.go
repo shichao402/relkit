@@ -32,14 +32,27 @@ func librarySession(root, stage string) *enginestate.ApplySessionRecord {
 	}
 }
 
-func TestWriteModeFor(t *testing.T) {
-	if m, _ := writeModeFor(updaterv2.Placement_PLACEMENT_IN_PLACE); m != writeReconcile {
-		t.Fatalf("IN_PLACE = %v", m)
+func TestLayoutFor(t *testing.T) {
+	tree, bundle := enginestate.ContentUnit_CONTENT_UNIT_TREE, enginestate.ContentUnit_CONTENT_UNIT_BUNDLE
+	inPlace, library := updaterv2.Placement_PLACEMENT_IN_PLACE, updaterv2.Placement_PLACEMENT_LIBRARY
+	cases := []struct {
+		unit      enginestate.ContentUnit
+		placement updaterv2.Placement
+		mode      writeMode
+		sw        switchMode
+	}{
+		{tree, inPlace, writeReconcile, switchNone},
+		{enginestate.ContentUnit_CONTENT_UNIT_UNSPECIFIED, inPlace, writeReconcile, switchNone},
+		{bundle, inPlace, writeFresh, switchRename},
+		{tree, library, writeFresh, switchPointer},
+		{bundle, library, writeFresh, switchPointer},
 	}
-	if m, _ := writeModeFor(updaterv2.Placement_PLACEMENT_LIBRARY); m != writeFresh {
-		t.Fatalf("LIBRARY = %v", m)
+	for _, c := range cases {
+		if m, s, err := layoutFor(c.unit, c.placement); err != nil || m != c.mode || s != c.sw {
+			t.Errorf("%s/%s = %v %v %v", c.unit, c.placement, m, s, err)
+		}
 	}
-	if _, err := writeModeFor(updaterv2.Placement_PLACEMENT_UNSPECIFIED); err == nil {
+	if _, _, err := layoutFor(tree, updaterv2.Placement_PLACEMENT_UNSPECIFIED); err == nil {
 		t.Fatal("unspecified placement accepted")
 	}
 }
@@ -55,11 +68,11 @@ func TestLibraryNeverRequiresHostExit(t *testing.T) {
 		ExecutableRelpath: "bin/app.exe",
 		SidecarRelpath:    "relkit-updater.exe",
 	}
-	if exit, err := planRequiresHostExit(inst, plan); err != nil || exit {
+	if exit, err := planRequiresHostExit(inst, plan, enginestate.ContentUnit_CONTENT_UNIT_TREE); err != nil || exit {
 		t.Fatalf("library exit=%v err=%v", exit, err)
 	}
 	inst.Placement = updaterv2.Placement_PLACEMENT_IN_PLACE
-	if exit, err := planRequiresHostExit(inst, plan); err != nil || !exit {
+	if exit, err := planRequiresHostExit(inst, plan, enginestate.ContentUnit_CONTENT_UNIT_TREE); err != nil || !exit {
 		t.Fatalf("in-place exit=%v err=%v", exit, err)
 	}
 }
@@ -144,7 +157,7 @@ func TestLibraryForeignTargetInUseIsOccupied(t *testing.T) {
 func TestLibraryPostScriptFailureLeavesNothing(t *testing.T) {
 	root, stage := t.TempDir(), t.TempDir()
 	content := &applyContent{
-		table: &enginestate.FileTable{Schema: payload.Schema, Scripts: []*enginestate.ScriptEntry{{
+		table: &enginestate.FileTable{Schema: payload.SchemaV1, Scripts: []*enginestate.ScriptEntry{{
 			Phase:       enginestate.ScriptPhase_SCRIPT_PHASE_POST_APPLY,
 			Relpath:     "missing.sh",
 			Interpreter: enginestate.ScriptInterpreter_SCRIPT_INTERPRETER_UNSPECIFIED,
@@ -233,7 +246,7 @@ func TestReconcileLeavesUnrelatedEmptyDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess := &enginestate.ApplySessionRecord{InstallRoot: root, StagedRoot: stage, Product: "launcher"}
-	content := &applyContent{table: &enginestate.FileTable{Schema: payload.Schema}, filesRoot: t.TempDir()}
+	content := &applyContent{table: &enginestate.FileTable{Schema: payload.SchemaV1}, filesRoot: t.TempDir()}
 	if err := applyReconcile(dataDir, sess, &enginestate.UpdatePlan{Code: 2}, content, root); err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +272,7 @@ func TestBaselineIsPerProductAndMigratesLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess := &enginestate.ApplySessionRecord{InstallRoot: root, StagedRoot: stage, Product: "loom-launcher"}
-	content := &applyContent{table: &enginestate.FileTable{Schema: payload.Schema}, filesRoot: t.TempDir()}
+	content := &applyContent{table: &enginestate.FileTable{Schema: payload.SchemaV1}, filesRoot: t.TempDir()}
 	if err := applyReconcile(dataDir, sess, &enginestate.UpdatePlan{Code: 2}, content, root); err != nil {
 		t.Fatal(err)
 	}

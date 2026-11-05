@@ -14,6 +14,7 @@ import (
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 	"github.com/shichao402/relkit/internal/inprocess"
 	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/payload"
 	"github.com/shichao402/relkit/internal/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -72,10 +73,12 @@ func osReadPlanIDs(st store) ([]string, error) {
 // ("macos") against a manifest selector os=darwin: the engine is the single
 // place that knows the platform truth, and it uses the canonical vocabulary.
 //
-// apply is forced to "relkit-payload": artifact selection narrows to payload
-// artifacts when any exist (ADR 0013), and hosts have no reason to override it.
+// apply is engine-owned: the host's value, if any, is dropped, and the
+// engine's ordered preference (payload.EngineApplyPreference, ADR 0027 §3)
+// is passed to artifact selection separately. Artifact selection narrows to
+// payload artifacts when any exist (ADR 0013).
 func withEngineDefaults(host map[string]string) map[string]string {
-	out := make(map[string]string, len(host)+3)
+	out := make(map[string]string, len(host)+2)
 	for key, value := range host {
 		out[key] = value
 	}
@@ -85,7 +88,7 @@ func withEngineDefaults(host map[string]string) map[string]string {
 	if _, ok := out["arch"]; !ok {
 		out["arch"] = runtime.GOARCH
 	}
-	out["apply"] = "relkit-payload"
+	delete(out, payload.ApplySelectorKey)
 	return out
 }
 
@@ -123,6 +126,7 @@ func (e *Engine) handleCheck(ctx context.Context, req *updaterv2.UpdaterRequest,
 		EntryURLs:       profile.EntryURLs,
 		TrustedKeys:     keys,
 		ClientSelectors: clientSelectors,
+		ApplyPreference: payload.EngineApplyPreference(),
 		Fetcher:         e.fetcher(),
 		StateStore:      sdk.NewMemoryStateStore(sdkState),
 	}

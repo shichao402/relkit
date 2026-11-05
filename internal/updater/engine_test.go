@@ -342,7 +342,7 @@ func TestBaselineDeletionProtectsModifiedFiles(t *testing.T) {
 		Product:     "p",
 	}
 	content := &applyContent{
-		table:     &enginestate.FileTable{Schema: payload.Schema},
+		table:     &enginestate.FileTable{Schema: payload.SchemaV1},
 		filesRoot: filesRoot,
 	}
 	if err := applyReconcile(dataDir, sess, &enginestate.UpdatePlan{Code: 2}, content, root); err != nil {
@@ -513,7 +513,6 @@ func TestWithEngineDefaults(t *testing.T) {
 			host: nil,
 			want: map[string]string{
 				"os": runtime.GOOS, "arch": runtime.GOARCH,
-				"apply": "relkit-payload",
 			},
 		},
 		{
@@ -521,7 +520,6 @@ func TestWithEngineDefaults(t *testing.T) {
 			host: map[string]string{"os": "macos", "arch": "x86_64"},
 			want: map[string]string{
 				"os": "macos", "arch": "x86_64",
-				"apply": "relkit-payload",
 			},
 		},
 		{
@@ -529,11 +527,19 @@ func TestWithEngineDefaults(t *testing.T) {
 			host: map[string]string{"arch": "x64", "component": "console"},
 			want: map[string]string{
 				"arch": "x64", "component": "console",
-				"os": runtime.GOOS, "apply": "relkit-payload",
+				"os": runtime.GOOS,
 			},
+		},
+		{
+			// apply is engine-owned; its preference list goes to selection
+			// separately (ADR 0027 §3).
+			name: "host apply is dropped",
+			host: map[string]string{"os": "darwin", "arch": "arm64", "apply": "relkit-payload"},
+			want: map[string]string{"os": "darwin", "arch": "arm64"},
 		},
 	}
 	for _, tc := range cases {
+		before := len(tc.host)
 		got := withEngineDefaults(tc.host)
 		if len(got) != len(tc.want) {
 			t.Fatalf("%s: got %v want %v", tc.name, got, tc.want)
@@ -545,7 +551,10 @@ func TestWithEngineDefaults(t *testing.T) {
 		}
 		// The input map must never be mutated: hosts may reuse it.
 		if tc.host != nil {
-			if _, mutated := tc.host["apply"]; mutated {
+			if len(tc.host) != before {
+				t.Errorf("%s: input map mutated", tc.name)
+			}
+			if tc.name == "host apply is dropped" && tc.host["apply"] != "relkit-payload" {
 				t.Errorf("%s: input map mutated", tc.name)
 			}
 		}

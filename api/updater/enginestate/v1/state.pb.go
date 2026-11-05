@@ -402,7 +402,14 @@ type ApplySessionRecord struct {
 	// Product id from the host profile. Scopes engine-private files that live
 	// beside other products under one install root, such as the IN_PLACE
 	// baseline (ADR 0027 §6.2).
-	Product       string `protobuf:"bytes,28,opt,name=product,proto3" json:"product,omitempty"`
+	Product string `protobuf:"bytes,28,opt,name=product,proto3" json:"product,omitempty"`
+	// Content unit of the install. For IN_PLACE it is read from the disk when
+	// apply is accepted (a bundle root has Contents/Info.plist) because the
+	// payload may not be downloaded yet; it decides where control files live
+	// and is cross-checked against the table (ADR 0027 §4.3). For LIBRARY it
+	// is filled from the table once the payload is on disk.
+	Unit          ContentUnit `protobuf:"varint,29,opt,name=unit,proto3,enum=relkit.updater.enginestate.v1.ContentUnit" json:"unit,omitempty"`
+	BundleName    string      `protobuf:"bytes,30,opt,name=bundle_name,json=bundleName,proto3" json:"bundle_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -612,6 +619,20 @@ func (x *ApplySessionRecord) GetProduct() string {
 	return ""
 }
 
+func (x *ApplySessionRecord) GetUnit() ContentUnit {
+	if x != nil {
+		return x.Unit
+	}
+	return ContentUnit_CONTENT_UNIT_UNSPECIFIED
+}
+
+func (x *ApplySessionRecord) GetBundleName() string {
+	if x != nil {
+		return x.BundleName
+	}
+	return ""
+}
+
 type JournalEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DestPath      string                 `protobuf:"bytes,1,opt,name=dest_path,json=destPath,proto3" json:"dest_path,omitempty"`
@@ -736,7 +757,7 @@ var File_updater_enginestate_v1_state_proto protoreflect.FileDescriptor
 
 const file_updater_enginestate_v1_state_proto_rawDesc = "" +
 	"\n" +
-	"\"updater/enginestate/v1/state.proto\x12\x1drelkit.updater.enginestate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18updater/v2/updater.proto\"\xde\x01\n" +
+	"\"updater/enginestate/v1/state.proto\x12\x1drelkit.updater.enginestate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$updater/enginestate/v1/payload.proto\x1a\x18updater/v2/updater.proto\"\xde\x01\n" +
 	"\vPlannedFile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x1d\n" +
@@ -777,7 +798,7 @@ const file_updater_enginestate_v1_state_proto_rawDesc = "" +
 	"\x12last_seen_sequence\x18\x03 \x01(\x03R\x10lastSeenSequence\x12?\n" +
 	"\x1clast_seen_directory_sequence\x18\x04 \x01(\x03R\x19lastSeenDirectorySequence\x12=\n" +
 	"\x1blast_seen_fallback_sequence\x18\x05 \x01(\x03R\x18lastSeenFallbackSequence\x12#\n" +
-	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xc9\b\n" +
+	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xaa\t\n" +
 	"\x12ApplySessionRecord\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
@@ -808,7 +829,10 @@ const file_updater_enginestate_v1_state_proto_rawDesc = "" +
 	"\rhide_progress\x18\x19 \x01(\bR\fhideProgress\x12!\n" +
 	"\fdisplay_name\x18\x1a \x01(\tR\vdisplayName\x12;\n" +
 	"\brecovery\x18\x1b \x01(\v2\x1f.relkit.updater.v2.RecoveryHelpR\brecovery\x12\x18\n" +
-	"\aproduct\x18\x1c \x01(\tR\aproductJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
+	"\aproduct\x18\x1c \x01(\tR\aproduct\x12>\n" +
+	"\x04unit\x18\x1d \x01(\x0e2*.relkit.updater.enginestate.v1.ContentUnitR\x04unit\x12\x1f\n" +
+	"\vbundle_name\x18\x1e \x01(\tR\n" +
+	"bundleNameJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
 	"\fJournalEntry\x12\x1b\n" +
 	"\tdest_path\x18\x01 \x01(\tR\bdestPath\x12\x1f\n" +
 	"\vbackup_path\x18\x02 \x01(\tR\n" +
@@ -852,6 +876,7 @@ var file_updater_enginestate_v1_state_proto_goTypes = []any{
 	(*v2.LibraryPolicy)(nil),      // 12: relkit.updater.v2.LibraryPolicy
 	(v2.ApplyDisposition)(0),      // 13: relkit.updater.v2.ApplyDisposition
 	(*v2.RecoveryHelp)(nil),       // 14: relkit.updater.v2.RecoveryHelp
+	(ContentUnit)(0),              // 15: relkit.updater.enginestate.v1.ContentUnit
 }
 var file_updater_enginestate_v1_state_proto_depIdxs = []int32{
 	6,  // 0: relkit.updater.enginestate.v1.UpdatePlan.prior_release_notes:type_name -> relkit.updater.v2.PriorReleaseNotes
@@ -868,12 +893,13 @@ var file_updater_enginestate_v1_state_proto_depIdxs = []int32{
 	12, // 11: relkit.updater.enginestate.v1.ApplySessionRecord.library:type_name -> relkit.updater.v2.LibraryPolicy
 	13, // 12: relkit.updater.enginestate.v1.ApplySessionRecord.disposition:type_name -> relkit.updater.v2.ApplyDisposition
 	14, // 13: relkit.updater.enginestate.v1.ApplySessionRecord.recovery:type_name -> relkit.updater.v2.RecoveryHelp
-	4,  // 14: relkit.updater.enginestate.v1.ApplyJournal.entries:type_name -> relkit.updater.enginestate.v1.JournalEntry
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 14: relkit.updater.enginestate.v1.ApplySessionRecord.unit:type_name -> relkit.updater.enginestate.v1.ContentUnit
+	4,  // 15: relkit.updater.enginestate.v1.ApplyJournal.entries:type_name -> relkit.updater.enginestate.v1.JournalEntry
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_updater_enginestate_v1_state_proto_init() }
@@ -881,6 +907,7 @@ func file_updater_enginestate_v1_state_proto_init() {
 	if File_updater_enginestate_v1_state_proto != nil {
 		return
 	}
+	file_updater_enginestate_v1_payload_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

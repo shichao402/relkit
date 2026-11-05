@@ -16,6 +16,7 @@ import (
 
 	rupv2 "github.com/shichao402/relkit/api/rup/v2"
 	"github.com/shichao402/relkit/internal/model"
+	"github.com/shichao402/relkit/internal/payload"
 	legacystage "github.com/shichao402/relkit/internal/stage"
 	"github.com/shichao402/relkit/internal/vnext/artifactset"
 	"github.com/shichao402/relkit/internal/vnext/document"
@@ -92,10 +93,21 @@ func Stage(
 		filenames[filename] = true
 		selectors := cloneMap(artifact.Selectors)
 		if artifact.Kind == artifactset.KindPayload {
-			if value := selectors["apply"]; value != "" && value != "relkit-payload" {
-				return nil, fmt.Errorf("payload %q reserves selector apply=relkit-payload", artifact.ID)
+			// The apply selector is derived from the table, never declared
+			// by hand: it is what isolates /2 from engines that only know /1
+			// (ADR 0027 §3).
+			table, err := payload.Validate(filepath.Join(artifactRoot, filepath.FromSlash(artifact.Path)))
+			if err != nil {
+				return nil, fmt.Errorf("payload %q: %w", artifact.ID, err)
 			}
-			selectors["apply"] = "relkit-payload"
+			want := payload.ApplySelectorFor(table)
+			if value := selectors[payload.ApplySelectorKey]; value != "" && value != want {
+				return nil, fmt.Errorf("payload %q is %s and reserves selector apply=%s, declares apply=%q", artifact.ID, table.Schema, want, value)
+			}
+			selectors[payload.ApplySelectorKey] = want
+			if err := payload.CheckPublishSelectors(table, selectors); err != nil {
+				return nil, fmt.Errorf("payload %q: %w", artifact.ID, err)
+			}
 		}
 		meta := map[string]any{}
 		if artifact.Relations.InstallOf != "" {

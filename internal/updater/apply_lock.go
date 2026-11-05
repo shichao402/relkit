@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 )
 
 type applyLockFile struct {
@@ -13,15 +15,30 @@ type applyLockFile struct {
 	Pid       int    `json:"pid"`
 }
 
+// applyLockPath is the lock of an install root that holds its own control
+// files: every layout except BUNDLE/IN_PLACE (see applyLockPathFor).
 func applyLockPath(root string) string {
 	return filepath.Join(root, ApplyLockName)
 }
 
+// sessionLockPath is the lock a session took when it was accepted. The unit
+// recorded at acceptance decides it, so worker and status agree on one file.
+func sessionLockPath(sess *enginestate.ApplySessionRecord) string {
+	return applyLockPathFor(sess.GetInstallRoot(), sess.GetPlacement(), sess.GetUnit())
+}
+
 func acquireApplyLock(root, sessionID string) error {
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	return acquireApplyLockAt(applyLockPath(root), sessionID)
+}
+
+func releaseApplyLock(root string) {
+	releaseApplyLockAt(applyLockPath(root))
+}
+
+func acquireApplyLockAt(path, sessionID string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	path := applyLockPath(root)
 	payload, err := json.Marshal(applyLockFile{SessionID: sessionID, Pid: os.Getpid()})
 	if err != nil {
 		return err
@@ -48,14 +65,14 @@ func acquireApplyLock(root, sessionID string) error {
 	return fmt.Errorf("could not acquire apply lock")
 }
 
-func refreshApplyLock(root, sessionID string, pid int) {
+func refreshApplyLockAt(path, sessionID string, pid int) {
 	payload, err := json.Marshal(applyLockFile{SessionID: sessionID, Pid: pid})
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(applyLockPath(root), append(payload, '\n'), 0o644)
+	_ = os.WriteFile(path, append(payload, '\n'), 0o644)
 }
 
-func releaseApplyLock(root string) {
-	_ = os.Remove(applyLockPath(root))
+func releaseApplyLockAt(path string) {
+	_ = os.Remove(path)
 }

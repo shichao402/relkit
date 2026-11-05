@@ -13,17 +13,40 @@ import "google/protobuf/duration.proto";
 // It is the complete set of files owned by this release. Deletions are derived
 // by comparing this table with the last successfully applied baseline.
 message FileTable {
-  string schema = 1; // must be "relkit.payload/1"
+  // "relkit.payload/1", or "relkit.payload/2" exactly when the table has a
+  // SYMLINK entry or unit is BUNDLE (ADR 0027 §3).
+  string schema = 1;
   repeated FileEntry files = 2;
   repeated ScriptEntry scripts = 3;
   repeated string preserve = 4;
+  ContentUnit unit = 5;
+  // BUNDLE only: one path segment ending in ".app", e.g. "SvnAutoMerge.app".
+  // Relpaths stay relative to the bundle root ("Contents/...").
+  string bundle_name = 6;
+}
+
+// ContentUnit says what the table describes (ADR 0027 §2).
+enum ContentUnit {
+  CONTENT_UNIT_UNSPECIFIED = 0; // read as TREE; every /1 table
+  CONTENT_UNIT_TREE = 1;        // open directory: per-file add/remove, preserve allowed
+  CONTENT_UNIT_BUNDLE = 2;      // sealed macOS .app: replaced as a whole only
+}
+
+enum EntryKind {
+  ENTRY_KIND_UNSPECIFIED = 0; // read as FILE; every /1 entry
+  ENTRY_KIND_FILE = 1;
+  ENTRY_KIND_SYMLINK = 2;
 }
 
 message FileEntry {
   string relpath = 1;
-  int64 size = 2;
-  string sha256 = 3; // 64 lowercase hex chars
-  uint32 mode = 4;   // portable permission bits; 0 means use 0644
+  int64 size = 2;    // 0 for SYMLINK
+  string sha256 = 3; // 64 lowercase hex chars; empty for SYMLINK
+  uint32 mode = 4;   // portable permission bits; 0 means use 0644; ignored for SYMLINK
+  EntryKind kind = 5;
+  // SYMLINK only: the readlink result, relative, resolving inside the table
+  // (ADR 0027 §1). Symlinks are never stored in the zip.
+  string link_target = 6;
 }
 
 enum ScriptPhase {
@@ -59,5 +82,7 @@ message Baseline {
 
 message BaselineEntry {
   string relpath = 1;
-  string sha256 = 2;
+  string sha256 = 2; // empty for SYMLINK
+  EntryKind kind = 3;
+  string link_target = 4; // SYMLINK only; compared instead of sha256
 }

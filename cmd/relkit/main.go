@@ -266,7 +266,7 @@ relkit ` + version + `
 Commands:
   artifacts produce|merge   run the artifact producer / merge ArtifactSets
   bootstrap build          build the Runtime Bootstrap a host embeds
-  payload build            build a payload table from a tree
+  payload build            build a payload table from a tree or a macOS .app (--bundle)
   stage                    stage an immutable ArtifactSet
   inspect                  print a protobuf or JSON document
   release                  publish a staged release to an agent

@@ -13,9 +13,38 @@ type DuplicateSelectors struct {
 }
 
 func SelectArtifact(manifest *model.ManifestDocument, clientSelectors map[string]string) *model.ManifestArtifact {
+	var prefs []string
+	if want := clientSelectors[applyKey]; want != "" {
+		prefs = []string{want}
+	}
+	return SelectArtifactPreferring(manifest, clientSelectors, prefs)
+}
+
+const applyKey = "apply"
+
+// SelectArtifactPreferring is SelectArtifact for a client that accepts
+// several apply formats (ADR 0027 §3). An artifact's apply selector matches
+// when it is any of applyPrefs; the client map's own apply value is ignored.
+// Among matches, the earliest apply in applyPrefs wins, artifacts without an
+// apply selector (full installs) come last, and ties break by id.
+//
+// SelectArtifact(m, c) is exactly SelectArtifactPreferring(m, c, [c["apply"]]).
+func SelectArtifactPreferring(manifest *model.ManifestDocument, clientSelectors map[string]string, applyPrefs []string) *model.ManifestArtifact {
+	rank := func(artifact *model.ManifestArtifact) int {
+		value, ok := model.SelectorsToMap(artifact.Selectors)[applyKey]
+		if !ok {
+			return len(applyPrefs)
+		}
+		for i, pref := range applyPrefs {
+			if value == pref {
+				return i
+			}
+		}
+		return -1
+	}
 	var matches []*model.ManifestArtifact
 	for _, artifact := range manifest.Artifacts {
-		if artifact != nil && MatchesClient(model.SelectorsToMap(artifact.Selectors), clientSelectors) {
+		if artifact != nil && MatchesClientApply(model.SelectorsToMap(artifact.Selectors), clientSelectors, applyPrefs) {
 			matches = append(matches, artifact)
 		}
 	}
@@ -23,19 +52,37 @@ func SelectArtifact(manifest *model.ManifestDocument, clientSelectors map[string
 		return nil
 	}
 	sort.Slice(matches, func(i, j int) bool {
-		leftPreferred := prefersApply(matches[i], clientSelectors)
-		rightPreferred := prefersApply(matches[j], clientSelectors)
-		if leftPreferred != rightPreferred {
-			return leftPreferred
+		left, right := rank(matches[i]), rank(matches[j])
+		if left != right {
+			return left < right
 		}
 		return matches[i].Id < matches[j].Id
 	})
 	return matches[0]
 }
 
-func prefersApply(artifact *model.ManifestArtifact, clientSelectors map[string]string) bool {
-	want := clientSelectors["apply"]
-	return want != "" && model.SelectorsToMap(artifact.Selectors)["apply"] == want
+// MatchesClientApply is MatchesClient with the apply key matched against a
+// list of accepted values instead of a single client value.
+func MatchesClientApply(requiredSelectors, clientSelectors map[string]string, applyPrefs []string) bool {
+	for key, value := range requiredSelectors {
+		if key == applyKey {
+			accepted := false
+			for _, pref := range applyPrefs {
+				if value == pref {
+					accepted = true
+					break
+				}
+			}
+			if !accepted {
+				return false
+			}
+			continue
+		}
+		if clientSelectors[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func FindDuplicateSelectors(artifacts []*model.StagedArtifact) []DuplicateSelectors {

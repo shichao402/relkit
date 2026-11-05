@@ -25,6 +25,105 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ContentUnit says what the table describes (ADR 0027 §2).
+type ContentUnit int32
+
+const (
+	ContentUnit_CONTENT_UNIT_UNSPECIFIED ContentUnit = 0 // read as TREE; every /1 table
+	ContentUnit_CONTENT_UNIT_TREE        ContentUnit = 1 // open directory: per-file add/remove, preserve allowed
+	ContentUnit_CONTENT_UNIT_BUNDLE      ContentUnit = 2 // sealed macOS .app: replaced as a whole only
+)
+
+// Enum value maps for ContentUnit.
+var (
+	ContentUnit_name = map[int32]string{
+		0: "CONTENT_UNIT_UNSPECIFIED",
+		1: "CONTENT_UNIT_TREE",
+		2: "CONTENT_UNIT_BUNDLE",
+	}
+	ContentUnit_value = map[string]int32{
+		"CONTENT_UNIT_UNSPECIFIED": 0,
+		"CONTENT_UNIT_TREE":        1,
+		"CONTENT_UNIT_BUNDLE":      2,
+	}
+)
+
+func (x ContentUnit) Enum() *ContentUnit {
+	p := new(ContentUnit)
+	*p = x
+	return p
+}
+
+func (x ContentUnit) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ContentUnit) Descriptor() protoreflect.EnumDescriptor {
+	return file_updater_enginestate_v1_payload_proto_enumTypes[0].Descriptor()
+}
+
+func (ContentUnit) Type() protoreflect.EnumType {
+	return &file_updater_enginestate_v1_payload_proto_enumTypes[0]
+}
+
+func (x ContentUnit) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ContentUnit.Descriptor instead.
+func (ContentUnit) EnumDescriptor() ([]byte, []int) {
+	return file_updater_enginestate_v1_payload_proto_rawDescGZIP(), []int{0}
+}
+
+type EntryKind int32
+
+const (
+	EntryKind_ENTRY_KIND_UNSPECIFIED EntryKind = 0 // read as FILE; every /1 entry
+	EntryKind_ENTRY_KIND_FILE        EntryKind = 1
+	EntryKind_ENTRY_KIND_SYMLINK     EntryKind = 2
+)
+
+// Enum value maps for EntryKind.
+var (
+	EntryKind_name = map[int32]string{
+		0: "ENTRY_KIND_UNSPECIFIED",
+		1: "ENTRY_KIND_FILE",
+		2: "ENTRY_KIND_SYMLINK",
+	}
+	EntryKind_value = map[string]int32{
+		"ENTRY_KIND_UNSPECIFIED": 0,
+		"ENTRY_KIND_FILE":        1,
+		"ENTRY_KIND_SYMLINK":     2,
+	}
+)
+
+func (x EntryKind) Enum() *EntryKind {
+	p := new(EntryKind)
+	*p = x
+	return p
+}
+
+func (x EntryKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EntryKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_updater_enginestate_v1_payload_proto_enumTypes[1].Descriptor()
+}
+
+func (EntryKind) Type() protoreflect.EnumType {
+	return &file_updater_enginestate_v1_payload_proto_enumTypes[1]
+}
+
+func (x EntryKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EntryKind.Descriptor instead.
+func (EntryKind) EnumDescriptor() ([]byte, []int) {
+	return file_updater_enginestate_v1_payload_proto_rawDescGZIP(), []int{1}
+}
+
 type ScriptPhase int32
 
 const (
@@ -58,11 +157,11 @@ func (x ScriptPhase) String() string {
 }
 
 func (ScriptPhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_updater_enginestate_v1_payload_proto_enumTypes[0].Descriptor()
+	return file_updater_enginestate_v1_payload_proto_enumTypes[2].Descriptor()
 }
 
 func (ScriptPhase) Type() protoreflect.EnumType {
-	return &file_updater_enginestate_v1_payload_proto_enumTypes[0]
+	return &file_updater_enginestate_v1_payload_proto_enumTypes[2]
 }
 
 func (x ScriptPhase) Number() protoreflect.EnumNumber {
@@ -71,7 +170,7 @@ func (x ScriptPhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ScriptPhase.Descriptor instead.
 func (ScriptPhase) EnumDescriptor() ([]byte, []int) {
-	return file_updater_enginestate_v1_payload_proto_rawDescGZIP(), []int{0}
+	return file_updater_enginestate_v1_payload_proto_rawDescGZIP(), []int{2}
 }
 
 type ScriptInterpreter int32
@@ -110,11 +209,11 @@ func (x ScriptInterpreter) String() string {
 }
 
 func (ScriptInterpreter) Descriptor() protoreflect.EnumDescriptor {
-	return file_updater_enginestate_v1_payload_proto_enumTypes[1].Descriptor()
+	return file_updater_enginestate_v1_payload_proto_enumTypes[3].Descriptor()
 }
 
 func (ScriptInterpreter) Type() protoreflect.EnumType {
-	return &file_updater_enginestate_v1_payload_proto_enumTypes[1]
+	return &file_updater_enginestate_v1_payload_proto_enumTypes[3]
 }
 
 func (x ScriptInterpreter) Number() protoreflect.EnumNumber {
@@ -123,18 +222,24 @@ func (x ScriptInterpreter) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ScriptInterpreter.Descriptor instead.
 func (ScriptInterpreter) EnumDescriptor() ([]byte, []int) {
-	return file_updater_enginestate_v1_payload_proto_rawDescGZIP(), []int{1}
+	return file_updater_enginestate_v1_payload_proto_rawDescGZIP(), []int{3}
 }
 
 // FileTable is stored as files.pb at the root of a payload artifact.
 // It is the complete set of files owned by this release. Deletions are derived
 // by comparing this table with the last successfully applied baseline.
 type FileTable struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"` // must be "relkit.payload/1"
-	Files         []*FileEntry           `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`
-	Scripts       []*ScriptEntry         `protobuf:"bytes,3,rep,name=scripts,proto3" json:"scripts,omitempty"`
-	Preserve      []string               `protobuf:"bytes,4,rep,name=preserve,proto3" json:"preserve,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "relkit.payload/1", or "relkit.payload/2" exactly when the table has a
+	// SYMLINK entry or unit is BUNDLE (ADR 0027 §3).
+	Schema   string         `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`
+	Files    []*FileEntry   `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`
+	Scripts  []*ScriptEntry `protobuf:"bytes,3,rep,name=scripts,proto3" json:"scripts,omitempty"`
+	Preserve []string       `protobuf:"bytes,4,rep,name=preserve,proto3" json:"preserve,omitempty"`
+	Unit     ContentUnit    `protobuf:"varint,5,opt,name=unit,proto3,enum=relkit.updater.enginestate.v1.ContentUnit" json:"unit,omitempty"`
+	// BUNDLE only: one path segment ending in ".app", e.g. "SvnAutoMerge.app".
+	// Relpaths stay relative to the bundle root ("Contents/...").
+	BundleName    string `protobuf:"bytes,6,opt,name=bundle_name,json=bundleName,proto3" json:"bundle_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -197,12 +302,30 @@ func (x *FileTable) GetPreserve() []string {
 	return nil
 }
 
+func (x *FileTable) GetUnit() ContentUnit {
+	if x != nil {
+		return x.Unit
+	}
+	return ContentUnit_CONTENT_UNIT_UNSPECIFIED
+}
+
+func (x *FileTable) GetBundleName() string {
+	if x != nil {
+		return x.BundleName
+	}
+	return ""
+}
+
 type FileEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Relpath       string                 `protobuf:"bytes,1,opt,name=relpath,proto3" json:"relpath,omitempty"`
-	Size          int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
-	Sha256        string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"` // 64 lowercase hex chars
-	Mode          uint32                 `protobuf:"varint,4,opt,name=mode,proto3" json:"mode,omitempty"`    // portable permission bits; 0 means use 0644
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Relpath string                 `protobuf:"bytes,1,opt,name=relpath,proto3" json:"relpath,omitempty"`
+	Size    int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`    // 0 for SYMLINK
+	Sha256  string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"` // 64 lowercase hex chars; empty for SYMLINK
+	Mode    uint32                 `protobuf:"varint,4,opt,name=mode,proto3" json:"mode,omitempty"`    // portable permission bits; 0 means use 0644; ignored for SYMLINK
+	Kind    EntryKind              `protobuf:"varint,5,opt,name=kind,proto3,enum=relkit.updater.enginestate.v1.EntryKind" json:"kind,omitempty"`
+	// SYMLINK only: the readlink result, relative, resolving inside the table
+	// (ADR 0027 §1). Symlinks are never stored in the zip.
+	LinkTarget    string `protobuf:"bytes,6,opt,name=link_target,json=linkTarget,proto3" json:"link_target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -263,6 +386,20 @@ func (x *FileEntry) GetMode() uint32 {
 		return x.Mode
 	}
 	return 0
+}
+
+func (x *FileEntry) GetKind() EntryKind {
+	if x != nil {
+		return x.Kind
+	}
+	return EntryKind_ENTRY_KIND_UNSPECIFIED
+}
+
+func (x *FileEntry) GetLinkTarget() string {
+	if x != nil {
+		return x.LinkTarget
+	}
+	return ""
 }
 
 type ScriptEntry struct {
@@ -429,7 +566,9 @@ func (x *Baseline) GetFiles() []*BaselineEntry {
 type BaselineEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Relpath       string                 `protobuf:"bytes,1,opt,name=relpath,proto3" json:"relpath,omitempty"`
-	Sha256        string                 `protobuf:"bytes,2,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	Sha256        string                 `protobuf:"bytes,2,opt,name=sha256,proto3" json:"sha256,omitempty"` // empty for SYMLINK
+	Kind          EntryKind              `protobuf:"varint,3,opt,name=kind,proto3,enum=relkit.updater.enginestate.v1.EntryKind" json:"kind,omitempty"`
+	LinkTarget    string                 `protobuf:"bytes,4,opt,name=link_target,json=linkTarget,proto3" json:"link_target,omitempty"` // SYMLINK only; compared instead of sha256
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -478,21 +617,41 @@ func (x *BaselineEntry) GetSha256() string {
 	return ""
 }
 
+func (x *BaselineEntry) GetKind() EntryKind {
+	if x != nil {
+		return x.Kind
+	}
+	return EntryKind_ENTRY_KIND_UNSPECIFIED
+}
+
+func (x *BaselineEntry) GetLinkTarget() string {
+	if x != nil {
+		return x.LinkTarget
+	}
+	return ""
+}
+
 var File_updater_enginestate_v1_payload_proto protoreflect.FileDescriptor
 
 const file_updater_enginestate_v1_payload_proto_rawDesc = "" +
 	"\n" +
-	"$updater/enginestate/v1/payload.proto\x12\x1drelkit.updater.enginestate.v1\x1a\x1egoogle/protobuf/duration.proto\"\xc5\x01\n" +
+	"$updater/enginestate/v1/payload.proto\x12\x1drelkit.updater.enginestate.v1\x1a\x1egoogle/protobuf/duration.proto\"\xa6\x02\n" +
 	"\tFileTable\x12\x16\n" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12>\n" +
 	"\x05files\x18\x02 \x03(\v2(.relkit.updater.enginestate.v1.FileEntryR\x05files\x12D\n" +
 	"\ascripts\x18\x03 \x03(\v2*.relkit.updater.enginestate.v1.ScriptEntryR\ascripts\x12\x1a\n" +
-	"\bpreserve\x18\x04 \x03(\tR\bpreserve\"e\n" +
+	"\bpreserve\x18\x04 \x03(\tR\bpreserve\x12>\n" +
+	"\x04unit\x18\x05 \x01(\x0e2*.relkit.updater.enginestate.v1.ContentUnitR\x04unit\x12\x1f\n" +
+	"\vbundle_name\x18\x06 \x01(\tR\n" +
+	"bundleName\"\xc4\x01\n" +
 	"\tFileEntry\x12\x18\n" +
 	"\arelpath\x18\x01 \x01(\tR\arelpath\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x16\n" +
 	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x12\n" +
-	"\x04mode\x18\x04 \x01(\rR\x04mode\"\xb2\x02\n" +
+	"\x04mode\x18\x04 \x01(\rR\x04mode\x12<\n" +
+	"\x04kind\x18\x05 \x01(\x0e2(.relkit.updater.enginestate.v1.EntryKindR\x04kind\x12\x1f\n" +
+	"\vlink_target\x18\x06 \x01(\tR\n" +
+	"linkTarget\"\xb2\x02\n" +
 	"\vScriptEntry\x12@\n" +
 	"\x05phase\x18\x01 \x01(\x0e2*.relkit.updater.enginestate.v1.ScriptPhaseR\x05phase\x12\x18\n" +
 	"\arelpath\x18\x02 \x01(\tR\arelpath\x12\x12\n" +
@@ -505,10 +664,21 @@ const file_updater_enginestate_v1_payload_proto_rawDesc = "" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\x03R\x04code\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12B\n" +
-	"\x05files\x18\x04 \x03(\v2,.relkit.updater.enginestate.v1.BaselineEntryR\x05files\"A\n" +
+	"\x05files\x18\x04 \x03(\v2,.relkit.updater.enginestate.v1.BaselineEntryR\x05files\"\xa0\x01\n" +
 	"\rBaselineEntry\x12\x18\n" +
 	"\arelpath\x18\x01 \x01(\tR\arelpath\x12\x16\n" +
-	"\x06sha256\x18\x02 \x01(\tR\x06sha256*d\n" +
+	"\x06sha256\x18\x02 \x01(\tR\x06sha256\x12<\n" +
+	"\x04kind\x18\x03 \x01(\x0e2(.relkit.updater.enginestate.v1.EntryKindR\x04kind\x12\x1f\n" +
+	"\vlink_target\x18\x04 \x01(\tR\n" +
+	"linkTarget*[\n" +
+	"\vContentUnit\x12\x1c\n" +
+	"\x18CONTENT_UNIT_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11CONTENT_UNIT_TREE\x10\x01\x12\x17\n" +
+	"\x13CONTENT_UNIT_BUNDLE\x10\x02*T\n" +
+	"\tEntryKind\x12\x1a\n" +
+	"\x16ENTRY_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fENTRY_KIND_FILE\x10\x01\x12\x16\n" +
+	"\x12ENTRY_KIND_SYMLINK\x10\x02*d\n" +
 	"\vScriptPhase\x12\x1c\n" +
 	"\x18SCRIPT_PHASE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16SCRIPT_PHASE_PRE_APPLY\x10\x01\x12\x1b\n" +
@@ -532,30 +702,35 @@ func file_updater_enginestate_v1_payload_proto_rawDescGZIP() []byte {
 	return file_updater_enginestate_v1_payload_proto_rawDescData
 }
 
-var file_updater_enginestate_v1_payload_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_updater_enginestate_v1_payload_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_updater_enginestate_v1_payload_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_updater_enginestate_v1_payload_proto_goTypes = []any{
-	(ScriptPhase)(0),            // 0: relkit.updater.enginestate.v1.ScriptPhase
-	(ScriptInterpreter)(0),      // 1: relkit.updater.enginestate.v1.ScriptInterpreter
-	(*FileTable)(nil),           // 2: relkit.updater.enginestate.v1.FileTable
-	(*FileEntry)(nil),           // 3: relkit.updater.enginestate.v1.FileEntry
-	(*ScriptEntry)(nil),         // 4: relkit.updater.enginestate.v1.ScriptEntry
-	(*Baseline)(nil),            // 5: relkit.updater.enginestate.v1.Baseline
-	(*BaselineEntry)(nil),       // 6: relkit.updater.enginestate.v1.BaselineEntry
-	(*durationpb.Duration)(nil), // 7: google.protobuf.Duration
+	(ContentUnit)(0),            // 0: relkit.updater.enginestate.v1.ContentUnit
+	(EntryKind)(0),              // 1: relkit.updater.enginestate.v1.EntryKind
+	(ScriptPhase)(0),            // 2: relkit.updater.enginestate.v1.ScriptPhase
+	(ScriptInterpreter)(0),      // 3: relkit.updater.enginestate.v1.ScriptInterpreter
+	(*FileTable)(nil),           // 4: relkit.updater.enginestate.v1.FileTable
+	(*FileEntry)(nil),           // 5: relkit.updater.enginestate.v1.FileEntry
+	(*ScriptEntry)(nil),         // 6: relkit.updater.enginestate.v1.ScriptEntry
+	(*Baseline)(nil),            // 7: relkit.updater.enginestate.v1.Baseline
+	(*BaselineEntry)(nil),       // 8: relkit.updater.enginestate.v1.BaselineEntry
+	(*durationpb.Duration)(nil), // 9: google.protobuf.Duration
 }
 var file_updater_enginestate_v1_payload_proto_depIdxs = []int32{
-	3, // 0: relkit.updater.enginestate.v1.FileTable.files:type_name -> relkit.updater.enginestate.v1.FileEntry
-	4, // 1: relkit.updater.enginestate.v1.FileTable.scripts:type_name -> relkit.updater.enginestate.v1.ScriptEntry
-	0, // 2: relkit.updater.enginestate.v1.ScriptEntry.phase:type_name -> relkit.updater.enginestate.v1.ScriptPhase
-	7, // 3: relkit.updater.enginestate.v1.ScriptEntry.timeout:type_name -> google.protobuf.Duration
-	1, // 4: relkit.updater.enginestate.v1.ScriptEntry.interpreter:type_name -> relkit.updater.enginestate.v1.ScriptInterpreter
-	6, // 5: relkit.updater.enginestate.v1.Baseline.files:type_name -> relkit.updater.enginestate.v1.BaselineEntry
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5, // 0: relkit.updater.enginestate.v1.FileTable.files:type_name -> relkit.updater.enginestate.v1.FileEntry
+	6, // 1: relkit.updater.enginestate.v1.FileTable.scripts:type_name -> relkit.updater.enginestate.v1.ScriptEntry
+	0, // 2: relkit.updater.enginestate.v1.FileTable.unit:type_name -> relkit.updater.enginestate.v1.ContentUnit
+	1, // 3: relkit.updater.enginestate.v1.FileEntry.kind:type_name -> relkit.updater.enginestate.v1.EntryKind
+	2, // 4: relkit.updater.enginestate.v1.ScriptEntry.phase:type_name -> relkit.updater.enginestate.v1.ScriptPhase
+	9, // 5: relkit.updater.enginestate.v1.ScriptEntry.timeout:type_name -> google.protobuf.Duration
+	3, // 6: relkit.updater.enginestate.v1.ScriptEntry.interpreter:type_name -> relkit.updater.enginestate.v1.ScriptInterpreter
+	8, // 7: relkit.updater.enginestate.v1.Baseline.files:type_name -> relkit.updater.enginestate.v1.BaselineEntry
+	1, // 8: relkit.updater.enginestate.v1.BaselineEntry.kind:type_name -> relkit.updater.enginestate.v1.EntryKind
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_updater_enginestate_v1_payload_proto_init() }
@@ -568,7 +743,7 @@ func file_updater_enginestate_v1_payload_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_updater_enginestate_v1_payload_proto_rawDesc), len(file_updater_enginestate_v1_payload_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      4,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,

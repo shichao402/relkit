@@ -28,6 +28,10 @@ type Updater struct {
 	FallbackURLs    []string // optional; also filled from directory services
 	TrustedKeys     sdk.TrustedKeys
 	ClientSelectors map[string]string
+	// ApplyPreference, when set, is the ordered list of apply selector values
+	// this client accepts (ADR 0027 §3); ClientSelectors["apply"] is then
+	// ignored. When nil, ClientSelectors["apply"] alone is used.
+	ApplyPreference []string
 	Fetcher         sdk.Fetcher
 	StateStore      sdk.StateStore
 	Policy          sdk.Policy
@@ -584,7 +588,7 @@ func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []strin
 		}
 		st.ObserveFallbackSequence(doc.Sequence)
 
-		rule := matchFallbackRule(doc, int64(u.CurrentCode), u.ClientSelectors)
+		rule := matchFallbackRule(doc, int64(u.CurrentCode), u.ClientSelectors, u.applyPreference())
 		if rule == nil {
 			return nil, attempts
 		}
@@ -600,7 +604,19 @@ func (u *Updater) CheckFallback(ctx context.Context) (*FallbackRequired, []strin
 	return nil, attempts
 }
 
-func matchFallbackRule(doc *rupv2.Fallback, currentCode int64, clientSelectors map[string]string) *rupv2.FallbackRule {
+// applyPreference is the apply list in effect: ApplyPreference, else the
+// single value the client map carries.
+func (u *Updater) applyPreference() []string {
+	if u.ApplyPreference != nil {
+		return u.ApplyPreference
+	}
+	if want := u.ClientSelectors["apply"]; want != "" {
+		return []string{want}
+	}
+	return nil
+}
+
+func matchFallbackRule(doc *rupv2.Fallback, currentCode int64, clientSelectors map[string]string, applyPrefs []string) *rupv2.FallbackRule {
 	for _, rule := range doc.Rules {
 		if rule == nil {
 			continue
@@ -608,7 +624,7 @@ func matchFallbackRule(doc *rupv2.Fallback, currentCode int64, clientSelectors m
 		if currentCode < rule.MinCode || currentCode > rule.MaxCode {
 			continue
 		}
-		if !selectors.MatchesClient(model.SelectorsToMap(rule.Selectors), clientSelectors) {
+		if !selectors.MatchesClientApply(model.SelectorsToMap(rule.Selectors), clientSelectors, applyPrefs) {
 			continue
 		}
 		return rule
@@ -652,7 +668,7 @@ func (u *Updater) fetchTarget(ctx context.Context, index *rupv2.Index, target *r
 			st.RecordSourceFailure(url)
 			continue
 		}
-		artifact := selectors.SelectArtifact(manifest, u.ClientSelectors)
+		artifact := selectors.SelectArtifactPreferring(manifest, u.ClientSelectors, u.applyPreference())
 		if artifact == nil {
 			last = fmt.Errorf("no artifact matches selectors")
 			st.RecordSourceFailure(url)

@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	Schema        = "relkit.payload/1"
 	TableName     = "files.pb"
 	FilesPrefix   = "files/"
 	ScriptsPrefix = "scripts/"
@@ -42,6 +41,10 @@ type BuildOptions struct {
 	ScriptsDir string
 	Scripts    []Script
 	Preserve   []string
+	// Bundle declares Tree to be a sealed macOS .app (ADR 0027 §2). It is an
+	// explicit switch, never inferred from the directory name. The table's
+	// bundle_name is the base name of Tree and relpaths stay relative to it.
+	Bundle bool
 }
 
 type Package struct {
@@ -55,10 +58,23 @@ func Build(outPath string, options BuildOptions) (*enginestate.FileTable, error)
 	if err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("payload tree must be a directory: %s", options.Tree)
 	}
-	if err := applyDescriptor(&options); err != nil {
+	table := &enginestate.FileTable{}
+	if options.Bundle {
+		if _, err := os.Lstat(filepath.Join(options.Tree, ConfigDir)); err == nil {
+			return nil, fmt.Errorf("a bundle cannot carry %s: anything beside Contents/ breaks the seal", ConfigDir)
+		}
+		if len(options.Preserve) != 0 {
+			return nil, fmt.Errorf("a bundle cannot preserve entries: a sealed bundle holds no mutable data")
+		}
+		name := filepath.Base(filepath.Clean(options.Tree))
+		if err := CheckBundleName(name); err != nil {
+			return nil, err
+		}
+		table.Unit = enginestate.ContentUnit_CONTENT_UNIT_BUNDLE
+		table.BundleName = name
+	} else if err := applyDescriptor(&options); err != nil {
 		return nil, err
 	}
-	table := &enginestate.FileTable{Schema: Schema}
 	type source struct {
 		name string
 		path string
@@ -79,12 +95,6 @@ func Build(outPath string, options BuildOptions) (*enginestate.FileTable, error)
 			}
 			return nil
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("payload does not support symlink %s", path)
-		}
-		if info.IsDir() {
-			return nil
-		}
 		rel, err := filepath.Rel(options.Tree, path)
 		if err != nil {
 			return err
@@ -92,6 +102,26 @@ func Build(outPath string, options BuildOptions) (*enginestate.FileTable, error)
 		rel = filepath.ToSlash(rel)
 		if err := CheckRelpath(rel); err != nil {
 			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			// filepath.Walk uses Lstat: the link itself is recorded and
+			// never followed. CheckSymlinks below decides whether it is safe.
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			table.Files = append(table.Files, &enginestate.FileEntry{
+				Relpath:    rel,
+				Kind:       enginestate.EntryKind_ENTRY_KIND_SYMLINK,
+				LinkTarget: filepath.ToSlash(target),
+			})
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("payload does not support special file %s", path)
 		}
 		digest, size, err := model.Sha256File(path)
 		if err != nil {
@@ -168,6 +198,10 @@ func Build(outPath string, options BuildOptions) (*enginestate.FileTable, error)
 		return table.Scripts[i].Relpath < table.Scripts[j].Relpath
 	})
 	if err := ensurePortableDistinct(table); err != nil {
+		return nil, err
+	}
+	table.Schema = RequiredSchema(table)
+	if err := CheckTable(table); err != nil {
 		return nil, err
 	}
 
@@ -324,24 +358,28 @@ func inspect(path, dest string) (*enginestate.FileTable, error) {
 	if err := proto.Unmarshal(raw, table); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", TableName, err)
 	}
-	if table.Schema != Schema {
+	if table.Schema != SchemaV1 && table.Schema != SchemaV2 {
 		return nil, fmt.Errorf("unexpected payload schema %q", table.Schema)
+	}
+	if err := CheckTable(table); err != nil {
+		return nil, err
 	}
 	if err := ensurePortableDistinct(table); err != nil {
 		return nil, err
 	}
 	expected := map[string]struct{}{TableName: {}}
+	seenRel := map[string]struct{}{}
 	for _, file := range table.Files {
-		if file == nil {
-			return nil, fmt.Errorf("payload contains nil file entry")
-		}
-		if err := CheckRelpath(file.Relpath); err != nil {
-			return nil, err
-		}
-		name := FilesPrefix + file.Relpath
-		if _, duplicate := expected[name]; duplicate {
+		if _, duplicate := seenRel[file.Relpath]; duplicate {
 			return nil, fmt.Errorf("duplicate file table path %q", file.Relpath)
 		}
+		seenRel[file.Relpath] = struct{}{}
+		if IsSymlink(file) {
+			// Symlinks live only in the table; a zip entry at the same
+			// name is reported as undeclared below.
+			continue
+		}
+		name := FilesPrefix + file.Relpath
 		expected[name] = struct{}{}
 		if err := verifyZipEntry(entries[name], file.Size, file.Sha256, name); err != nil {
 			return nil, err
