@@ -102,7 +102,7 @@ message FileTable {
 
 - 表内 relpath 在 BUNDLE 下相对于 bundle 根（`Contents/...`），不带 `bundle_name` 前缀。这样同一张表在两种 Placement 下都不用改写。
 - `relkit payload build --bundle <X.app>`：显式开关，不按扩展名推断。构建时校验 `Contents/Info.plist` 存在、`bundle_name` 合法，并拒绝 `--preserve`（密封包内不允许有可变数据）。
-- BUNDLE 只允许在 darwin 选择器的 artifact 上出现；stage 闸门对其他 os 拒绝。
+- BUNDLE 只允许在目标系统为 darwin 的 artifact 上出现；stage 闸门对其他目标拒绝。目标系统取 `os` 选择器，未声明时取 `os-arch` 的 GOOS 段（定向构建的规范维度，如 `darwin-universal`）；两者都声明时必须一致（`payload.TargetOS`）。含软链的表不得以 windows 为目标，判定同此。
 
 为什么不复用 TREE + “根目录名以 .app 结尾”：那正是 `79be2be` 之前的推断式做法，会被一次重构顺手删掉而无人察觉。显式枚举让“这是密封包”成为契约的一部分，测试和 stage 闸门都能看见。
 

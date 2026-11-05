@@ -96,19 +96,42 @@ func CheckBundleName(name string) error {
 	return nil
 }
 
+// TargetOS is the operating system an artifact's selectors target: the "os"
+// selector when declared, otherwise the GOOS half of "os-arch" (the dimension
+// targeted builds must use, e.g. "darwin-universal"). Empty when neither
+// names one.
+func TargetOS(selectors map[string]string) string {
+	if value := selectors["os"]; value != "" {
+		return value
+	}
+	if value := selectors["os-arch"]; value != "" {
+		if goos, _, ok := strings.Cut(value, "-"); ok && goos != "" {
+			return goos
+		}
+	}
+	return ""
+}
+
 // CheckPublishSelectors is the stage gate for one payload artifact
 // (ADR 0027 §2, §3, §1 rule 6): its apply selector must name the table's
-// format, a BUNDLE must target os=darwin, and a table with symlinks must not
-// target os=windows.
+// format, a BUNDLE must target darwin, and a table with symlinks must not
+// target windows. The target is read with [TargetOS], and the two must agree
+// when both "os" and "os-arch" are declared.
 func CheckPublishSelectors(table *enginestate.FileTable, selectors map[string]string) error {
 	if got, want := selectors[ApplySelectorKey], ApplySelectorFor(table); got != want {
 		return fmt.Errorf("payload is %s and must carry selector apply=%s, has apply=%q", table.GetSchema(), want, got)
 	}
-	if UnitOf(table) == enginestate.ContentUnit_CONTENT_UNIT_BUNDLE && selectors["os"] != "darwin" {
-		return fmt.Errorf("a BUNDLE payload must target os=darwin, has os=%q", selectors["os"])
+	target := TargetOS(selectors)
+	if osArch := selectors["os-arch"]; osArch != "" && selectors["os"] != "" {
+		if goos, _, _ := strings.Cut(osArch, "-"); goos != selectors["os"] {
+			return fmt.Errorf("selectors disagree on the target: os=%q, os-arch=%q", selectors["os"], osArch)
+		}
 	}
-	if HasSymlinks(table) && selectors["os"] == "windows" {
-		return fmt.Errorf("a payload with symlinks cannot target os=windows")
+	if UnitOf(table) == enginestate.ContentUnit_CONTENT_UNIT_BUNDLE && target != "darwin" {
+		return fmt.Errorf("a BUNDLE payload must target darwin (os or os-arch), targets %q", target)
+	}
+	if HasSymlinks(table) && target == "windows" {
+		return fmt.Errorf("a payload with symlinks cannot target windows")
 	}
 	return nil
 }
