@@ -131,7 +131,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if err := changelog.CompactPriorNodes(retained, cfg.Changelog.URLTemplate, staged.Code); err != nil {
 		return nil, Error{Message: err.Error()}
 	}
-	provisional, err := model.NewIndex(cfg.Product, channel, baseSequence+1, retained, model.MinSupportedPtr(existing), "")
+	provisional, err := model.NewIndex(cfg.Product, channel, model.NextSequence(baseSequence), retained, model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if dryRun {
 		printer("")
 		printer("dry run: validation passed, nothing uploaded")
-		printer(fmt.Sprintf("would write sequence %d and these keys:", baseSequence+1))
+		printer(fmt.Sprintf("would write sequence %d and these keys:", model.NextSequence(baseSequence)))
 		for _, artifact := range staged.Artifacts {
 			printer("  " + model.ArtifactKey(cfg.Product, version, artifact.Filename))
 			if casKey, err := model.CasKey(artifact.Sha256); err == nil {
@@ -255,7 +255,7 @@ func Run(cfg *config.Config, version string, to []string, dryRun bool, allowBack
 	if err := changelog.CompactPriorNodes(mergedFinal, cfg.Changelog.URLTemplate, staged.Code); err != nil {
 		return nil, Error{Message: err.Error()}
 	}
-	index, err := model.NewIndex(cfg.Product, channel, baseSequence+1, mergedFinal, model.MinSupportedPtr(existing), "")
+	index, err := model.NewIndex(cfg.Product, channel, model.NextSequence(baseSequence), mergedFinal, model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}

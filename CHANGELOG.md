@@ -76,6 +76,14 @@ what will break.
   `relkit-agent init -bootstrap`. Found on publish.firoyang.com after its
   redeploy, where the config was correct and the agent had no admin state.
 
+- Clients installed before the 2026-10-24 epoch kept anti-rollback
+  watermarks from the old servers (directory 29, index 94 seen in the field),
+  while the epoch restarted counting near 1. Even after a manual reinstall they
+  rejected every directory and index as "older than last seen". The next
+  directory or index signed over an existing one now jumps to
+  `model.SequenceFloor` (1000) and counts on from there; a product's first
+  document still starts at 1.
+
 ### Removed
 
 - `DecAssets/` and the `assets-version.yml` gate. The `relkit-ops` and

@@ -149,8 +149,8 @@ func TestUnpublishRemovesNodeAndRewritesWebDocs(t *testing.T) {
 	if len(out.Versions) != 1 || out.Versions[0].Version != "1.0.0" {
 		t.Fatalf("versions=%v", out.Versions)
 	}
-	if out.Sequence != 8 {
-		t.Fatalf("sequence=%d want 8", out.Sequence)
+	if out.Sequence != model.SequenceFloor {
+		t.Fatalf("sequence=%d want %d", out.Sequence, model.SequenceFloor)
 	}
 
 	raw := backend.files[model.IndexKey("demo", "stable")]
@@ -252,8 +252,8 @@ func TestUnpublishRemovesMiddleNodeKeepsReachability(t *testing.T) {
 	if len(out.Versions) != 2 {
 		t.Fatalf("versions=%v", out.Versions)
 	}
-	if out.Sequence != 10 {
-		t.Fatalf("sequence=%d want 10", out.Sequence)
+	if out.Sequence != model.SequenceFloor {
+		t.Fatalf("sequence=%d want %d", out.Sequence, model.SequenceFloor)
 	}
 	channelDoc, err := webmeta.UnmarshalChannel(backend.files[webmeta.ChannelKey("demo", "stable")])
 	if err != nil {

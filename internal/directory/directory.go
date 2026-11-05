@@ -115,7 +115,7 @@ func Set(cfg *config.Config, opts Options, printer Printer) (*model.UpdateDirect
 	doc := &model.UpdateDirectory{
 		Schema:            model.SchemaDirectory,
 		Product:           cfg.Product,
-		DirectorySequence: int64(baseSequence + 1),
+		DirectorySequence: int64(model.NextSequence(baseSequence)),
 		UpdatedAt:         model.UTCNow(),
 		Services:          docServices,
 		RuntimeProfile:    cloneDigestRef(opts.RuntimeProfile),

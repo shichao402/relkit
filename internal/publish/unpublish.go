@@ -106,11 +106,11 @@ func unpublishOnBackends(cfg *config.Config, version string, openedBackends []ba
 		printer("")
 		printer("dry run: validation passed, nothing removed")
 		printer(fmt.Sprintf("would write sequence %d without %s (code %d), leaving %d version(s)",
-			baseSequence+1, version, removed.Code, len(kept)))
+			model.NextSequence(baseSequence), version, removed.Code, len(kept)))
 		return nil, nil
 	}
 
-	rebuilt, err := model.NewIndex(cfg.Product, channel, baseSequence+1, kept, model.MinSupportedPtr(existing), "")
+	rebuilt, err := model.NewIndex(cfg.Product, channel, model.NextSequence(baseSequence), kept, model.MinSupportedPtr(existing), "")
 	if err != nil {
 		return nil, err
 	}

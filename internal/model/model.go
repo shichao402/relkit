@@ -470,6 +470,26 @@ func NewIndexNode(staged *StagedDocument, manifestDigest string, manifestSize in
 	return node
 }
 
+// SequenceFloor is the lowest sequence a signed directory or index takes once
+// one already exists. Clients installed before the 2026-10-24 epoch keep the
+// anti-rollback watermarks they saw on the old servers (seen in the field:
+// directory 29, index 94). The epoch restarted counting near 1, so after a
+// manual reinstall those clients still rejected every current document as
+// "older than last seen". Jumping past the old range once heals them without
+// touching client state. A product's first document still starts at 1, which
+// is how callers tell "no document yet" apart from "existing document".
+const SequenceFloor = 1000
+
+// NextSequence returns the sequence for the document that replaces one at
+// base (0 means none exists yet).
+func NextSequence(base int) int {
+	next := base + 1
+	if base >= 1 && next < SequenceFloor {
+		return SequenceFloor
+	}
+	return next
+}
+
 func NewIndex(product, channel string, sequence int, versions []*VersionNode, minSupported *int, generatedAt string) (*IndexDocument, error) {
 	if err := CheckIdentifier(product, "product"); err != nil {
 		return nil, err
