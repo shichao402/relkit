@@ -20,6 +20,9 @@ type Engine struct {
 	// LaunchWorker is injectable for tests. Production copies the running
 	// updater into staging and starts it independently of the host install tree.
 	LaunchWorker func(dataDir, sessionID, stagedRoot string) error
+	// newProgressUI is injectable for tests; production uses the platform
+	// window (ADR 0026 §6).
+	newProgressUI func(progressSpec) progressUI
 }
 
 func (e *Engine) writer() io.Writer {

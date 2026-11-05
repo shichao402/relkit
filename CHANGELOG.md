@@ -10,6 +10,15 @@ what will break.
 
 - `relkit-updater proto` prints the embedded `relkit.updater.v2` contract, so a
   host generates its types from the very binary it runs (ADR 0026).
+- On Windows the apply worker shows a progress window while the host is gone:
+  waiting for exit, downloading, installing, relaunching, and failures with
+  the host's recovery help. Waiting and downloading can be cancelled; the old
+  version is relaunched when the install was left untouched. Hosts that draw
+  their own handoff UI set `ApplyOp.hideProgress`; `InstallSpec.displayName`
+  names the product (ADR 0026 §6).
+- `apply` accepts a plan that was not downloaded yet; the worker downloads it
+  after the host exits (new `SESSION_PHASE_DOWNLOADING`). Such a session always
+  reports `requiresHostExit: true`.
 - Release codes are allocated by the server (ADR 0025). `POST /v1/release-code`
   hands out the next code for a product, above both its counter and every code
   already published on any channel, so products that published before need no

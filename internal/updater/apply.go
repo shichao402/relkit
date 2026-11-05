@@ -16,6 +16,7 @@ import (
 
 	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
+	"github.com/shichao402/relkit/internal/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -35,14 +36,14 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 	if plan.ExpiresAt != nil && time.Now().After(plan.ExpiresAt.AsTime()) {
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_EXPIRED, "plan expired")
 	}
+	// A plan need not be downloaded first: the worker fetches it after the
+	// host exits (ADR 0026 §6). Files marked downloaded must still be intact.
 	for _, f := range plan.Files {
-		if !f.Downloaded || f.LocalPath == "" {
-			return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_NOT_DOWNLOADED, "download the plan before apply")
-		}
-		if fi, err := os.Stat(f.LocalPath); err != nil || fi.Size() != f.Size {
+		if f.Downloaded && !planFileReady(f) {
 			return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_PLAN_TAMPERED, "downloaded file size mismatch")
 		}
 	}
+	downloaded := planDownloaded(plan)
 	if len(plan.Files) == 0 {
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_LAYOUT_UNSUPPORTED, "plan has no files")
 	}
@@ -73,7 +74,10 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 		return e.emitApplyFail(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, err.Error())
 	}
 	requiresHostExit := true
-	if disposition == updaterv2.ApplyDisposition_APPLY_DISPOSITION_INTERNAL {
+	// Without the payload on disk the engine cannot tell whether it touches
+	// the running executable, so an undownloaded plan always asks the host
+	// to exit.
+	if disposition == updaterv2.ApplyDisposition_APPLY_DISPOSITION_INTERNAL && downloaded {
 		ok, perr := planRequiresHostExit(inst, plan)
 		if perr != nil {
 			releaseApplyLock(inst.InstallRoot)
@@ -102,6 +106,9 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 		RequiresHostExit:  requiresHostExit,
 		Disposition:       disposition,
 		InstallerRelpath:  installerRel,
+		HideProgress:      op.HideProgress,
+		DisplayName:       displayNameFor(req),
+		Recovery:          req.GetProfile().GetRecovery(),
 	}
 	if err := st.saveSession(sess); err != nil {
 		releaseApplyLock(inst.InstallRoot)
@@ -128,6 +135,15 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 			}},
 		}},
 	})
+}
+
+// displayNameFor is the product name the progress window shows: the host's
+// InstallSpec.display_name, else the product id the host declared.
+func displayNameFor(req *updaterv2.UpdaterRequest) string {
+	if n := strings.TrimSpace(req.GetRuntime().GetInstall().GetDisplayName()); n != "" {
+		return n
+	}
+	return req.GetProfile().GetExpectedProduct()
 }
 
 func launchApplyWorker(dataDir, sessionID, stagedRoot string) error {
@@ -267,6 +283,13 @@ func assertWritable(root string) error {
 }
 
 // RunWorker applies a previously accepted session. It must be started from staging.
+//
+// While the host is gone it drives the progress window (ADR 0026 §6): wait
+// for the host to exit, download the plan if apply was accepted before
+// download, then install and relaunch. Waiting and downloading can be
+// cancelled; once copying starts they cannot. When the session ends with the
+// old install intact (cancelled, download failed, rolled back) the worker
+// relaunches the old host so the user is not left with nothing running.
 func (e *Engine) RunWorker(dataDir, sessionID string) error {
 	st := store{dataDir: dataDir}
 	sess, err := st.loadSession(sessionID)
@@ -278,28 +301,94 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		return err
 	}
 	refreshApplyLock(sess.InstallRoot, sess.SessionId, os.Getpid())
+
+	ui := e.openProgressUI(sess)
+	defer ui.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-ui.Cancelled():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
 	setPhase := func(p updaterv2.SessionPhase, errp *updaterv2.Error) {
+		if errp != nil && errp.Recovery == nil {
+			errp.Recovery = sess.Recovery
+		}
 		sess.Phase = p
 		sess.HeartbeatAt = timestamppb.Now()
 		sess.Error = errp
 		_ = st.saveSession(sess)
 	}
+	enter := func(p updaterv2.SessionPhase) {
+		setPhase(p, nil)
+		ui.SetPhase(p, phaseCancelable(p))
+	}
+	// finish records a terminal failure, shows it, and relaunches the old
+	// host when the install is untouched and the host is gone.
+	finish := func(p updaterv2.SessionPhase, errp *updaterv2.Error, cause error, relaunchOld bool) error {
+		setPhase(p, errp)
+		releaseApplyLock(sess.InstallRoot)
+		if errp.GetCode() == updaterv2.ErrorCode_ERROR_CODE_CANCELED {
+			ui.Close()
+		} else {
+			ui.Fail(errp)
+		}
+		if relaunchOld && sess.RequiresHostExit {
+			relaunchHost(sess)
+		}
+		return cause
+	}
+
 	if sess.RequiresHostExit {
-		if err := waitForHostExit(int(sess.Pid), 5*time.Minute, func() {
+		ui.SetPhase(updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, true)
+		if err := waitForHostExit(ctx, int(sess.Pid), 5*time.Minute, func() {
 			setPhase(updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, nil)
 		}); err != nil {
-			setPhase(
-				updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
-				newError(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil),
-			)
-			releaseApplyLock(sess.InstallRoot)
-			return err
+			if ctx.Err() != nil {
+				// The host may still be up; nothing to relaunch.
+				return finish(updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
+					newError(updaterv2.ErrorCode_ERROR_CODE_CANCELED, true, "cancelled while waiting for the host to exit", nil),
+					err, false)
+			}
+			return finish(updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
+				newError(updaterv2.ErrorCode_ERROR_CODE_OCCUPIED, true, err.Error(), nil), err, false)
 		}
 	}
+	if !planDownloaded(plan) {
+		enter(updaterv2.SessionPhase_SESSION_PHASE_DOWNLOADING)
+		var totalSize int64
+		received := make([]int64, len(plan.Files))
+		for i, f := range plan.Files {
+			totalSize += f.Size
+			if planFileReady(f) {
+				received[i] = f.Size
+			}
+		}
+		if _, derr := e.downloadPlanFiles(ctx, st, plan, sess.StagedRoot, func(i int, p sdk.Progress) {
+			received[i] = p.Received
+			var sum int64
+			for _, r := range received {
+				sum += r
+			}
+			ui.SetDownload(sum, totalSize, p.BytesPerSecond)
+		}); derr != nil {
+			return finish(updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION, derr, errors.New(derr.GetMessage()), true)
+		}
+	}
+	if ctx.Err() != nil {
+		return finish(updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION,
+			newError(updaterv2.ErrorCode_ERROR_CODE_CANCELED, true, "cancelled before install", nil), ctx.Err(), true)
+	}
 	if sess.Disposition == updaterv2.ApplyDisposition_APPLY_DISPOSITION_FULL_INSTALL {
+		// The installer draws its own UI from here on.
+		ui.Close()
 		return runFullInstallPhase(sess, st, setPhase)
 	}
-	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COPYING, nil)
+	enter(updaterv2.SessionPhase_SESSION_PHASE_COPYING)
 
 	err = applyPlan(dataDir, sess, plan)
 	if err != nil {
@@ -308,27 +397,42 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		if attn {
 			phase = updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
 		}
-		setPhase(phase, newError(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil))
-		releaseApplyLock(sess.InstallRoot)
-		return err
+		return finish(phase, newError(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil), err, !attn)
 	}
 	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
-		setPhase(updaterv2.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
-		exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
-		if sess.Placement == updaterv2.Placement_PLACEMENT_LIBRARY {
-			if ptr := readActive(sess.InstallRoot); ptr != nil && ptr.Executable != "" {
-				exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Executable))
-			} else if ptr != nil {
-				exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Path), filepath.Base(sess.ExecutableRelpath))
-			}
-		}
-		cmd := exec.Command(exe)
-		cmd.Dir = sess.InstallRoot
-		_ = cmd.Start()
+		enter(updaterv2.SessionPhase_SESSION_PHASE_RELAUNCHING)
+		relaunchHost(sess)
 	}
 	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COMPLETED, nil)
 	releaseApplyLock(sess.InstallRoot)
 	return nil
+}
+
+// phaseCancelable is the cancel rule: only the stretches that change nothing
+// on disk may be cancelled.
+func phaseCancelable(p updaterv2.SessionPhase) bool {
+	return p == updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT ||
+		p == updaterv2.SessionPhase_SESSION_PHASE_DOWNLOADING
+}
+
+// relaunchHost starts the host executable the session names, resolving the
+// active version for LIBRARY installs. It is a no-op unless the session asked
+// for relaunch.
+var relaunchHost = func(sess *enginestate.ApplySessionRecord) {
+	if !sess.Relaunch || sess.ExecutableRelpath == "" || sess.InstallOnly {
+		return
+	}
+	exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
+	if sess.Placement == updaterv2.Placement_PLACEMENT_LIBRARY {
+		if ptr := readActive(sess.InstallRoot); ptr != nil && ptr.Executable != "" {
+			exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Executable))
+		} else if ptr != nil {
+			exe = filepath.Join(sess.InstallRoot, filepath.FromSlash(ptr.Path), filepath.Base(sess.ExecutableRelpath))
+		}
+	}
+	cmd := exec.Command(exe)
+	cmd.Dir = sess.InstallRoot
+	_ = cmd.Start()
 }
 
 // runFullInstallPhase runs the verified installer and reports the outcome in
@@ -353,16 +457,13 @@ func runFullInstallPhase(
 	}
 	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
 		setPhase(updaterv2.SessionPhase_SESSION_PHASE_RELAUNCHING, nil)
-		exe := filepath.Join(sess.InstallRoot, filepath.FromSlash(sess.ExecutableRelpath))
-		cmd := exec.Command(exe)
-		cmd.Dir = sess.InstallRoot
-		_ = cmd.Start()
+		relaunchHost(sess)
 	}
 	setPhase(updaterv2.SessionPhase_SESSION_PHASE_COMPLETED, nil)
 	return nil
 }
 
-func waitForHostExit(pid int, timeout time.Duration, heartbeat func()) error {
+func waitForHostExit(ctx context.Context, pid int, timeout time.Duration, heartbeat func()) error {
 	if pid <= 0 {
 		return nil
 	}
@@ -374,7 +475,11 @@ func waitForHostExit(pid int, timeout time.Duration, heartbeat func()) error {
 		if heartbeat != nil {
 			heartbeat()
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 	return nil
 }

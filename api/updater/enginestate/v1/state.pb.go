@@ -394,8 +394,13 @@ type ApplySessionRecord struct {
 	Disposition v2.ApplyDisposition `protobuf:"varint,23,opt,name=disposition,proto3,enum=relkit.updater.v2.ApplyDisposition" json:"disposition,omitempty"`
 	// Relpath of the verified installer inside the staged root.
 	InstallerRelpath string `protobuf:"bytes,24,opt,name=installer_relpath,json=installerRelpath,proto3" json:"installer_relpath,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Progress window settings carried from ApplyOp and InstallSpec.
+	HideProgress bool   `protobuf:"varint,25,opt,name=hide_progress,json=hideProgress,proto3" json:"hide_progress,omitempty"`
+	DisplayName  string `protobuf:"bytes,26,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// Host recovery help, attached to errors the worker reports.
+	Recovery      *v2.RecoveryHelp `protobuf:"bytes,27,opt,name=recovery,proto3" json:"recovery,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ApplySessionRecord) Reset() {
@@ -575,6 +580,27 @@ func (x *ApplySessionRecord) GetInstallerRelpath() string {
 	return ""
 }
 
+func (x *ApplySessionRecord) GetHideProgress() bool {
+	if x != nil {
+		return x.HideProgress
+	}
+	return false
+}
+
+func (x *ApplySessionRecord) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *ApplySessionRecord) GetRecovery() *v2.RecoveryHelp {
+	if x != nil {
+		return x.Recovery
+	}
+	return nil
+}
+
 type JournalEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DestPath      string                 `protobuf:"bytes,1,opt,name=dest_path,json=destPath,proto3" json:"dest_path,omitempty"`
@@ -740,7 +766,7 @@ const file_updater_enginestate_v1_state_proto_rawDesc = "" +
 	"\x12last_seen_sequence\x18\x03 \x01(\x03R\x10lastSeenSequence\x12?\n" +
 	"\x1clast_seen_directory_sequence\x18\x04 \x01(\x03R\x19lastSeenDirectorySequence\x12=\n" +
 	"\x1blast_seen_fallback_sequence\x18\x05 \x01(\x03R\x18lastSeenFallbackSequence\x12#\n" +
-	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xaa\a\n" +
+	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xaf\b\n" +
 	"\x12ApplySessionRecord\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
@@ -767,7 +793,10 @@ const file_updater_enginestate_v1_state_proto_rawDesc = "" +
 	"\x12requires_host_exit\x18\x15 \x01(\bR\x10requiresHostExit\x12:\n" +
 	"\alibrary\x18\x16 \x01(\v2 .relkit.updater.v2.LibraryPolicyR\alibrary\x12E\n" +
 	"\vdisposition\x18\x17 \x01(\x0e2#.relkit.updater.v2.ApplyDispositionR\vdisposition\x12+\n" +
-	"\x11installer_relpath\x18\x18 \x01(\tR\x10installerRelpathJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
+	"\x11installer_relpath\x18\x18 \x01(\tR\x10installerRelpath\x12#\n" +
+	"\rhide_progress\x18\x19 \x01(\bR\fhideProgress\x12!\n" +
+	"\fdisplay_name\x18\x1a \x01(\tR\vdisplayName\x12;\n" +
+	"\brecovery\x18\x1b \x01(\v2\x1f.relkit.updater.v2.RecoveryHelpR\brecoveryJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
 	"\fJournalEntry\x12\x1b\n" +
 	"\tdest_path\x18\x01 \x01(\tR\bdestPath\x12\x1f\n" +
 	"\vbackup_path\x18\x02 \x01(\tR\n" +
@@ -810,6 +839,7 @@ var file_updater_enginestate_v1_state_proto_goTypes = []any{
 	(v2.Placement)(0),             // 11: relkit.updater.v2.Placement
 	(*v2.LibraryPolicy)(nil),      // 12: relkit.updater.v2.LibraryPolicy
 	(v2.ApplyDisposition)(0),      // 13: relkit.updater.v2.ApplyDisposition
+	(*v2.RecoveryHelp)(nil),       // 14: relkit.updater.v2.RecoveryHelp
 }
 var file_updater_enginestate_v1_state_proto_depIdxs = []int32{
 	6,  // 0: relkit.updater.enginestate.v1.UpdatePlan.prior_release_notes:type_name -> relkit.updater.v2.PriorReleaseNotes
@@ -825,12 +855,13 @@ var file_updater_enginestate_v1_state_proto_depIdxs = []int32{
 	11, // 10: relkit.updater.enginestate.v1.ApplySessionRecord.placement:type_name -> relkit.updater.v2.Placement
 	12, // 11: relkit.updater.enginestate.v1.ApplySessionRecord.library:type_name -> relkit.updater.v2.LibraryPolicy
 	13, // 12: relkit.updater.enginestate.v1.ApplySessionRecord.disposition:type_name -> relkit.updater.v2.ApplyDisposition
-	4,  // 13: relkit.updater.enginestate.v1.ApplyJournal.entries:type_name -> relkit.updater.enginestate.v1.JournalEntry
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	14, // 13: relkit.updater.enginestate.v1.ApplySessionRecord.recovery:type_name -> relkit.updater.v2.RecoveryHelp
+	4,  // 14: relkit.updater.enginestate.v1.ApplyJournal.entries:type_name -> relkit.updater.enginestate.v1.JournalEntry
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_updater_enginestate_v1_state_proto_init() }

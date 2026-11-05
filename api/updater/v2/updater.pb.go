@@ -394,6 +394,8 @@ const (
 	SessionPhase_SESSION_PHASE_NEEDS_ATTENTION  SessionPhase = 5
 	SessionPhase_SESSION_PHASE_COMPLETED        SessionPhase = 6
 	SessionPhase_SESSION_PHASE_ROLLED_BACK      SessionPhase = 7
+	// The worker is fetching a plan that apply accepted before download.
+	SessionPhase_SESSION_PHASE_DOWNLOADING SessionPhase = 8
 )
 
 // Enum value maps for SessionPhase.
@@ -407,6 +409,7 @@ var (
 		5: "SESSION_PHASE_NEEDS_ATTENTION",
 		6: "SESSION_PHASE_COMPLETED",
 		7: "SESSION_PHASE_ROLLED_BACK",
+		8: "SESSION_PHASE_DOWNLOADING",
 	}
 	SessionPhase_value = map[string]int32{
 		"SESSION_PHASE_UNSPECIFIED":      0,
@@ -417,6 +420,7 @@ var (
 		"SESSION_PHASE_NEEDS_ATTENTION":  5,
 		"SESSION_PHASE_COMPLETED":        6,
 		"SESSION_PHASE_ROLLED_BACK":      7,
+		"SESSION_PHASE_DOWNLOADING":      8,
 	}
 )
 
@@ -759,8 +763,11 @@ type InstallSpec struct {
 	Preserve          []string               `protobuf:"bytes,5,rep,name=preserve,proto3" json:"preserve,omitempty"`
 	Relaunch          bool                   `protobuf:"varint,6,opt,name=relaunch,proto3" json:"relaunch,omitempty"`
 	Library           *LibraryPolicy         `protobuf:"bytes,7,opt,name=library,proto3" json:"library,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Product name shown in the engine progress window. Falls back to the
+	// bootstrap product id when empty.
+	DisplayName   string `protobuf:"bytes,8,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *InstallSpec) Reset() {
@@ -840,6 +847,13 @@ func (x *InstallSpec) GetLibrary() *LibraryPolicy {
 		return x.Library
 	}
 	return nil
+}
+
+func (x *InstallSpec) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
 }
 
 type Runtime struct {
@@ -1220,7 +1234,11 @@ type ApplyOp struct {
 	PlanId string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	// When true, LIBRARY installs into versions/ but does not rewrite
 	// active.json. IN_PLACE ignores this flag.
-	InstallOnly   bool `protobuf:"varint,2,opt,name=install_only,json=installOnly,proto3" json:"install_only,omitempty"`
+	InstallOnly bool `protobuf:"varint,2,opt,name=install_only,json=installOnly,proto3" json:"install_only,omitempty"`
+	// The worker shows a small progress window while the host is gone
+	// (waiting for exit, downloading, installing, relaunching, failure).
+	// Default is shown; a host that draws its own handoff UI sets this.
+	HideProgress  bool `protobuf:"varint,3,opt,name=hide_progress,json=hideProgress,proto3" json:"hide_progress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1265,6 +1283,13 @@ func (x *ApplyOp) GetPlanId() string {
 func (x *ApplyOp) GetInstallOnly() bool {
 	if x != nil {
 		return x.InstallOnly
+	}
+	return false
+}
+
+func (x *ApplyOp) GetHideProgress() bool {
+	if x != nil {
+		return x.HideProgress
 	}
 	return false
 }
@@ -3607,7 +3632,7 @@ const file_updater_v2_updater_proto_rawDesc = "" +
 	"\x10root_fingerprint\x18\x05 \x01(\tR\x0frootFingerprint\"N\n" +
 	"\rLibraryPolicy\x12\x16\n" +
 	"\x06retain\x18\x01 \x01(\x05R\x06retain\x12%\n" +
-	"\x0ereserved_codes\x18\x02 \x03(\x03R\rreservedCodes\"\xb8\x02\n" +
+	"\x0ereserved_codes\x18\x02 \x03(\x03R\rreservedCodes\"\xdb\x02\n" +
 	"\vInstallSpec\x12:\n" +
 	"\tplacement\x18\x01 \x01(\x0e2\x1c.relkit.updater.v2.PlacementR\tplacement\x12!\n" +
 	"\finstall_root\x18\x02 \x01(\tR\vinstallRoot\x12-\n" +
@@ -3615,7 +3640,8 @@ const file_updater_v2_updater_proto_rawDesc = "" +
 	"\x0fsidecar_relpath\x18\x04 \x01(\tR\x0esidecarRelpath\x12\x1a\n" +
 	"\bpreserve\x18\x05 \x03(\tR\bpreserve\x12\x1a\n" +
 	"\brelaunch\x18\x06 \x01(\bR\brelaunch\x12:\n" +
-	"\alibrary\x18\a \x01(\v2 .relkit.updater.v2.LibraryPolicyR\alibrary\"\xbb\x02\n" +
+	"\alibrary\x18\a \x01(\v2 .relkit.updater.v2.LibraryPolicyR\alibrary\x12!\n" +
+	"\fdisplay_name\x18\b \x01(\tR\vdisplayName\"\xbb\x02\n" +
 	"\aRuntime\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12!\n" +
 	"\fcurrent_code\x18\x02 \x01(\x03R\vcurrentCode\x12Z\n" +
@@ -3649,10 +3675,11 @@ const file_updater_v2_updater_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\"%\n" +
 	"\n" +
 	"DownloadOp\x12\x17\n" +
-	"\aplan_id\x18\x01 \x01(\tR\x06planId\"E\n" +
+	"\aplan_id\x18\x01 \x01(\tR\x06planId\"j\n" +
 	"\aApplyOp\x12\x17\n" +
 	"\aplan_id\x18\x01 \x01(\tR\x06planId\x12!\n" +
-	"\finstall_only\x18\x02 \x01(\bR\vinstallOnly\"\n" +
+	"\finstall_only\x18\x02 \x01(\bR\vinstallOnly\x12#\n" +
+	"\rhide_progress\x18\x03 \x01(\bR\fhideProgress\"\n" +
 	"\n" +
 	"\bStatusOp\"\v\n" +
 	"\tCleanupOp\"\x11\n" +
@@ -3871,7 +3898,7 @@ const file_updater_v2_updater_proto_rawDesc = "" +
 	"\x17OPERATION_SWITCH_ACTIVE\x10\n" +
 	"\x12\x16\n" +
 	"\x12OPERATION_ROLLBACK\x10\v\x12\x1e\n" +
-	"\x1aOPERATION_DELETE_INSTALLED\x10\f\"\x04\b\a\x10\a\"\x04\b\b\x10\b*\x88\x02\n" +
+	"\x1aOPERATION_DELETE_INSTALLED\x10\f\"\x04\b\a\x10\a\"\x04\b\b\x10\b*\xa7\x02\n" +
 	"\fSessionPhase\x12\x1d\n" +
 	"\x19SESSION_PHASE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eSESSION_PHASE_WAITING_FOR_EXIT\x10\x01\x12\x19\n" +
@@ -3880,7 +3907,8 @@ const file_updater_v2_updater_proto_rawDesc = "" +
 	"\x19SESSION_PHASE_RELAUNCHING\x10\x04\x12!\n" +
 	"\x1dSESSION_PHASE_NEEDS_ATTENTION\x10\x05\x12\x1b\n" +
 	"\x17SESSION_PHASE_COMPLETED\x10\x06\x12\x1d\n" +
-	"\x19SESSION_PHASE_ROLLED_BACK\x10\aB\xc2\x01\n" +
+	"\x19SESSION_PHASE_ROLLED_BACK\x10\a\x12\x1d\n" +
+	"\x19SESSION_PHASE_DOWNLOADING\x10\bB\xc2\x01\n" +
 	"\x15com.relkit.updater.v2B\fUpdaterProtoP\x01Z5github.com/shichao402/relkit/api/updater/v2;updaterv2\xa2\x02\x03RUX\xaa\x02\x11Relkit.Updater.V2\xca\x02\x11Relkit\\Updater\\V2\xe2\x02\x1dRelkit\\Updater\\V2\\GPBMetadata\xea\x02\x13Relkit::Updater::V2b\x06proto3"
 
 var (

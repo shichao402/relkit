@@ -95,14 +95,20 @@ launcher 下一次解析 `active.json` 的时候。
 
 1. 宿主调 `apply` → 引擎记下 `pid = os.Getppid()`（**调用方那一个进程**），拷一份 worker 到
    `<stagedRoot>/.worker/`，用 `--worker <sessionId> --data-dir <dataDir>` 拉起来，
-   然后回 `ApplyAccepted{requires_host_exit}` 就结束。
+   然后回 `ApplyAccepted{requires_host_exit}` 就结束。plan 可以尚未下载；此时引擎看不到
+   payload，`requires_host_exit` 一律为 true。
 2. worker 先 `WAITING_FOR_EXIT`：轮询那个 pid，最长 5 分钟，每 500ms 一次心跳。超时报
    `ERROR_CODE_OCCUPIED` 并进 `NEEDS_ATTENTION`，**不会**强杀宿主。
-3. pid 消失后进 `COPYING`，按布局执行。
-4. `relaunch=true` 且 `executableRelpath` 非空时进 `RELAUNCHING`：`versionedDir` 下从
+3. plan 未下载时进 `DOWNLOADING`，下载并校验后重新封 plan。
+4. 进 `COPYING`，按布局执行。
+5. `relaunch=true` 且 `executableRelpath` 非空时进 `RELAUNCHING`：`versionedDir` 下从
    `active.json` 的 `executable` 起，读不到指针才退回 `installRoot/executableRelpath`，
    工作目录是 `installRoot`。只起**一个**进程。
-5. `COMPLETED`。
+6. `COMPLETED`。
+
+`requires_host_exit` 为 true 且宿主没有设 `ApplyOp.hide_progress` 时，worker 在第 2 至 5 步
+显示进度窗口（ADR 0026 §6，目前仅 Windows）。等待与下载两段可取消；取消、下载失败或已回滚
+时安装目录未被改动，worker 会按 `relaunch` 重新拉起旧版本宿主。
 
 只等这一个 pid 意味着：同一安装根下**其它正在运行的实例既不被等待，也不被通知**。
 对 `wholeRoot` 这是危险的（别人正在用的文件会被整根换掉）；对 `versionedDir` 要看 `retain`

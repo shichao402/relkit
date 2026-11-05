@@ -1,6 +1,6 @@
 # ADR 0026: 只交付 relkit-updater 二进制，契约用 ProtoJSON 收敛
 
-- 状态：Accepted（2026-11-05 用户裁决；relkit 侧第 1 步已落地，进度窗口与宿主迁移按“迁移”一节推进）
+- 状态：Accepted（2026-11-05 用户裁决；relkit 侧第 1、2 步已落地（第 2 步仅 Windows），宿主迁移按“迁移”一节推进）
 - 日期：2026-11-04
 - 关联：修订 [ADR 0023](0023-desktop-updater-epoch.md) 决策 2（各语言薄 IPC 客户端）；延续 [ADR 0010](0010-single-updater-engine.md) 单引擎原则与 [ADR 0003](0003-protobuf-v2-wire-format.md) 的 protobuf 契约
 
@@ -73,28 +73,31 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 
 ### 6. 交接阶段的进度窗口归引擎
 
-`ApplyOp` 新增进度窗口开关，默认显示。proto3 的 bool 默认值是 false，所以落地时字段以 `hide_progress` 或 `optional bool show_progress` 的形式加入（随窗口实现一并定，不提前占号）。worker 进程在宿主退出后自己显示一个小窗口，覆盖宿主看不到的全部阶段：
+`ApplyOp` 新增进度窗口开关 `bool hide_progress = 3`，默认（false）即显示。worker 进程在宿主退出后自己显示一个小窗口，覆盖宿主看不到的全部阶段：
 
 | 阶段 | 窗口内容 |
 | --- | --- |
 | `WAITING_FOR_EXIT` | 正在等待 <产品名> 退出 |
-| （plan 未下载时）下载 | 进度条，字节数与速率 |
-| `COPYING` | 正在安装 <版本> |
+| `DOWNLOADING`（新增 `SessionPhase = 8`，plan 未下载时） | 进度条，字节数与速率 |
+| `COPYING` / `COMMITTING` | 正在安装 <版本> |
 | `RELAUNCHING` | 正在启动 |
 | `NEEDS_ATTENTION` / `ROLLED_BACK` | 失败原因与 `RecoveryHelp` 链接，带关闭按钮 |
 
 规则：
 
-- `ApplyOp` 允许 plan 尚未下载：worker 先下载再交接。宿主最简流程因此只剩两步：`check` 得到 `UpdateAvailable`，用户确认后发 `apply` 并立刻退出。需要后台预下载的宿主（如 Loom-Launcher 暂存启动器包）照旧先发 `download`。
-- 窗口只覆盖宿主不在的阶段。宿主仍在运行时的前台下载进度由宿主自己画，引擎不弹窗（2026-11-05 用户裁决）。
-- 窗口只显示、不提供“取消”以外的操作，与 SvnMergeTool 让路界面“不给留下来的机会”的原则一致。安装开始拷贝后不可取消。
+- `ApplyOp` 允许 plan 尚未下载：worker 等宿主退出后先下载再安装。此时引擎看不到 payload，无法判断是否触及正在运行的可执行文件，`ApplyAccepted.requires_host_exit` 一律为 true。宿主最简流程因此只剩两步：`check` 得到 `UpdateAvailable`，用户确认后发 `apply` 并立刻退出。需要后台预下载的宿主（如 Loom-Launcher 暂存启动器包）照旧先发 `download`。
+- 窗口只覆盖宿主不在的阶段：`requires_host_exit` 为 false 的会话（宿主继续运行）不弹窗。宿主仍在运行时的前台下载进度由宿主自己画，引擎不弹窗（2026-11-05 用户裁决）。
+- 窗口只显示、不提供“取消”以外的操作（失败时另有关闭按钮，以及有 `RecoveryHelp` 链接时的帮助按钮），与 SvnMergeTool 让路界面“不给留下来的机会”的原则一致。只有等待退出与下载两段可取消，安装开始拷贝后不可取消，标题栏关闭按钮与取消按钮同义。
+- 会话以“安装目录未被改动”结束时（用户取消、下载失败、拷贝失败已回滚），worker 按 `relaunch` 重新拉起旧版本宿主，用户不会落到什么都没在运行的状态。等待宿主退出超时则不拉起，因为宿主仍在运行。取消记为 `NEEDS_ATTENTION` + `ERROR_CODE_CANCELED`（可重试），与安装程序被取消一致。
+- worker 写进会话的错误带上宿主 `ClientProfile.recovery`，窗口与后续 `status` 都能看到。
 - 窗口期间仍有宿主实例被手动打开：宿主启动时发 `status`，看到 `active_session` 处于非终态就自行退出。这是宿主唯一必须实现的交接行为，契约里写死。
 - full-install（安装包交接）：窗口只覆盖等待宿主退出这一段，之后交给安装程序自身的界面。
-- 产品显示名取自 bootstrap，界面文案随系统语言在 zh/en 之间选择。
+- 产品显示名取自新增的 `InstallSpec.display_name = 8`，为空时退回 `ClientProfile.expected_product`。原设想“取自 bootstrap”不成立：bootstrap 只有 product id，没有显示名。界面文案随系统 UI 语言（Windows `GetUserDefaultUILanguage`，其他平台 `LC_ALL`/`LC_MESSAGES`/`LANG`）在 zh/en 之间选择。
+- `hide_progress`、显示名与 recovery 随会话落盘（enginestate `ApplySessionRecord` 25–27），worker 从会话读取。
 
 平台实现：
 
-- Windows：`golang.org/x/sys/windows` 直接调 Win32（窗口、进度条控件），无 cgo，交叉编译不变。
+- Windows：`golang.org/x/sys/windows` 直接调 Win32（user32 窗口、comctl32 进度条、shell32 打开帮助链接），无 cgo，交叉编译不变。窗口跑在独立锁定的 OS 线程上，worker 只改状态并投递消息。第一版没有嵌 comctl32 v6 manifest，也未声明 DPI 感知，控件是经典样式、高 DPI 下由系统缩放。
 - macOS：AppKit 需要 cgo，`relkit-updater` 的 darwin 产物改由 GitHub Actions macOS runner 编译（2026-11-05 用户裁决），产物仍走现有工具发布与验签流程上传服务器。macOS 是整个 `.app` 当 payload 替换，耗时短，第一版只做等待与安装两个阶段的面板。
 
 ### 7. conformance
@@ -111,7 +114,7 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 断代一次，不留兼容分支（ADR 0023 原则 2）：
 
 1. relkit：proto v2 与 enginestate 拆分、引擎改 ProtoJSON 传输与 `protocol` 校验、`relkit-updater proto` 子命令、conformance 改写、删除第 1 节所列目录。（2026-11-05 已在仓内完成；新引擎暂不发布到服务器，因为它会拒绝现役宿主，须与步骤 3、4 同批上线。）
-2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。
+2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。（2026-11-05 Windows 已在仓内完成，随步骤 1 同批发布。）
 3. SvnMergeTool（Dart）：删 `rup_client` 依赖与 `.relkit/components/sdk/dart` 物化；CI 加“导出 proto → buf generate”；`update_service.dart` 改成启动进程 + 按行解码；启动时 `status` 检查替代现有让路逻辑的判定来源（界面可保留）。
 4. Loom-Launcher（Rust）：删 `relkit-updater` crate 路径依赖与 `.relkit/components/sdk/rust`；`build.rs` 用导出的 proto 跑 `prost-build` + `pbjson-build`；`updater.rs` 改调用方式。
 5. Loom：无变化（不持有 updater 客户端）。

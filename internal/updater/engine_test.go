@@ -195,10 +195,10 @@ func TestRuntimeValidation(t *testing.T) {
 }
 
 func TestWaitForHostExit(t *testing.T) {
-	if err := waitForHostExit(0, time.Second, nil); err != nil {
+	if err := waitForHostExit(context.Background(), 0, time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForHostExit(os.Getpid(), time.Millisecond, nil); err == nil {
+	if err := waitForHostExit(context.Background(), os.Getpid(), time.Millisecond, nil); err == nil {
 		t.Fatal("live process must time out")
 	}
 }

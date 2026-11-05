@@ -75,6 +75,11 @@ message ApplySessionRecord {
   relkit.updater.v2.ApplyDisposition disposition = 23;
   // Relpath of the verified installer inside the staged root.
   string installer_relpath = 24;
+  // Progress window settings carried from ApplyOp and InstallSpec.
+  bool hide_progress = 25;
+  string display_name = 26;
+  // Host recovery help, attached to errors the worker reports.
+  relkit.updater.v2.RecoveryHelp recovery = 27;
 }
 
 message JournalEntry {

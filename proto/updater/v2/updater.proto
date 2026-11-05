@@ -105,6 +105,8 @@ enum SessionPhase {
   SESSION_PHASE_NEEDS_ATTENTION = 5;
   SESSION_PHASE_COMPLETED = 6;
   SESSION_PHASE_ROLLED_BACK = 7;
+  // The worker is fetching a plan that apply accepted before download.
+  SESSION_PHASE_DOWNLOADING = 8;
 }
 
 message RecoveryLink {
@@ -155,6 +157,9 @@ message InstallSpec {
   repeated string preserve = 5;
   bool relaunch = 6;
   LibraryPolicy library = 7;
+  // Product name shown in the engine progress window. Falls back to the
+  // bootstrap product id when empty.
+  string display_name = 8;
 }
 
 message Runtime {
@@ -204,6 +209,10 @@ message ApplyOp {
   // When true, LIBRARY installs into versions/ but does not rewrite
   // active.json. IN_PLACE ignores this flag.
   bool install_only = 2;
+  // The worker shows a small progress window while the host is gone
+  // (waiting for exit, downloading, installing, relaunching, failure).
+  // Default is shown; a host that draws its own handoff UI sets this.
+  bool hide_progress = 3;
 }
 
 message StatusOp {}
