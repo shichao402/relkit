@@ -52,7 +52,6 @@ installRoot/
   <launcher>.exe           ← 产品自带的稳定入口，引擎从不生成、从不覆盖
   relkit-updater.exe       ← 引擎每次 apply 都会刷新（§7）
   active.json              ← 指针，原子写
-  update_apply.json        ← 会话状态（versionedDir 写在这里，其它布局写在 dataDir）
   versions/
     0.1.2+80/              ← 上一版，按 retain 决定留不留
     0.1.2+81/              ← 当前版，payload 整棵树拷进来
@@ -77,8 +76,8 @@ payload 是 artifact zip 解包后的**整棵树**，不做「单顶层目录剥
 
 ## 4. 入口由产品提供，引擎不生成 launcher
 
-这是最容易误判的一条。引擎在 `installRoot` 下只碰四样东西：`versions/`、`active.json`、
-`update_apply.json`、`relkit-updater[.exe]`。**它不会创建、不会更新任何 launcher，也不会动快捷方式。**
+这是最容易误判的一条。引擎在 `installRoot` 下只碰三样东西：`versions/`、`active.json`、
+`relkit-updater[.exe]`。会话记录与暂存都在 `dataDir`（`sessions/`、`staging/`）。**它不会创建、不会更新任何 launcher，也不会动快捷方式。**
 
 所以 `versionedDir` 要成立，产品必须自己在 `installRoot` 放一个稳定入口：读 `active.json`，
 按 `executable` 起真正的程序。安装器（NSIS / MSI / pkg）的快捷方式、开始菜单项、卸载项
