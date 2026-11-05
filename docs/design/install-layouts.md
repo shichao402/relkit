@@ -135,6 +135,8 @@ Go 引擎（`pruneVersions`）：
 
 ## 7. sidecar 刷新位置
 
+> 已被 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md) §6 废止（实现前仍是现状）：引擎随宿主落在版本内，不再刷新安装根上的共享引擎。现行形状见 [topology.md](topology.md) 第七节。
+
 `sidecarRelpath` 非空时，每次 apply 结束都会把 payload 里的那一份更新器覆盖到
 **`installRoot/relkit-updater[.exe]`**——注意是安装根，不是版本目录。做法是先把旧的 rename
 成 `.old`，拷新的进去，再删掉 `.old`。所以 `versionedDir` 下更新器是跨版本共享的一份，
@@ -142,6 +144,8 @@ Go 引擎（`pruneVersions`）：
 `<stagedRoot>/<sidecarRelpath>`，都没有就跳过（静默）。
 
 ## 8. macOS 可以版本并存，但不能照搬当前落盘形状
+
+> macOS 的落盘设计（BUNDLE、launcher + seed、换名切换）已由 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md) 取代本节，图见 [topology.md](topology.md) 第七节。本节保留为论证过程。
 
 SPEC 附录 B 原来要求引擎拒绝 `macos` + `versionedDir`，却没有论证。这条平台禁令过强。
 版本目录不只用来绕开 Windows 文件占用，也可以承担**回退、并行保留多个工具版本、按项目

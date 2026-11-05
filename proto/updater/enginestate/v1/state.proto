@@ -80,6 +80,10 @@ message ApplySessionRecord {
   string display_name = 26;
   // Host recovery help, attached to errors the worker reports.
   relkit.updater.v2.RecoveryHelp recovery = 27;
+  // Product id from the host profile. Scopes engine-private files that live
+  // beside other products under one install root, such as the IN_PLACE
+  // baseline (ADR 0027 §6.2).
+  string product = 28;
 }
 
 message JournalEntry {

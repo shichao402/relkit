@@ -4,9 +4,9 @@
 title: 拓扑（唯一来源）
 category: design
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-11-05
 status: approved
-依据: ADR 0023
+依据: ADR 0023；第七节依据 ADR 0027（Proposed）
 ---
 
 本文是 relkit 拓扑图的唯一来源。其它文档需要画拓扑时引用本文的对应小节，不再各画一份。图分散在多处必然漂移，而漂移过的图比没有图更误导。
@@ -15,7 +15,7 @@ status: approved
 
 判据只有一条：图和文字里的每个事实，都能在代码或现网配置里找到对应。现网配置的样例在 `scripts/deploy/`（内网 `nginx-intranet.example.conf`，外网 `nginx-public.example.conf`）。
 
-六张图分工：图一总览一台服务器上有什么、域名转到哪；图二发布链路（CI 写面）；图三下载链路（updater 读面）；图四信任与凭据；图五一次发布的时序；图六可替换的接缝（adapter）。
+六张图分工：图一总览一台服务器上有什么、域名转到哪；图二发布链路（CI 写面）；图三下载链路（updater 读面）；图四信任与凭据；图五一次发布的时序；图六可替换的接缝（adapter）。第七节另画客户端落盘：安装形态、托管库特例、写法与切换、payload 格式协商。
 
 三句话概括现状：每台服务器三个进程；三组域名各管一件事；发布与下载是两条独立链路，唯一交汇点是 store 里的发布树。
 
@@ -350,10 +350,182 @@ IA <|.. s3r
 - 实现不外露。对其他切面（进程入口、配置文件顶层、命令行参数、部署脚本、本文以外的文档）来说，只看得见抽象条目 `{type, ...}`；实现名和实现专属参数（如 `url`、`bucket`）只在条目内部，由该实现的构造函数解析。部署脚本整块搬运 `tree` 条目、不读其内容，也不去探测本机装了哪个 store。反例是已删除的 console `rootAdapter` 与过渡期的顶层 `store` 键：前者让一个实现直接和本机目录打交道，后者把实现名和它的地址提到了配置顶层，两者都让其他切面认识了实现。
 - type 名在三处接缝间共用：console 的 `relkit-compatible` 读的就是存储面 `relkit-compatible` 写进去的同一套协议，一个协议一个名字；将来的 S3 读 adapter 同样叫 `s3-compatible`。
 
+## 七、安装形态（客户端落盘）
+
+前六节画的是服务器和链路，本节画引擎把字节落到用户机器上之后的形状。依据 [ADR 0027](../adr/0027-bundle-content-and-symlinks.md)（Proposed）。图中标「待实现」的部分还没有代码，落地后去掉标记；没标的都能在 `internal/updater/` 里找到。
+
+### 7.1 两条正交轴与标准形态
+
+Content 轴回答「payload 是什么」：TREE 是一棵文件树，BUNDLE 是一个 `.app` 整包。Placement 轴回答「放在哪」：IN_PLACE 直接覆盖安装根，LIBRARY 放进 `versions/<id>/`，由 `active.json` 指向当前版本（[ADR 0014](../adr/0014-placement-and-version-library.md)）。两轴正交，组合出的每一格都是同一个引擎处理，不另起实现。
+
+```plantuml
+@startuml
+skinparam shadowing false
+skinparam componentStyle rectangle
+left to right direction
+
+package "TREE / IN_PLACE（现有）\n例：Windows 单目录产品、Loom 启动器" as A {
+  folder "install_root/" as a_root {
+    file "app.exe 等内容文件" as a_files
+    file "relkit-updater(.exe)\n引擎随内容走" as a_eng
+    file "用户文件 / preserve 条目" as a_user
+  }
+}
+
+package "TREE|BUNDLE / LIBRARY\n例：SvnMergeTool（Windows 现有，macOS 待实现）" as B {
+  folder "install_root/" as b_root {
+    file "入口：launcher\n只读 active.json，不调用引擎\n由安装器写入，引擎从不更新它" as b_launch
+    file "active.json\n{current, previous, executable, bundle（待实现）}" as b_active
+    folder "versions/<id>/" as b_ver {
+      file "relkit-version.json" as b_vj
+      file "内容；BUNDLE 时为 <bundle_name>.app" as b_c
+      file "引擎在版本内\nBUNDLE：包内 Contents/Resources/runtime/" as b_eng
+    }
+  }
+}
+
+package "BUNDLE / IN_PLACE（待实现）\n例：/Applications 下的存量裸包" as C {
+  folder "install_root = /Applications/X.app" as c_root {
+    file "Contents/...\n引擎在 Contents/Resources/runtime/" as c_c
+  }
+}
+@enduml
+```
+
+| 形态 | 安装根 | 引擎位置 | 写法 | 切换 | 宿主退出 | 回滚 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TREE/IN_PLACE | 开放目录 | 根内，随内容 | 对账写 | 无（逐文件） | 仅当 `sidecar_relpath` 被改时需要 | 无 |
+| TREE/LIBRARY | `versions/<id>` | 版本内 | 全新写 | 指针切换 | 不需要 | `active.json.previous` |
+| BUNDLE/LIBRARY（待实现） | `versions/<id>/<bundle>` | 包内 | 全新写 | 指针切换 | 不需要 | `active.json.previous` |
+| BUNDLE/IN_PLACE（待实现） | 包本身 | 包内 | 全新写 | 换名切换 | 需要 | 无，commit 即删旧包 |
+
+规则只有一条：引擎属于调用它的宿主，随宿主的内容一起落盘、一起更新。没有放在共享位置、由别人刷新的引擎（原 `refreshSidecar` 已删除）。
+
+### 7.2 托管库特例：Loom
+
+Loom 是本节唯一的特例：同一个安装根上落着两个产品。启动器是宿主，编辑器是被它托管的库。整体看是 versioned，但入口必须待在固定路径读 `active.json`，所以入口本身只能是 IN_PLACE。
+
+```plantuml
+@startuml
+skinparam shadowing false
+skinparam componentStyle rectangle
+left to right direction
+
+folder "install_root/（同一根）" as root {
+  package "产品 loom-launcher\nTREE / IN_PLACE（宿主）" as L {
+    file "loom-launcher.exe" as lexe
+    file "relkit-updater.exe\n唯一调用引擎的进程" as leng
+    file "launcher 依赖文件" as ldep
+  }
+  package "产品 loom\nTREE / LIBRARY（被托管，不是宿主）" as E {
+    file "active.json" as eact
+    folder "versions/<code>/\nretain=2 + reserved_codes\n版本内不需要引擎" as ever
+  }
+  file ".relkit-apply.lock\n两个产品共用" as lock
+}
+
+folder "dataDir = <user_data>/relkit\n两个产品共用" as data {
+  file "baseline-<product>.pb\n旧 baseline.pb 读一次后迁移" as base
+}
+
+lexe --> leng : 先更新自己（对账写）\n再更新编辑器（全新写 + 指针切换）
+leng --> L : 对账写
+leng --> E : 全新写 → active.json
+leng --> lock
+leng --> base
+@enduml
+```
+
+引擎不识别特例，下面五条共存义务对所有对账写都成立，Loom 只是第一个把它们暴露出来的产品：
+
+| # | 义务 | 现状 |
+| --- | --- | --- |
+| 1 | 对账写清理空目录时只碰本次触及条目的祖先目录 | 已实现（原 `removeEmptyDirectories(install_root)` 扫全根） |
+| 2 | 基线文件按产品分开：`baseline-<product>.pb`，旧名读一次后迁移 | 已实现 |
+| 3 | 同根同锁 `.relkit-apply.lock` | 已满足 |
+| 4 | prune 的在用判定覆盖被托管产品（进程路径落在 `versions/<id>/` 下即在用） | 已实现 |
+| 5 | 被托管产品的 payload 格式受宿主所带引擎的版本约束 | 约定 |
+
+### 7.3 两种写法 × 两种切换
+
+除 TREE/IN_PLACE 之外的三格都是全新写：先在目标旁边的临时目录里把这一版完整造出来，校验通过后再一次性切换。TREE/IN_PLACE 的根不归这份内容独占，只能逐文件对账。
+
+```plantuml
+@startuml
+skinparam shadowing false
+
+start
+:下载并校验 artifact（size → sha256）;
+if (形态?) then (TREE / IN_PLACE)
+  :对账写
+  逐条比对基线，备份后覆盖
+  清理空目录（只限触及条目的祖先）;
+  :写基线;
+  stop
+else (其余三格)
+  :全新写（LIBRARY 现有，BUNDLE 待实现）
+  P = dir(T)/.<base(T)>.relkit-partial;
+  :pre 脚本;
+  :物化条目（FILE / SYMLINK，CheckSymlink）;
+  :post 脚本（cwd = P）;
+  :codesign --verify（darwin）;
+  :写 relkit-version.json;
+  if (Placement?) then (LIBRARY)
+    :指针切换
+    rename P → versions/<id>
+    （Windows 退避重试约 5 秒）;
+    :原子写 active.json（previous = 旧版）;
+    :prune：按 code 排序，跳过在用版本;
+    note right: 不要求宿主退出
+  else (IN_PLACE)
+    :换名切换（待实现）
+    controlDir → 等宿主退出;
+    :journal 记 SWAP;
+    :renamex_np RENAME_SWAP
+    （非 APFS 回落为两次 rename）;
+    :commit 即删旧包;
+  endif
+  :拉起宿主（darwin 用 open -n）;
+  stop
+endif
+@enduml
+```
+
+同版本重装不新增错误码：目标已存在且 code 一致则幂等返回；code 不一致且不在用，先挪进 Trash 再重装；在用则报 `OCCUPIED`。
+
+### 7.4 payload 格式协商
+
+软链只在新格式里出现，旧引擎看不懂就不该拿到。格式由 manifest 里的 selector 区分，引擎按自己的偏好顺序挑第一个认识的（待实现）。
+
+```plantuml
+@startuml
+skinparam shadowing false
+
+participant "引擎（新）" as new
+participant "引擎（旧）" as old
+database "manifest/<product>/<version>.pb" as m
+
+new -> m : 读 artifacts
+m --> new : apply=relkit-payload/2（可含 SYMLINK）\napply=relkit-payload/1
+new -> new : 偏好 [/2, /1] → 取 /2
+old -> m : 读 artifacts
+m --> old : 同上
+old -> old : 只认 /1 → 取 /1
+note over m : BUNDLE 只发 /2：旧引擎找不到可用格式，\n报错而不是装出一个缺软链的包
+@enduml
+```
+
+要点：
+
+- 协议版本严格相等，不提供兼容窗口（[ADR 0026](../adr/0026-updater-binary-only-protojson.md) §4）。引擎随宿主更新，所以宿主拿到的永远是自己 payload 里那个引擎；引擎不在 payload 里的产品（SvnMergeTool Windows `+219..+222`）会协议失配，只能手动跑一次安装器。
+- macOS 上安装根不得位于任何 `.app` 内，也不得等于 dataDir；宿主处于 App Translocation 或只读卷时不发起更新（待实现）。
+
 ## 相关
 
 - [architecture.md](../architecture.md)：现行架构，哪些规矩不能破
 - [ADR 0023](../adr/0023-desktop-updater-epoch.md)：桌面更新断代决策，本文的结构以其为准
+- [ADR 0027](../adr/0027-bundle-content-and-symlinks.md)：整包、软链与落盘收敛，第七节以其为准
+- [install-layouts.md](install-layouts.md)：安装布局的历史设计，§7、§8 已被第七节取代
 - [publish-agent.md](publish-agent.md)：发布协议与 HTTP 表面细节
 - [SPEC.md](../../SPEC.md)：协议与客户端内嵌合约
 - [trust-root-custody.md](../guide/trust-root-custody.md)：根密钥放哪、怎么确认在

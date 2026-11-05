@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
 )
@@ -114,19 +113,7 @@ func deleteInstalled(root string, code int64, inUse []int64) error {
 	if found == "" {
 		return fmt.Errorf("code %d is not installed", code)
 	}
-	src := filepath.Join(root, filepath.FromSlash(found))
-	trash := filepath.Join(root, TrashDirName)
-	if err := os.MkdirAll(trash, 0o755); err != nil {
-		return err
-	}
-	quarantined := filepath.Join(trash, fmt.Sprintf("%s.%d", filepath.Base(src), time.Now().UnixNano()))
-	if err := os.Rename(src, quarantined); err != nil {
-		return fmt.Errorf("could not move version out of versions/: %w", err)
-	}
-	if err := os.RemoveAll(quarantined); err != nil {
-		return fmt.Errorf("moved to %s but could not remove it: %w", quarantined, err)
-	}
-	return nil
+	return moveToTrash(root, filepath.Join(root, filepath.FromSlash(found)))
 }
 
 func listInstalled(root string) *updaterv2.InstalledList {
@@ -141,7 +128,8 @@ func listInstalled(root string) *updaterv2.InstalledList {
 		return out
 	}
 	for _, e := range ents {
-		if !e.IsDir() {
+		// Hidden entries are partial fresh writes, never installed versions.
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		rel := filepath.ToSlash(filepath.Join("versions", e.Name()))

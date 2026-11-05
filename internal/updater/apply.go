@@ -8,15 +8,16 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
 	updaterv2 "github.com/shichao402/relkit/api/updater/v2"
-	"github.com/shichao402/relkit/internal/model"
 	"github.com/shichao402/relkit/internal/sdk"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -110,6 +111,7 @@ func (e *Engine) handleApply(_ context.Context, req *updaterv2.UpdaterRequest, o
 		HideProgress:      op.HideProgress,
 		DisplayName:       displayNameFor(req),
 		Recovery:          req.GetProfile().GetRecovery(),
+		Product:           req.GetProfile().GetExpectedProduct(),
 	}
 	if err := st.saveSession(sess); err != nil {
 		releaseApplyLock(inst.InstallRoot)
@@ -398,7 +400,7 @@ func (e *Engine) RunWorker(dataDir, sessionID string) error {
 		if attn {
 			phase = updaterv2.SessionPhase_SESSION_PHASE_NEEDS_ATTENTION
 		}
-		return finish(phase, newError(updaterv2.ErrorCode_ERROR_CODE_DISK, false, err.Error(), nil), err, !attn)
+		return finish(phase, newError(applyErrorCode(err), false, err.Error(), nil), err, !attn)
 	}
 	if sess.Relaunch && sess.ExecutableRelpath != "" && !sess.InstallOnly {
 		enter(updaterv2.SessionPhase_SESSION_PHASE_RELAUNCHING)
@@ -540,6 +542,12 @@ type versionMeta struct {
 	Executable string `json:"executable,omitempty"`
 }
 
+// pruneVersions trims versions/ after an install (ADR 0027 §4.4). It keeps
+// the active and previous versions, the version just installed, reserved
+// codes, then the newest by code up to retain. A version a running process
+// executes from is never removed, whatever the budget says. Leftover partial
+// directories from interrupted fresh writes are removed; the caller holds the
+// apply lock, so none of them belongs to a live session.
 func pruneVersions(root string, current activePointer, retain int, reserved []int64, extraKeep string) {
 	if retain <= 0 {
 		retain = 2
@@ -560,44 +568,71 @@ func pruneVersions(root string, current activePointer, retain int, reserved []in
 			reservedSet[c] = struct{}{}
 		}
 	}
-	base := filepath.Join(root, "versions")
+	base := filepath.Join(root, VersionsDirName)
 	ents, err := os.ReadDir(base)
 	if err != nil {
 		return
 	}
 	type item struct {
 		rel  string
-		name string
 		code int64
 	}
 	var all []item
 	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), ".") {
+			if strings.HasSuffix(e.Name(), partialSuffix) {
+				_ = os.RemoveAll(filepath.Join(base, e.Name()))
+			}
+			continue
+		}
 		if !e.IsDir() {
 			continue
 		}
-		rel := filepath.ToSlash(filepath.Join("versions", e.Name()))
-		code := int64(0)
-		if m := readVersionMeta(filepath.Join(root, filepath.FromSlash(rel))); m != nil {
-			code = m.Code
-		}
-		all = append(all, item{rel: rel, name: e.Name(), code: code})
-		if _, ok := reservedSet[code]; ok {
+		rel := path.Join(VersionsDirName, e.Name())
+		code := installedCode(root, e.Name())
+		all = append(all, item{rel: rel, code: code})
+		if _, ok := reservedSet[code]; ok && code != 0 {
 			keep[rel] = struct{}{}
 		}
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].name > all[j].name })
+	sort.SliceStable(all, func(i, j int) bool { return all[i].code > all[j].code })
 	for _, it := range all {
 		if len(keep) >= retain {
 			break
 		}
 		keep[it.rel] = struct{}{}
 	}
+	var inUse map[string]struct{}
 	for _, it := range all {
 		if _, ok := keep[it.rel]; ok {
 			continue
 		}
-		_ = os.RemoveAll(filepath.Join(root, filepath.FromSlash(it.rel)))
+		if inUse == nil {
+			inUse = versionsInUse(root)
+		}
+		if _, busy := inUse[path.Base(it.rel)]; busy {
+			continue
+		}
+		_ = moveToTrash(root, filepath.Join(root, filepath.FromSlash(it.rel)))
 	}
+}
+
+// installedCode is the code of versions/<name>: its metadata, else the active
+// pointer naming it, else a code-N directory name, else 0.
+func installedCode(root, name string) int64 {
+	dir := filepath.Join(root, VersionsDirName, name)
+	if m := readVersionMeta(dir); m != nil {
+		return m.Code
+	}
+	if a := readActive(root); a != nil && filepath.ToSlash(a.Path) == path.Join(VersionsDirName, name) {
+		return a.Code
+	}
+	if strings.HasPrefix(name, "code-") {
+		if n, err := strconv.ParseInt(strings.TrimPrefix(name, "code-"), 10, 64); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 func rollbackJournal(j *enginestate.ApplyJournal) {
@@ -634,72 +669,6 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return cerr
-}
-
-// refreshSidecar puts the new relkit-updater where the host said its sidecar
-// lives (InstallRoot/SidecarRelpath). The relpath is the whole answer: on
-// macOS it is Contents/Resources/runtime/relkit-updater inside the .app, and a
-// copy dropped at the bundle root would sit outside Contents and break the
-// bundle's code signature. When the payload already carried the sidecar the
-// destination is byte-identical to the source and there is nothing to do.
-func refreshSidecar(sess *enginestate.ApplySessionRecord, payload string) {
-	rel, ok := sidecarRelpath(sess.SidecarRelpath)
-	if !ok {
-		return
-	}
-	src := filepath.Join(payload, rel)
-	if _, err := os.Stat(src); err != nil {
-		src = filepath.Join(sess.StagedRoot, rel)
-	}
-	if _, err := os.Stat(src); err != nil {
-		return
-	}
-	dest := filepath.Join(sess.InstallRoot, rel)
-	if sameFileContent(src, dest) {
-		return
-	}
-	aside := dest + ".old"
-	_ = os.Rename(dest, aside)
-	_ = copyFile(src, dest)
-	_ = os.Chmod(dest, 0o755)
-	_ = os.Remove(aside)
-}
-
-// sidecarRelpath turns the host's slash-separated relpath into a native one
-// and refuses anything that would land outside InstallRoot.
-func sidecarRelpath(raw string) (string, bool) {
-	if raw == "" {
-		return "", false
-	}
-	rel := filepath.Clean(filepath.FromSlash(raw))
-	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" || rel == "." ||
-		rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	return rel, true
-}
-
-func sameFileContent(a, b string) bool {
-	ai, err := os.Stat(a)
-	if err != nil {
-		return false
-	}
-	bi, err := os.Stat(b)
-	if err != nil {
-		return false
-	}
-	if os.SameFile(ai, bi) {
-		return true
-	}
-	if ai.Size() != bi.Size() {
-		return false
-	}
-	ad, _, err := model.Sha256File(a)
-	if err != nil {
-		return false
-	}
-	bd, _, err := model.Sha256File(b)
-	return err == nil && ad == bd
 }
 
 func writeJournal(path string, j *enginestate.ApplyJournal) error {

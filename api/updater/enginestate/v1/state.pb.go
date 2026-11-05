@@ -398,7 +398,11 @@ type ApplySessionRecord struct {
 	HideProgress bool   `protobuf:"varint,25,opt,name=hide_progress,json=hideProgress,proto3" json:"hide_progress,omitempty"`
 	DisplayName  string `protobuf:"bytes,26,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// Host recovery help, attached to errors the worker reports.
-	Recovery      *v2.RecoveryHelp `protobuf:"bytes,27,opt,name=recovery,proto3" json:"recovery,omitempty"`
+	Recovery *v2.RecoveryHelp `protobuf:"bytes,27,opt,name=recovery,proto3" json:"recovery,omitempty"`
+	// Product id from the host profile. Scopes engine-private files that live
+	// beside other products under one install root, such as the IN_PLACE
+	// baseline (ADR 0027 §6.2).
+	Product       string `protobuf:"bytes,28,opt,name=product,proto3" json:"product,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -601,6 +605,13 @@ func (x *ApplySessionRecord) GetRecovery() *v2.RecoveryHelp {
 	return nil
 }
 
+func (x *ApplySessionRecord) GetProduct() string {
+	if x != nil {
+		return x.Product
+	}
+	return ""
+}
+
 type JournalEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DestPath      string                 `protobuf:"bytes,1,opt,name=dest_path,json=destPath,proto3" json:"dest_path,omitempty"`
@@ -766,7 +777,7 @@ const file_updater_enginestate_v1_state_proto_rawDesc = "" +
 	"\x12last_seen_sequence\x18\x03 \x01(\x03R\x10lastSeenSequence\x12?\n" +
 	"\x1clast_seen_directory_sequence\x18\x04 \x01(\x03R\x19lastSeenDirectorySequence\x12=\n" +
 	"\x1blast_seen_fallback_sequence\x18\x05 \x01(\x03R\x18lastSeenFallbackSequence\x12#\n" +
-	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xaf\b\n" +
+	"\rskipped_codes\x18\x06 \x03(\x03R\fskippedCodes\"\xc9\b\n" +
 	"\x12ApplySessionRecord\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
@@ -796,7 +807,8 @@ const file_updater_enginestate_v1_state_proto_rawDesc = "" +
 	"\x11installer_relpath\x18\x18 \x01(\tR\x10installerRelpath\x12#\n" +
 	"\rhide_progress\x18\x19 \x01(\bR\fhideProgress\x12!\n" +
 	"\fdisplay_name\x18\x1a \x01(\tR\vdisplayName\x12;\n" +
-	"\brecovery\x18\x1b \x01(\v2\x1f.relkit.updater.v2.RecoveryHelpR\brecoveryJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
+	"\brecovery\x18\x1b \x01(\v2\x1f.relkit.updater.v2.RecoveryHelpR\brecovery\x12\x18\n" +
+	"\aproduct\x18\x1c \x01(\tR\aproductJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x14\x10\x15\"m\n" +
 	"\fJournalEntry\x12\x1b\n" +
 	"\tdest_path\x18\x01 \x01(\tR\bdestPath\x12\x1f\n" +
 	"\vbackup_path\x18\x02 \x01(\tR\n" +

@@ -327,7 +327,7 @@ func TestBaselineDeletionProtectsModifiedFiles(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "stale.txt"), []byte("user-edited"), 0o644)
 	_ = os.WriteFile(filepath.Join(root, "remove.txt"), []byte("old"), 0o644)
 	oldDigest := model.Sha256Bytes([]byte("old"))
-	if err := saveBaseline(filepath.Join(dataDir, baselineFileName), &enginestate.Baseline{
+	if err := saveBaseline(baselinePathFor(dataDir, "p"), &enginestate.Baseline{
 		Schema: baselineSchema,
 		Files: []*enginestate.BaselineEntry{
 			{Relpath: "stale.txt", Sha256: oldDigest},
@@ -339,12 +339,13 @@ func TestBaselineDeletionProtectsModifiedFiles(t *testing.T) {
 	sess := &enginestate.ApplySessionRecord{
 		InstallRoot: root,
 		StagedRoot:  stage,
+		Product:     "p",
 	}
 	content := &applyContent{
 		table:     &enginestate.FileTable{Schema: payload.Schema},
 		filesRoot: filesRoot,
 	}
-	if err := applyContentTable(dataDir, sess, &enginestate.UpdatePlan{Code: 2}, content, root, true); err != nil {
+	if err := applyReconcile(dataDir, sess, &enginestate.UpdatePlan{Code: 2}, content, root); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "remove.txt")); !os.IsNotExist(err) {

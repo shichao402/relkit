@@ -71,14 +71,23 @@ what will break.
 
 ### Fixed
 
-- After an apply the engine refreshed its sidecar at
-  `<installRoot>/relkit-updater[.exe]` regardless of `sidecarRelpath`. On macOS
-  that left a stray binary at the `.app` root, outside `Contents`, which breaks
-  the bundle's code signature, while the real sidecar under
-  `Contents/Resources/runtime/` was never refreshed by this step. The refresh
-  now writes `<installRoot>/<sidecarRelpath>`, skips the copy when the payload
-  already put identical bytes there, and ignores relpaths that leave the
-  install root.
+- LIBRARY installs could delete or corrupt a running version. The engine
+  wiped `versions/<id>` before reinstalling it, pruned by directory name (so
+  `0.2.0+99` outranked `0.2.0+221`) and never checked what was running. A
+  version is now built in a hidden `.<id>.relkit-partial` beside its final
+  place and renamed in once complete (retried for about five seconds on
+  Windows); reinstalling the same code just switches the pointer, a foreign
+  directory is set aside when idle and refused with `OCCUPIED` when a process
+  runs from it, and prune orders by code and skips any version a running
+  process executes from. LIBRARY applies no longer ask the host to exit
+  (ADR 0027 §4).
+
+- An IN_PLACE apply removed every empty directory under the install root,
+  including empty directories inside another product's `versions/` in a
+  managed library such as Loom. It now removes only the directories its own
+  deletions emptied. The apply baseline is per product
+  (`baseline-<product>.pb`); the shared `baseline.pb` is read once and migrated
+  (ADR 0027 §6.2).
 
 - The publish-time "code is not greater" error pointed at `CLI.md 4.2`, which
   is now the `doctor` section. It now carries the stable code
@@ -99,6 +108,13 @@ what will break.
   document still starts at 1.
 
 ### Removed
+
+- The engine no longer copies itself to `<installRoot>/<sidecarRelpath>` after
+  an apply. The engine is part of the host's own content and is updated with
+  it; a shared engine beside versioned hosts cannot satisfy the strict
+  protocol match (ADR 0027 §6). `InstallSpec.sidecarRelpath` keeps its other
+  meaning: a reconcile write that replaces it requires the host to exit.
+  Products whose payload lacks the engine must add it.
 
 - `DecAssets/` and the `assets-version.yml` gate. The `relkit-ops` and
   `relkit-deploy` skills now live only in the Dec cloud `relkit` bundle; edit
