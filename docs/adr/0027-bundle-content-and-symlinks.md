@@ -1,6 +1,6 @@
 # ADR 0027: 内容轴补上软链与密封包，macOS 同时支持 LIBRARY 与整包 IN_PLACE
 
-- 状态：Accepted（第五版，2026-11-05：第 0–3 步已实现于 `cb03d6d`、`2276d82`；本版按实现修正 schema 类型、`controlDir` 判定、换名恢复、脚本工作目录、`ExecutableRelpath` 基准与对账写的软链父目录。第四版裁决不变：整包交换 commit 即删旧包、`active.json` 只加 `bundle` 字段、launcher bundle id 用 `<id>.launcher`、Loom 作为托管库特例）
+- 状态：Accepted，已实施（第五版，2026-11-05：第 0–3 步实现于 `cb03d6d`、`2276d82`，第 4–7 步已完成，2026-11-06 进入 stable；macOS LIBRARY 形态的真机验证尚未做，目前没有产品使用。本版按实现修正 schema 类型、`controlDir` 判定、换名恢复、脚本工作目录、`ExecutableRelpath` 基准与对账写的软链父目录。第四版裁决不变：整包交换 commit 即删旧包、`active.json` 只加 `bundle` 字段、launcher bundle id 用 `<id>.launcher`、Loom 作为托管库特例）
 - 日期：2026-11-05
 - 关联：修订 [ADR 0013](0013-internal-update-payload.md)（软链禁令）、[ADR 0014](0014-placement-and-version-library.md)（“macOS .app 选 bundle 根”一句的落地方式）；延续 [ADR 0010](0010-single-updater-engine.md) 单引擎、[ADR 0026](0026-updater-binary-only-protojson.md) 强类型契约；同步 `docs/design/install-layouts.md` §7、§8、§11
 
@@ -316,11 +316,11 @@ Loom 是一个安装根上的两个产品：
 0. 止血（与 macOS 工作解耦，先做）：
    - relkit（已实现，`cb03d6d`；其中 `writeMode` 后在第 3 步并入 `layoutFor`）：删 `refreshSidecar` 及测试；引入 `writeMode`，LIBRARY 改为全新写（`.partial` 物化 → post 脚本 → `relkit-version.json` → `rename`，去掉空转的 journal 与备份，不再 `RemoveAll`）；同版本重装按 4.2 幂等或 `OCCUPIED`；`pruneVersions` 按 code 排序、跳过在用版本；Windows `rename` 退避重试；对账写的空目录清理只限本次触及条目的祖先（§6.2-1）；基线文件按产品命名（§6.2-2）。
    - SvnMergeTool Windows：引擎放进 `versions/<id>/` 并改为调用自带引擎，`validate_windows_payload_package` 要求含引擎；日志移出版本目录。
-   - 发 dev，在 Windows 真机验证：SvnMergeTool 从 `+222` 手动重装后能应用内升级；Loom 启动器自更新后编辑器 `versions/` 无改动，编辑器装新版、重装同版、另一实例停在旧版时更新，三项都正确。再决定 stable。
+   - （已完成）发 dev，在 Windows 真机验证：SvnMergeTool 从 `+222` 手动重装后能应用内升级；Loom 启动器自更新后编辑器 `versions/` 无改动，编辑器装新版、重装同版、另一实例停在旧版时更新，三项都正确。再决定 stable。（2026-11-05 结果：SvnMergeTool 手动重装后应用内升到 +225；启动器 0.1.0+57 → +59 自更新后编辑器 `versions/` 与 `active.json` 零差异。编辑器三项用户裁决不单独验证。2026-11-06 发 stable。）
 1. relkit / Content 轴（已实现，`2276d82`）：`payload.proto` 字段、`CheckSymlinks`、`payload build --bundle`、`inspect`/`Extract`、payload/2 manifest；父目录软链加固。单测覆盖全部规则的正反例。
 2. relkit / 协商（已实现，`2276d82`）：apply 偏好列表、`prefersApply`、stage 闸门对 `/2`、BUNDLE 仅 darwin、SYMLINK 拒绝 Windows。
 3. relkit / 落盘（已实现，`2276d82`）：全新写支持 BUNDLE（物化到内容根、软链、codesign 校验）；换名切换（`controlDirFor`、磁盘判定单元并交叉校验、`RENAME_SWAP` 与两次 rename 回落、兄弟路径恢复、commit 删旧包与陈旧基线）；BUNDLE/LIBRARY 删死代码、`bundle` 字段、`install_root` 不得在 `.app` 内；宿主退出规则按 4.3；LaunchServices 拉起。单测用带 framework 软链的测试 `.app` 跑两种 Placement 与各崩溃中间态，另有真实 ad-hoc 签名与篡改反例；真机 kill -9 留待第 6 步。
 4. 文档（已完成）：`docs/design/topology.md` 第七节去掉“待实现”并按实现重画写法流程；`install-layouts.md` §7（引擎随宿主）、§8（与本 ADR 对齐）、§11；ADR 0013/0014 加“已被 0027 修订”指针。
-5. 发布 relkit（`2d38946` 会被第 0 步删除的代码覆盖，不单独发），升级两台服务器（`update.devcloud.woa.com`、`publish.firoyang.com`）。
-6. SvnMergeTool macOS：日志进 dataDir、安装根推导、构建出 `/2` payload、发 dev 版，本机先验 BUNDLE/IN_PLACE（存量 `/Applications` 包），再做 launcher + seed 验 LIBRARY。
-7. SvnMergeTool `adr-009` 修订。
+5. （已完成）发布 relkit（`2d38946` 会被第 0 步删除的代码覆盖，不单独发），升级两台服务器（`update.devcloud.woa.com`、`publish.firoyang.com`）。
+6. SvnMergeTool macOS：日志进 dataDir、安装根推导、构建出 `/2` payload、发 dev 版，本机先验 BUNDLE/IN_PLACE（存量 `/Applications` 包），再做 launcher + seed 验 LIBRARY。（BUNDLE/IN_PLACE 已完成：本机 +224 DMG 手装后应用内升到 +225，换名切换、旧包删除、锁与临时目录清理、签名均正确。LIBRARY 与非 APFS 卷的 kill -9 测试未做，留待有产品采用 LIBRARY 时补。）
+7. （已完成）SvnMergeTool `adr-009` 修订。

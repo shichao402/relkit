@@ -1,6 +1,6 @@
 # ADR 0026: 只交付 relkit-updater 二进制，契约用 ProtoJSON 收敛
 
-- 状态：Accepted（2026-11-05 用户裁决；relkit 侧第 1、2 步已落地（第 2 步仅 Windows），宿主迁移按“迁移”一节推进）
+- 状态：Accepted，已全部实施（2026-11-05 用户裁决；迁移四步均已发布，2026-11-06 随 SvnMergeTool 0.2.0+227、Loom 0.2.2+100、Loom-Launcher 0.1.0+61 进入 stable）
 - 日期：2026-11-04
 - 关联：修订 [ADR 0023](0023-desktop-updater-epoch.md) 决策 2（各语言薄 IPC 客户端）；延续 [ADR 0010](0010-single-updater-engine.md) 单引擎原则与 [ADR 0003](0003-protobuf-v2-wire-format.md) 的 protobuf 契约
 
@@ -119,7 +119,7 @@ v2 只放宿主真正读写的消息。引擎内部落盘结构移到 `proto/upd
 断代一次，不留兼容分支（ADR 0023 原则 2）：
 
 1. relkit：proto v2 与 enginestate 拆分、引擎改 ProtoJSON 传输与 `protocol` 校验、`relkit-updater proto` 子命令、conformance 改写、删除第 1 节所列目录。（2026-11-05 完成，与步骤 3、4 同批发布到内外网服务器。）
-2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。（2026-11-05 Windows 已随步骤 1 发布，待 Windows 真机验证；macOS 已实现，随下次服务器升级发布。）
+2. 进度窗口：Windows 先行，macOS 随 macOS 构建机就绪跟进；在此之前该开关在 macOS 上是无操作。（2026-11-05 Windows 已随步骤 1 发布，Windows 真机应用内更新已跑通；macOS 版 `acc9689` 已随服务器升级发布，darwin 引擎由 GitHub Actions 构建。窗口本身的真机目视检查用户裁决不单独做。）
 3. SvnMergeTool（Dart）：删 `rup_client` 依赖与 `.relkit/components/sdk/dart` 物化；CI 加“导出 proto → buf generate”；`update_service.dart` 改成启动进程 + 按行解码；启动时 `status` 检查替代现有让路逻辑的判定来源（界面可保留）。（2026-11-05 完成，SvnMergeTool #108 发布 0.2.0+219。）
 4. Loom-Launcher（Rust）：删 `relkit-updater` crate 路径依赖与 `.relkit/components/sdk/rust`；`build.rs` 用导出的 proto 跑 `prost-build` + `pbjson-build`；`updater.rs` 改调用方式。（2026-11-05 完成，Loom-Launcher #59 发布 0.1.0+58。）
 5. Loom：无变化（不持有 updater 客户端）。
