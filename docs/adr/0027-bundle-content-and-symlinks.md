@@ -230,8 +230,10 @@ BUNDLE/IN_PLACE 可以看成“容量为 1 的版本库”：指针是 `.app` �
 | 形态 | 宿主所在 | 引擎位置 | 根上的入口 |
 | --- | --- | --- | --- |
 | TREE/IN_PLACE | 安装根 | 安装根内，随表写入 | 无（宿主即入口） |
-| TREE/LIBRARY 或 BUNDLE/LIBRARY | `versions/<id>/` | `versions/<id>/` 内（BUNDLE 在包内 `Contents/Resources/runtime/`） | launcher：只读 `active.json` 拉起版本，不调用引擎，由安装器写入，引擎从不更新它 |
-| BUNDLE/IN_PLACE | `.app` 本身 | 包内 `Contents/Resources/runtime/` | 无（`.app` 即入口） |
+| TREE/LIBRARY 或 BUNDLE/LIBRARY | `versions/<id>/` | `versions/<id>/` 内（BUNDLE 在包内，见下） | launcher：只读 `active.json` 拉起版本，不调用引擎，由安装器写入，引擎从不更新它 |
+| BUNDLE/IN_PLACE | `.app` 本身 | 包内，见下 | 无（`.app` 即入口） |
+
+BUNDLE 内的引擎位置由宿主决定，引擎不依赖它，只要在包内、随包签名即可；`sidecar_relpath` 照实填写。建议 `Contents/MacOS/`（Apple 规定的辅助可执行文件位置，也是 Tauri externalBin 的默认落点；可执行文件放 `Resources` 会被 `codesign --strict` 告警，同 §7.4）。SvnMergeTool 现用 `Contents/Resources/runtime/`，novoard-agent 用 `Contents/MacOS/relkit-updater`。
 
 现有产品的对照（已核实线上产物）：
 
