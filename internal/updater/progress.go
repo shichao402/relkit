@@ -3,6 +3,7 @@ package updater
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	enginestate "github.com/shichao402/relkit/api/updater/enginestate/v1"
@@ -32,6 +33,9 @@ type progressSpec struct {
 	Product string
 	Version string
 	Lang    string // "zh" or "en"
+	// AppBundle is the host's .app directory when the install has one; the
+	// macOS window shows its icon. Empty elsewhere.
+	AppBundle string
 }
 
 func progressSpecFor(sess *enginestate.ApplySessionRecord) progressSpec {
@@ -39,7 +43,47 @@ func progressSpecFor(sess *enginestate.ApplySessionRecord) progressSpec {
 	if name == "" {
 		name = "the application"
 	}
-	return progressSpec{Product: name, Version: sess.GetTargetVersion(), Lang: uiLanguage()}
+	return progressSpec{
+		Product:   name,
+		Version:   sess.GetTargetVersion(),
+		Lang:      uiLanguage(),
+		AppBundle: hostAppBundle(sess),
+	}
+}
+
+// hostAppBundle finds the existing .app directory the host runs from: the
+// install root itself, or the first .app on the way to the executable.
+func hostAppBundle(sess *enginestate.ApplySessionRecord) string {
+	root := sess.GetInstallRoot()
+	if root == "" {
+		return ""
+	}
+	for _, p := range []string{filepath.Join(root, filepath.FromSlash(sess.GetExecutableRelpath())), root} {
+		if b := appBundleOf(p); b != "" {
+			if fi, err := os.Stat(b); err == nil && fi.IsDir() {
+				return b
+			}
+		}
+	}
+	return ""
+}
+
+// appBundleOf returns the outermost ancestor of path (path included) whose
+// name ends in ".app", or "".
+func appBundleOf(path string) string {
+	path = filepath.Clean(path)
+	found := ""
+	for p := path; ; {
+		if strings.HasSuffix(strings.ToLower(filepath.Base(p)), ".app") {
+			found = p
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		p = parent
+	}
+	return found
 }
 
 // openProgressUI picks the window for a session. The window only covers the

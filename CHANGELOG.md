@@ -20,6 +20,11 @@ what will break.
   message font at the real DPI (no bitmap font, no blur on scaled displays),
   themed controls, white client area, a marquee bar while installing, and the
   Cancel button only while cancelling is possible instead of greyed out.
+- The macOS progress window follows the same rules and reads like a macOS
+  alert: the host app's icon, a bold headline, an animated bar while waiting
+  or installing, a quiet status line with steady digits, Cancel only while it
+  works (Escape), and a failure screen that shrinks to its text with Close as
+  the default button and a selectable error.
 - On macOS the apply worker shows the same progress window, drawn with
   AppKit. The darwin `relkit-updater` is now a cgo build from the
   `darwin-updater` GitHub Actions workflow and needs macOS 13 or later; the

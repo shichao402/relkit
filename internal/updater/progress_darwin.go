@@ -14,14 +14,43 @@ extern void relkitProgressReady(void);
 extern void relkitProgressButton(void);
 extern void relkitProgressHelp(void);
 
+// Layout in points, laid out top-down in a flipped content view. The shape
+// follows a macOS alert: app icon on the left, bold headline, then the bar
+// and a quiet status line, buttons bottom-right.
+#define RK_WIDTH      460.0
+#define RK_MARGIN     20.0
+#define RK_ICON       64.0
+#define RK_ICON_GAP   16.0
+#define RK_BAR_GAP    10.0
+#define RK_BAR_H      16.0
+#define RK_DETAIL_GAP 6.0
+#define RK_FAIL_GAP   8.0
+#define RK_ROW_GAP    16.0
+#define RK_BUTTON_H   32.0
+#define RK_BUTTON_MIN 84.0
+#define RK_BUTTON_GAP 8.0
+#define RK_BOTTOM     12.0
+// A push button's frame is ~6pt wider than its bezel on each side.
+#define RK_BEZEL_INSET 6.0
+
 // One window per worker process; every static below is touched only on the
 // main thread.
 static NSWindow *rkWindow;
+static NSImageView *rkIcon;
 static NSTextField *rkHeadline;
 static NSTextField *rkDetail;
 static NSProgressIndicator *rkBar;
 static NSButton *rkButton;
 static NSButton *rkHelp;
+
+@interface RKFlippedView : NSView
+@end
+
+@implementation RKFlippedView
+- (BOOL)isFlipped {
+	return YES;
+}
+@end
 
 @interface RKProgressDelegate : NSObject <NSWindowDelegate>
 @end
@@ -48,24 +77,152 @@ static NSString *rkString(const char *s) {
 	return v ? v : @"";
 }
 
-static NSTextField *rkLabel(NSRect frame, NSFont *font) {
+static NSTextField *rkLabel(NSFont *font, NSColor *color) {
 	NSTextField *t = [NSTextField wrappingLabelWithString:@""];
-	[t setFrame:frame];
 	[t setFont:font];
+	[t setTextColor:color];
 	[t setSelectable:NO];
 	return t;
 }
 
+// rkTextHeight is the height a label of width w needs for s; an empty string
+// still takes one line so the layout does not jump.
+static CGFloat rkTextHeight(NSTextField *label, NSString *s, CGFloat w, NSInteger maxLines) {
+	NSFont *font = [label font];
+	NSLayoutManager *lm = [NSLayoutManager new];
+	CGFloat line = ceil([lm defaultLineHeightForFont:font]);
+	if ([s length] == 0) {
+		return line;
+	}
+	NSRect r = [s boundingRectWithSize:NSMakeSize(w - 4, CGFLOAT_MAX)
+	                           options:NSStringDrawingUsesLineFragmentOrigin
+	                        attributes:@{NSFontAttributeName : font}];
+	CGFloat h = ceil(r.size.height);
+	if (maxLines > 0 && h > line * maxLines) {
+		h = line * maxLines;
+	}
+	return h < line ? line : h;
+}
+
+static CGFloat rkButtonWidth(NSButton *b) {
+	[b sizeToFit];
+	CGFloat w = [b frame].size.width;
+	return w < RK_BUTTON_MIN ? RK_BUTTON_MIN : w;
+}
+
+// rkLayout places the controls for the progress or the failure screen and
+// sizes the window to fit, keeping its top-left corner where it is.
+static void rkLayout(BOOL failed, BOOL showHelp) {
+	BOOL hasIcon = [rkIcon image] != nil;
+	CGFloat x = hasIcon ? RK_MARGIN + RK_ICON + RK_ICON_GAP : RK_MARGIN;
+	CGFloat tw = RK_WIDTH - x - RK_MARGIN;
+	CGFloat y = RK_MARGIN;
+
+	[rkIcon setHidden:!hasIcon];
+	[rkIcon setFrame:NSMakeRect(RK_MARGIN, RK_MARGIN, RK_ICON, RK_ICON)];
+
+	CGFloat hh = rkTextHeight(rkHeadline, [rkHeadline stringValue], tw, 3);
+	[rkHeadline setFrame:NSMakeRect(x, y, tw, hh)];
+	y += hh;
+
+	if (failed) {
+		y += RK_FAIL_GAP;
+		[[rkDetail cell] setLineBreakMode:NSLineBreakByWordWrapping];
+		[rkDetail setMaximumNumberOfLines:12];
+		CGFloat dh = rkTextHeight(rkDetail, [rkDetail stringValue], tw, 12);
+		[rkDetail setFrame:NSMakeRect(x, y, tw, dh)];
+		y += dh;
+	} else {
+		y += RK_BAR_GAP;
+		[rkBar setFrame:NSMakeRect(x, y, tw, RK_BAR_H)];
+		y += RK_BAR_H + RK_DETAIL_GAP;
+		[[rkDetail cell] setLineBreakMode:NSLineBreakByTruncatingTail];
+		[rkDetail setMaximumNumberOfLines:1];
+		CGFloat dh = rkTextHeight(rkDetail, @"", tw, 1);
+		[rkDetail setFrame:NSMakeRect(x, y, tw, dh)];
+		y += dh;
+	}
+	if (hasIcon && y < RK_MARGIN + RK_ICON) {
+		y = RK_MARGIN + RK_ICON;
+	}
+
+	// The button row is kept even while no button shows, so the window does
+	// not change height between phases.
+	y += RK_ROW_GAP;
+	CGFloat right = RK_WIDTH - RK_MARGIN + RK_BEZEL_INSET;
+	CGFloat bw = rkButtonWidth(rkButton);
+	[rkButton setFrame:NSMakeRect(right - bw, y, bw, RK_BUTTON_H)];
+	if (showHelp) {
+		CGFloat hw = rkButtonWidth(rkHelp);
+		[rkHelp setFrame:NSMakeRect(right - bw - RK_BUTTON_GAP - hw, y, hw, RK_BUTTON_H)];
+	}
+	CGFloat height = y + RK_BUTTON_H + RK_BOTTOM;
+
+	NSRect old = [rkWindow frame];
+	NSRect next = [rkWindow frameRectForContentRect:NSMakeRect(0, 0, RK_WIDTH, height)];
+	next.origin.x = old.origin.x;
+	next.origin.y = old.origin.y + old.size.height - next.size.height;
+	if (!NSEqualRects(old, next)) {
+		[rkWindow setFrame:next display:YES animate:[rkWindow isVisible]];
+	}
+}
+
+// rkApply pushes one state snapshot into the controls; main thread only.
+static void rkApply(NSString *headline, NSString *detail, BOOL showBar, double barPos, BOOL busy,
+		NSString *button, BOOL buttonEnabled, BOOL showButton, BOOL failed, NSString *helpLabel, BOOL showHelp) {
+	[rkHeadline setStringValue:headline];
+	[rkDetail setStringValue:detail];
+	if (failed) {
+		// Selectable so the error can be copied into a support request.
+		[rkDetail setSelectable:YES];
+		[rkDetail setFont:[NSFont systemFontOfSize:[NSFont systemFontSize] - 1]];
+		[rkDetail setTextColor:[NSColor labelColor]];
+	} else {
+		[rkDetail setSelectable:NO];
+		[rkDetail setFont:[NSFont monospacedDigitSystemFontOfSize:[NSFont smallSystemFontSize]
+		                                                    weight:NSFontWeightRegular]];
+		[rkDetail setTextColor:[NSColor secondaryLabelColor]];
+	}
+
+	// Determinate while downloading, an indeterminate bar while waiting or
+	// installing so the window never looks stuck.
+	BOOL marquee = busy && !showBar && !failed;
+	BOOL barVisible = (showBar || marquee) && !failed;
+	if (marquee) {
+		if (![rkBar isIndeterminate]) {
+			[rkBar setIndeterminate:YES];
+		}
+		[rkBar startAnimation:nil];
+	} else {
+		[rkBar stopAnimation:nil];
+		if ([rkBar isIndeterminate]) {
+			[rkBar setIndeterminate:NO];
+		}
+		[rkBar setDoubleValue:barPos];
+	}
+	[rkBar setHidden:!barVisible];
+
+	[rkButton setTitle:button];
+	[rkButton setEnabled:buttonEnabled];
+	[rkButton setHidden:!showButton];
+	// Return confirms Close on the failure screen; Escape cancels otherwise.
+	[rkButton setKeyEquivalent:failed ? @"\r" : @"\033"];
+	[rkHelp setTitle:helpLabel];
+	[rkHelp setHidden:!showHelp];
+
+	rkLayout(failed, showHelp);
+}
+
 // relkit_progress_run builds the window and spins the AppKit run loop until
 // relkit_progress_close stops it. It must run on the main thread.
-static void relkit_progress_run(const char *title, const char *headline, const char *button) {
+static void relkit_progress_run(const char *title, const char *headline, const char *button, const char *appBundle) {
 	@autoreleasepool {
 		[NSApplication sharedApplication];
 		// Accessory: a window without a Dock icon or menu bar takeover.
 		[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
 		rkWindow = [[NSWindow alloc]
-			initWithContentRect:NSMakeRect(0, 0, 440, 200)
+			initWithContentRect:NSMakeRect(0, 0, RK_WIDTH, 140)
 			          styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
 			            backing:NSBackingStoreBuffered
 			              defer:NO];
@@ -75,25 +232,38 @@ static void relkit_progress_run(const char *title, const char *headline, const c
 		rkDelegate = [RKProgressDelegate new];
 		[rkWindow setDelegate:rkDelegate];
 
-		NSView *content = [rkWindow contentView];
-		rkHeadline = rkLabel(NSMakeRect(20, 140, 400, 40), [NSFont boldSystemFontOfSize:13]);
-		[rkHeadline setStringValue:rkString(headline)];
-		rkBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(20, 116, 400, 16)];
-		[rkBar setStyle:NSProgressIndicatorStyleBar];
-		[rkBar setIndeterminate:NO];
-		[rkBar setMinValue:0];
-		[rkBar setMaxValue:1000];
-		[rkBar setHidden:YES];
-		rkDetail = rkLabel(NSMakeRect(20, 54, 400, 56), [NSFont systemFontOfSize:12]);
-		rkButton = [NSButton buttonWithTitle:rkString(button) target:rkDelegate action:@selector(pressButton:)];
-		[rkButton setFrame:NSMakeRect(328, 12, 92, 32)];
-		rkHelp = [NSButton buttonWithTitle:@"" target:rkDelegate action:@selector(pressHelp:)];
-		[rkHelp setFrame:NSMakeRect(228, 12, 92, 32)];
-		[rkHelp setHidden:YES];
-		for (NSView *v in @[ rkHeadline, rkBar, rkDetail, rkHelp, rkButton ]) {
-			[content addSubview:v];
+		RKFlippedView *content = [[RKFlippedView alloc] initWithFrame:NSMakeRect(0, 0, RK_WIDTH, 140)];
+		[rkWindow setContentView:content];
+
+		rkIcon = [NSImageView imageViewWithImage:[NSImage new]];
+		[rkIcon setImage:nil];
+		[rkIcon setImageScaling:NSImageScaleProportionallyUpOrDown];
+		NSString *bundle = rkString(appBundle);
+		if ([bundle length] > 0) {
+			NSImage *img = [[NSWorkspace sharedWorkspace] iconForFile:bundle];
+			[img setSize:NSMakeSize(RK_ICON, RK_ICON)];
+			[rkIcon setImage:img];
 		}
 
+		rkHeadline = rkLabel([NSFont boldSystemFontOfSize:[NSFont systemFontSize]], [NSColor labelColor]);
+		[rkHeadline setStringValue:rkString(headline)];
+		rkBar = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
+		[rkBar setStyle:NSProgressIndicatorStyleBar];
+		[rkBar setIndeterminate:YES];
+		[rkBar setMinValue:0];
+		[rkBar setMaxValue:1000];
+		rkDetail = rkLabel([NSFont monospacedDigitSystemFontOfSize:[NSFont smallSystemFontSize] weight:NSFontWeightRegular],
+			[NSColor secondaryLabelColor]);
+		rkButton = [NSButton buttonWithTitle:rkString(button) target:rkDelegate action:@selector(pressButton:)];
+		[rkButton setKeyEquivalent:@"\033"];
+		rkHelp = [NSButton buttonWithTitle:@"" target:rkDelegate action:@selector(pressHelp:)];
+		[rkHelp setHidden:YES];
+		for (NSView *v in @[ rkIcon, rkHeadline, rkBar, rkDetail, rkHelp, rkButton ]) {
+			[content addSubview:v];
+		}
+		[rkBar startAnimation:nil];
+
+		rkLayout(NO, NO);
 		[rkWindow center];
 		[rkWindow makeKeyAndOrderFront:nil];
 		[NSApp activateIgnoringOtherApps:YES];
@@ -102,6 +272,7 @@ static void relkit_progress_run(const char *title, const char *headline, const c
 	[NSApp run];
 	@autoreleasepool {
 		rkWindow = nil;
+		rkIcon = nil;
 		rkHeadline = nil;
 		rkDetail = nil;
 		rkBar = nil;
@@ -113,8 +284,8 @@ static void relkit_progress_run(const char *title, const char *headline, const c
 
 // relkit_progress_update copies the strings now (the caller frees them right
 // after) and applies them on the main thread.
-static void relkit_progress_update(const char *headline, const char *detail, int showBar, int barPos,
-		const char *button, int buttonEnabled, const char *helpLabel, int showHelp) {
+static void relkit_progress_update(const char *headline, const char *detail, int showBar, int barPos, int busy,
+		const char *button, int buttonEnabled, int showButton, int failed, const char *helpLabel, int showHelp) {
 	@autoreleasepool {
 		NSString *h = rkString(headline);
 		NSString *d = rkString(detail);
@@ -124,14 +295,8 @@ static void relkit_progress_update(const char *headline, const char *detail, int
 			if (rkWindow == nil) {
 				return;
 			}
-			[rkHeadline setStringValue:h];
-			[rkDetail setStringValue:d];
-			[rkBar setHidden:showBar ? NO : YES];
-			[rkBar setDoubleValue:(double)barPos];
-			[rkButton setTitle:b];
-			[rkButton setEnabled:buttonEnabled ? YES : NO];
-			[rkHelp setTitle:l];
-			[rkHelp setHidden:showHelp ? NO : YES];
+			rkApply(h, d, showBar != 0, (double)barPos, busy != 0, b, buttonEnabled != 0, showButton != 0,
+				failed != 0, l, showHelp != 0);
 		});
 	}
 }
@@ -225,8 +390,10 @@ type macProgress struct {
 	headline   string
 	detail     string
 	showBar    bool
+	busy       bool // indeterminate phase: animated bar
 	barPos     int
 	cancelable bool
+	cancelling bool
 	failed     bool
 	helpLabel  string
 	helpURL    string
@@ -256,6 +423,7 @@ func currentMac() *macProgress {
 func platformProgressUI(spec progressSpec) (progressUI, error) {
 	w := &macProgress{
 		text:      progressText{spec: spec},
+		busy:      true,
 		ready:     make(chan struct{}),
 		done:      make(chan struct{}),
 		cancelled: make(chan struct{}),
@@ -303,10 +471,12 @@ func (w *macProgress) run() {
 	title := C.CString(w.text.Title())
 	headline := C.CString(w.headline)
 	button := C.CString(w.text.CancelButton())
+	bundle := C.CString(w.text.spec.AppBundle)
 	defer C.free(unsafe.Pointer(title))
 	defer C.free(unsafe.Pointer(headline))
 	defer C.free(unsafe.Pointer(button))
-	C.relkit_progress_run(title, headline, button)
+	defer C.free(unsafe.Pointer(bundle))
+	C.relkit_progress_run(title, headline, button, bundle)
 }
 
 func (w *macProgress) onReady() {
@@ -318,11 +488,13 @@ func (w *macProgress) onReady() {
 func (w *macProgress) refresh() {
 	w.mu.Lock()
 	headline, detail := w.headline, strings.ReplaceAll(w.detail, "\r\n", "\n")
-	showBar, pos := w.showBar, w.barPos
-	cancelable, failed := w.cancelable, w.failed
+	showBar, busy, pos := w.showBar, w.busy, w.barPos
+	cancelable, cancelling, failed := w.cancelable, w.cancelling, w.failed
 	helpLabel, helpURL := w.helpLabel, w.helpURL
 	w.mu.Unlock()
 
+	// The button only appears when it does something; it stays, disabled,
+	// between a Cancel click and the worker acting on it.
 	label := w.text.CancelButton()
 	if failed {
 		label = w.text.CloseButton()
@@ -333,8 +505,9 @@ func (w *macProgress) refresh() {
 			C.free(unsafe.Pointer(s))
 		}
 	}()
-	C.relkit_progress_update(cs[0], cs[1], cbool(showBar), C.int(pos),
-		cs[2], cbool(cancelable || failed), cs[3], cbool(failed && helpURL != ""))
+	C.relkit_progress_update(cs[0], cs[1], cbool(showBar && !failed), C.int(pos), cbool(busy),
+		cs[2], cbool(cancelable || failed), cbool(cancelable || cancelling || failed), cbool(failed),
+		cs[3], cbool(failed && helpURL != ""))
 }
 
 func cbool(b bool) C.int {
@@ -350,6 +523,7 @@ func (w *macProgress) onButton() {
 	failed, cancelable := w.failed, w.cancelable
 	if cancelable && !failed {
 		w.cancelable = false
+		w.cancelling = true
 	}
 	w.mu.Unlock()
 	switch {
@@ -389,8 +563,10 @@ func (w *macProgress) SetPhase(phase updaterv2.SessionPhase, cancelable bool) {
 	w.headline = w.text.Phase(phase)
 	w.detail = ""
 	w.showBar = phase == updaterv2.SessionPhase_SESSION_PHASE_DOWNLOADING
+	w.busy = !w.showBar && phase != updaterv2.SessionPhase_SESSION_PHASE_COMPLETED
 	w.barPos = 0
 	w.cancelable = cancelable
+	w.cancelling = false
 	w.mu.Unlock()
 	if !w.isDone() {
 		w.refresh()
@@ -400,6 +576,7 @@ func (w *macProgress) SetPhase(phase updaterv2.SessionPhase, cancelable bool) {
 func (w *macProgress) SetDownload(received, total, bps int64) {
 	w.mu.Lock()
 	w.showBar = true
+	w.busy = false
 	if total > 0 {
 		w.barPos = int(received * macBarRange / total)
 	}
@@ -414,7 +591,9 @@ func (w *macProgress) Fail(err *updaterv2.Error) {
 	w.mu.Lock()
 	w.failed = true
 	w.cancelable = false
+	w.cancelling = false
 	w.showBar = false
+	w.busy = false
 	w.headline = w.text.FailureHeadline()
 	w.detail = w.text.FailureDetail(err)
 	w.helpLabel, w.helpURL = w.text.HelpURL(err)

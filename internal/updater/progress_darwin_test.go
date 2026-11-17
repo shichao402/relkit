@@ -25,25 +25,35 @@ func TestMain(m *testing.M) {
 //	RELKIT_PROGRESS_SMOKE=1 go test ./internal/updater -run MacProgressWindowSmoke -v
 //
 // Set RELKIT_PROGRESS_SMOKE=interactive to leave the failure screen up until
-// the Close button is pressed.
+// the Close button is pressed. RELKIT_PROGRESS_SMOKE_HOLD (a Go duration)
+// stretches every step for screenshots; RELKIT_PROGRESS_SMOKE_APP picks the
+// .app whose icon the window shows (Terminal by default).
 func TestMacProgressWindowSmoke(t *testing.T) {
 	mode := os.Getenv("RELKIT_PROGRESS_SMOKE")
 	if mode == "" {
 		t.Skip("set RELKIT_PROGRESS_SMOKE=1 to open a real AppKit window")
 	}
-	ui, err := platformProgressUI(progressSpec{Product: "Smoke", Version: "9.9.9+1", Lang: uiLanguage()})
+	hold := 700 * time.Millisecond
+	if d, err := time.ParseDuration(os.Getenv("RELKIT_PROGRESS_SMOKE_HOLD")); err == nil && d > 0 {
+		hold = d
+	}
+	app := os.Getenv("RELKIT_PROGRESS_SMOKE_APP")
+	if app == "" {
+		app = "/System/Applications/Utilities/Terminal.app"
+	}
+	ui, err := platformProgressUI(progressSpec{Product: "Smoke", Version: "9.9.9+1", Lang: uiLanguage(), AppBundle: appBundleOf(app)})
 	if err != nil {
 		t.Fatalf("platformProgressUI: %v", err)
 	}
 	ui.SetPhase(updaterv2.SessionPhase_SESSION_PHASE_WAITING_FOR_EXIT, true)
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(hold)
 	ui.SetPhase(updaterv2.SessionPhase_SESSION_PHASE_DOWNLOADING, true)
 	for i := int64(0); i <= 10; i++ {
 		ui.SetDownload(i*1<<20, 10<<20, 2<<20)
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(hold / 6)
 	}
 	ui.SetPhase(updaterv2.SessionPhase_SESSION_PHASE_COPYING, false)
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(hold)
 
 	failure := &updaterv2.Error{
 		Message: "smoke failure",
@@ -55,7 +65,7 @@ func TestMacProgressWindowSmoke(t *testing.T) {
 	if mode == "interactive" {
 		ui.Fail(failure)
 	} else {
-		go func() { time.Sleep(1500 * time.Millisecond); ui.Close() }()
+		go func() { time.Sleep(2 * hold); ui.Close() }()
 		ui.Fail(failure)
 	}
 	ui.Close()

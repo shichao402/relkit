@@ -113,6 +113,31 @@ func TestProgressTextFailureCarriesRecovery(t *testing.T) {
 	}
 }
 
+func TestAppBundleOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"/Applications/Foo.app":                             "/Applications/Foo.app",
+		"/Applications/Foo.app/Contents/MacOS/foo":          "/Applications/Foo.app",
+		"/Applications/Foo.app/Contents/Frameworks/H.app/x": "/Applications/Foo.app",
+		"/opt/foo/bin/foo":                                  "",
+		"/Users/me/Apps/Bar.APP/Contents/MacOS/bar":         "/Users/me/Apps/Bar.APP",
+	} {
+		if got := appBundleOf(filepath.FromSlash(in)); got != filepath.FromSlash(want) {
+			t.Errorf("appBundleOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+	root := filepath.Join(t.TempDir(), "Demo.app")
+	if err := os.MkdirAll(filepath.Join(root, "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sess := &enginestate.ApplySessionRecord{InstallRoot: root, ExecutableRelpath: "Contents/MacOS/demo"}
+	if got := hostAppBundle(sess); got != root {
+		t.Fatalf("hostAppBundle = %q", got)
+	}
+	if got := hostAppBundle(&enginestate.ApplySessionRecord{InstallRoot: filepath.Join(t.TempDir(), "Gone.app")}); got != "" {
+		t.Fatalf("missing bundle must not be used, got %q", got)
+	}
+}
+
 func TestOpenProgressUIOnlyWhileHostIsGone(t *testing.T) {
 	fake := newFakeProgress()
 	eng := &Engine{newProgressUI: func(progressSpec) progressUI { return fake }}
