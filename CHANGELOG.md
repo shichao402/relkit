@@ -16,6 +16,10 @@ what will break.
   version is relaunched when the install was left untouched. Hosts that draw
   their own handoff UI set `ApplyOp.hideProgress`; `InstallSpec.displayName`
   names the product (ADR 0026 §6).
+- The Windows progress window looks like a current Windows dialog: system
+  message font at the real DPI (no bitmap font, no blur on scaled displays),
+  themed controls, white client area, a marquee bar while installing, and the
+  Cancel button only while cancelling is possible instead of greyed out.
 - On macOS the apply worker shows the same progress window, drawn with
   AppKit. The darwin `relkit-updater` is now a cgo build from the
   `darwin-updater` GitHub Actions workflow and needs macOS 13 or later; the
